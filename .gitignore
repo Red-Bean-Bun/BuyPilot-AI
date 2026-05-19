@@ -1,0 +1,47 @@
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Android
+build/
+.gradle/
+local.properties
+*.iml
+.externalNativeBuild/
+.cxx/
+capture/
+*.apk
+*.aar
+*.jks
+*.keystore
+
+# Docker
+.dockerignore
+
+# Database
+postgres_data/
+
+# Project Specific
+logs/
+temp/
+
+.claude/
