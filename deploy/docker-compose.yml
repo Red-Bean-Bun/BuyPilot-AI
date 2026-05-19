@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: buypilot
+      POSTGRES_PASSWORD: buypilot
+      POSTGRES_DB: buypilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://buypilot:buypilot@postgres:5432/buypilot
+    volumes:
+      - ../backend/src:/app/src
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:

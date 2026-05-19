@@ -32,6 +32,8 @@
 
 ## 目录结构
 
+### 文档层（`doc/`）
+
 ```
 doc/
 ├── strategy/          战略与决策          ← 先读这里，理解"为什么做"
@@ -50,6 +52,46 @@ doc/
     ├── 01-DeepResearch提示词.md
     ├── 02-DeepResearch提示词拆分.md
     └── 03-AI编码助手系统提示词.md
+```
+
+### 代码层
+
+```
+├── android/                     ← Android 客户端（MVVM 风格）
+│   └── app/src/main/java/com/buypilot/
+│       ├── ui/                  ← Compose 组件（UI 层）
+│       │   ├── components/      ← 可复用组件
+│       │   │   └── cards/       ← Criteria/Product/FinalDecision/Clarification 卡片
+│       │   └── theme/           ← 主题
+│       ├── viewmodel/           ← ViewModel + StateFlow
+│       ├── network/             ← OkHttp SSE + API 调用
+│       ├── data/                ← Room DAO + Entity
+│       ├── model/               ← Kotlin data class（ChatUiNode sealed interface）
+│       └── util/                ← 工具类
+│
+├── backend/                     ← FastAPI 后端（严格 AGENTS.md 分层）
+│   ├── src/
+│   │   ├── types/               ← DTO, Schema, 数据契约
+│   │   ├── config/              ← 集中配置（环境变量、LLM Profile YAML）
+│   │   ├── repos/               ← 数据持久化（SQLModel, pgvector）
+│   │   ├── services/            ← 业务逻辑（意图/标准/检索/推荐/视觉/反馈）
+│   │   ├── runtime/             ← SSE 管道编排（async generator stage 链）
+│   │   │   └── stages/          ← 意图/标准/检索/推荐 各阶段
+│   │   └── api/                 ← FastAPI routers
+│   └── tests/                   ← 按层对应的测试
+│
+├── data/                        ← 数据层
+│   ├── raw/                     ← 原始 Amazon CSV
+│   ├── images/                  ← 全量商品图片（本地化）
+│   ├── processed/               ← LLM 提取的结构化结果
+│   └── scripts/                 ← 数据处理脚本（可迭代）
+│
+├── eval/                        ← 评测
+│   ├── datasets/                ← 测试样本
+│   └── scripts/                 ← RAGAS 评测脚本
+│
+└── deploy/                      ← 部署
+    └── docker-compose.yml       ← PG + pgvector + FastAPI
 ```
 
 ## 文档角色定位
