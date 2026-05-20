@@ -95,7 +95,7 @@
 
 
 
-**P0**：精选 **80条** 干净 Toys 商品，**双数据源**：导师提供的脱敏电商数据（商品名、类目、价格、详情描述、主图URL 5基础字段）+ 自主构造的80条（含玩具专属字段：age_min/age_max、safety_features、education_dimensions、requires_battery、play_scenario 等）。足以支撑 Demo + 评测 + 硬过滤 + 反选排除。
+**P0**：导师提供的**100条**脱敏电商数据（4品类×25，中文，含 marketing_description + FAQ + reviews + SKUs + 本地图片）直接入库。足以支撑多品类 Demo + 评测 + 条件筛选 + 反选排除。
 
 **P1**：扩展非结构化文档（安全说明书、教育研究、FAQ），增强 RAG 证据源。
 
@@ -177,12 +177,13 @@ products (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   category      TEXT NOT NULL,
+  sub_category  TEXT,
   price         DECIMAL,
   brand         TEXT,
   image_urls    TEXT[],
   product_url   TEXT,
   amazon_seller BOOLEAN,
-  metadata      JSONB DEFAULT '{}'       -- 12 个结构化属性字段（含 age_min/age_max/age_label）
+  metadata      JSONB DEFAULT '{}'       -- 品类结构化属性（如肤质适用、存储规格、运动类型等）
 )
 
 product_chunks (

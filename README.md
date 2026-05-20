@@ -2,20 +2,20 @@
 
 基于 RAG 的多模态电商智能导购 Agent —— 字节跳动 AI 全栈挑战赛参赛项目
 
-**一句话定位**：把用户模糊购物需求转化为可解释决策路径的亲子玩具专家级决策智能体
+**一句话定位**：把用户模糊购物需求转化为可解释决策路径的多品类智能导购决策智能体
 
 ## 技术决策
 
 | 决策项 | 选择 |
 |--------|------|
-| 品类 | 亲子玩具（Toys & Games），深水区验证品类 |
+| 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
 | LLM | 百炼平台（Qwen-Turbo / Qwen-Plus / Qwen-VL-Plus / text-embedding-v3 / gte-rerank） |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
-| 商品数据源 | Amazon 多模态 RAG 数据集（6488 条 Toys & Games） |
-| 图片处理 | 全量下载存 `data/images/{uniq_id}.jpg` |
-| 商品筛选 | Qwen-Turbo 批量打分 + 人工复核 Top 500 |
+| 商品数据源 | 导师官方脱敏电商数据（100条，4品类×25） |
+| 图片处理 | 使用官方数据自带本地 jpg |
+| 商品筛选 | 不需要，官方数据直接入库 |
 | 前端架构 | 1 人负责，sealed interface + ChatUiNode |
 | 后端架构 | 2 人（主开发 + 算法），分模块（routers/services/models/db） |
 | SSE 管道 | async generator stage 模式 |
@@ -24,7 +24,7 @@
 | LLM 调用 | Profile 配置驱动（YAML） |
 | 开发环境 | Docker Compose 统一（PG + pgvector + FastAPI） |
 | 演示环境 | 本地笔记本 + WiFi |
-| 数据库 | 8 张表一次性建好 |
+| 数据库 | 9 张表一次性建好（含 cart_items） |
 
 完整决策记录 → [doc/decisions/决策记录.md](doc/decisions/决策记录.md)
 

@@ -3,11 +3,11 @@
 
 **BuyPilot-AI**：基于 RAG 的多模态电商智能导购 Agent
 **赛事**：ByteDance AI Full-Stack Challenge（3 周 / 3 人）
-**一句话定位**：把用户模糊购物需求转化为可解释决策路径的亲子玩具专家级决策智能体
+**一句话定位**：把用户模糊购物需求转化为可解释决策路径的多品类智能导购决策智能体
 
 | 决策项 | 选择 |
 |--------|------|
-| 品类 | 亲子玩具（Toys & Games），深水区验证品类 |
+| 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
 | LLM | **双轨并行**：火山引擎 Doubao（意图识别主力）+ 百炼 Qwen（生成主力） |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
@@ -164,10 +164,11 @@ UI → Runtime → Service → Repo → Config/Types
 
 ### 数据策略
 
-- **80条**商品数据（50-100范围内偏多，覆盖3-4个玩具子类目）
-- **双数据源**：导师提供的脱敏电商数据（兼容通用5字段）+ 自主构造80条（含玩具专属字段）
-- 玩具专属字段必须有：age_min/age_max、safety_features、education_dimensions、requires_battery、play_scenario——没有这些字段，硬过滤和反选排除就是假的
+- **100条**商品数据（导师提供的脱敏电商数据，4品类×25，中文）
+- 每条含：product_id, title, brand, category, sub_category, base_price, image_path, skus(多规格), rag_knowledge{marketing_description, official_faq[], user_reviews[]}
+- rag_knowledge 天然 chunking：marketing_description + 每个 FAQ + 每个 review = 独立 chunk
 - 数据质量比数据数量重要
+- products 表 Schema 使用 metadata JSONB 承载品类结构化属性（如护肤品的肤质适用、数码的存储规格等）
 
 ### 止损规则（评审权重驱动）
 
@@ -188,12 +189,12 @@ UI → Runtime → Service → Repo → Config/Types
 
 ### 四条 Demo 路径
 
-| # | Demo路径 | 核心演示能力 | 对应官方场景 |
-|---|---------|-------------|-------------|
-| 1 | "推荐适合4岁孩子的益智玩具" | 模糊推荐→意图识别→购买标准→推荐 | 单轮模糊推荐 + 条件筛选 |
-| 2 | 上传玩具包装图+"这个适合3岁孩子吗？有吞咽风险吗？" | 多模态VL→RAG安全知识→避坑推荐 | 拍照找货 |
-| 3 | 首轮推荐后"不要电池款"+"预算降到150" | 多轮约束变化+反选排除 | 多轮追问 + 反选排除 |
-| 4 | "把这个加到购物车" | 对话式CRUD+结构化数据操作 | 购物车⭐入门 |
+| # | Demo路径 | 品类 | 核心演示能力 | 对应官方场景 |
+|---|---------|------|-------------|-------------|
+| 1 | "推荐适合油皮的洗面奶，200元以内" | 美妆护肤 | 模糊推荐+条件筛选 | 单轮模糊推荐 + 条件筛选 |
+| 2 | 上传护肤品图片+"这个适合敏感肌吗？" | 美妆护肤 | 拍照找货⭐⭐⭐+VL理解 | 拍照找货 |
+| 3 | "不要含酒精的防晒霜"+"预算降到200" | 美妆护肤 | 反选排除⭐⭐+多轮约束 | 多轮追问 + 反选排除 |
+| 4 | "把这个加到购物车" | 通用 | 对话式CRUD+加购⭐入门 | 购物车⭐入门 |
 
 ---
 
