@@ -148,19 +148,23 @@ UI → Runtime → Service → Repo → Config/Types
 用户输入 (Android)
   ↓
 意图识别 (Qwen-Turbo) + 槽位检查
+  ↓ 需要澄清时 → clarification 事件（多问题模式，每题带 suggested_options）
   ↓ 并行
-购买标准生成 (Qwen-Plus)  |  投机检索 (embedding + 硬过滤)
+购买标准生成 (Qwen-Plus) → 约束列表 → 展平为 CriteriaPayload  |  投机检索 (embedding + 硬过滤)
   ↓
 混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(gte)
   ↓
 推荐解释生成 (Qwen-Plus) + 证据绑定
   ↓
-SSE 事件流：thinking → criteria_card → text_delta → product_card → final_decision → done
+SSE 事件流（每事件必带 seq + session_id）：
+  thinking → criteria_card → text_delta(message_id+done) → product_card → final_decision → done(criteria_id+total_products)
   ↓
 Android Compose + LazyColumn 卡片渲染
   ↓
-用户反馈 → feedbacks 表 → 下一轮推荐注入约束
+用户反馈（quick_actions: criteria_patch/feedback/open_evidence/compare） → feedbacks 表 → 下一轮推荐注入约束
 ```
+
+> 统一 SSE 事件协议详见 `contracts/sse-event-protocol-v1.md`
 
 ---
 

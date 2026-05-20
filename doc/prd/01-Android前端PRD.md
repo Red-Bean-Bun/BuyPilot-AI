@@ -162,7 +162,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 ### 完整流式示例
 
-下面给出一组**从用户请求到完整 SSE 序列**的工程样例。为便于 Android 侧直接联调，示例包含原始请求体、SSE 帧内容与事件顺序。`seq` 字段在当前材料中**未指定**；本 PRD 建议后端补充。如果后端不提供，前端必须以到达顺序生成 `localSeq`。
+下面给出一组**从用户请求到完整 SSE 序列**的工程样例。为便于 Android 侧直接联调，示例包含原始请求体、SSE 帧内容与事件顺序。每个事件携带 `seq`（正整数递增）和 `session_id`（必填）；首次请求 `session_id` 为 `null` 时后端生成 UUID 并在第一个事件中返回。
 
 **请求**
 
@@ -171,7 +171,7 @@ json
 复制
 
 ```JSON
-{"message": "给4岁孩子买一个室内玩的益智玩具，预算200元以内，不要小零件，也尽量不要电池","session_id": "sess_demo_001","history": [],"image_url": null}
+{"message": "给4岁孩子买一个室内玩的益智玩具，预算200元以内，不要小零件，也尽量不要电池","session_id": null,"history": [],"image_url": null}
 ```
 
 **响应流**
@@ -182,28 +182,28 @@ text
 
 ```Plain Text
 event: thinking
-data: {"event":"thinking","session_id":"sess_demo_001","stage":"understanding","message":"正在理解年龄、场景、预算与安全约束"}
+data: {"seq":1,"event":"thinking","session_id":"sess_demo_001","stage":"understanding","message":"正在理解年龄、场景、预算与安全约束"}
 
 event: criteria_card
-data: {"event":"criteria_card","session_id":"sess_demo_001","editable":true,"criteria":{"age":4,"scenario":"indoor","budget_max":200,"requires_battery":false,"safety_features":["no_small_parts"],"education_dimensions":["logic","fine_motor"]},"quick_actions":[{"action_id":"budget_low","label":"预算压低","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"more_educational","label":"更偏益智","action":"criteria_patch","criteria_patch":{"education_dimensions":["logic","focus"]}}]}
+data: {"seq":2,"event":"criteria_card","session_id":"sess_demo_001","criteria_id":"crit_001","editable":true,"criteria":{"age":4,"scenario":"indoor","budget_max":200,"requires_battery":false,"safety_features":["no_small_parts"],"education_dimensions":["logic","fine_motor"]},"risks":["4岁儿童使用磁力玩具需家长陪同收纳"],"quick_actions":[{"action_id":"budget_low","label":"预算压低","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"more_educational","label":"更偏益智","action":"criteria_patch","criteria_patch":{"education_dimensions":["logic","focus"]}}]}
 
 event: text_delta
-data: {"event":"text_delta","session_id":"sess_demo_001","message_id":"msg_ai_01","delta":"我先按 4 岁、室内、200 元以内、无小零件、尽量不要电池来筛选。","done":false}
+data: {"seq":3,"event":"text_delta","session_id":"sess_demo_001","message_id":"msg_ai_01","delta":"我先按 4 岁、室内、200 元以内、无小零件、尽量不要电池来筛选。","done":false}
 
 event: text_delta
-data: {"event":"text_delta","session_id":"sess_demo_001","message_id":"msg_ai_01","delta":"下面给你两种更适合在家安静玩的选择。","done":false}
+data: {"seq":4,"event":"text_delta","session_id":"sess_demo_001","message_id":"msg_ai_01","delta":"下面给你两种更适合在家安静玩的选择。","done":false}
 
 event: product_card
-data: {"event":"product_card","session_id":"sess_demo_001","rank":1,"product":{"product_id":"toy_1001","name":"大颗粒磁力积木","price":169,"currency":"CNY","image_url":"https://example.com/1.jpg","age_min":4,"age_max":6,"toy_type":"building","education_dimensions":["logic","creativity"],"safety_features":["no_small_parts"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low"},"reason":"适合 4 岁儿童进行室内安静拼搭，兼顾逻辑与动手能力。","risk_notes":["含磁性部件，建议家长陪同收纳。"],"evidence":[{"source_type":"product_chunk","snippet":"适合 4-6 岁，大颗粒设计，减少误吞风险。"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"dislike_product","label":"不喜欢这个","action":"feedback","feedback_type":"not_interested"}]}
+data: {"seq":5,"event":"product_card","session_id":"sess_demo_001","rank":1,"product":{"product_id":"toy_1001","name":"大颗粒磁力积木","brand":"Magformers","price":169,"currency":"CNY","image_url":"https://example.com/1.jpg","age_min":4,"age_max":6,"toy_type":"building","education_dimensions":["logic","creativity"],"safety_features":["no_small_parts"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low"},"reason":"适合 4 岁儿童进行室内安静拼搭，兼顾逻辑与动手能力。","risk_notes":["含磁性部件，建议家长陪同收纳。"],"evidence":[{"source_type":"product_chunk","snippet":"适合 4-6 岁，大颗粒设计，减少误吞风险。","source_id":"chunk_001"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"dislike_product","label":"不喜欢这个","action":"feedback","feedback_type":"not_interested"}]}
 
 event: product_card
-data: {"event":"product_card","session_id":"sess_demo_001","rank":2,"product":{"product_id":"toy_1002","name":"木质拼图启蒙盒","price":129,"currency":"CNY","image_url":"https://example.com/2.jpg","age_min":4,"age_max":5,"toy_type":"puzzle","education_dimensions":["focus","fine_motor"],"safety_features":["rounded_edge"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low"},"reason":"如果你更在意安静与收纳方便，这个比磁力积木更省心。","risk_notes":[],"evidence":[{"source_type":"product_chunk","snippet":"木质圆角处理，适合家庭室内启蒙游戏。"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"show_alternatives","label":"换相似的","action":"feedback","feedback_type":"show_alternatives"}]}
+data: {"seq":6,"event":"product_card","session_id":"sess_demo_001","rank":2,"product":{"product_id":"toy_1002","name":"木质拼图启蒙盒","brand":"Hape","price":129,"currency":"CNY","image_url":"https://example.com/2.jpg","age_min":4,"age_max":5,"toy_type":"puzzle","education_dimensions":["focus","fine_motor"],"safety_features":["rounded_edge"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low"},"reason":"如果你更在意安静与收纳方便，这个比磁力积木更省心。","risk_notes":[],"evidence":[{"source_type":"product_chunk","snippet":"木质圆角处理，适合家庭室内启蒙游戏。","source_id":"chunk_002"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"show_alternatives","label":"换相似的","action":"feedback","feedback_type":"show_alternatives"}]}
 
 event: final_decision
-data: {"event":"final_decision","session_id":"sess_demo_001","winner_product_id":"toy_1001","summary":"如果你更看重综合益智性和可玩时长，优先选大颗粒磁力积木；如果你更看重安静和收纳成本，木质拼图启蒙盒更省心。","why":["适龄匹配 4 岁","预算内","无电池","室内友好"],"not_for":["若你希望绝对避免磁性件，不建议 Top1"],"alternatives":[{"product_id":"toy_1002","name":"木质拼图启蒙盒"}],"next_actions":[{"action_id":"cheaper","label":"再便宜一点","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"compare","label":"加入对比","action":"compare"}]}
+data: {"seq":7,"event":"final_decision","session_id":"sess_demo_001","winner_product_id":"toy_1001","summary":"如果你更看重综合益智性和可玩时长，优先选大颗粒磁力积木；如果你更看重安静和收纳成本，木质拼图启蒙盒更省心。","why":["适龄匹配 4 岁","预算内","无电池","室内友好"],"not_for":["若你希望绝对避免磁性件，不建议 Top1"],"alternatives":[{"product_id":"toy_1002","name":"木质拼图启蒙盒"}],"next_actions":[{"action_id":"cheaper","label":"再便宜一点","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"compare","label":"加入对比","action":"compare"}]}
 
 event: done
-data: {"event":"done","session_id":"sess_demo_001"}
+data: {"seq":8,"event":"done","session_id":"sess_demo_001","criteria_id":"crit_001","total_products":2}
 ```
 
 ### 接口契约
@@ -243,9 +243,36 @@ json
 
 <sheet sheet-id="odnsUX" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
 
-#### `POST /feedback`
+#### `GET /sessions/{id}/history` — 恢复对话历史（新增 P0）
 
-<sheet sheet-id="odnsUX" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
+- **用途**：App 重启/清数据后恢复历史对话
+- **请求**：`GET /sessions/{session_id}/history`
+- **响应**：
+
+```JSON
+{
+  "session_id": "sess_001",
+  "messages": [
+    {"role": "user", "content": "给4岁孩子买益智玩具", "timestamp": "2026-05-20T10:00:00Z"},
+    {"role": "assistant", "content": "我为您筛选了...", "timestamp": "2026-05-20T10:00:05Z"}
+  ]
+}
+```
+
+#### `POST /chat/cancel` — 停止当前管道（新增 P1）
+
+- **用途**：前端点击"停止生成"时通知后端终止当前管道，节省 token 和算力
+- **请求**：
+
+```JSON
+{"session_id": "sess_001"}
+```
+
+- **响应**：
+
+```JSON
+{"status": "cancelled"}
+```
 
 ### 错误码约定
 
@@ -264,45 +291,72 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
-@Serializablesealed interface AgentSseEvent {
+// === 全局规则 ===
+// 1. 每个 SSE 事件必带 seq: Int（正整数递增）和 session_id: String（必填）
+// 2. 首次请求 session_id=null 时后端生成 UUID，第一个事件携带
+// 3. 字段命名 JSON 侧统一 snake_case，Kotlin 侧用 @SerialName 映射
+
+@Serializable
+sealed interface AgentSseEvent {
     val event: String
-    @SerialName("session_id")val sessionId: String?
+    val seq: Int
+    @SerialName("session_id")
+    val sessionId: String
 }
 
-@Serializabledata class ThinkingEvent(
+@Serializable
+data class ThinkingEvent(
     override val event: String = "thinking",
-    @SerialName("session_id") override val sessionId: String? = null,
-    val stage: String,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
+    val stage: String,  // understanding | clarifying | searching | generating | decision_making
     val message: String
 ) : AgentSseEvent
 
-@Serializabledata class ClarificationEvent(
+@Serializable
+data class ClarificationEvent(
     override val event: String = "clarification",
-    @SerialName("session_id") override val sessionId: String? = null,
-    val question: String,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
+    val questions: List<ClarificationQuestion>,
     @SerialName("required_slots") val requiredSlots: List<String> = emptyList(),
-    @SerialName("suggested_options") val suggestedOptions: List<String> = emptyList()
+    @SerialName("partial_criteria") val partialCriteria: CriteriaPayload? = null
 ) : AgentSseEvent
 
-@Serializabledata class CriteriaCardEvent(
+@Serializable
+data class ClarificationQuestion(
+    val slot: String,
+    val question: String,
+    @SerialName("suggested_options") val suggestedOptions: List<String> = emptyList()
+)
+
+@Serializable
+data class CriteriaCardEvent(
     override val event: String = "criteria_card",
-    @SerialName("session_id") override val sessionId: String? = null,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
+    @SerialName("criteria_id") val criteriaId: String,
     val editable: Boolean = true,
     val criteria: CriteriaPayload,
+    val risks: List<String> = emptyList(),
     @SerialName("quick_actions") val quickActions: List<QuickActionPayload> = emptyList()
 ) : AgentSseEvent
 
-@Serializabledata class TextDeltaEvent(
+@Serializable
+data class TextDeltaEvent(
     override val event: String = "text_delta",
-    @SerialName("session_id") override val sessionId: String? = null,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
     @SerialName("message_id") val messageId: String,
     val delta: String,
     val done: Boolean = false
 ) : AgentSseEvent
 
-@Serializabledata class ProductCardEvent(
+@Serializable
+data class ProductCardEvent(
     override val event: String = "product_card",
-    @SerialName("session_id") override val sessionId: String? = null,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
     val rank: Int,
     val product: ProductPayload,
     val reason: String,
@@ -311,9 +365,11 @@ import kotlinx.serialization.json.JsonObject
     val actions: List<QuickActionPayload> = emptyList()
 ) : AgentSseEvent
 
-@Serializabledata class FinalDecisionEvent(
+@Serializable
+data class FinalDecisionEvent(
     override val event: String = "final_decision",
-    @SerialName("session_id") override val sessionId: String? = null,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
     @SerialName("winner_product_id") val winnerProductId: String? = null,
     val summary: String,
     val why: List<String> = emptyList(),
@@ -322,20 +378,29 @@ import kotlinx.serialization.json.JsonObject
     @SerialName("next_actions") val nextActions: List<QuickActionPayload> = emptyList()
 ) : AgentSseEvent
 
-@Serializabledata class DoneEvent(
+@Serializable
+data class DoneEvent(
     override val event: String = "done",
-    @SerialName("session_id") override val sessionId: String? = null
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
+    @SerialName("criteria_id") val criteriaId: String,
+    @SerialName("total_products") val totalProducts: Int
 ) : AgentSseEvent
 
-@Serializabledata class ErrorEvent(
+@Serializable
+data class ErrorEvent(
     override val event: String = "error",
-    @SerialName("session_id") override val sessionId: String? = null,
+    override val seq: Int,
+    @SerialName("session_id") override val sessionId: String,
     val code: String,
     val message: String,
     val retryable: Boolean = true
 ) : AgentSseEvent
 
-@Serializabledata class CriteriaPayload(
+// === Payload 数据类 ===
+
+@Serializable
+data class CriteriaPayload(
     val age: Int? = null,
     val scenario: String? = null,
     @SerialName("budget_min") val budgetMin: Int? = null,
@@ -347,9 +412,11 @@ import kotlinx.serialization.json.JsonObject
     @SerialName("requires_battery") val requiresBattery: Boolean? = null
 )
 
-@Serializabledata class ProductPayload(
+@Serializable
+data class ProductPayload(
     @SerialName("product_id") val productId: String,
     val name: String,
+    val brand: String? = null,
     val price: Int? = null,
     val currency: String? = null,
     @SerialName("image_url") val imageUrl: String? = null,
@@ -363,36 +430,42 @@ import kotlinx.serialization.json.JsonObject
     @SerialName("requires_battery") val requiresBattery: Boolean? = null
 )
 
-@Serializabledata class EvidencePayload(
+@Serializable
+data class EvidencePayload(
     @SerialName("source_type") val sourceType: String,
     val snippet: String,
     @SerialName("source_id") val sourceId: String? = null
 )
 
-@Serializabledata class AlternativePayload(
+@Serializable
+data class AlternativePayload(
     @SerialName("product_id") val productId: String,
     val name: String
 )
 
-@Serializabledata class QuickActionPayload(
+@Serializable
+data class QuickActionPayload(
     @SerialName("action_id") val actionId: String,
     val label: String,
-    val action: String,
+    val action: String,  // criteria_patch | feedback | open_evidence | compare
     @SerialName("feedback_type") val feedbackType: String? = null,
     @SerialName("criteria_patch") val criteriaPatch: JsonObject? = null
 )
 
-@Serializabledata class ChatStreamRequest(
+// === 请求体 ===
+
+@Serializable
+data class ChatStreamRequest(
     val message: String,
-    @SerialName("session_id") val sessionId: String? = null,
+    @SerialName("session_id") val sessionId: String? = null,  // null = 新会话，后端生成
     val history: List<MessageLite> = emptyList(),
     @SerialName("image_url") val imageUrl: String? = null,
     @SerialName("criteria_patch") val criteriaPatch: JsonObject? = null,
-    @SerialName("skip_stages") val skipStages: List<String>? = null,
-    @SerialName("client_trace_id") val clientTraceId: String? = null
+    @SerialName("skip_stages") val skipStages: List<String>? = null
 )
 
-@Serializabledata class MessageLite(
+@Serializable
+data class MessageLite(
     val role: String,
     val content: String
 )

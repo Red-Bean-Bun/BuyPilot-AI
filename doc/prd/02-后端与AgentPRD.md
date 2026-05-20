@@ -376,9 +376,18 @@ T17s:   ──→ yield final_decision + done
 
 
 ```Python
-async def chat_stream(user_input, image_url=None, history=None):
+async def chat_stream(user_input, image_url=None, history=None, session_id=None, criteria_patch=None, skip_stages=None):
+    # ====== session_id 管理 ======
+    if session_id is None:
+        session_id = generate_session_id()  # UUID
+    seq_counter = 0
+
+    def next_seq():
+        seq_counter += 1
+        return seq_counter
+
     # ====== T0: 立即响应 ======
-    yield SSEEvent("thinking", {"phase": "analyzing", "message": "正在理解您的需求..."})
+    yield SSEEvent("thinking", seq=next_seq(), session_id=session_id, stage="understanding", message="正在理解您的需求...")
 
     # ====== T0: slot_checker + intent 并行 ======
     slot_result, intent_result = await asyncio.gather(
@@ -387,7 +396,10 @@ async def chat_stream(user_input, image_url=None, history=None):
     )
 
     if slot_result.needs_clarification:
-        yield SSEEvent("clarification", {...})
+        yield SSEEvent("clarification", seq=next_seq(), session_id=session_id,
+                        questions=[{"slot": s, "question": q, "suggested_options": opts} for s, q, opts in slot_result.clarification_data],
+                        required_slots=slot_result.missing_slots,
+                        partial_criteria=flatten_constraints(intent_result.partial_constraints))
         return
 
     # ====== T1.5: criteria + embedding + 初步硬过滤 三路并行 ======
@@ -395,15 +407,19 @@ async def chat_stream(user_input, image_url=None, history=None):
     embedding_task = asyncio.create_task(compute_query_embedding(intent_result, user_input))
     initial_filter_task = asyncio.create_task(initial_hard_filter(intent_result))
 
-    yield SSEEvent("thinking", {"phase": "generating", "message": "正在生成购买标准..."})
+    yield SSEEvent("thinking", seq=next_seq(), session_id=session_id, stage="generating", message="正在生成购买标准...")
 
-    criteria = await criteria_task
-    yield SSEEvent("criteria_card", criteria)
+    criteria_raw = await criteria_task  # LLM 输出 constraints 列表
+    criteria_payload = flatten_constraints(criteria_raw.constraints)  # 展平为前端 CriteriaPayload
+    yield SSEEvent("criteria_card", seq=next_seq(), session_id=session_id,
+                    criteria_id=criteria_raw.criteria_id, editable=True,
+                    criteria=criteria_payload, risks=criteria_raw.risks,
+                    quick_actions=criteria_raw.quick_actions)
 
     # ====== 投机检索结果已提前准备好 ======
     query_embedding = await embedding_task
     hard_filter_ids = await initial_filter_task
-    final_filter_ids = await refine_hard_filter(criteria, hard_filter_ids)
+    final_filter_ids = await refine_hard_filter(criteria_payload, hard_filter_ids)
 
     # ====== 并行：向量召回 + 硬过滤候选集 ======
     vector_results, filtered_results = await asyncio.gather(
@@ -413,30 +429,33 @@ async def chat_stream(user_input, image_url=None, history=None):
     candidates = merge_and_dedup(vector_results, filtered_results)
 
     # rerank
-    ranked = await rerank(candidates, criteria, top_n=5)
+    ranked = await rerank(candidates, criteria_payload, top_n=5)
 
-    yield SSEEvent("thinking", {"phase": "searching", "message": "找到5个匹配商品..."})
+    yield SSEEvent("thinking", seq=next_seq(), session_id=session_id, stage="searching", message="找到5个匹配商品...")
 
     # ====== 并行：5个商品evidence检索 ======
-    evidences = await asyncio.gather(*[fetch_evidence(p, criteria) for p in ranked])
+    evidences = await asyncio.gather(*[fetch_evidence(p, criteria_payload) for p in ranked])
 
     # ====== 并行：推荐流式输出 + 后台写入 ======
     background_tasks = asyncio.gather(
-        write_retrieval_trace(criteria, ranked, evidences),
+        write_retrieval_trace(criteria_raw, ranked, evidences),
         write_evidence_links(ranked, evidences),
     )
 
-    for chunk in generate_recommendation_stream(criteria, ranked, evidences):
+    msg_id = generate_message_id()
+    for chunk in generate_recommendation_stream(criteria_payload, ranked, evidences):
         if chunk.type == "text":
-            yield SSEEvent("text_delta", {"delta": chunk.content})
+            yield SSEEvent("text_delta", seq=next_seq(), session_id=session_id, message_id=msg_id, delta=chunk.content, done=False)
         elif chunk.type == "product":
-            yield SSEEvent("product_card", chunk.product)
+            yield SSEEvent("product_card", seq=next_seq(), session_id=session_id, rank=chunk.rank, product=chunk.product_payload, reason=chunk.reason, risk_notes=chunk.risk_notes, evidence=chunk.evidence, actions=chunk.actions)
+    yield SSEEvent("text_delta", seq=next_seq(), session_id=session_id, message_id=msg_id, delta="", done=True)
 
     await background_tasks
 
-    decision = await generate_decision(criteria, ranked)
-    yield SSEEvent("final_decision", decision)
-    yield SSEEvent("done", {"criteria_id": criteria.criteria_id, "total_products": len(ranked)})
+    yield SSEEvent("thinking", seq=next_seq(), session_id=session_id, stage="decision_making", message="正在整理结论...")
+    decision = await generate_decision(criteria_payload, ranked)
+    yield SSEEvent("final_decision", seq=next_seq(), session_id=session_id, winner_product_id=decision.winner_id, summary=decision.summary, why=decision.why, not_for=decision.not_for, alternatives=decision.alternatives, next_actions=decision.next_actions)
+    yield SSEEvent("done", seq=next_seq(), session_id=session_id, criteria_id=criteria_raw.criteria_id, total_products=len(ranked))
 ```
 
 
@@ -485,13 +504,17 @@ criteria.constraints
 
 ```Python
 class PipelineState(TypedDict):
+    session_id: str                        # 必填，后端生成或前端携带
+    seq_counter: int                       # SSE 事件序号递增器
     user_message: str
     image_url: Optional[str]
     history: List[Dict]
     intent: Optional[Dict]
-    criteria: Optional[Dict]
+    criteria_raw: Optional[Dict]           # LLM 输出的约束列表 [{dimension, value, weight}]
+    criteria_payload: Optional[Dict]       # 展平后的前端 CriteriaPayload 格式
     needs_clarification: bool
-    clarification_questions: Optional[List[str]]
+    clarification_data: Optional[List[Dict]]  # [{slot, question, suggested_options}]
+    partial_criteria: Optional[Dict]       # 已推断的部分标准（展平格式）
     filters: Optional[Dict]           # 硬过滤条件
     soft_preferences: Optional[Dict]  # 软偏好
     query_embedding: Optional[List[float]]  # 投机预计算的query embedding
@@ -512,10 +535,10 @@ class PipelineState(TypedDict):
 在 LLM 调用等待期间，每隔 800ms yield 一个 thinking 事件更新状态文字，用户始终感知系统在工作，不会出现空白等待：
 
 ```Plain Text
-T0ms:    thinking → "正在理解您的需求..."
-T800ms:  thinking → "正在分析您的偏好..."
-T1.5s:   thinking → "正在生成购买标准..."
-T3s:     thinking → "正在检索匹配商品..."
+T0ms:    thinking → stage="understanding" → "正在理解您的需求..."
+T800ms:  thinking → stage="understanding" → "正在分析您的偏好..."
+T1.5s:   thinking → stage="generating" → "正在生成购买标准..."
+T3s:     thinking → stage="searching" → "正在检索匹配商品..."
 ```
 
 状态文字按管道进度自然推进，不是假动画——每个文字对应后台真实计算阶段。
@@ -524,16 +547,22 @@ T3s:     thinking → "正在检索匹配商品..."
 
 **细节2：quick_actions 修正快捷路径**
 
-用户点击 criteria_card 的 quick_actions 按钮（如"预算调低"），客户端发新 `/chat/stream` 请求带上 patch：
+用户点击 criteria_card / product_card / final_decision 的 quick_actions 按钮，客户端发新 `/chat/stream` 请求带上 patch：
 
 ```JSON
 {
-  "message": "修正购买标准",
+  "message": "",
   "session_id": "s_001",
   "criteria_patch": {"budget_max": 30},
-  "skip_stages": ["intent", "criteria"]  // 跳过已完成的阶段
+  "skip_stages": ["intent", "criteria"]
 }
 ```
+
+quick_actions 统一为 4 维结构 `{action_id, label, action, feedback_type?, criteria_patch?}`：
+- `action: "criteria_patch"` → 修正购买标准，携带 criteria_patch
+- `action: "feedback"` → 反馈，携带 feedback_type (like/dislike/not_interested/show_alternatives)
+- `action: "open_evidence"` → 查看证据（前端底板展示）
+- `action: "compare"` → 加入对比
 
 后端收到 patch 后用现有 criteria + patch 更新约束，直接跳到检索阶段（不重新跑 intent + criteria），延迟降到 \~2s。
 
@@ -545,56 +574,68 @@ T3s:     thinking → "正在检索匹配商品..."
 
 ### **5.1 SSE 事件协议**
 
-P0 客户端接收 7 种事件（去掉 retrieval，trace 写后台）：
+> **统一协议参见 `contracts/sse-event-protocol-v1.md`**——本节为后端视角的摘要，详细字段定义以合约文件为准。
+
+全局规则：每个 SSE 事件必带 `seq: Int`（正整数递增）和 `session_id: String`（必填）。首次请求 `session_id=null` 时后端生成 UUID 并在第一个事件中携带。
+
+P0 客户端接收 8 种事件（去掉 retrieval，trace 写后台）：
 
 ```Plain Text
-thinking:        {"phase": "analyzing|clarifying|searching|generating", "message": "..."}
-clarification:   {"missing_dimensions": [...], "questions": [...], "partial_criteria": {...}}
-criteria_card:   {"criteria_id": "...", "user_profile": "...", "scenario": "...",
-                  "constraints": [{dimension, value, weight}],
-                  "risks": [...],
-                  "editable": true,
-                  "quick_actions": [
-                    {"label": "预算调低", "patch": {"budget_max": 30}},
-                    {"label": "更偏益智", "patch": {"education_dimensions": ["logic"]}},
-                    {"label": "不要小零件", "patch": {"safety_features": ["no_small_parts"]}}
-                  ]}
-text_delta:      {"delta": "..."}
-product_card:    {"product_id": "...", "name": "...", "price": ..., "brand": "...",
-                  "image_url": "...", "match_details": {...},
-                  "recommend_reason": "...", "evidence": [...], "risks": [...]}
-final_decision:  {"recommended_id": "...", "recommended_name": "...",
-                  "why": "...", "suitable_for": "...", "not_suitable_for": "...",
-                  "alternatives": [...]}
-done:            {"criteria_id": "...", "total_products": 3}
-error:           {"code": "...", "message": "..."}
+thinking:        {"seq":1, "event":"thinking", "session_id":"...", "stage":"understanding|clarifying|searching|generating|decision_making", "message":"..."}
+clarification:   {"seq":2, "event":"clarification", "session_id":"...", "questions":[{"slot":"age", "question":"孩子多大呢？", "suggested_options":["3岁","4岁","5-6岁","7岁以上"]}], "required_slots":["age","scenario"], "partial_criteria":{"budget_max":200}}
+criteria_card:   {"seq":3, "event":"criteria_card", "session_id":"...", "criteria_id":"crit_001", "editable":true,
+                  "criteria":{"age":4,"scenario":"indoor","budget_max":200,"requires_battery":false,"safety_features":["no_small_parts"],"education_dimensions":["logic","fine_motor"]},
+                  "risks":["4岁儿童使用磁力玩具需家长陪同收纳"],
+                  "quick_actions":[{"action_id":"budget_low","label":"预算压低","action":"criteria_patch","criteria_patch":{"budget_max":150}}]}
+text_delta:      {"seq":4, "event":"text_delta", "session_id":"...", "message_id":"msg_ai_01", "delta":"...", "done":false}
+product_card:    {"seq":5, "event":"product_card", "session_id":"...", "rank":1,
+                  "product":{"product_id":"...", "name":"...", "brand":"...", "price":169, "currency":"CNY", "image_url":"...", "age_min":4, "age_max":6, "toy_type":"building", "education_dimensions":[...], "safety_features":[...], "play_scenario":[...], "requires_battery":false, "messiness_level":"low"},
+                  "reason":"...", "risk_notes":[...], "evidence":[...],
+                  "actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"}]}
+final_decision:  {"seq":7, "event":"final_decision", "session_id":"...", "winner_product_id":"...", "summary":"...",
+                  "why":["..."], "not_for":["..."], "alternatives":[...],
+                  "next_actions":[{"action_id":"cheaper","label":"再便宜一点","action":"criteria_patch","criteria_patch":{"budget_max":150}}]}
+done:            {"seq":8, "event":"done", "session_id":"...", "criteria_id":"crit_001", "total_products":2}
+error:           {"seq":2, "event":"error", "session_id":"...", "code":"...", "message":"...", "retryable":true}
 ```
 
-**调整说明**：
+**关键调整说明**：
 
+- `thinking` 字段名统一为 `stage`（不是 `phase`），枚举扩展为 5 值：`understanding | clarifying | searching | generating | decision_making`
+- `clarification` 采用多问题模式，每个问题独立带 `slot` + `suggested_options`，顶层带 `partial_criteria` + `required_slots`
+- `criteria_card.criteria` 输出扁平 `CriteriaPayload` 格式（不是 `constraints` 列表）——后端内部 LLM 生成约束列表，管道内做展平转换后输出；新增 `criteria_id`（评测关联）和 `risks`（标准级风险提示）；删除 `user_profile`（冗余）和顶层 `scenario`（已在 criteria 内）
+- `text_delta` 必带 `message_id` + `done`——前端据此拼同一条 AI 消息气泡和判断文本流结束
+- `product_card` 采用嵌套结构（`product: ProductPayload` 在内，`rank/reason/risk_notes/evidence/actions` 在外）；新增 `brand` 字段；字段名统一为 `reason`（不是 `recommend_reason`）、`risk_notes`（不是 `risks`）；删除 `match_details`
+- `final_decision` 命名统一为前端定义：`winner_product_id`（不是 `recommended_id`）、`not_for`（不是 `not_suitable_for`）；新增 `summary` 和 `next_actions`；删除 `recommended_name`（前端从 product_card 取）和 `suitable_for`（`why` 已覆盖）
+- `done` 事件字段：`criteria_id` + `total_products`（不是 `session_id`——已在全局必填字段中）
+- `error` 新增 `retryable: Boolean`，错误码枚举：INTENT_FAILED / CLARIFICATION_FAILED / RETRIEVAL_EMPTY / LLM_TIMEOUT / RATE_LIMITED / INTERNAL_ERROR
+- `quick_actions` 统一为 4 维结构 `{action_id, label, action, feedback_type?, criteria_patch?}`，扩展到 criteria_card / product_card / final_decision 三类卡片
 - `retrieval` 事件不再发给客户端，技术细节放后台 retrieval_traces 展示
-- `criteria_card` 增加 `editable: true` + `quick_actions`，允许用户轻量修正标准
-- 客户端只关心体验，后台关心工程透明性
 
 ### **5.2 HTTP API 端点**
 
 ```Plain Text
 POST /chat/stream          — SSE 流式导购对话
-  请求: {message, session_id, image_url?, history, criteria_patch?, skip_stages?}
-  响应: SSE 事件流（7 种事件）
-  注: criteria_patch + skip_stages 用于quick_actions快捷修正，跳过已完成阶段，延迟降至~2s
-
-POST /stream/token         — Stream 用户 token 签发
-  请求: {user_id}
-  响应: {user_id, stream_token, stream_api_key}
+  请求: {message, session_id?, image_url?, history, criteria_patch?, skip_stages?}
+  响应: SSE 事件流（8 种事件，每个事件必带 seq + session_id）
+  注: session_id=null 时后端生成 UUID；criteria_patch + skip_stages 用于quick_actions快捷修正
 
 POST /feedback             — 用户反馈记录
-  请求: {session_id, product_id?, action, reason?}
+  请求: {session_id, product_id?, action, feedback_type?, reason?, criteria_patch?}
   响应: {status: "ok"}
+  action 枚举: criteria_patch | feedback | open_evidence | compare
+  feedback_type 枚举: like | dislike | not_interested | show_alternatives
 
 POST /upload/image         — 图片上传与多模态解析
   请求: multipart/form-data
-  响应: {image_url, analysis: {...}}
+  响应: {image_url, width, height, mime_type, ocr_text}
+
+GET /sessions/{id}/history — 恢复对话历史（P0 新增）
+  响应: {session_id, messages: [{role, content, timestamp}]}
+
+POST /chat/cancel          — 停止当前管道（P1 新增）
+  请求: {session_id}
+  响应: {status: "cancelled"}
 ```
 
 客户端携带 session_id，后端持久化轨迹但不维护登录态。
@@ -715,10 +756,10 @@ buypilot-backend/
 │   ├── config.py                # Pydantic-Settings 配置管理
 │   │
 │   ├── api/                     # HTTP 层（提前拆分，避免膨胀）
-│   │   ├── chat.py              # /chat/stream SSE 端点（含 criteria_patch 快捷路径）
-│   │   ├── stream_token.py      # /stream/token
-│   │   ├── feedback.py          # /feedback
-│   │   ├── upload.py            # /upload/image
+│   │   ├── chat.py              # /chat/stream SSE 端点（含 criteria_patch 快捷路径）+ /chat/cancel
+│   │   ├── sessions.py          # /sessions/{id}/history 会话历史恢复（P0 新增）
+│   │   ├── feedback.py          # /feedback（action 枚举扩展 + feedback_type + criteria_patch）
+│   │   ├── upload.py            # /upload/image（响应展平为 {image_url, width, height, mime_type, ocr_text}）
 │   │   ├── admin_products.py    # 管理后台：商品数据
 │   │   ├── admin_documents.py   # 管理后台：文档/知识库
 │   │   ├── admin_feedback.py    # 管理后台：用户反馈
@@ -975,6 +1016,7 @@ services:
 - 全量真实电商平台接入
 - 复杂端侧大模型推理
 - 通过 Stream Channel 转发流式 token
+- `/stream/token` 端点（Stream SDK 残留，已删除；采用 OkHttp SSE 直连）
 - Celery + Redis 异步任务系统
 - JWT 复杂认证系统
 - RAGAS 作为 P0 评测依赖（P1 加入）
@@ -987,16 +1029,18 @@ services:
 
 ## **14. SSE 事件 → Android UI 组件映射（供队友对齐）**
 
-| SSE 事件 | Android UI 组件 | 说明 |
-|-|-|-|
-| thinking | 顶部状态条（"正在分析..."） | 简单 loading indicator |
-| clarification | 问题卡片 | 显示缺失维度和追问问题 |
-| criteria_card | 购买标准卡 + quick_actions 按钮 | 可编辑，可轻量修正 |
-| text_delta | AI 旁白文本 | 流式 Markdown 渲染 |
-| product_card | 商品推荐卡（名称/价格/参数/理由/证据） | 每个商品一个卡片 |
-| final_decision | 最终决策卡（首选/备选/不适合/理由） | 高优先级视觉模块 |
-| done | 结束态 | 停止 loading |
-| error | Toast + fallback 提示 | 异常处理 |
+> 统一协议详见 `contracts/sse-event-protocol-v1.md`
+
+| SSE 事件 | 关键字段 | Android UI 组件 | 说明 |
+|-|-|-|-|
+| thinking | `stage` (understanding/clarifying/searching/generating/decision_making) | 顶部状态条（按 stage→中文映射） | 简单 loading indicator，150–250ms 去抖 |
+| clarification | `questions[{slot,question,suggested_options}]`, `required_slots`, `partial_criteria` | 多问题澄清卡（每题一组选项按钮） | partial_criteria 小字展示已推断标准 |
+| criteria_card | `criteria_id`, `editable`, `criteria`(CriteriaPayload), `risks`, `quick_actions` | 购买标准卡 + quick_actions 按钮 | criteria 为扁平格式；risks 显示标准级风险 |
+| text_delta | `message_id`, `delta`, `done` | AI 旁白文本（同 message_id 拼同一条气泡） | done=true 时做最终 Markdown 渲染 |
+| product_card | `rank`, `product`(ProductPayload), `reason`, `risk_notes`, `evidence`, `actions` | 商品推荐卡（嵌套 product 对象） | product 包含 brand；actions 含看证据/反馈/换相似 |
+| final_decision | `winner_product_id`, `summary`, `why`, `not_for`, `alternatives`, `next_actions` | 最终决策卡 | next_actions 含 criteria_patch/compare |
+| done | `criteria_id`, `total_products` | 结束态 | Debug 页用 criteria_id 关联 trace |
+| error | `code`, `message`, `retryable` | Toast + fallback 提示 | retryable 决定是否显示重试按钮 |
 
 ---
 
