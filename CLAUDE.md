@@ -168,7 +168,7 @@ Android Compose + LazyColumn 卡片渲染
 用户反馈（quick_actions: criteria_patch/feedback/open_evidence/compare） → feedbacks 表 → 下一轮推荐注入约束
 ```
 
-> 统一 SSE 事件协议详见 `contracts/sse-event-protocol-v1.md`
+> SSE 事件协议以 `doc/prd/01-Android前端PRD.md` 和 `doc/prd/02-后端与AgentPRD.md` 为准，两份 PRD 已对齐。
 
 ---
 
