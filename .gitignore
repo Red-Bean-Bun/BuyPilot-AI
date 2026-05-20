@@ -48,3 +48,4 @@ temp/
 .agents/
 .impeccable/
 skills-lock.json
+data/raw/

@@ -47,17 +47,17 @@
 
 | 2 | 向量存储 | **PostgreSQL + pgvector** | 一库双用，结构化表 + 向量表 |
 
-| 3 | 路由层 LLM | **Qwen-Turbo**（百炼） | 意图识别、约束抽取、澄清问题生成 |
+| 3 | 路由层 LLM | **Doubao-Seed-2.0-lite**（primary）/ **Qwen-Turbo**（fallback） | 双轨策略，意图识别用Doubao免费额度，失败时fallback到Qwen-Turbo |
 
-| 4 | 生成层 LLM | **Qwen-Plus**（百炼） | 购买标准生成、推荐解释、决策卡 |
+| 4 | 生成层 LLM | **Qwen-Plus**（primary）/ **Doubao**（fallback） | 购买标准生成/推荐解释/决策卡需要强JSON约束输出，Qwen-Plus更稳定 |
 
-| 5 | 多模态 LLM | **Qwen-VL-Plus**（百炼） | 图片理解、商品截图识别 |
+| 5 | 多模态 LLM | **Qwen-VL-Plus**（primary，无fallback） | Doubao VL生态不确定，Qwen-VL-Plus成熟方案 |
 
-| 6 | LLM 接入方式 | **百炼 OpenAI 兼容接口** | 统一 SDK，换模型改参数 |
+| 6 | LLM 接入方式 | **双轨：火山引擎Ark + 百炼 OpenAI兼容** | 配置层 dict + call_llm() 函数，按任务类型选 primary/fallback |
 
-| 7 | Embedding | **text-embedding-v3**，1024 维 | 百炼平台，pgvector 表 vector(1024) |
+| 7 | Embedding | **text-embedding-v3**（1024维，primary）/ **Doubao-embedding-vision**（fallback） | 百炼有Key+维度确定 |
 
-| 8 | Rerank | **百炼 gte-rerank** | Cross-Encoder 中文重排 |
+| 8 | Rerank | **gte-rerank**（百炼，无fallback） | Doubao无对应服务 |
 
 | 9 | 流式推进策略 | **默认流式推进，不等用户确认** | criteria_card 带 editable + quick_actions，允许轻量修正 |
 
@@ -73,6 +73,14 @@
 
 | 15 | Session 策略 | **轻量持久化 session trace** | 客户端携带 session_id，后端持久化轨迹但不维护登录态 |
 
+| 16 | 模型切换机制 | **配置层 dict + call_llm(task_type, prompt)** | settings.py 定义 providers 和 task_routing，call_llm() 读配置选 provider，primary失败自动retry fallback |
+
+| 17 | 对话式加购 | **⭐入门：cart_items表 + add_to_cart意图 + cart_action事件** | P1实现，不做⭐⭐⭐下单确认 |
+
+| 18 | 数据策略 | **80条 + 双数据源** | 导师提供（5基础字段兼容通用）+ 自主构造80条（含玩具专属字段），50-100范围内偏多 |
+
+| 19 | Doubao API 配置 | BaseAPI/Model/Key/Limit 见 `.env.example` | TPM 80万/RPM 700，不限制具体使用模型 |
+
 
 
 ---
@@ -87,19 +95,11 @@
 
 
 
-**P0**：精选 100-200 条干净 Toys 商品，人工/半自动清洗，保证字段质量。足以支撑 Demo + 评测。
+**P0**：精选 **80条** 干净 Toys 商品，**双数据源**：导师提供的脱敏电商数据（商品名、类目、价格、详情描述、主图URL 5基础字段）+ 自主构造的80条（含玩具专属字段：age_min/age_max、safety_features、education_dimensions、requires_battery、play_scenario 等）。足以支撑 Demo + 评测 + 硬过滤 + 反选排除。
 
+**P1**：扩展非结构化文档（安全说明书、教育研究、FAQ），增强 RAG 证据源。
 
-
-**P1**：扩展到 1000 条，展示规模感。
-
-
-
-**P2**：完整 6484 条入库，用于"系统支持规模化处理"的说明，但不作为主 Demo 依赖。
-
-
-
-**核心原则**：先跑通小闭环，再扩大规模。6484 条全量入库放到第 2 周后台任务，不阻塞主链路。
+**P2**：不再追求规模数量，数据质量比数量重要。
 
 
 
@@ -155,7 +155,19 @@
 
 
 
-### **3.3 数据库 Schema（8 张表）**
+**意图类型定义**：
+
+```Plain Text
+recommend:   用户表达购物需求（模糊或清晰），进入导购管道
+clarify:     用户回答澄清问题，补充缺失约束后继续管道
+feedback:    用户对已有推荐表达偏好修正（like/dislike/criteria_patch），影响下一轮
+add_to_cart: 用户要求将推荐商品加入购物车，触发 cart_action 事件
+view_cart:   用户查看当前购物车内容，触发 cart_action(view) 事件
+```
+
+
+
+### **3.3 数据库 Schema（9 张表）**
 
 
 
@@ -201,6 +213,14 @@ feedbacks (
   action        TEXT NOT NULL,              -- like/dislike/view_detail/click_alternative
   reason        TEXT,
   created_at    TIMESTAMPTZ DEFAULT now()
+)
+
+cart_items (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id    TEXT NOT NULL,              -- 关联 conversations.session_id
+  product_id    TEXT NOT NULL REFERENCES products(id),
+  quantity      INT DEFAULT 1,
+  added_at      TIMESTAMPTZ DEFAULT now()
 )
 
 eval_runs (
@@ -286,7 +306,7 @@ def chunk_product_text(text):
 
 
 ```Plain Text
-CSV 数据 → 精选 100-200 条（P0）
+CSV 数据 → 精选 80 条（P0，双数据源）
          → clean_text 噪音清洗
          → LLM 批量提取 metadata（12 字段）
          → 混合切分 product_text
@@ -297,7 +317,7 @@ CSV 数据 → 精选 100-200 条（P0）
 
 
 
-P1 扩展到 1000 条，P2 完整 6484 条。借鉴 Amazon-Multimodal-RAG-Assistant 的 clean_text 正则过滤。
+P1 扩展非结构化文档，P2 不追求规模数量。
 
 
 
@@ -619,7 +639,7 @@ T3s:     thinking → "正在检索匹配商品..."
 
 ### **5.1 SSE / A2UI 事件协议**
 
-P0 客户端接收 7 种业务事件（去掉 retrieval，trace 写后台），但所有事件必须使用统一 Agent-to-UI envelope。后端不能只返回业务 JSON 让前端猜渲染方式；必须提供排序、幂等、稳定 key、分组和展示语义。
+P0 客户端接收 8 种业务事件（去掉 retrieval，trace 写后台），但所有事件必须使用统一 Agent-to-UI envelope。后端不能只返回业务 JSON 让前端猜渲染方式；必须提供排序、幂等、稳定 key、分组和展示语义。
 
 **统一 envelope：**
 
@@ -700,6 +720,11 @@ final_decision:
     evidence_refs: [{evidence_id, source_type, trust_label?, snippet?}]
   }
 
+cart_action:
+  display_mode: inline_card
+  node_id: cart_{turn_id}
+  payload: {action: "add"|"remove"|"view", product_id, cart_id, quantity, status: "success"|"failed"}
+
 done:
   display_mode: none
   payload: {criteria_id?, deck_id?, total_products?, client_turn_id?, finish_reason: "completed|canceled|error"}
@@ -723,7 +748,7 @@ error:
 ```Plain Text
 POST /chat/stream          — SSE 流式导购对话
   请求: {message, session_id, image_url?, history, criteria_patch?, skip_stages?, client_turn_id?}
-  响应: SSE / A2UI envelope 事件流（7 种业务事件）
+  响应: SSE / A2UI envelope 事件流（8 种业务事件）
   注: criteria_patch + skip_stages 用于quick_actions快捷修正，跳过已完成阶段，延迟降至~2s
 
 POST /chat/cancel          — 取消当前轮 Agent 生成
@@ -740,6 +765,10 @@ POST /feedback             — 用户反馈记录
 POST /upload/image         — 图片上传与多模态解析
   请求: multipart/form-data
   响应: {image_url, analysis: {...}}
+
+GET /cart/{session_id}     — 查询购物车内容
+  响应: {items: [{product_id, name, price, quantity, added_at}], total_items, total_price}
+  注: Demo 4 需要"查看购物车底板"，前端通过此端点获取购物车内容用于渲染
 ```
 
 客户端携带 session_id，后端持久化轨迹但不维护登录态。
@@ -906,7 +935,7 @@ backend/
 │   │
 │   ├── repos/                   # 数据访问层（CRUD）
 │   │   ├── __init__.py
-│   │   ├── models.py            # SQLModel 模型（8 张表）
+│   │   ├── models.py            # SQLModel 模型（9 张表）
 │   │   ├── database.py          # 数据库连接
 │   │   ├── products.py          # 商品读写
 │   │   ├── documents.py         # 文档/chunk 读写
@@ -930,7 +959,7 @@ backend/
 │   ├── metadata_extraction.md
 │
 ├── scripts/                     # 一次性脚本
-│   ├── ingest.py                # 数据入库（分级：P0 100条 / P1 1000条 / P2 全量）
+│   ├── ingest.py                # 数据入库（分级：P0 80条双数据源 / P1 非结构化文档 / P2 不追求规模）
 │   ├── eval.py                  # 运行评测
 │
 ├── tests/                       # TDD
@@ -986,6 +1015,7 @@ backend/
 - feedback.py API → 反馈写入 DB
 - chunking.py → 切分数量和格式
 - ingest.py → LLM 提取 JSON 合法性
+- cart_action → 3 个场景：add_to_cart 意图识别 → cart_action 事件 schema 合法性 → add 成功后 GET /cart 返回正确内容
 
 **P2 不写测试**：
 
@@ -1077,9 +1107,9 @@ volumes:
 
 | 天 | 任务 | 验证标准 |
 |-|-|-|
-| 1 | 项目骨架 + Docker Compose + SQLModel 8 张表 | `docker compose up` 成功，表创建 |
+| 1 | 项目骨架 + Docker Compose + SQLModel 9 张表 | `docker compose up` 成功，表创建 |
 
-| 2 | **精选 100 条 Toys 商品入库**（半自动清洗 + LLM 提取 metadata） | 100 条商品+chunks 写入 DB，可检索 |
+| 2 | **精选 80 条 Toys 商品入库**（双数据源 + LLM 提取 metadata） | 80 条商品+chunks 写入 DB，可检索 |
 
 | 3 | sse_events.py + slot_defs.py + slot_checker.py | JSON schema + slot 检查测试通过 |
 
@@ -1104,7 +1134,7 @@ volumes:
 | 10 | multimodal.py 图片上传 + Qwen-VL-Plus 解析 | 图片→描述→检索链路跑通 |
 | 11 | feedback.py 反馈记录 + 反馈注入 criteria 逻辑 | 反馈影响下一轮推荐 |
 | 12 | retrieval_traces + evidence_links 写入 | 每次推荐有完整检索追踪和证据 |
-| 13 | 扩展数据到 1000 条 + 管道性能优化 | 数据规模感提升，流式延迟达标 |
+| 13 | 非结构化文档入库（安全说明书、教育研究、FAQ）+ 管道性能优化 | RAG 证据源增强，流式延迟达标 |
 
 | 14 | **第二次内部 Demo** | 多模态 + 反馈闭环 + 结构化卡片完整 |
 
@@ -1160,7 +1190,8 @@ volumes:
 | criteria_card | 购买标准摘要卡 + 编辑 Bottom Sheet | 对话区只放摘要；完整字段、quick_actions、可编辑项进底板 |
 | text_delta | 当前轮 AI 文本节点 | 流式 Markdown 渲染；同一 `node_id` 追加 delta |
 | product_card | SwipeDeck item | 同一 `deck_id` 聚合为一个商品卡堆；详情和证据进 Bottom Sheet |
-| final_decision | 最终决策摘要卡 | 对话区展示中等完整结论；“查看依据”打开 Bottom Sheet |
+| final_decision | 最终决策摘要卡 | 对话区展示中等完整结论；”查看依据”打开 Bottom Sheet |
+| cart_action | 加购/购物车操作节点 | 对话区显示加购成功/失败反馈；”查看购物车”打开 Bottom Sheet |
 | done | 当前轮结束态 | 停止 inline thinking 与底部输入区 loading |
 | error | 错误气泡 + 可恢复动作 | 可同时触发 Toast，但聊天流必须保留错误节点 |
 

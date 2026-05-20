@@ -2,7 +2,7 @@
 
 **Executive Summary**
 
-本 PRD 面向 **3 周赛制**下的 **亲子玩具 Toys & Games 导购 Agent** Android 客户端实现，目标是把当前已确认的整体策略口径与后端 & Agent PRD 口径，落成一份**可以直接交付给 Android 开发者开工**的前端执行文档。文档默认采用当前对话中已经确认的后端事件集与字段口径：`thinking`、`clarification`、`criteria_card`、`text_delta`、`product_card`、`final_decision`、`done/error`，并围绕“**模糊需求 → 澄清 → 购买标准 → 商品推荐 → 决策结论 → 反馈修正**”构建流式 UI 主链路。
+本 PRD 面向 **3 周赛制**下的 **亲子玩具 Toys & Games 导购 Agent** Android 客户端实现，目标是把当前已确认的整体策略口径与后端 & Agent PRD 口径，落成一份**可以直接交付给 Android 开发者开工**的前端执行文档。文档默认采用当前对话中已经确认的后端事件集与字段口径：`thinking`、`clarification`、`criteria_card`、`text_delta`、`product_card`、`cart_action`、`final_decision`、`done/error`，并围绕”**模糊需求 → 澄清 → 购买标准 → 商品推荐 → 加购操作 → 决策结论 → 反馈修正**”构建流式 UI 主链路。
 
 文档中的状态说明如下：**已确认**表示当前对话中两份 PDF 已明确的方向或字段口径；**未指定**表示原材料未给出；**本 PRD 决策**表示为保证 Android 工程可实施而新增的前端约定。对外部技术栈、SDK 能力、版本与平台兼容信息，优先采用官方或原始资料。Jetpack Compose 官方建议以 BOM 统一管理 Compose 依赖版本；Photo Picker 支持 Compose 启动器并在不支持设备上回退到 `ACTION_OPEN_DOCUMENT`；CameraX 是 Google 推荐新应用优先使用的相机库；ML Kit 文本识别、Coil Compose 与 OkHttp SSE 均有官方或原始资料可引用。
 
@@ -22,11 +22,11 @@
 
 ### 不可做功能清单
 
-为了匹配三周比赛节奏，前端必须严格收缩范围。**P0 不做**：商城首页、类目浏览页、商品详情长页、购物车、支付、订单系统、消息通知中心、账号体系深集成、客服系统、多端同登同步。**P1 也不建议做**：复杂筛选页、长列表瀑布流、活动会场、优惠券、多图多视频理解、完整埋点后台。上述能力在原始材料中**未指定**，本 PRD 决策为**全部降级为非目标项**。
+为了匹配三周比赛节奏，前端必须严格收缩范围。**P0 不做**：商城首页、类目浏览页、商品详情长页、支付、订单系统、消息通知中心、账号体系深集成、客服系统、多端同登同步。**P1 也不建议做**：复杂筛选页、长列表瀑布流、活动会场、优惠券、多图多视频理解、完整埋点后台。购物车仅做⭐入门档（对话式加购 + 购物车图标 + 购物车底板查看），不做⭐⭐进阶（NLP操作购物车）和⭐⭐⭐挑战（下单确认流程）。上述能力在原始材料中**未指定**，本 PRD 决策为**除购物车⭐入门外全部降级为非目标项**。
 
 ## 技术栈与工程结构
 
-Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **Compose BOM** 统一 Compose 依赖版本；官方文档示例给出了 `androidx.compose:compose-bom:2026.04.01`。图片选择优先用系统 Photo Picker；官方明确其在 Compose 中可直接通过 `rememberLauncherForActivityResult(PickVisualMedia())` 启动，在不支持设备上会回退至 `ACTION_OPEN_DOCUMENT`，并可覆盖到 Android 4.4+ 的设备层。相机拍摄如果进入 P1/P2，则优先用 CameraX，Google 官方建议新应用从 CameraX 起步，且其向后兼容到 Android 5.0。图片渲染建议用 Coil Compose；官方当前文档给出 `io.coil-kt.coil3:coil-compose:3.4.0`，并推荐大多数场景优先使用 `AsyncImage`。SSE 通道建议用 OkHttp SSE；Square 官方模块说明其为实验性支持，当前 README 示例依赖为 `com.squareup.okhttp3:okhttp-sse:5.3.0`。如果需要端上 OCR 兜底，可选 ML Kit Text Recognition；Google 官方当前 Android 文档给出拉丁文与中文识别依赖 `16.0.1`，Play services 版本也有对应依赖。UI 状态管理建议用 `ViewModel + StateFlow`，并在 UI 层使用 `repeatOnLifecycle` 收集，避免不可见时仍处理事件。
+Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **Compose BOM** 统一 Compose 依赖版本；官方文档示例给出了 `androidx.compose:compose-bom:2026.04.01`。图片选择优先用系统 Photo Picker；官方明确其在 Compose 中可直接通过 `rememberLauncherForActivityResult(PickVisualMedia())` 启动，在不支持设备上会回退至 `ACTION_OPEN_DOCUMENT`，并可覆盖到 Android 4.4+ 的设备层。相机拍摄如果进入 P1/P2，则优先用 CameraX，Google 官方建议新应用从 CameraX 起步，且其向后兼容到 Android 5.0。图片渲染建议用 Coil Compose；官方当前文档给出 `io.coil-kt.coil3:coil-compose:3.4.0`，并推荐大多数场景优先使用 `AsyncImage`。SSE 通道建议用 OkHttp SSE；Square 官方模块说明其为实验性支持，当前 README 示例依赖为 `com.squareup.okhttp3:okhttp-sse:5.3.0`。如果需要端上 OCR 兜底，可选 ML Kit Text Recognition；Google 官方当前 Android 文档给出拉丁文与中文识别依赖 `16.0.1`，Play services 版本也有对应依赖。UI 状态管理建议用 `ViewModel + StateFlow`，并在 UI 层使用 `repeatOnLifecycle` 收集，避免不可见时仍处理事件。后端 LLM 接入采用**双轨：火山引擎 Doubao + 百炼 Qwen**，意图识别用 Doubao（免费额度），购买标准生成用 Qwen-Plus（JSON schema 级约束更稳定），前端无需关心具体模型路由，只需消费 SSE 事件。
 
 <sheet sheet-id="lDp1Lm" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
 
@@ -61,6 +61,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
    - `clarification` 澄清完整小卡
    - `criteria_card` 购买标准摘要卡
    - `product_card` 商品 `SwipeDeck` 卡堆节点
+   - `cart_action` 加购/购物车操作反馈节点
    - `final_decision` 最终决策摘要卡
    - 系统错误气泡
 3. **输入区**  
@@ -384,6 +385,14 @@ data class AgentUiEnvelope<T>(
     @SerialName("criteria_patch") val criteriaPatch: JsonElement? = null
 )
 
+@Serializable data class CartActionPayload(
+    val action: String,              // "add" | "remove" | "view"
+    @SerialName("product_id") val productId: String,
+    @SerialName("cart_id") val cartId: String? = null,
+    val quantity: Int = 1,
+    val status: String               // "success" | "failed"
+)
+
 @Serializable data class DonePayload(
     @SerialName("criteria_id") val criteriaId: String? = null,
     @SerialName("deck_id") val deckId: String? = null,
@@ -461,32 +470,41 @@ Android 官方架构指南建议以状态持有者承载 UI 状态，而 `StateF
 
 ### 答辩 Demo 剧本
 
-#### Demo 路径一
+#### Demo 路径一：模糊推荐+条件筛选
 
 - **用户话术**：  
-“给 4 岁孩子买一个室内玩的益智玩具，预算 200 元以内，不要小零件，也尽量不要电池。”
+“推荐适合4岁孩子的益智玩具”
 - **预期 SSE 流**：  
-`thinking → criteria_card → text_delta → product_card ×2 → final_decision → done`
+`thinking → clarification`（若缺约束）或 `thinking → criteria_card → text_delta → product_card ×2 → final_decision → done`
 - **验收点**：  
-年龄/场景/预算/安全约束被正确显示在 `criteria_card`；Top1 与备选都能渲染；结论卡明确指出“不适合什么情况”。
+年龄/场景/预算/安全约束被正确显示在 `criteria_card`；Top1 与备选都能渲染；结论卡明确指出”不适合什么情况”。
 
-#### Demo 路径二
+#### Demo 路径二：拍照找货
 
 - **用户话术**：  
-上传一张玩具包装图，然后问：“这个适合 3 岁孩子吗？会不会有吞咽风险？”
+上传一张玩具包装图 + “这个适合3岁孩子吗？有吞咽风险吗？”
 - **预期 SSE 流**：  
-`/upload/image` 成功 → `thinking → clarification`（若缺信息）或 `text_delta → final_decision → done`
+`/upload/image` 成功 → `thinking → clarification`（若缺信息）或 `text_delta → product_card → final_decision → done`
 - **验收点**：  
 图片预览存在；若后端可识别则直接进入判断；若识别失败也能兜底为文字建议，不出现空白页。
 
-#### Demo 路径三
+#### Demo 路径三：多轮+反选排除
 
 - **用户话术**：  
-在首轮推荐后点按“不要电池”“再便宜一点”“不喜欢这个”。
+在首轮推荐后说”不要电池款” + “预算降到150”
 - **预期 SSE 流**：  
 `feedback/criteria_patch → thinking → criteria_card → product_card → final_decision → done`
 - **验收点**：  
 用户反馈会真实改变下一轮结果，而不是重复返回同一商品；Debug 页能看到新的 `session_id` 或同 session 下的新 trace。
+
+#### Demo 路径四：对话式加购
+
+- **用户话术**：  
+“把这个加到购物车”
+- **预期 SSE 流**：  
+`thinking → cart_action(add) → done`
+- **验收点**：  
+cart_action 事件正确渲染加购反馈；购物车内容可在底板中查看；加购失败时显示 failed 状态和原因。
 
 ### 管理后台与 Debug 页最小需求
 
