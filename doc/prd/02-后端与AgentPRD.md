@@ -43,7 +43,7 @@
 | # | 决策点 | 选择 | 备注 |
 |-|-|-|-|
 
-| 1 | Agent/RAG 框架 | **LlamaIndex** | 检索层用 LlamaIndex，编排层用自定义函数链 |
+| 1 | Agent/RAG 框架 | **自定义函数链 + pgvector 直连** | 编排层用 asyncio.gather 并行化，检索层直接用 pgvector SQL + OpenAI 兼容 SDK |
 
 | 2 | 向量存储 | **PostgreSQL + pgvector** | 一库双用，结构化表 + 向量表 |
 
@@ -69,7 +69,7 @@
 
 | 13 | 部署方案 | **Docker Compose**（FastAPI + PostgreSQL） | 不加 Celery/Redis |
 
-| 14 | 反馈闭环 | **方案 B：反馈影响同一会话下一轮推荐** | 从 history 提取反馈，注入 criteria 约束 |
+| 14 | 反馈闭环 | **方案 B：反馈影响同一会话下一轮推荐** | 后端通过 session_id 查询 feedbacks 表获取历史反馈，注入 criteria 约束 |
 
 | 15 | Session 策略 | **轻量持久化 session trace** | 客户端携带 session_id，后端持久化轨迹但不维护登录态 |
 
@@ -377,8 +377,19 @@ T17s:   ──→ yield final_decision + done
 
 ```Python
 async def chat_stream(user_input, image_url=None, history=None):
+    turn_id = new_turn_id()
+    deck_id = f"deck_{turn_id}"
+    seq = EventSeq(turn_id)
+
     # ====== T0: 立即响应 ======
-    yield SSEEvent("thinking", {"phase": "analyzing", "message": "正在理解您的需求..."})
+    yield A2UIEvent(
+        "thinking",
+        turn_id=turn_id,
+        seq=seq.next(),
+        node_id=f"thinking_{turn_id}",
+        display_mode="inline_thinking",
+        payload={"phase": "analyzing", "message": "正在理解您的需求..."},
+    )
 
     # ====== T0: slot_checker + intent 并行 ======
     slot_result, intent_result = await asyncio.gather(
@@ -387,7 +398,14 @@ async def chat_stream(user_input, image_url=None, history=None):
     )
 
     if slot_result.needs_clarification:
-        yield SSEEvent("clarification", {...})
+        yield A2UIEvent(
+            "clarification",
+            turn_id=turn_id,
+            seq=seq.next(),
+            node_id=f"clarification_{turn_id}",
+            display_mode="inline_card",
+            payload={...},
+        )
         return
 
     # ====== T1.5: criteria + embedding + 初步硬过滤 三路并行 ======
@@ -395,10 +413,28 @@ async def chat_stream(user_input, image_url=None, history=None):
     embedding_task = asyncio.create_task(compute_query_embedding(intent_result, user_input))
     initial_filter_task = asyncio.create_task(initial_hard_filter(intent_result))
 
-    yield SSEEvent("thinking", {"phase": "generating", "message": "正在生成购买标准..."})
+    yield A2UIEvent(
+        "thinking",
+        turn_id=turn_id,
+        seq=seq.next(),
+        node_id=f"thinking_{turn_id}",
+        display_mode="inline_thinking",
+        payload={"phase": "generating", "message": "正在生成购买标准..."},
+    )
 
     criteria = await criteria_task
-    yield SSEEvent("criteria_card", criteria)
+    yield A2UIEvent(
+        "criteria_card",
+        turn_id=turn_id,
+        seq=seq.next(),
+        node_id=f"criteria_{criteria.criteria_id}",
+        display_mode="summary_card",
+        payload={
+            "summary": criteria.to_summary(),
+            "detail": criteria.to_detail(),
+            "quick_actions": criteria.quick_actions,
+        },
+    )
 
     # ====== 投机检索结果已提前准备好 ======
     query_embedding = await embedding_task
@@ -415,7 +451,14 @@ async def chat_stream(user_input, image_url=None, history=None):
     # rerank
     ranked = await rerank(candidates, criteria, top_n=5)
 
-    yield SSEEvent("thinking", {"phase": "searching", "message": "找到5个匹配商品..."})
+    yield A2UIEvent(
+        "thinking",
+        turn_id=turn_id,
+        seq=seq.next(),
+        node_id=f"thinking_{turn_id}",
+        display_mode="inline_thinking",
+        payload={"phase": "searching", "message": "找到5个匹配商品..."},
+    )
 
     # ====== 并行：5个商品evidence检索 ======
     evidences = await asyncio.gather(*[fetch_evidence(p, criteria) for p in ranked])
@@ -428,15 +471,44 @@ async def chat_stream(user_input, image_url=None, history=None):
 
     for chunk in generate_recommendation_stream(criteria, ranked, evidences):
         if chunk.type == "text":
-            yield SSEEvent("text_delta", {"delta": chunk.content})
+            yield A2UIEvent(
+                "text_delta",
+                turn_id=turn_id,
+                seq=seq.next(),
+                node_id=f"ai_text_{turn_id}",
+                display_mode="inline_text",
+                payload={"message_id": f"msg_{turn_id}", "delta": chunk.content},
+            )
         elif chunk.type == "product":
-            yield SSEEvent("product_card", chunk.product)
+            yield A2UIEvent(
+                "product_card",
+                turn_id=turn_id,
+                seq=seq.next(),
+                node_id=f"product_{chunk.product.product_id}",
+                deck_id=deck_id,
+                display_mode="swipe_deck_item",
+                payload=build_product_card_payload(chunk.product, evidences),
+            )
 
     await background_tasks
 
     decision = await generate_decision(criteria, ranked)
-    yield SSEEvent("final_decision", decision)
-    yield SSEEvent("done", {"criteria_id": criteria.criteria_id, "total_products": len(ranked)})
+    yield A2UIEvent(
+        "final_decision",
+        turn_id=turn_id,
+        seq=seq.next(),
+        node_id=f"decision_{turn_id}",
+        display_mode="summary_card",
+        payload=build_decision_payload(decision, evidences),
+    )
+    yield A2UIEvent(
+        "done",
+        turn_id=turn_id,
+        seq=seq.next(),
+        node_id=f"done_{turn_id}",
+        display_mode="none",
+        payload={"criteria_id": criteria.criteria_id, "deck_id": deck_id, "total_products": len(ranked)},
+    )
 ```
 
 
@@ -445,9 +517,11 @@ async def chat_stream(user_input, image_url=None, history=None):
 
 \- **图片输入**：Qwen-VL-Plus 图片分析与 Qwen-Turbo 文本意图识别并行，合并后进入正常管道
 
-\- **反馈影响推荐**：从 history 提取 feedback → 注入 criteria 约束（同一会话下一轮）
+\- **反馈影响推荐**：后端通过 session_id 查询 feedbacks 表获取历史反馈 → 注入 criteria 约束（同一会话下一轮）
 
 \- **需求澄清**：硬规则 slot 检查兜底，LLM 只负责生成自然问题和推断 partial criteria
+
+\- **澄清回复流程**：用户回答澄清问题后，前端以同一 `session_id` 发送新的 `/chat/stream` 请求。后端通过 `session_id` 查询上一轮的 `partial_criteria` 自动恢复上下文，与用户新回答合并后继续管道。前端无需回传 `partial_criteria`。
 
 
 
@@ -509,7 +583,7 @@ class PipelineState(TypedDict):
 
 **细节1：thinking 心跳填充**
 
-在 LLM 调用等待期间，每隔 800ms yield 一个 thinking 事件更新状态文字，用户始终感知系统在工作，不会出现空白等待：
+在 LLM 调用等待期间，每隔 800ms yield 一个 `thinking` 事件更新当前轮次的 inline thinking 气泡，用户始终感知系统在工作，不会出现空白等待。`thinking` 不是顶部状态条日志，而是当前 AI 回复节点的一部分；同一轮 `thinking` 必须复用稳定 `node_id`，由客户端 upsert 更新：
 
 ```Plain Text
 T0ms:    thinking → "正在理解您的需求..."
@@ -518,7 +592,7 @@ T1.5s:   thinking → "正在生成购买标准..."
 T3s:     thinking → "正在检索匹配商品..."
 ```
 
-状态文字按管道进度自然推进，不是假动画——每个文字对应后台真实计算阶段。
+状态文字按管道进度自然推进，不是假动画——每个文字对应后台真实计算阶段。TopBar 只展示连接状态、标题等全局信息，不消费 `thinking.message`。
 
 
 
@@ -543,50 +617,121 @@ T3s:     thinking → "正在检索匹配商品..."
 
 ## **5. API 契约**
 
-### **5.1 SSE 事件协议**
+### **5.1 SSE / A2UI 事件协议**
 
-P0 客户端接收 7 种事件（去掉 retrieval，trace 写后台）：
+P0 客户端接收 7 种业务事件（去掉 retrieval，trace 写后台），但所有事件必须使用统一 Agent-to-UI envelope。后端不能只返回业务 JSON 让前端猜渲染方式；必须提供排序、幂等、稳定 key、分组和展示语义。
 
-```Plain Text
-thinking:        {"phase": "analyzing|clarifying|searching|generating", "message": "..."}
-clarification:   {"missing_dimensions": [...], "questions": [...], "partial_criteria": {...}}
-criteria_card:   {"criteria_id": "...", "user_profile": "...", "scenario": "...",
-                  "constraints": [{dimension, value, weight}],
-                  "risks": [...],
-                  "editable": true,
-                  "quick_actions": [
-                    {"label": "预算调低", "patch": {"budget_max": 30}},
-                    {"label": "更偏益智", "patch": {"education_dimensions": ["logic"]}},
-                    {"label": "不要小零件", "patch": {"safety_features": ["no_small_parts"]}}
-                  ]}
-text_delta:      {"delta": "..."}
-product_card:    {"product_id": "...", "name": "...", "price": ..., "brand": "...",
-                  "image_url": "...", "match_details": {...},
-                  "recommend_reason": "...", "evidence": [...], "risks": [...]}
-final_decision:  {"recommended_id": "...", "recommended_name": "...",
-                  "why": "...", "suitable_for": "...", "not_suitable_for": "...",
-                  "alternatives": [...]}
-done:            {"criteria_id": "...", "total_products": 3}
-error:           {"code": "...", "message": "..."}
+**统一 envelope：**
+
+```JSON
+{
+  "schema_version": "2026-05-20",
+  "event": "thinking",
+  "session_id": "sess_demo_001",
+  "turn_id": "turn_001",
+  "seq": 1,
+  "event_id": "turn_001:0001",
+  "node_id": "thinking_turn_001",
+  "deck_id": null,
+  "display_mode": "inline_thinking",
+  "created_at_ms": 1780000000000,
+  "payload": {}
+}
 ```
 
-**调整说明**：
+**字段规则：**
 
-- `retrieval` 事件不再发给客户端，技术细节放后台 retrieval_traces 展示
-- `criteria_card` 增加 `editable: true` + `quick_actions`，允许用户轻量修正标准
-- 客户端只关心体验，后台关心工程透明性
+- `schema_version`：协议版本，破坏性调整必须升级。
+- `turn_id`：一次用户输入对应一次 Agent 回复轮次；同一轮事件必须一致。后端自行生成 `turn_id`，与前端发送的 `client_turn_id` 无关。`done` 事件 payload 中回传 `client_turn_id`，供前端关联请求与响应。
+- `seq`：同一 `turn_id` 内单调递增，客户端按它排序。
+- `event_id`：幂等去重 key，建议 `${turn_id}:${seq}`。
+- `node_id`：聊天流节点稳定 key，用于 upsert，而不是 append-only。
+- `deck_id`：商品卡堆稳定 key；同一轮多个 `product_card` 必须共用同一 `deck_id`。
+- `display_mode`：后端声明展示语义，允许值包括 `inline_thinking`、`inline_card`、`inline_text`、`summary_card`、`swipe_deck_item`、`none`。
+- `payload`：业务载荷，必须分为对话区摘要、底板详情和证据引用三层。
+
+**事件 payload 规范：**
+
+```Plain Text
+thinking:
+  display_mode: inline_thinking
+  node_id: thinking_{turn_id}
+  payload: {phase: "analyzing|clarifying|criteria|searching|reranking|generating|deciding", message: "..."}
+
+clarification:
+  display_mode: inline_card
+  node_id: clarification_{turn_id}
+  payload: {question, required_slots, suggested_options, partial_criteria?}
+
+criteria_card:
+  display_mode: summary_card
+  node_id: criteria_{criteria_id}
+  payload: {
+    criteria_id,
+    summary: {title: "已理解你的需求", chips: ["4岁", "室内", "200元内", "不要小零件", "益智"]},
+    detail: {age, scenario, budget_min?, budget_max?, safety_features, education_dimensions, requires_battery?, weights?},
+    quick_actions: [...]
+  }
+
+text_delta:
+  display_mode: inline_text
+  node_id: ai_text_{turn_id}
+  payload: {message_id, delta, done?}
+
+product_card:
+  display_mode: swipe_deck_item
+  node_id: product_{product_id}
+  deck_id: deck_{turn_id}
+  payload: {
+    product_id,
+    rank,
+    summary: {name, price, image_url, chips, reason_short, risk_short?},
+    detail: {age_min?, age_max?, toy_type?, education_dimensions, safety_features, play_scenario, requires_battery?, match_details?, risk_notes},
+    evidence_refs: [{evidence_id, source_type, trust_label?, snippet?}],
+    actions: [...]
+  }
+
+final_decision:
+  display_mode: summary_card
+  node_id: decision_{turn_id}
+  payload: {
+    summary: {winner_product_id, verdict, why_chips, not_for_short?},
+    detail: {why, not_for, alternatives, comparison?},
+    evidence_refs: [{evidence_id, source_type, trust_label?, snippet?}]
+  }
+
+done:
+  display_mode: none
+  payload: {criteria_id?, deck_id?, total_products?, client_turn_id?, finish_reason: "completed|canceled|error"}
+
+error:
+  display_mode: inline_card
+  node_id: error_{turn_id}
+  payload: {code, message, retryable, recover_action?}
+```
+
+**工程约束：**
+
+- `retrieval` 事件不发给客户端；技术 trace 写入 `retrieval_traces` 后台表。
+- 证据完整 snippet 不直接作为聊天流节点输出，只通过 `evidence_refs` 绑定到商品详情或最终依据 Bottom Sheet。
+- `criteria_card` 的 `quick_actions` 可以存在，但对话区只显示摘要入口；完整编辑项由客户端在 Bottom Sheet 渲染。
+- `product_card` 是 SwipeDeck 的 item，不是聊天流里的独立长卡；同一轮推荐必须使用同一 `deck_id`。
+- 服务端必须保证 `event_id` 幂等、`seq` 单调、`node_id` 稳定，客户端才能做无闪烁 upsert。
 
 ### **5.2 HTTP API 端点**
 
 ```Plain Text
 POST /chat/stream          — SSE 流式导购对话
-  请求: {message, session_id, image_url?, history, criteria_patch?, skip_stages?}
-  响应: SSE 事件流（7 种事件）
+  请求: {message, session_id, image_url?, history, criteria_patch?, skip_stages?, client_turn_id?}
+  响应: SSE / A2UI envelope 事件流（7 种业务事件）
   注: criteria_patch + skip_stages 用于quick_actions快捷修正，跳过已完成阶段，延迟降至~2s
 
-POST /stream/token         — Stream 用户 token 签发
-  请求: {user_id}
-  响应: {user_id, stream_token, stream_api_key}
+POST /chat/cancel          — 取消当前轮 Agent 生成
+  请求: {session_id, turn_id}
+  响应: {session_id, turn_id, canceled: true}
+  注: 取消机制采用双保险——前端关闭 SSE 连接为主要取消信号，同时 best-effort 调用此端点。
+      后端同时支持两种检测方式：1) SSE 连接断开时自动中断后续任务；2) 收到显式 cancel 请求时中断。
+      两种方式都应中断后续 LLM/RAG 任务，避免继续推送 product_card/final_decision。
 
 POST /feedback             — 用户反馈记录
   请求: {session_id, product_id?, action, reason?}
@@ -598,6 +743,8 @@ POST /upload/image         — 图片上传与多模态解析
 ```
 
 客户端携带 session_id，后端持久化轨迹但不维护登录态。
+
+**session_id 创建规则**：首次请求 `session_id` 为 null 时，后端生成新的 `session_id`（格式 `sess_{uuid}`）并在所有响应事件的 envelope `session_id` 字段中返回。前端必须从首个 SSE 事件中提取 `session_id` 并缓存，后续请求携带同一 `session_id` 以维持会话连续性。
 
 
 
@@ -681,16 +828,18 @@ POST /upload/image         — 图片上传与多模态解析
 
 
 
-同一会话的下一轮对话，从 history 中提取反馈，注入 criteria 约束：
+同一会话的下一轮对话，后端通过 `session_id` 查询 feedbacks 表获取本会话历史反馈，注入 criteria 约束：
+
+**注意**：反馈数据从 feedbacks 表按 session_id 查询获取，不从 history 字段解析（history 只是 `[{role, content}]` 文本对，不含行为数据）。
 
 
 
 ```Python
-extracted_feedback = extract_feedback_from_history(history)
-# → {"avoid_types": ["in_ear"], "avoid_products": ["p_001"], "prefer_traits": ["open_ear"]}
+extracted_feedback = extract_feedback_from_session(session_id)  # 查询 feedbacks 表
+# → {"avoid_products": ["toy_1001"], "avoid_traits": ["requires_battery"], "prefer_traits": ["quiet", "no_mess"]}
 
 criteria.constraints.append(
-  {"dimension": "佩戴方式", "value": "非入耳式", "weight": "high", "source": "user_feedback"}
+  {"dimension": "电池需求", "value": "不要电池", "weight": "high", "source": "user_feedback"}
 )
 ```
 
@@ -709,14 +858,19 @@ criteria_card 的 quick_actions 也允许用户轻量修正标准，无需打长
 
 
 ```Plain Text
-buypilot-backend/
-├── app/
+backend/
+├── src/
 │   ├── main.py                  # FastAPI 入口
-│   ├── config.py                # Pydantic-Settings 配置管理
 │   │
-│   ├── api/                     # HTTP 层（提前拆分，避免膨胀）
+│   ├── config/                  # 配置管理
+│   │   ├── __init__.py
+│   │   ├── settings.py          # Pydantic-Settings 配置
+│   │   ├── llm_profiles.yaml    # LLM Profile 配置（intent/generation/vision）
+│   │
+│   ├── api/                     # HTTP 层（路由）
+│   │   ├── __init__.py
 │   │   ├── chat.py              # /chat/stream SSE 端点（含 criteria_patch 快捷路径）
-│   │   ├── stream_token.py      # /stream/token
+│   │   ├── cancel.py            # /chat/cancel
 │   │   ├── feedback.py          # /feedback
 │   │   ├── upload.py            # /upload/image
 │   │   ├── admin_products.py    # 管理后台：商品数据
@@ -725,41 +879,47 @@ buypilot-backend/
 │   │   ├── admin_eval.py        # 管理后台：评测数据
 │   │   ├── admin_traces.py      # 管理后台：检索trace
 │   │
-│   ├── agent/                   # 核心智能层
+│   ├── runtime/                 # 管道编排层（SSE 事件流生成）
+│   │   ├── __init__.py
 │   │   ├── pipeline.py          # chat_stream 主函数（asyncio.gather并行编排）
-│   │   ├── slot_checker.py      # 硬规则 slot 检查（required slots）
-│   │   ├── intent.py            # 意图识别 + 约束抽取
-│   │   ├── criteria.py          # 购买标准生成（含反馈注入 + patch合并）
-│   │   ├── recommendation.py    # 推荐生成 + 流式输出
-│   │   ├── decision.py          # 最终决策卡生成
-│   │   ├── multimodal.py        # 图片解析
-│   │   ├── llm_client.py        # 百炼平台 LLM 客户端（支持流式 async generator）
+│   │   ├── stages/              # 管道各阶段
+│   │   │   ├── __init__.py
+│   │   │   ├── slot_checker.py  # 硬规则 slot 检查（required slots）
+│   │   │   ├── intent.py        # 意图识别 + 约束抽取
+│   │   │   ├── criteria.py      # 购买标准生成（含反馈注入 + patch合并）
+│   │   │   ├── recommendation.py # 推荐生成 + 流式输出
+│   │   │   ├── decision.py      # 最终决策卡生成
+│   │   │   ├── multimodal.py    # 图片解析
 │   │
-│   ├── rag/                     # 检索层
+│   ├── services/                # 业务逻辑层（检索、LLM、评测）
+│   │   ├── __init__.py
+│   │   ├── llm_client.py        # 百炼平台 LLM 客户端（Profile驱动，支持流式 async generator）
 │   │   ├── retriever.py         # 混合检索（硬过滤+向量召回并行 + pgvector + rerank）
 │   │   ├── embedding.py         # 百炼 embedding 客户端（含投机预计算接口）
 │   │   ├── reranker.py          # gte-rerank 客户端
 │   │   ├── evidence.py          # 并行evidence检索（5商品asyncio.gather）
 │   │   ├── chunking.py          # product_text 切分
+│   │   ├── eval/                # 评测闭环
+│   │   │   ├── runner.py        # 评测运行器
+│   │   │   ├── metrics.py       # deterministic 指标计算（P0）
+│   │   │   ├── ragas_metrics.py # RAGAS 指标（P1）
 │   │
-│   ├── db/                      # 数据层（提前拆分 crud）
+│   ├── repos/                   # 数据访问层（CRUD）
+│   │   ├── __init__.py
 │   │   ├── models.py            # SQLModel 模型（8 张表）
-│   │   ├── session.py           # 数据库连接
-│   │   ├── crud_products.py     # 商品读写
-│   │   ├── crud_documents.py    # 文档/chunk 读写
-│   │   ├── crud_conversations.py # 会话读写
-│   │   ├── crud_eval.py         # 评测读写
+│   │   ├── database.py          # 数据库连接
+│   │   ├── products.py          # 商品读写
+│   │   ├── documents.py         # 文档/chunk 读写
+│   │   ├── conversations.py     # 会话读写
+│   │   ├── feedbacks.py         # 反馈读写（含按 session_id 查询历史反馈）
+│   │   ├── eval_runs.py         # 评测读写
 │   │
-│   ├── models/                  # 契约层
+│   ├── types/                   # 契约层（Pydantic 模型 + 类型定义）
+│   │   ├── __init__.py
 │   │   ├── schemas.py           # 请求/响应 Pydantic 模型
-│   │   ├── sse_events.py        # SSE 事件类型定义
+│   │   ├── sse_events.py        # SSE 事件类型定义（A2UI envelope）
 │   │   ├── pipeline_state.py    # PipelineState TypedDict
 │   │   ├── slot_defs.py         # required slots 定义
-│   │
-│   ├── eval/                    # 评测闭环
-│   │   ├── runner.py            # 评测运行器
-│   │   ├── metrics.py           # deterministic 指标计算（P0）
-│   │   ├── ragas_metrics.py     # RAGAS 指标（P1）
 │   │
 ├── prompts/                     # Prompt 独立管理（git 版本控制）
 │   ├── intent_analysis.md
@@ -785,26 +945,23 @@ buypilot-backend/
 │   ├── test_chunking.py         # P1: 切分数量和格式
 │   ├── test_ingest.py           # P1: LLM 提取 metadata JSON
 │
-├── docker-compose.yaml
-├── Dockerfile
 ├── pyproject.toml
+├── Dockerfile
 ├── .env.example
 ```
 
 
 
-**结构调整说明**：
+**结构说明**：
 
-- 新增 `slot_checker.py` 和 `slot_defs.py`：硬规则 slot 检查独立模块
-- `pipeline.py` 从串行改为 `asyncio.gather` + `create_task` 流水线式并行编排
-- `retriever.py` 拆为 `hard_filter()` + `vector_retrieve()` 两个可独立调用的异步函数（并行执行）
-- `embedding.py` 增加 `compute_query_embedding()` 投机预计算接口
-- 新增 `evidence.py`：5个商品evidence并行fetch
-- `llm_client.py` 支持流式 async generator 返回
-- `criteria_card` 增加 `editable` + `quick_actions` 字段，`/chat/stream` 支持 `criteria_patch` + `skip_stages` 快捷路径
-- admin API 拆为 5 个文件，crud 拆为 4 个文件
-- eval 模块分 `metrics.py`（P0 deterministic）和 `ragas_metrics.py`（P1）
-- ingest.py 支持分级入库参数（`--count 100` / `--count 1000` / `--count all`）
+- `runtime/` 负责管道编排和 SSE 事件 yield，是 async generator 的 owner
+- `services/` 负责具体业务逻辑（LLM 调用、检索、rerank、evidence），被 runtime 调用
+- `repos/` 负责数据库 CRUD，被 services 和 runtime 调用
+- `types/` 定义所有 Pydantic 模型和类型，被所有层引用
+- `config/` 集中管理配置，禁止 `os.getenv()` 散落在业务代码中
+- 依赖方向：`api → runtime → services → repos → types/config`（只能自上而下）
+- `stream_token.py` 已删除（Stream SDK 已砍，见决策记录 #1）
+- `repos/feedbacks.py` 提供 `get_session_feedbacks(session_id)` 接口，供 criteria 阶段注入反馈约束
 
 ---
 
@@ -855,14 +1012,9 @@ buypilot-backend/
 ## **10. 部署方案**
 
 ```YAML
+# deploy/docker-compose.yml
 services:
-  api:
-    build: .
-    ports: ["8000:8000"]
-    depends_on: [db]
-    env_file: .env
-
-  db:
+  postgres:
     image: pgvector/pgvector:pg16
     ports: ["5432:5432"]
     environment:
@@ -870,6 +1022,20 @@ services:
       POSTGRES_USER: buypilot
       POSTGRES_PASSWORD: buypilot
     volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://buypilot:buypilot@postgres:5432/buypilot
+    volumes: ["../backend/src:/app/src"]
+    depends_on: [postgres]
+
+volumes:
+  pgdata:
 ```
 
 数据入库脚本一次性命令运行。
@@ -938,7 +1104,7 @@ services:
 | 10 | multimodal.py 图片上传 + Qwen-VL-Plus 解析 | 图片→描述→检索链路跑通 |
 | 11 | feedback.py 反馈记录 + 反馈注入 criteria 逻辑 | 反馈影响下一轮推荐 |
 | 12 | retrieval_traces + evidence_links 写入 | 每次推荐有完整检索追踪和证据 |
-| 13 | stream_token.py + 扩展数据到 1000 条 | Android 能连 Stream Chat，数据规模感提升 |
+| 13 | 扩展数据到 1000 条 + 管道性能优化 | 数据规模感提升，流式延迟达标 |
 
 | 14 | **第二次内部 Demo** | 多模态 + 反馈闭环 + 结构化卡片完整 |
 
@@ -989,14 +1155,14 @@ services:
 
 | SSE 事件 | Android UI 组件 | 说明 |
 |-|-|-|
-| thinking | 顶部状态条（"正在分析..."） | 简单 loading indicator |
-| clarification | 问题卡片 | 显示缺失维度和追问问题 |
-| criteria_card | 购买标准卡 + quick_actions 按钮 | 可编辑，可轻量修正 |
-| text_delta | AI 旁白文本 | 流式 Markdown 渲染 |
-| product_card | 商品推荐卡（名称/价格/参数/理由/证据） | 每个商品一个卡片 |
-| final_decision | 最终决策卡（首选/备选/不适合/理由） | 高优先级视觉模块 |
-| done | 结束态 | 停止 loading |
-| error | Toast + fallback 提示 | 异常处理 |
+| thinking | 对话流 inline thinking 气泡 / 骨架节点 | 不进 TopBar；同一 `node_id` upsert 阶段文案 |
+| clarification | 澄清完整小卡 | 显示缺失维度和追问问题，可直接在对话区完成 |
+| criteria_card | 购买标准摘要卡 + 编辑 Bottom Sheet | 对话区只放摘要；完整字段、quick_actions、可编辑项进底板 |
+| text_delta | 当前轮 AI 文本节点 | 流式 Markdown 渲染；同一 `node_id` 追加 delta |
+| product_card | SwipeDeck item | 同一 `deck_id` 聚合为一个商品卡堆；详情和证据进 Bottom Sheet |
+| final_decision | 最终决策摘要卡 | 对话区展示中等完整结论；“查看依据”打开 Bottom Sheet |
+| done | 当前轮结束态 | 停止 inline thinking 与底部输入区 loading |
+| error | 错误气泡 + 可恢复动作 | 可同时触发 Toast，但聊天流必须保留错误节点 |
 
 ---
 

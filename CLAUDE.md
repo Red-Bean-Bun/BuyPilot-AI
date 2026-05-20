@@ -40,7 +40,11 @@ doc/
 **编码相关指引**：
 - 编码风格和架构原则 → `doc/prompts/03-AI编码助手系统提示词.md`
 - 前端接口契约 → `doc/prd/01-Android前端PRD.md`（SSE 事件类型、Kotlin data class、卡片规范）
+- 前端表格附录 → `doc/prd/01-附录-表格内容.md`（错误码、状态机、渲染策略、测试用例等）
 - 后端接口契约 → `doc/prd/02-后端与AgentPRD.md`（8 张表 Schema、管道编排、API 端点）
+- 后端 Prompt 模板 → `backend/prompts/`（6 个运行时 LLM prompt，开发时直接读取使用）
+- 产品定义 → `PRODUCT.md`（用户画像、产品目的、设计原则、Anti-references）
+- 设计系统 → `DESIGN.md`（颜色、字体、间距、圆角、组件规范，开发 UI 时必须遵循）
 - 风险清单 → `doc/risk/卡点与风险清单.md`（开发前必读）
 
 ---

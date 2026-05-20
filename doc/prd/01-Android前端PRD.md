@@ -48,19 +48,20 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 导购聊天页采用**单栏主流布局**，从上到下分为五个区域：
 
-1. **顶部状态区**  
-固定在顶部 AppBar 下方，展示当前阶段状态，例如“正在理解需求”“正在生成购买标准”“正在检索商品”“正在整理结论”。状态文本由 `thinking` 或内部阶段映射驱动，不单独占用聊天流中的气泡位置。建议使用一行文本 + 小型 loading 指示器，状态切换做 150–250ms 去抖，避免多阶段快速跳变时闪烁。
-2. **消息列表与卡片流**  
-使用单一 `LazyColumn` 承载，**文本消息与结构化卡片必须进入同一条时间线**。不能把产品卡单独放在聊天流外，否则会破坏用户对“这是 Agent 逐步思考结果”的感知。  
+1. **顶部导航区**
+固定在顶部 AppBar，展示返回、页面标题、会话/连接状态点与必要的全局工具入口。TopBar 不展示“正在理解需求”“正在生成购买标准”“正在检索商品”等过程文案；这些过程状态属于当前 AI 回复的一部分，必须进入聊天流。**停止生成按钮不放在 TopBar，统一放在底部输入区**，与发送按钮共享生成态位置。
+2. **消息列表与卡片流**
+使用单一 `LazyColumn` 承载，**文本消息、thinking 动画与结构化结果必须进入同一条时间线**。不能把产品卡单独放在聊天流外，否则会破坏用户对“这是 Agent 逐步思考结果”的感知。
 列表元素建议统一抽象为 `ChatUiNode`：
 
    - 用户文本消息
    - 用户图片消息
+   - AI thinking 动画气泡 / 骨架节点
    - AI 文本流消息
-   - `clarification` 澄清卡
-   - `criteria_card`
-   - `product_card`
-   - `final_decision`
+   - `clarification` 澄清完整小卡
+   - `criteria_card` 购买标准摘要卡
+   - `product_card` 商品 `SwipeDeck` 卡堆节点
+   - `final_decision` 最终决策摘要卡
    - 系统错误气泡
 3. **输入区**  
 底部固定。包含：
@@ -71,13 +72,13 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
    - 停止生成按钮，仅在流式进行中显示
    - 重试按钮，仅在错误态显示
 4. **反馈区**  
-仅在出现 `product_card` 或 `final_decision` 后显示，采用轻量行内按钮或卡片底部操作区，包含点赞、点踩、不喜欢、换一批、看证据、加入对比等动作。用户在 `criteria_card` 上的 quick action 也属于反馈闭环的一部分。
+仅在出现 `criteria_card`、`product_card` 或 `final_decision` 后显示轻量操作。`clarification` 可以直接在对话区完整展示；`criteria_card` 在对话区只展示摘要确认卡与“修改/展开”等入口；`product_card` 进入独立 SwipeDeck，通过左右滑表达喜欢/不喜欢，通过点击或上滑进入详情；`final_decision` 展示中等完整摘要，点击“查看依据”进入底板。证据不直接塞进聊天流。
 5. **浮层/底板**  
-用于图片预览、证据详情、商品对比与错误详情。P0 只要求图片预览与证据底板；对比页可到 P1 实现。
+用于购买标准编辑、商品详情、证据详情、图片预览、商品对比与错误详情。P0 要求购买标准编辑底板、商品详情/证据底板与图片预览；对比页可到 P1 实现。
 
 ### 交互流程
 
-当用户发送文本或图片后，前端先做**本地回显**，随后创建或续用 `session_id`，发起 `/chat/stream`。一旦连接建立，顶部状态区立即进入“连接中 / 正在理解需求”。如果收到 `clarification`，输入框保持可编辑，用户可以直接回答，当前 stream 结束；如果收到 `criteria_card`，则在时间线上插入购买标准卡，并允许用户点按 quick action 直接回流 `criteria_patch`。`text_delta` 会持续增量更新同一条 AI 气泡；每到一个 `product_card`，就在对应文本之后插入一张完整商品卡；`final_decision` 到达时，在流末插入总结卡并关闭 loading。整个过程中，用户点击“停止生成”应立即关闭 SSE，并将当前状态改为 `Canceled`，保留已生成内容供继续追问。
+当用户发送文本或图片后，前端先做**本地回显**，随后创建或续用 `session_id`，发起 `/chat/stream`。**session_id 规则**：首次对话时 `session_id` 为 null，后端会生成新的 session_id 并在所有响应事件的 envelope 中返回；前端必须从首个 SSE 事件中提取 `session_id` 并缓存到 ViewModel，后续请求携带同一 `session_id`。一旦连接建立，聊天流中立即插入或更新一条 AI thinking 动画气泡，`thinking.message` 用于驱动该气泡内的阶段文案，例如”正在理解需求””正在生成购买标准””正在检索商品”。TopBar 只展示会话/连接状态，不承载这些阶段文案。如果收到 `clarification`，输入框保持可编辑，用户可以直接回答，当前 stream 结束；如果收到 `criteria_card`，则在时间线上插入购买标准摘要卡，完整字段、quick actions 与可编辑项进入 Bottom Sheet，用户修改后通过 `criteria_patch` 回流。`text_delta` 会持续增量更新同一条 AI 气泡；多个 `product_card` 到达时进入同一个商品 `SwipeDeck` 数据源，而不是在聊天流中连续插入多张完整商品详情卡；`final_decision` 到达时，在流末插入最终决策摘要卡并关闭 loading。整个过程中，用户点击底部输入区的”停止生成”应立即关闭 SSE 连接（主要取消信号），同时 best-effort 调用 `POST /chat/cancel`，并将当前状态改为 `Canceled`，保留已生成内容供继续追问。
 
 ### 输入区规范
 
@@ -89,17 +90,43 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 ### 消息列表与卡片流渲染规则
 
-渲染层必须满足三条硬规则。第一，**仅有一个时间线**；第二，`text_delta` **永远更新同一条 AI 流式消息节点**，不得每个 delta 新增一条列表项；第三，**所有结构化卡片都使用稳定 key**，插入后尽量只做内容增量更新，避免重组造成抖动。
+渲染层必须满足四条硬规则。第一，**仅有一个时间线**；第二，`thinking` 与 `text_delta` **永远更新同一条当前 AI 回复节点**，不得每个 delta 或阶段变化新增一条列表项；第三，**所有结构化卡片都使用后端提供的稳定 `node_id` 或 `deck_id`**，插入后以 upsert 方式更新，避免重组造成抖动；第四，多个 `product_card` 必须聚合到同一个 `ProductSwipeDeck` 节点，不能在聊天流中堆叠成多张详情卡。
 
 建议渲染策略如下：
 
 <sheet sheet-id="NriNH0" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
 
+### Agent-to-UI 渲染契约
+
+后端 SSE 不是普通日志流，而是前端状态机可以直接消费的 **Agent-to-UI 事件流**。每个事件必须带统一 envelope，用于幂等、排序、稳定 key 和分组渲染：
+
+```JSON
+{
+  "schema_version": "2026-05-20",
+  "event": "thinking",
+  "session_id": "sess_demo_001",
+  "turn_id": "turn_001",
+  "seq": 1,
+  "event_id": "turn_001:0001",
+  "node_id": "thinking_turn_001",
+  "deck_id": null,
+  "display_mode": "inline_thinking",
+  "created_at_ms": 1780000000000
+}
+```
+
+- `turn_id`：一次用户输入对应一次 Agent 回复轮次；同一轮所有事件必须一致。
+- `seq` / `event_id`：后端按轮次单调递增，客户端用来排序和去重。
+- `node_id`：聊天流节点稳定 key。`thinking` 与本轮 AI 文本可以共享同一个回复节点，也可以分别使用稳定节点；不得每次阶段变化生成新节点。
+- `deck_id`：商品推荐卡堆稳定 key。所有同一轮推荐商品必须带同一个 `deck_id`，客户端据此创建或更新一个 `ProductSwipeDeck`。
+- `display_mode`：后端明确建议前端如何渲染，例如 `inline_thinking`、`inline_card`、`inline_text`、`summary_card`、`swipe_deck_item`、`none`。前端可以按设计系统实现样式，但不能反向猜测数据用途。
+- `summary` / `detail` / `evidence`：结构化卡片必须拆成对话区摘要、底板详情和证据三层；证据只进入底板或详情页，不直接作为聊天节点。
+
 ### 三类核心卡片 UI 规范
 
 <sheet sheet-id="dzyNci" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
 
-`criteria_card` 的目标不是“展示系统内部理解”，而是让用户看见**当前购买标准已被结构化**，并可一键修正。`product_card` 的目标不是穷举参数，而是把用户最关心的适龄、安全、预算和教育价值前置。`final_decision` 则必须给出**可执行结论**，而不是只重复前文。
+`criteria_card` 的目标不是“展示系统内部理解”，而是让用户看见**当前购买标准已被结构化**，并可一键修正。对话区中的购买标准只展示摘要，例如“已理解你的需求：4岁｜室内｜200元内｜不要小零件｜益智”，完整字段、权重、quick actions 与编辑控件进入 Bottom Sheet。`product_card` 的目标不是穷举参数，而是进入 SwipeDeck 后把用户最关心的适龄、安全、预算和教育价值前置；商品完整详情、风险说明和证据在详情底板展示。`final_decision` 则必须给出**可执行结论**，对话区展示中等完整摘要，“查看依据”进入 Bottom Sheet。
 
 推荐 quick action 最小集合如下：
 
@@ -162,7 +189,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 ### 完整流式示例
 
-下面给出一组**从用户请求到完整 SSE 序列**的工程样例。为便于 Android 侧直接联调，示例包含原始请求体、SSE 帧内容与事件顺序。`seq` 字段在当前材料中**未指定**；本 PRD 建议后端补充。如果后端不提供，前端必须以到达顺序生成 `localSeq`。
+下面给出一组**从用户请求到完整 SSE / A2UI 序列**的工程样例。为便于 Android 侧直接联调，示例包含原始请求体、SSE 帧内容与事件顺序。后端必须提供 `turn_id`、`seq`、`event_id`、`node_id`、`display_mode`；商品推荐必须提供统一 `deck_id`，客户端据此把多个 `product_card` 聚合为一个 SwipeDeck。
 
 **请求**
 
@@ -171,7 +198,7 @@ json
 复制
 
 ```JSON
-{"message": "给4岁孩子买一个室内玩的益智玩具，预算200元以内，不要小零件，也尽量不要电池","session_id": "sess_demo_001","history": [],"image_url": null}
+{"message": "给4岁孩子买一个室内玩的益智玩具，预算200元以内，不要小零件，也尽量不要电池","session_id": "sess_demo_001","history": [],"image_url": null,"client_turn_id":"turn_client_001"}
 ```
 
 **响应流**
@@ -182,28 +209,28 @@ text
 
 ```Plain Text
 event: thinking
-data: {"event":"thinking","session_id":"sess_demo_001","stage":"understanding","message":"正在理解年龄、场景、预算与安全约束"}
+data: {"schema_version":"2026-05-20","event":"thinking","session_id":"sess_demo_001","turn_id":"turn_001","seq":1,"event_id":"turn_001:0001","node_id":"thinking_turn_001","deck_id":null,"display_mode":"inline_thinking","created_at_ms":1780000000000,"payload":{"phase":"analyzing","message":"正在理解年龄、场景、预算与安全约束"}}
 
 event: criteria_card
-data: {"event":"criteria_card","session_id":"sess_demo_001","editable":true,"criteria":{"age":4,"scenario":"indoor","budget_max":200,"requires_battery":false,"safety_features":["no_small_parts"],"education_dimensions":["logic","fine_motor"]},"quick_actions":[{"action_id":"budget_low","label":"预算压低","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"more_educational","label":"更偏益智","action":"criteria_patch","criteria_patch":{"education_dimensions":["logic","focus"]}}]}
+data: {"schema_version":"2026-05-20","event":"criteria_card","session_id":"sess_demo_001","turn_id":"turn_001","seq":2,"event_id":"turn_001:0002","node_id":"criteria_001","deck_id":null,"display_mode":"summary_card","created_at_ms":1780000000100,"payload":{"criteria_id":"criteria_001","summary":{"title":"已理解你的需求","chips":["4岁","室内","200元内","不要小零件","益智"]},"detail":{"age":4,"scenario":"indoor","budget_max":200,"requires_battery":false,"safety_features":["no_small_parts"],"education_dimensions":["logic","fine_motor"]},"quick_actions":[{"action_id":"budget_low","label":"预算压低","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"more_educational","label":"更偏益智","action":"criteria_patch","criteria_patch":{"education_dimensions":["logic","focus"]}}]}}
 
 event: text_delta
-data: {"event":"text_delta","session_id":"sess_demo_001","message_id":"msg_ai_01","delta":"我先按 4 岁、室内、200 元以内、无小零件、尽量不要电池来筛选。","done":false}
+data: {"schema_version":"2026-05-20","event":"text_delta","session_id":"sess_demo_001","turn_id":"turn_001","seq":3,"event_id":"turn_001:0003","node_id":"ai_text_turn_001","deck_id":null,"display_mode":"inline_text","created_at_ms":1780000000200,"payload":{"message_id":"msg_ai_01","delta":"我先按 4 岁、室内、200 元以内、无小零件、尽量不要电池来筛选。","done":false}}
 
 event: text_delta
-data: {"event":"text_delta","session_id":"sess_demo_001","message_id":"msg_ai_01","delta":"下面给你两种更适合在家安静玩的选择。","done":false}
+data: {"schema_version":"2026-05-20","event":"text_delta","session_id":"sess_demo_001","turn_id":"turn_001","seq":4,"event_id":"turn_001:0004","node_id":"ai_text_turn_001","deck_id":null,"display_mode":"inline_text","created_at_ms":1780000000300,"payload":{"message_id":"msg_ai_01","delta":"下面给你两种更适合在家安静玩的选择。","done":false}}
 
 event: product_card
-data: {"event":"product_card","session_id":"sess_demo_001","rank":1,"product":{"product_id":"toy_1001","name":"大颗粒磁力积木","price":169,"currency":"CNY","image_url":"https://example.com/1.jpg","age_min":4,"age_max":6,"toy_type":"building","education_dimensions":["logic","creativity"],"safety_features":["no_small_parts"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low"},"reason":"适合 4 岁儿童进行室内安静拼搭，兼顾逻辑与动手能力。","risk_notes":["含磁性部件，建议家长陪同收纳。"],"evidence":[{"source_type":"product_chunk","snippet":"适合 4-6 岁，大颗粒设计，减少误吞风险。"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"dislike_product","label":"不喜欢这个","action":"feedback","feedback_type":"not_interested"}]}
+data: {"schema_version":"2026-05-20","event":"product_card","session_id":"sess_demo_001","turn_id":"turn_001","seq":5,"event_id":"turn_001:0005","node_id":"product_toy_1001","deck_id":"deck_turn_001","display_mode":"swipe_deck_item","created_at_ms":1780000000400,"payload":{"product_id":"toy_1001","rank":1,"summary":{"name":"大颗粒磁力积木","price":169,"currency":"CNY","image_url":"https://example.com/1.jpg","chips":["4-6岁","无小零件","无需电池"],"reason_short":"适合室内安静拼搭，兼顾逻辑与动手能力。","risk_short":"含磁性部件，建议家长陪同收纳。"},"detail":{"age_min":4,"age_max":6,"toy_type":"building","education_dimensions":["logic","creativity"],"safety_features":["no_small_parts"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low","risk_notes":["含磁性部件，建议家长陪同收纳。"]},"evidence_refs":[{"evidence_id":"ev_1001_01","source_type":"product_chunk","trust_label":"商品资料","snippet":"大颗粒磁力积木，60片装，适合4-6岁，无小零件"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"dislike_product","label":"不喜欢这个","action":"feedback","feedback_type":"not_interested"}]}}
 
 event: product_card
-data: {"event":"product_card","session_id":"sess_demo_001","rank":2,"product":{"product_id":"toy_1002","name":"木质拼图启蒙盒","price":129,"currency":"CNY","image_url":"https://example.com/2.jpg","age_min":4,"age_max":5,"toy_type":"puzzle","education_dimensions":["focus","fine_motor"],"safety_features":["rounded_edge"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low"},"reason":"如果你更在意安静与收纳方便，这个比磁力积木更省心。","risk_notes":[],"evidence":[{"source_type":"product_chunk","snippet":"木质圆角处理，适合家庭室内启蒙游戏。"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"show_alternatives","label":"换相似的","action":"feedback","feedback_type":"show_alternatives"}]}
+data: {"schema_version":"2026-05-20","event":"product_card","session_id":"sess_demo_001","turn_id":"turn_001","seq":6,"event_id":"turn_001:0006","node_id":"product_toy_1002","deck_id":"deck_turn_001","display_mode":"swipe_deck_item","created_at_ms":1780000000500,"payload":{"product_id":"toy_1002","rank":2,"summary":{"name":"木质拼图启蒙盒","price":129,"currency":"CNY","image_url":"https://example.com/2.jpg","chips":["4-5岁","圆角","无需电池"],"reason_short":"更安静，收纳也更省心。"},"detail":{"age_min":4,"age_max":5,"toy_type":"puzzle","education_dimensions":["focus","fine_motor"],"safety_features":["rounded_edge"],"play_scenario":["indoor"],"requires_battery":false,"messiness_level":"low","risk_notes":[]},"evidence_refs":[{"evidence_id":"ev_1002_01","source_type":"product_chunk","trust_label":"商品资料","snippet":"木质拼图启蒙盒，圆角设计，适合4-5岁"}],"actions":[{"action_id":"show_evidence","label":"看证据","action":"open_evidence"},{"action_id":"show_alternatives","label":"换相似的","action":"feedback","feedback_type":"show_alternatives"}]}}
 
 event: final_decision
-data: {"event":"final_decision","session_id":"sess_demo_001","winner_product_id":"toy_1001","summary":"如果你更看重综合益智性和可玩时长，优先选大颗粒磁力积木；如果你更看重安静和收纳成本，木质拼图启蒙盒更省心。","why":["适龄匹配 4 岁","预算内","无电池","室内友好"],"not_for":["若你希望绝对避免磁性件，不建议 Top1"],"alternatives":[{"product_id":"toy_1002","name":"木质拼图启蒙盒"}],"next_actions":[{"action_id":"cheaper","label":"再便宜一点","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"compare","label":"加入对比","action":"compare"}]}
+data: {"schema_version":"2026-05-20","event":"final_decision","session_id":"sess_demo_001","turn_id":"turn_001","seq":7,"event_id":"turn_001:0007","node_id":"decision_turn_001","deck_id":null,"display_mode":"summary_card","created_at_ms":1780000000600,"payload":{"summary":{"winner_product_id":"toy_1001","verdict":"优先选大颗粒磁力积木","why_chips":["适龄匹配","预算内","无电池","室内友好"],"not_for_short":"若希望绝对避免磁性件，不建议 Top1"},"detail":{"why":["适龄匹配 4 岁","预算内","无电池","室内友好"],"not_for":["若你希望绝对避免磁性件，不建议 Top1"],"alternatives":[{"product_id":"toy_1002","name":"木质拼图启蒙盒"}]},"evidence_refs":[{"evidence_id":"ev_1001_01","source_type":"product_chunk","trust_label":"商品资料","snippet":"大颗粒磁力积木适合4-6岁儿童，无小零件吞咽风险"}],"next_actions":[{"action_id":"cheaper","label":"再便宜一点","action":"criteria_patch","criteria_patch":{"budget_max":150}},{"action_id":"no_magnet","label":"不要磁性件","action":"criteria_patch","criteria_patch":{"safety_features":["no_magnets"]}}]}}
 
 event: done
-data: {"event":"done","session_id":"sess_demo_001"}
+data: {"schema_version":"2026-05-20","event":"done","session_id":"sess_demo_001","turn_id":"turn_001","seq":8,"event_id":"turn_001:0008","node_id":"done_turn_001","deck_id":"deck_turn_001","display_mode":"none","created_at_ms":1780000000700,"payload":{"criteria_id":"criteria_001","deck_id":"deck_turn_001","total_products":2,"client_turn_id":"turn_client_001","finish_reason":"completed"}}
 ```
 
 ### 接口契约
@@ -221,9 +248,9 @@ data: {"event":"done","session_id":"sess_demo_001"}
 - 连接超时：10 秒
 - 写超时：15 秒
 - 读超时：SSE 通道设置为无限或 0；客户端以“首事件软超时”管理 UX
-- 首个 `thinking` 事件软超时：2 秒
+- 首个 `thinking` 事件软超时：2 秒；超时后在当前 AI 回复位置显示“响应较慢，仍在等待”的 inline thinking 气泡
 - 首个结构化事件（`clarification` / `criteria_card` / `error`）软超时：8 秒  
-如果超过软超时仍无事件，顶部状态区改为“响应较慢，仍在等待”，但**不应自动中断**。
+如果超过软超时仍无事件，聊天流中的 thinking 节点改为“响应较慢，仍在等待”，但**不应自动中断**。TopBar 只保持连接状态，不展示阶段文案。
 
 #### `POST /upload/image`
 
@@ -262,137 +289,128 @@ kotlin
 ```Kotlin
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 
-@Serializablesealed interface AgentSseEvent {
-    val event: String
-    @SerialName("session_id")val sessionId: String?
-}
+@Serializable
+data class AgentUiEnvelope<T>(
+    @SerialName("schema_version") val schemaVersion: String = "2026-05-20",
+    val event: String,
+    @SerialName("session_id") val sessionId: String? = null,
+    @SerialName("turn_id") val turnId: String? = null,
+    val seq: Long,
+    @SerialName("event_id") val eventId: String,
+    @SerialName("node_id") val nodeId: String,
+    @SerialName("deck_id") val deckId: String? = null,
+    @SerialName("display_mode") val displayMode: String,
+    @SerialName("created_at_ms") val createdAtMs: Long,
+    val payload: T
+)
 
-@Serializabledata class ThinkingEvent(
-    override val event: String = "thinking",
-    @SerialName("session_id") override val sessionId: String? = null,
-    val stage: String,
+@Serializable data class ThinkingPayload(
+    val phase: String,
     val message: String
-) : AgentSseEvent
+)
 
-@Serializabledata class ClarificationEvent(
-    override val event: String = "clarification",
-    @SerialName("session_id") override val sessionId: String? = null,
+@Serializable data class ClarificationPayload(
     val question: String,
     @SerialName("required_slots") val requiredSlots: List<String> = emptyList(),
-    @SerialName("suggested_options") val suggestedOptions: List<String> = emptyList()
-) : AgentSseEvent
+    @SerialName("suggested_options") val suggestedOptions: List<String> = emptyList(),
+    @SerialName("partial_criteria") val partialCriteria: JsonElement? = null
+)
 
-@Serializabledata class CriteriaCardEvent(
-    override val event: String = "criteria_card",
-    @SerialName("session_id") override val sessionId: String? = null,
-    val editable: Boolean = true,
-    val criteria: CriteriaPayload,
+@Serializable data class CriteriaSummaryPayload(
+    val title: String,
+    val chips: List<String> = emptyList()
+)
+
+@Serializable data class CriteriaCardPayload(
+    @SerialName("criteria_id") val criteriaId: String,
+    val summary: CriteriaSummaryPayload,
+    val detail: JsonElement,
     @SerialName("quick_actions") val quickActions: List<QuickActionPayload> = emptyList()
-) : AgentSseEvent
+)
 
-@Serializabledata class TextDeltaEvent(
-    override val event: String = "text_delta",
-    @SerialName("session_id") override val sessionId: String? = null,
+@Serializable data class TextDeltaPayload(
     @SerialName("message_id") val messageId: String,
     val delta: String,
     val done: Boolean = false
-) : AgentSseEvent
-
-@Serializabledata class ProductCardEvent(
-    override val event: String = "product_card",
-    @SerialName("session_id") override val sessionId: String? = null,
-    val rank: Int,
-    val product: ProductPayload,
-    val reason: String,
-    @SerialName("risk_notes") val riskNotes: List<String> = emptyList(),
-    val evidence: List<EvidencePayload> = emptyList(),
-    val actions: List<QuickActionPayload> = emptyList()
-) : AgentSseEvent
-
-@Serializabledata class FinalDecisionEvent(
-    override val event: String = "final_decision",
-    @SerialName("session_id") override val sessionId: String? = null,
-    @SerialName("winner_product_id") val winnerProductId: String? = null,
-    val summary: String,
-    val why: List<String> = emptyList(),
-    @SerialName("not_for") val notFor: List<String> = emptyList(),
-    val alternatives: List<AlternativePayload> = emptyList(),
-    @SerialName("next_actions") val nextActions: List<QuickActionPayload> = emptyList()
-) : AgentSseEvent
-
-@Serializabledata class DoneEvent(
-    override val event: String = "done",
-    @SerialName("session_id") override val sessionId: String? = null
-) : AgentSseEvent
-
-@Serializabledata class ErrorEvent(
-    override val event: String = "error",
-    @SerialName("session_id") override val sessionId: String? = null,
-    val code: String,
-    val message: String,
-    val retryable: Boolean = true
-) : AgentSseEvent
-
-@Serializabledata class CriteriaPayload(
-    val age: Int? = null,
-    val scenario: String? = null,
-    @SerialName("budget_min") val budgetMin: Int? = null,
-    @SerialName("budget_max") val budgetMax: Int? = null,
-    @SerialName("toy_type") val toyType: String? = null,
-    @SerialName("education_dimensions") val educationDimensions: List<String> = emptyList(),
-    @SerialName("safety_features") val safetyFeatures: List<String> = emptyList(),
-    @SerialName("messiness_level") val messinessLevel: String? = null,
-    @SerialName("requires_battery") val requiresBattery: Boolean? = null
 )
 
-@Serializabledata class ProductPayload(
-    @SerialName("product_id") val productId: String,
+@Serializable data class ProductSummaryPayload(
     val name: String,
-    val price: Int? = null,
+    val price: Double? = null,
     val currency: String? = null,
     @SerialName("image_url") val imageUrl: String? = null,
-    @SerialName("age_min") val ageMin: Int? = null,
-    @SerialName("age_max") val ageMax: Int? = null,
-    @SerialName("toy_type") val toyType: String? = null,
-    @SerialName("education_dimensions") val educationDimensions: List<String> = emptyList(),
-    @SerialName("safety_features") val safetyFeatures: List<String> = emptyList(),
-    @SerialName("play_scenario") val playScenario: List<String> = emptyList(),
-    @SerialName("messiness_level") val messinessLevel: String? = null,
-    @SerialName("requires_battery") val requiresBattery: Boolean? = null
+    val chips: List<String> = emptyList(),
+    @SerialName("reason_short") val reasonShort: String? = null,
+    @SerialName("risk_short") val riskShort: String? = null
 )
 
-@Serializabledata class EvidencePayload(
-    @SerialName("source_type") val sourceType: String,
-    val snippet: String,
-    @SerialName("source_id") val sourceId: String? = null
-)
-
-@Serializabledata class AlternativePayload(
+@Serializable data class ProductCardPayload(
     @SerialName("product_id") val productId: String,
-    val name: String
+    val rank: Int,
+    val summary: ProductSummaryPayload,
+    val detail: JsonElement,
+    @SerialName("evidence_refs") val evidenceRefs: List<EvidenceRefPayload> = emptyList(),
+    val actions: List<QuickActionPayload> = emptyList()
 )
 
-@Serializabledata class QuickActionPayload(
+@Serializable data class EvidenceRefPayload(
+    @SerialName("evidence_id") val evidenceId: String,
+    @SerialName("source_type") val sourceType: String,
+    @SerialName("trust_label") val trustLabel: String? = null,
+    val snippet: String? = null
+)
+
+@Serializable data class DecisionSummaryPayload(
+    @SerialName("winner_product_id") val winnerProductId: String? = null,
+    val verdict: String,
+    @SerialName("why_chips") val whyChips: List<String> = emptyList(),
+    @SerialName("not_for_short") val notForShort: String? = null
+)
+
+@Serializable data class FinalDecisionPayload(
+    val summary: DecisionSummaryPayload,
+    val detail: JsonElement,
+    @SerialName("evidence_refs") val evidenceRefs: List<EvidenceRefPayload> = emptyList(),
+    @SerialName("next_actions") val nextActions: List<QuickActionPayload> = emptyList()
+)
+
+@Serializable data class QuickActionPayload(
     @SerialName("action_id") val actionId: String,
     val label: String,
     val action: String,
     @SerialName("feedback_type") val feedbackType: String? = null,
-    @SerialName("criteria_patch") val criteriaPatch: JsonObject? = null
+    @SerialName("criteria_patch") val criteriaPatch: JsonElement? = null
 )
 
-@Serializabledata class ChatStreamRequest(
+@Serializable data class DonePayload(
+    @SerialName("criteria_id") val criteriaId: String? = null,
+    @SerialName("deck_id") val deckId: String? = null,
+    @SerialName("total_products") val totalProducts: Int? = null,
+    @SerialName("client_turn_id") val clientTurnId: String? = null,
+    @SerialName("finish_reason") val finishReason: String
+)
+
+@Serializable data class ErrorPayload(
+    val code: String,
+    val message: String,
+    val retryable: Boolean = true,
+    @SerialName("recover_action") val recoverAction: String? = null
+)
+
+@Serializable data class ChatStreamRequest(
     val message: String,
     @SerialName("session_id") val sessionId: String? = null,
+    @SerialName("client_turn_id") val clientTurnId: String? = null,
     val history: List<MessageLite> = emptyList(),
     @SerialName("image_url") val imageUrl: String? = null,
-    @SerialName("criteria_patch") val criteriaPatch: JsonObject? = null,
+    @SerialName("criteria_patch") val criteriaPatch: JsonElement? = null,
     @SerialName("skip_stages") val skipStages: List<String>? = null,
     @SerialName("client_trace_id") val clientTraceId: String? = null
 )
 
-@Serializabledata class MessageLite(
+@Serializable data class MessageLite(
     val role: String,
     val content: String
 )
@@ -408,7 +426,7 @@ Android 官方架构指南建议以状态持有者承载 UI 状态，而 `StateF
 
 ### 停止生成交互
 
-停止生成必须是**显式且即时**的。点击后前端直接关闭 SSE 连接，并将当前状态切为 `Canceled`。如果后端支持取消接口，则同步发送 cancel；若后端未指定取消接口，前端至少要做到本地停止渲染、恢复输入、保留已有内容。
+停止生成必须是**显式且即时**的，并且按钮只能出现在底部输入区的生成态位置。点击后前端直接关闭 SSE 连接，并将当前 `turn_id` 切为 `Canceled`。工程化实现建议后端提供 `POST /chat/cancel` 或在 SSE 断开后识别取消信号，服务端停止后续 LLM/RAG 任务与后台写入；若取消请求失败，前端至少要做到本地停止渲染、恢复输入、保留已有内容。
 
 ### 无闪烁渲染策略
 
@@ -424,7 +442,7 @@ Android 官方架构指南建议以状态持有者承载 UI 状态，而 `StateF
 - **卡片入场**：轻量淡入即可，不做大位移动画。
 - **停止生成**：按钮必须放在输入区显著位置，且点按后 100ms 内有界面反馈。
 - **占位策略**：`criteria_card` 和 `final_decision` 不做长时间 skeleton；应在真实事件到达时再插入。
-- **证据展示**：底板优先展示 snippet，不跳出应用打开长链接。
+- **证据展示**：证据只在 Bottom Sheet / 详情层展示，底板优先展示 snippet，不跳出应用打开长链接。
 - **弱网体验**：显示“仍在处理中”而不是假死；任何情况下都不能只剩一个无响应 loading。
 
 ## 里程碑 测试与交付

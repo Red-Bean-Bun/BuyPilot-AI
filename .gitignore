@@ -45,3 +45,6 @@ logs/
 temp/
 
 .claude/
+.agents/
+.impeccable/
+skills-lock.json
