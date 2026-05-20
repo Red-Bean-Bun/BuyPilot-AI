@@ -1,0 +1,100 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+jobs:
+  codex-review:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          persist-credentials: false
+
+      - name: Pre-fetch PR refs
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin \
+            "$PR_BASE_REF" \
+            "+refs/pull/$PR_NUMBER/head"
+
+      - name: Run Codex Review
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.CODEX_RESPONSES_API_ENDPOINT }}
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt: |
+            You are reviewing BuyPilot-AI, a RAG-based multimodal ecommerce shopping assistant.
+
+            Review only the changes introduced by this pull request. Do not rewrite files.
+            Prioritize correctness, contract drift, hidden regressions, security, and missing tests.
+
+            Project rules to keep in mind:
+            - Follow CLAUDE.md as the repository development guide.
+            - SSE event protocol truth source is doc/prd/01-Android前端PRD.md and doc/prd/02-后端与AgentPRD.md.
+            - Preserve the full A2UI envelope fields when touching streaming events.
+            - Keep dependencies flowing UI -> Runtime -> Service -> Repo -> Config/Types.
+            - Avoid over-engineering; prefer minimal, verifiable fixes.
+
+            Output in Chinese with this structure:
+            ## PR Summary
+            - 2-5 bullets summarizing what changed.
+
+            ## Review Findings
+            - List findings by severity: P0, P1, P2, P3.
+            - Include file paths and line references when possible.
+            - If no actionable issues are found, say so clearly.
+
+            Useful context:
+            Repository: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+            Base SHA: ${{ github.event.pull_request.base.sha }}
+            Head SHA: ${{ github.event.pull_request.head.sha }}
+            Title: ${{ github.event.pull_request.title }}
+            Body:
+            ${{ github.event.pull_request.body }}
+
+            Inspect the PR with commands such as:
+            git log --oneline ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+            git diff --stat ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+            git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+
+  post-review:
+    needs: codex-review
+    if: github.event_name == 'pull_request' && needs.codex-review.outputs.final_message != ''
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Post Codex review comment
+        uses: actions/github-script@v7
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.codex-review.outputs.final_message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: process.env.CODEX_FINAL_MESSAGE,
+            });
