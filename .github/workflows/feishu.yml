@@ -1,0 +1,48 @@
+name: Feishu Notification
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - merged
+  workflow_dispatch:
+
+jobs:
+  send-notification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Message to Feishu
+        env:
+          WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "FEISHU_WEBHOOK secret not set, skipping notification"
+            exit 0
+          fi
+
+          EVENT_TYPE="${{ github.event_name }}"
+          REPO="${{ github.repository }}"
+          ACTOR="${{ github.actor }}"
+          SHA="${{ github.sha }}"
+          SHORT_SHA="${SHA:0:7}"
+          MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'manual trigger' }}"
+
+          if [ "$EVENT_TYPE" = "push" ]; then
+            TITLE="Push to main"
+            BODY="Actor: ${ACTOR}\nCommit: ${SHORT_SHA}\nMessage: ${MSG}"
+          elif [ "$EVENT_TYPE" = "pull_request" ]; then
+            PR_NUM="${{ github.event.pull_request.number }}"
+            PR_STATE="${{ github.event.pull_request.merged && 'merged' || 'opened' }}"
+            TITLE="PR #${PR_NUM} ${PR_STATE}"
+            BODY="Title: ${MSG}\nBy: ${ACTOR}"
+          else
+            TITLE="Manual trigger"
+            BODY="By: ${ACTOR}"
+          fi
+
+          curl -s -X POST -H "Content-Type: application/json" \
+            -d "{\"msg_type\":\"interactive\",\"card\":{\"header\":{\"title\":{\"tag\":\"plain_text\",\"content\":\"${TITLE}\"},\"template\":\"blue\"},\"elements\":[{\"tag\":\"markdown\",\"content\":\"**Repo**: ${REPO}\n${BODY}\"}]}}" \
+            "$WEBHOOK_URL"
