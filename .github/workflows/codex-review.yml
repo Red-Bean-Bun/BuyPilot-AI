@@ -14,7 +14,12 @@ on:
 
 jobs:
   codex-review:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # 细粒度管理逻辑：
+    # 1. 默认触发：Push 和 PR 均默认执行 AI 审查
+    # 2. 免审机制：若 Commit Message (或 PR 标题) 包含 "[no-review]" 标签，则跳过审查
+    if: |
+      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[no-review]')) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false && !contains(github.event.pull_request.title, '[no-review]'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

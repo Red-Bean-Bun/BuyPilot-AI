@@ -12,16 +12,14 @@
 
 
 
-**品类策略**：选择亲子玩具作为深水区验证品类，验证该导购决策架构在泛电商中的可迁移性。前台展示跨品类导购能力，后台真正跑深的是 Toys & Games。
-
-
+**品类策略**：使用导师提供的官方脱敏电商数据（4品类×25：美妆护肤/数码电子/服饰运动/食品生活），品类与课题说明会场景完美匹配。
 
 **答辩叙事顺序**：
 
-1. 为什么选玩具？——家长购买决策的痛点最强（年龄安全、教育价值、场景适配）
-2. 玩具购买为什么更需要决策辅助？——不是关键词搜索能解决的问题
-3. 家长关心的是年龄、安全、教育价值、使用场景，不是商品数量
-4. 我们用 Toys 作为验证品类，实现一套可迁移到泛电商的导购决策架构
+1. 为什么用导师数据？——品类与课题场景完美匹配（油皮洗面奶/蓝牙耳机/推荐跑鞋）
+2. 每条商品有 marketing_description + FAQ + reviews，天然适合 RAG chunking
+3. 反选排除在美妆品类更真实——"不要含酒精的"需要语义理解，不是 SQL 字段过滤
+4. 我们用 4 品类验证了"一套可迁移的导购决策架构"
 
 **核心差异化**：
 
@@ -61,7 +59,7 @@
 
 | 9 | 流式推进策略 | **默认流式推进，不等用户确认** | criteria_card 带 editable + quick_actions，允许轻量修正 |
 
-| 10 | 澄清触发机制 | **硬规则兜底 + LLM 增强** | required slots 硬检查（age 必须），LLM 只负责生成问题和推断 partial criteria |
+| 10 | 澄清触发机制 | **硬规则兜底 + LLM 增强** | required slots 硬检查（category 必须），LLM 只负责生成问题和推断 partial criteria |
 
 | 11 | Agent 链路编排 | **自定义 Python 函数链 + asyncio.gather 并行化** | 流水线式重叠执行，首字延迟 < 100ms |
 
@@ -77,7 +75,7 @@
 
 | 17 | 对话式加购 | **⭐入门：cart_items表 + add_to_cart意图 + cart_action事件** | P1实现，不做⭐⭐⭐下单确认 |
 
-| 18 | 数据策略 | **80条 + 双数据源** | 导师提供（5基础字段兼容通用）+ 自主构造80条（含玩具专属字段），50-100范围内偏多 |
+| 18 | 数据策略 | **官方100条，直接入库** | 导师提供4品类×25脱敏数据（含 rag_knowledge），不自构造补充数据 |
 
 | 19 | Doubao API 配置 | BaseAPI/Model/Key/Limit 见 `.env.example` | TPM 80万/RPM 700，不限制具体使用模型 |
 
@@ -95,61 +93,71 @@
 
 
 
-**P0**：导师提供的**100条**脱敏电商数据（4品类×25，中文，含 marketing_description + FAQ + reviews + SKUs + 本地图片）直接入库。足以支撑多品类 Demo + 评测 + 条件筛选 + 反选排除。
+**P0**：导师提供的**100条**脱敏电商数据（4品类×25，中文，含 marketing_description + FAQ + reviews + SKUs + 本地图片）直接入库。足以支撑多品类 Demo + 评测 + 条件筛选 + 反选排除。数据入库流程：官方数据JSON → products 表 + product_chunks 表拆分，rag_knowledge 天然 chunking，metadata 从 SKU 和品类推断。
 
-**P1**：扩展非结构化文档（安全说明书、教育研究、FAQ），增强 RAG 证据源。
+**P1**：扩展非结构化文档（成分说明、使用指南、FAQ），增强 RAG 证据源。
 
 **P2**：不再追求规模数量，数据质量比数量重要。
 
 
 
-### **3.2 商品结构化属性字段（LLM 提取）**
+### **3.2 商品结构化属性字段（metadata JSONB）**
 
 
 
-对精选 Toys 商品，用 Qwen-Plus 从 product_text 批量提取：
+官方数据每条商品已有 JSON 结构，`rag_knowledge` 直接拆为 chunks，metadata 从 SKU 和品类推断。
 
-
+**metadata JSONB 品类属性示例**：
 
 ```JSON
+// 美妆护肤
 {
-  "age_min": 3,
-  "age_max": 6,
-  "age_label": "3-6 years",
-  "gender_preference": "neutral",
-  "toy_type": "puzzle",
-  "education_dimensions": ["logic", "creativity", "fine_motor"],
-  "safety_features": ["no_small_parts", "non_toxic", "choking_hazard_free"],
-  "brand": "LEGO",
-  "key_features": ["60 pieces", "colorful illustrations"],
-  "play_scenario": "indoor",
-  "parent_concern": "age_appropriate",
-  "requires_battery": false,
-  "messiness_level": "low"
+  "skin_type": ["油性", "混合性"],
+  "ingredient_tags": ["无酒精", "含透明质酸", "含二裂酵母"],
+  "use_scenario": "日常护肤",
+  "spf": null,
+  "suitable_age": "25+"
+}
+
+// 数码电子
+{
+  "storage": ["256GB", "512GB"],
+  "screen_size": "6.3英寸",
+  "use_scenario": "日常/商务",
+  "chip": "A19 Pro"
+}
+
+// 服饰运动
+{
+  "sport_type": "跑步",
+  "season": "春夏",
+  "material": "速干面料",
+  "use_scenario": "日常训练"
+}
+
+// 飶品生活
+{
+  "dietary": ["无糖", "0脂0卡"],
+  "taste": "原味",
+  "use_scenario": "日常饮用"
 }
 ```
 
+**设计说明**：
 
+- metadata 用 JSONB 承载品类属性，不建品类特有 nullable 列——4个NULL列比一个JSONB列更糟
+- 品类属性不做硬编码枚举，LLM 根据用户意图和商品数据动态提取
+- `ingredient_tags` 是反选排除的核心载体——"不要含酒精的" → `ingredient_avoid: ["含酒精"]`
+- `skin_type` 是硬过滤载体——"推荐适合油皮的" → `WHERE metadata @> '{"skin_type": ["油性"]}'`
 
-**字段调整说明**：
-
-- `age_range` 改为 `age_min/age_max/age_label`：数值型才能做 `WHERE age_min <= 4 AND age_max >= 4`，字符串 `"3+"` vs `"36 months+"` 无法可靠过滤
-- 新增 `requires_battery`（布尔值）：家长非常关心"会不会吵"
-- 新增 `messiness_level`（low/medium/high）：家长关心"会不会脏/乱"
-- `safety_features` 枚举增加 `"choking_hazard_free"`：吞咽风险是低龄玩具最严重的安全问题，作为枚举值而非独立字段避免膨胀
-- `key_features` 保留但不作为核心 filter，仅用于展示和向量检索语义增强
-- 总字段 12 个（原 9 个 + age_min/age_max 替代 age_range + requires_battery + messiness_level）
-
-**澄清机制硬规则 slot 定义**：
-
-
+**澄清机制 slot 定义**：
 
 ```JSON
 {
-  "age": "required",      // 年龄信息缺失时必须触发澄清
-  "budget": "optional",   // 缺失时默认宽范围
-  "scenario": "required", // 使用场景/目的缺失时必须触发澄清
-  "safety_concern": "optional"
+  "category": "required",    // 品类信息缺失时必须触发澄清
+  "budget": "optional",      // 缺失时默认宽范围
+  "scenario": "required",    // 使用场景/目的缺失时必须触发澄清
+  "category_constraint": "optional"  // 品类相关约束（肤质/用途/口味等）
 }
 ```
 
@@ -260,9 +268,9 @@ evidence_links (
 eval_samples (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   question        TEXT NOT NULL,
-  must_have       JSONB NOT NULL,           -- {"age_min_lte":4, "age_max_gte":4, "price_lte":30, "safety_features":["no_small_parts"]}
-  preferred       JSONB,                    -- {"education_dimensions":["logic","fine_motor"], "play_scenario":["indoor"]}
-  forbidden       JSONB,                    -- {"safety_features_missing":["no_small_parts"]}
+  must_have       JSONB NOT NULL,           -- {"category":"美妆护肤", "skin_type":["油性"], "price_lte":200}
+  preferred       JSONB,                    -- {"use_scenario":["日常护肤"], "sub_category":["洁面"]}
+  forbidden       JSONB,                    -- {"ingredient_avoid":["酒精", "香精"]}
   difficulty      TEXT,                     -- "simple"/"multi_constraint"/"ambiguous"/"image"
   scenario_type   TEXT                      -- "budget_guide"/"image_identify"/"comparison"
 )
@@ -272,7 +280,7 @@ eval_samples (
 
 **Schema 调整说明**：
 
-- `products.metadata` 字段改为 12 个（含 age_min/age_max）
+- `products.metadata` 字段改为 JSONB 承载品类属性，不建品类特有 nullable 列
 - `conversations` 增加 `message_id` 字段，用于消息级追踪
 - `eval_samples` 改为 `must_have/preferred/forbidden` 结构，比简单 expected_product_ids 更可计算
 
@@ -307,9 +315,9 @@ def chunk_product_text(text):
 
 
 ```Plain Text
-CSV 数据 → 精选 80 条（P0，双数据源）
-         → clean_text 噪音清洗
-         → LLM 批量提取 metadata（12 字段）
+官方数据 JSON → 精选 100 条（P0，官方数据直接入库）
+         → rag_knowledge 天然 chunking
+         → metadata 从 SKU 和品类推断
          → 混合切分 product_text
          → 分批 Embedding（50条/批 + 重试）
          → 写入 products 表 + product_chunks 表
@@ -553,9 +561,9 @@ async def chat_stream(user_input, image_url=None, history=None):
 ```Plain Text
 criteria.constraints
   → 硬过滤（不可违反的刚性条件，与向量召回并行执行）:
-      WHERE price <= budget AND metadata->>'age_min' <= user_age
-           AND metadata->>'age_max' >= user_age
-           AND metadata->>'safety_features' 包含 required safety tags
+      WHERE price <= budget AND category = '美妆护肤'
+           AND metadata @> '{"skin_type": ["油性"]}'
+           AND NOT metadata->>'ingredient_tags' LIKE '%酒精%'
   → candidate_pool
   → 向量召回 top_k=50（与硬过滤并行执行，软偏好由向量语义处理）
   → merge_and_dedup(硬过滤结果 + 向量召回结果)
@@ -568,7 +576,7 @@ criteria.constraints
 
 **关键设计**：
 
-1. 用户偏好（"更偏益智"、"亲子场景"）不变成 SQL WHERE，由向量召回和 Rerank 处理。硬过滤只管刚性条件。
+1. 用户偏好（"油性适用"、"日常护肤"）不变成 SQL WHERE，由向量召回和 Rerank 处理。硬过滤只管刚性条件。
 
 2. 硬过滤和向量召回**并行执行**（asyncio.gather），检索延迟从4s降到2s。
 
@@ -625,7 +633,7 @@ T3s:     thinking → "正在检索匹配商品..."
 {
   "message": "修正购买标准",
   "session_id": "s_001",
-  "criteria_patch": {"budget_max": 30},
+  "criteria_patch": {"budget_max": 150},
   "skip_stages": ["intent", "criteria"]  // 跳过已完成的阶段
 }
 ```
@@ -689,8 +697,8 @@ criteria_card:
   node_id: criteria_{criteria_id}
   payload: {
     criteria_id,
-    summary: {title: "已理解你的需求", chips: ["4岁", "室内", "200元内", "不要小零件", "益智"]},
-    detail: {age, scenario, budget_min?, budget_max?, safety_features, education_dimensions, requires_battery?, weights?},
+    summary: {title: "已理解你的需求", chips: ["油性肌肤", "200元内", "日常护肤", "洁面类"]},
+    detail: {category, skin_type?, budget_min?, budget_max?, ingredient_tags, ingredient_avoid, use_scenario, weights?},
     quick_actions: [...]
   }
 
@@ -707,7 +715,7 @@ product_card:
     product_id,
     rank,
     summary: {name, price, image_url, chips, reason_short, risk_short?},
-    detail: {age_min?, age_max?, toy_type?, education_dimensions, safety_features, play_scenario, requires_battery?, match_details?, risk_notes},
+    detail: {skin_type_match?, ingredient_tags?, ingredient_avoid?, use_scenario, sub_category?, match_details?, risk_notes},
     evidence_refs: [{evidence_id, source_type, trust_label?, snippet?}],
     actions: [...]
   }
@@ -786,14 +794,14 @@ GET /cart/{session_id}     — 查询购物车内容
 
 | 指标 | 计算方式 | 说明 |
 |-|-|-|
-| age_match_rate | `age_min <= user_age AND age_max >= user_age` | 推荐商品年龄段是否匹配 |
+| category_constraint_match_rate | `metadata @> category-specific constraints` | 推荐商品品类约束是否匹配（如肤质、适用场景） |
 | budget_match_rate | `price <= budget` | 推荐价格是否在预算内 |
 | constraint_satisfaction_rate | 每条约束的满足比例 | 购买标准约束满足率 |
 | evidence_cited_rate | `len(evidence_links) > 0` | 推荐是否引用至少 1 条证据 |
 
-| unsafe_recommendation_rate | 推荐给低龄但含 choking hazard / small parts | **严重错误**，必须为 0 |
+| unsafe_recommendation_rate | 推荐含用户明确排除的成分/特性 | **严重错误**，必须为 0 |
 
-| decision_diversity_score | 首选和备选的 toy_type 分布 | 不能全是同质商品 |
+| decision_diversity_score | 首选和备选的 sub_category 分布 | 不能全是同质商品 |
 
 | clarification_trigger_rate | 合理触发 vs 过度触发 | 不该触发时触发 = 过度澄清 |
 
@@ -808,29 +816,28 @@ GET /cart/{session_id}     — 查询购物车内容
 
 | 场景类型 | 数量 | 示例问题 |
 |-|-|-|
-| 年龄安全 | 5 | "给4岁孩子买益智玩具，不要小零件" |
-| 预算场景 | 4 | "预算30美元以内，适合6岁男孩的户外玩具" |
-| 教育目标 | 3 | "锻炼专注力的室内玩具，给5岁女孩" |
-| 礼物场景 | 2 | "送侄子的生日礼物，他3岁，喜欢恐龙" |
-| 多轮反馈 | 1 | "不喜欢太吵的，换个安静的" |
+| 品类约束 | 5 | "推荐适合油皮的洗面奶，不要含酒精" |
+| 预算场景 | 4 | "预算200元以内的防晒霜，油性适用" |
+| 使用场景 | 3 | "日常护肤的洁面产品，适合混合性皮肤" |
+| 礼物场景 | 2 | "送妈妈的护肤品，她皮肤偏干" |
+| 多轮反馈 | 1 | "不要含香精的，换个温和的" |
 
 每条样本的结构：
 
 ```JSON
 {
-  "question": "给4岁孩子买一个室内益智玩具，预算30美元以内，不要小零件",
+  "question": "推荐适合油皮的洗面奶，200元以内",
   "must_have": {
-    "age_min_lte": 4,
-    "age_max_gte": 4,
-    "price_lte": 30,
-    "safety_features": ["no_small_parts"]
+    "category": "美妆护肤",
+    "skin_type": ["油性"],
+    "price_lte": 200
   },
   "preferred": {
-    "education_dimensions": ["logic", "fine_motor"],
-    "play_scenario": ["indoor"]
+    "use_scenario": ["日常护肤"],
+    "sub_category": ["洁面"]
   },
   "forbidden": {
-    "safety_features_missing": ["no_small_parts"]
+    "ingredient_avoid": ["酒精", "香精"]
   }
 }
 ```
@@ -844,7 +851,7 @@ GET /cart/{session_id}     — 查询购物车内容
 - 后台可视化：baseline → 加硬过滤 → 加 Rerank → Prompt v2，每步指标变化
 - retrieval_traces 展示完整检索决策链路
 - evidence_links 展示推荐证据绑定
-- "我们不是玩具 Demo，是工业级原型：可评估、可解释、可迭代"
+- "我们不是 Demo，是工业级原型：可评估、可解释、可迭代"
 
 ---
 
@@ -866,10 +873,10 @@ GET /cart/{session_id}     — 查询购物车内容
 
 ```Python
 extracted_feedback = extract_feedback_from_session(session_id)  # 查询 feedbacks 表
-# → {"avoid_products": ["toy_1001"], "avoid_traits": ["requires_battery"], "prefer_traits": ["quiet", "no_mess"]}
+# → {"avoid_products": ["p_beauty_010"], "avoid_traits": ["含酒精"], "prefer_traits": ["油性适用", "控油"]}
 
 criteria.constraints.append(
-  {"dimension": "电池需求", "value": "不要电池", "weight": "high", "source": "user_feedback"}
+  {"dimension": "成分偏好", "value": "不要含酒精", "weight": "high", "source": "user_feedback"}
 )
 ```
 
@@ -957,10 +964,9 @@ backend/
 │   ├── recommendation.md
 │   ├── decision.md
 │   ├── clarification.md
-│   ├── metadata_extraction.md
 │
 ├── scripts/                     # 一次性脚本
-│   ├── ingest.py                # 数据入库（分级：P0 80条双数据源 / P1 非结构化文档 / P2 不追求规模）
+│   ├── ingest.py                # 数据入库（P0 官方100条 / P1 非结构化文档 / P2 不追求规模）
 │   ├── eval.py                  # 运行评测
 │
 ├── tests/                       # TDD
@@ -973,7 +979,7 @@ backend/
 │   ├── test_api.py              # P1: SSE 端点格式
 │   ├── test_feedback.py         # P1: 反馈写入 DB
 │   ├── test_chunking.py         # P1: 切分数量和格式
-│   ├── test_ingest.py           # P1: LLM 提取 metadata JSON
+│   ├── test_ingest.py           # P1: metadata JSON 合法性
 │
 ├── pyproject.toml
 ├── Dockerfile
@@ -1006,7 +1012,7 @@ backend/
 - slot_checker.py → 硬规则检查：各种输入场景的 required slot 缺失判断
 - sse_events.py → JSON schema 验证
 - intent.py → 5 个场景（模糊输入/清晰输入/需要澄清/图片输入/闲聊）
-- criteria.py → 3 个场景（Toys 导购/跨品类/多约束 + 反馈注入）
+- criteria.py → 3 个场景（美妆导购/跨品类/多约束 + 反馈注入）
 - retriever.py → mock DB，验证硬过滤 + 向量召回 + rerank 组合逻辑
 - pipeline.py → mock 各阶段函数，验证 SSE 事件 yield 顺序和格式
 
@@ -1086,13 +1092,10 @@ volumes:
 | ETL 分批 + 重试 + 幂等清理 | E-commerce-Smart-Agent | ingest.py 数据入库 |
 | SQLModel ORM | E-commerce-Smart-Agent | 减少重复代码 |
 | Pydantic-Settings 配置管理 | E-commerce-Smart-Agent | config.py |
-| clean_text 噪音过滤 | Amazon-Multimodal-RAG | product_text 清洗 |
 | PipelineState TypedDict | E-commerce-Smart-Agent | 状态管理 |
 | 硬逻辑与软逻辑分离 | E-commerce-Smart-Agent + 反馈意见 | 结构化过滤是 SQL 硬逻辑，软偏好由向量处理 |
 | 相似度阈值硬过滤 | E-commerce-Smart-Agent | retriever.py 距离过滤 |
-| 图像描述拼接查询 | Amazon-Multimodal-RAG | multimodal.py |
 | base64 图像编码 | multimodal-rag-ecommerce | upload.py |
-| Recall@K 评测 | Amazon-Multimodal-RAG | eval/metrics.py |
 
 
 
@@ -1102,7 +1105,7 @@ volumes:
 
 ## **12. 三周开发计划（后端 & Agent 负责人视角）**
 
-### **第 1 周：精选数据入库 + 核心管道跑通**
+### **第 1 周：官方数据入库 + 核心管道跑通**
 
 
 
@@ -1110,7 +1113,7 @@ volumes:
 |-|-|-|
 | 1 | 项目骨架 + Docker Compose + SQLModel 9 张表 | `docker compose up` 成功，表创建 |
 
-| 2 | **精选 80 条 Toys 商品入库**（双数据源 + LLM 提取 metadata） | 80 条商品+chunks 写入 DB，可检索 |
+| 2 | **官方 100 条数据入库**（JSON→PG 拆分 chunks + metadata 推断） | 100 条商品+chunks 写入 DB，可检索 |
 
 | 3 | sse_events.py + slot_defs.py + slot_checker.py | JSON schema + slot 检查测试通过 |
 
@@ -1135,7 +1138,7 @@ volumes:
 | 10 | multimodal.py 图片上传 + Qwen-VL-Plus 解析 | 图片→描述→检索链路跑通 |
 | 11 | feedback.py 反馈记录 + 反馈注入 criteria 逻辑 | 反馈影响下一轮推荐 |
 | 12 | retrieval_traces + evidence_links 写入 | 每次推荐有完整检索追踪和证据 |
-| 13 | 非结构化文档入库（安全说明书、教育研究、FAQ）+ 管道性能优化 | RAG 证据源增强，流式延迟达标 |
+| 13 | 非结构化文档入库（成分说明、使用指南、FAQ）+ 管道性能优化 | RAG 证据源增强，流式延迟达标 |
 
 | 14 | **第二次内部 Demo** | 多模态 + 反馈闭环 + 结构化卡片完整 |
 
@@ -1176,7 +1179,7 @@ volumes:
 - JWT 复杂认证系统
 - RAGAS 作为 P0 评测依赖（P1 加入）
 - retrieval 事件发给客户端（trace 放后台）
-- 第一天全量 6484 条数据入库（分级入库）
+- 第一天全量大规模数据入库（分级入库）
 
 ---
 
@@ -1204,11 +1207,11 @@ volumes:
 
 
 
-**开场**：我们选择亲子玩具作为深水区验证品类，因为家长购买玩具的决策痛点最强——年龄安全、教育价值、场景适配。这不是关键词搜索能解决的问题。
+**开场**：我们使用导师提供的官方脱敏电商数据驱动多品类导购，因为用户购买美妆护肤的决策痛点真实——肤质匹配、成分安全、场景适配。这不是关键词搜索能解决的问题，需要语义理解和结构化决策。
 
 **核心展示**：
 
-1. 购买标准生成："给4岁孩子推荐益智玩具" → 系统生成结构化标准（age 3-6、益智、无小零件、室内）
+1. 购买标准生成："推荐适合油皮的洗面奶，200元以内" → 系统生成结构化标准（油性适用、日常护肤、不含酒精、200元预算）
 2. 防幻觉机制：每个推荐绑定文档证据，不是 LLM 编的
 3. 反馈闭环：左滑不喜欢 → 下一轮自动调整推荐
 4. 评测进化：后台展示 baseline → 加硬过滤 → 加 Rerank → Prompt v2 的指标变化

@@ -7,7 +7,7 @@ on:
   pull_request:
     types:
       - opened
-      - merged
+      - closed
   workflow_dispatch:
 
 jobs:
@@ -17,30 +17,34 @@ jobs:
       - name: Send Message to Feishu
         env:
           WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          EVENT_TYPE: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then
             echo "FEISHU_WEBHOOK secret not set, skipping notification"
             exit 0
           fi
 
-          EVENT_TYPE="${{ github.event_name }}"
-          REPO="${{ github.repository }}"
-          ACTOR="${{ github.actor }}"
-          SHA="${{ github.sha }}"
           SHORT_SHA="${SHA:0:7}"
-          MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'manual trigger' }}"
+          MSG="${COMMIT_MSG:-${PR_TITLE:-manual trigger}}"
 
           if [ "$EVENT_TYPE" = "push" ]; then
             TITLE="Push to main"
             BODY="Actor: ${ACTOR}
-Commit: ${SHORT_SHA}
-Message: ${MSG}"
+          Commit: ${SHORT_SHA}
+          Message: ${MSG}"
           elif [ "$EVENT_TYPE" = "pull_request" ]; then
-            PR_NUM="${{ github.event.pull_request.number }}"
-            PR_STATE="${{ github.event.pull_request.merged && 'merged' || 'opened' }}"
+            PR_STATE="${PR_MERGED:-false}"
+            if [ "$PR_STATE" = "true" ]; then PR_STATE="merged"; else PR_STATE="opened"; fi
             TITLE="PR #${PR_NUM} ${PR_STATE}"
             BODY="Title: ${MSG}
-By: ${ACTOR}"
+          By: ${ACTOR}"
           else
             TITLE="Manual trigger"
             BODY="By: ${ACTOR}"
