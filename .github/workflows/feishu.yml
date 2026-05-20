@@ -32,17 +32,44 @@ jobs:
 
           if [ "$EVENT_TYPE" = "push" ]; then
             TITLE="Push to main"
-            BODY="Actor: ${ACTOR}\nCommit: ${SHORT_SHA}\nMessage: ${MSG}"
+            BODY="Actor: ${ACTOR}
+Commit: ${SHORT_SHA}
+Message: ${MSG}"
           elif [ "$EVENT_TYPE" = "pull_request" ]; then
             PR_NUM="${{ github.event.pull_request.number }}"
             PR_STATE="${{ github.event.pull_request.merged && 'merged' || 'opened' }}"
             TITLE="PR #${PR_NUM} ${PR_STATE}"
-            BODY="Title: ${MSG}\nBy: ${ACTOR}"
+            BODY="Title: ${MSG}
+By: ${ACTOR}"
           else
             TITLE="Manual trigger"
             BODY="By: ${ACTOR}"
           fi
 
+          # Use jq to build the JSON payload safely to avoid escaping issues
+          PAYLOAD=$(jq -n \
+            --arg title "$TITLE" \
+            --arg repo "$REPO" \
+            --arg body "$BODY" \
+            '{
+              msg_type: "interactive",
+              card: {
+                header: {
+                  title: {
+                    tag: "plain_text",
+                    content: $title
+                  },
+                  template: "blue"
+                },
+                elements: [
+                  {
+                    tag: "markdown",
+                    content: ("**Repo**: " + $repo + "\n" + $body)
+                  }
+                ]
+              }
+            }')
+
           curl -s -X POST -H "Content-Type: application/json" \
-            -d "{\"msg_type\":\"interactive\",\"card\":{\"header\":{\"title\":{\"tag\":\"plain_text\",\"content\":\"${TITLE}\"},\"template\":\"blue\"},\"elements\":[{\"tag\":\"markdown\",\"content\":\"**Repo**: ${REPO}\n${BODY}\"}]}}" \
+            -d "$PAYLOAD" \
             "$WEBHOOK_URL"
