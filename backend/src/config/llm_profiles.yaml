@@ -1,0 +1,50 @@
+profiles:
+  doubao_intent:
+    provider: doubao
+    model: doubao-seed-2.0-lite
+    base_url_env: DOUBAO_BASE_URL
+    api_key_env: DOUBAO_API_KEY
+    timeout_seconds: 20
+  doubao_generation:
+    provider: doubao
+    model: doubao-seed-1.6
+    base_url_env: DOUBAO_BASE_URL
+    api_key_env: DOUBAO_API_KEY
+    timeout_seconds: 30
+  doubao_embedding:
+    provider: doubao
+    model: doubao-embedding-vision
+    base_url_env: DOUBAO_BASE_URL
+    api_key_env: DOUBAO_API_KEY
+    timeout_seconds: 20
+  qwen_turbo:
+    provider: bailian
+    model: qwen-turbo
+    base_url_env: BAILIAN_BASE_URL
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 20
+  qwen_plus:
+    provider: bailian
+    model: qwen-plus
+    base_url_env: BAILIAN_BASE_URL
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 30
+  qwen_vl_plus:
+    provider: bailian
+    model: qwen-vl-plus
+    base_url_env: BAILIAN_BASE_URL
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 40
+  qwen_embedding:
+    provider: bailian
+    model: text-embedding-v3
+    dimensions: 1024
+    base_url_env: BAILIAN_BASE_URL
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 20
+  gte_rerank:
+    provider: bailian
+    model: qwen3-rerank
+    base_url_env: BAILIAN_BASE_URL
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 20

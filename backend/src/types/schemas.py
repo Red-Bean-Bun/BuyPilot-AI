@@ -1,0 +1,111 @@
+"""HTTP request and response contracts for the BuyPilot backend.
+
+API modules import these models instead of defining request shapes inline.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from src.types.sse_events import CriteriaPayload, ProductPayload
+
+
+class MessageLite(BaseModel):
+    role: Literal["user", "assistant", "system"] | str
+    content: str
+
+
+class ChatStreamRequest(BaseModel):
+    message: str
+    session_id: str | None = None
+    history: list[MessageLite] = Field(default_factory=list)
+    image_url: str | None = None
+    criteria_patch: dict[str, Any] | None = None
+    skip_stages: list[str] = Field(default_factory=list)
+    client_turn_id: str | None = None
+    client_trace_id: str | None = None
+
+
+class CancelRequest(BaseModel):
+    session_id: str
+    turn_id: str
+
+
+class CancelResponse(BaseModel):
+    session_id: str
+    turn_id: str
+    canceled: bool = True
+
+
+class ImageUploadRequest(BaseModel):
+    file_name: str
+    content_type: str = "image/jpeg"
+
+
+class ImageUploadResponse(BaseModel):
+    image_url: str
+    width: int | None = None
+    height: int | None = None
+    mime_type: str = "image/jpeg"
+    ocr_text: str | None = None
+    analysis: dict[str, Any] = Field(default_factory=dict)
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    feedback_type: str | None = None
+    action: str | None = None
+    product_id: str | None = None
+    reason: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    status: str = "received"
+    session_id: str
+    feedback_type: str | None = None
+    action: str | None = None
+
+
+class CartItemPayload(BaseModel):
+    product_id: str
+    name: str
+    price: float | None = None
+    quantity: int = 1
+    added_at: str | None = None
+    product: ProductPayload | None = None
+
+
+class CartResponse(BaseModel):
+    items: list[CartItemPayload] = Field(default_factory=list)
+    total_items: int = 0
+    total_price: float = 0.0
+
+
+class IntentResult(BaseModel):
+    intent: Literal["recommend", "clarify", "feedback", "add_to_cart", "view_cart", "chitchat"]
+    confidence: float = 1.0
+    category: str | None = None
+    extracted_constraints: dict[str, Any] = Field(default_factory=dict)
+    soft_preferences: list[str] = Field(default_factory=list)
+    target_product_id: str | None = None
+
+
+class RecommendationResult(BaseModel):
+    text_chunks: list[str] = Field(default_factory=list)
+    products: list[ProductPayload] = Field(default_factory=list)
+
+
+class DecisionResult(BaseModel):
+    winner_product_id: str
+    summary: str
+    why: list[str] = Field(default_factory=list)
+    not_for: list[str] = Field(default_factory=list)
+
+
+class SessionState(BaseModel):
+    session_id: str
+    last_criteria: CriteriaPayload | None = None
+    last_product_ids: list[str] = Field(default_factory=list)
+

@@ -1,0 +1,8 @@
+event: thinking
+data: {"event": "thinking", "session_id": "demo_error_001", "stage": "analyzing", "message": "正在连接后端服务..."}
+
+event: error
+data: {"event": "error", "session_id": "demo_error_001", "code": "LLM_TIMEOUT", "message": "后端服务暂时不可用，请稍后重试", "retryable": true}
+
+event: done
+data: {"event": "done", "session_id": "demo_error_001"}

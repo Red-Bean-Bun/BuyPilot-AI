@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SSE Event",
+  "description": "BuyPilot-AI SSE event from /chat/stream",
+  "oneOf": [
+    { "$ref": "#/$defs/thinking" },
+    { "$ref": "#/$defs/clarification" },
+    { "$ref": "#/$defs/criteria_card" },
+    { "$ref": "#/$defs/text_delta" },
+    { "$ref": "#/$defs/product_card" },
+    { "$ref": "#/$defs/cart_action" },
+    { "$ref": "#/$defs/final_decision" },
+    { "$ref": "#/$defs/done" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "properties": {
+        "schema_version": { "type": "string", "const": "2026-05-20" },
+        "event": { "type": "string" },
+        "session_id": { "type": "string" },
+        "turn_id": { "type": "string" },
+        "seq": { "type": "integer", "minimum": 1 },
+        "event_id": { "type": "string" },
+        "node_id": { "type": "string" },
+        "deck_id": { "type": ["string", "null"] },
+        "display_mode": {
+          "type": ["string", "null"],
+          "enum": ["inline_thinking", "inline_card", "inline_text", "summary_card", "swipe_deck_item", "none", null]
+        },
+        "created_at_ms": { "type": ["integer", "null"] }
+      },
+      "required": ["schema_version", "event", "session_id", "turn_id", "seq", "event_id", "node_id"]
+    },
+    "constraints": {
+      "type": "object",
+      "description": "封闭 DSL —— 品类约束显式枚举，禁止新增字段",
+      "additionalProperties": false,
+      "properties": {
+        "budget_min": { "type": ["number", "null"] },
+        "budget_max": { "type": ["number", "null"] },
+        "use_scenario": { "type": ["string", "null"] },
+        "skin_type": { "type": ["string", "null"] },
+        "ingredient_avoid": { "type": "array", "items": { "type": "string" } },
+        "ingredient_prefer": { "type": "array", "items": { "type": "string" } },
+        "storage": { "type": ["string", "null"] },
+        "screen_size": { "type": ["string", "null"] },
+        "sport_type": { "type": ["string", "null"] },
+        "season": { "type": ["string", "null"] },
+        "dietary": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "criteria_payload": {
+      "type": "object",
+      "properties": {
+        "criteria_id": { "type": "string" },
+        "category": { "type": "string" },
+        "summary": { "type": "string" },
+        "chips": { "type": "array", "items": { "type": "string" } },
+        "constraints": { "$ref": "#/$defs/constraints" }
+      },
+      "required": ["criteria_id", "category"]
+    },
+    "product_payload": {
+      "type": "object",
+      "properties": {
+        "product_id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": ["number", "null"] },
+        "currency": { "type": ["string", "null"] },
+        "image_url": { "type": ["string", "null"] },
+        "category": { "type": "string" },
+        "sub_category": { "type": ["string", "null"] },
+        "brand": { "type": ["string", "null"] },
+        "skin_type_match": { "type": "array", "items": { "type": "string" } },
+        "ingredient_tags": { "type": "array", "items": { "type": "string" } },
+        "ingredient_avoid": { "type": "array", "items": { "type": "string" } },
+        "use_scenario": { "type": ["string", "null"] }
+      },
+      "required": ["product_id", "name"]
+    },
+    "evidence_payload": {
+      "type": "object",
+      "properties": {
+        "source_type": { "type": "string" },
+        "snippet": { "type": "string" },
+        "source_id": { "type": ["string", "null"] }
+      },
+      "required": ["source_type", "snippet"]
+    },
+    "alternative_payload": {
+      "type": "object",
+      "properties": {
+        "product_id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["product_id", "name"]
+    },
+    "quick_action_payload": {
+      "type": "object",
+      "properties": {
+        "action_id": { "type": "string" },
+        "label": { "type": "string" },
+        "action": { "type": "string", "enum": ["criteria_patch", "feedback", "open_evidence", "compare", "add_to_cart"] },
+        "feedback_type": { "type": "string" },
+        "criteria_patch": { "type": "object" }
+      },
+      "required": ["action_id", "label", "action"]
+    },
+    "thinking": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "thinking" },
+            "display_mode": { "const": "inline_thinking" },
+            "stage": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["event", "stage", "message"]
+        }
+      ]
+    },
+    "clarification": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "clarification" },
+            "display_mode": { "const": "inline_card" },
+            "question": { "type": "string" },
+            "required_slots": { "type": "array", "items": { "type": "string" } },
+            "suggested_options": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["event", "question"]
+        }
+      ]
+    },
+    "criteria_card": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "criteria_card" },
+            "display_mode": { "const": "summary_card" },
+            "editable": { "type": "boolean" },
+            "criteria": { "$ref": "#/$defs/criteria_payload" },
+            "quick_actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } }
+          },
+          "required": ["event"]
+        }
+      ]
+    },
+    "text_delta": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "text_delta" },
+            "display_mode": { "const": "inline_text" },
+            "message_id": { "type": "string" },
+            "delta": { "type": "string" },
+            "done": { "type": "boolean" }
+          },
+          "required": ["event", "message_id", "delta"]
+        }
+      ]
+    },
+    "product_card": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "product_card" },
+            "display_mode": { "const": "swipe_deck_item" },
+            "deck_id": { "type": "string" },
+            "rank": { "type": "integer" },
+            "product": { "$ref": "#/$defs/product_payload" },
+            "reason": { "type": "string" },
+            "risk_notes": { "type": "array", "items": { "type": "string" } },
+            "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_payload" } },
+            "actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } }
+          },
+          "required": ["event", "deck_id", "rank", "product", "reason", "evidence"]
+        }
+      ]
+    },
+    "cart_action": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "cart_action" },
+            "display_mode": { "const": "inline_card" },
+            "action": { "type": "string", "enum": ["add", "remove", "view"] },
+            "product_id": { "type": "string" },
+            "quantity": { "type": "integer" },
+            "status": { "type": "string", "enum": ["success", "failed"] }
+          },
+          "required": ["event", "action", "product_id", "status"]
+        }
+      ]
+    },
+    "final_decision": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "final_decision" },
+            "display_mode": { "const": "summary_card" },
+            "winner_product_id": { "type": "string" },
+            "summary": { "type": "string" },
+            "why": { "type": "array", "items": { "type": "string" } },
+            "not_for": { "type": "array", "items": { "type": "string" } },
+            "alternatives": { "type": "array", "items": { "$ref": "#/$defs/alternative_payload" } },
+            "next_actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } }
+          },
+          "required": ["event", "winner_product_id", "summary"]
+        }
+      ]
+    },
+    "done": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "done" },
+            "display_mode": { "const": "none" }
+          },
+          "required": ["event"]
+        }
+      ]
+    },
+    "error": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "error" },
+            "display_mode": { "const": "inline_card" },
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "retryable": { "type": "boolean" }
+          },
+          "required": ["event", "code", "message"]
+        }
+      ]
+    }
+  }
+}

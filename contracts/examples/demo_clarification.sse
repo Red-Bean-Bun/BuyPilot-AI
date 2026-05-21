@@ -1,0 +1,8 @@
+event: thinking
+data: {"event": "thinking", "session_id": "demo_clarify_001", "stage": "analyzing", "message": "正在理解您的需求..."}
+
+event: clarification
+data: {"event": "clarification", "session_id": "demo_clarify_001", "question": "请告诉我你的肤质类型和预算范围？", "required_slots": ["skin_type", "budget_max"], "suggested_options": ["油性", "干性", "混合", "敏感"]}
+
+event: done
+data: {"event": "done", "session_id": "demo_clarify_001"}

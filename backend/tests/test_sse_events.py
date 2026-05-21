@@ -1,0 +1,292 @@
+import json
+
+import jsonschema
+import pytest
+
+from src.types.sse_events import (
+    AlternativePayload,
+    CartActionEvent,
+    ClarificationEvent,
+    Constraints,
+    CriteriaCardEvent,
+    CriteriaPayload,
+    DoneEvent,
+    ErrorEvent,
+    EventSeq,
+    EvidencePayload,
+    FinalDecisionEvent,
+    ProductCardEvent,
+    ProductPayload,
+    QuickActionPayload,
+    SSEEventBase,
+    TextDeltaEvent,
+    ThinkingEvent,
+    format_sse,
+    parse_sse_event,
+)
+
+# Helper to construct events with required envelope fields
+def _seq() -> EventSeq:
+    return EventSeq("turn_test")
+
+
+def _base(session_id="s1", turn_id="turn_test", seq_obj=None) -> dict:
+    if seq_obj is None:
+        seq_obj = _seq()
+    s = seq_obj.next()
+    return {
+        "session_id": session_id,
+        "turn_id": turn_id,
+        "seq": s,
+        "event_id": seq_obj.event_id(),
+    }
+
+
+class TestPayloadModels:
+    def test_criteria_payload(self):
+        c = CriteriaPayload(
+            criteria_id="c1",
+            category="美妆护肤",
+            chips=["油性肌肤", "200元内"],
+            constraints=Constraints(skin_type="油性", budget_max=200),
+        )
+        assert c.category == "美妆护肤"
+        assert c.constraints.skin_type == "油性"
+
+    def test_product_payload(self):
+        p = ProductPayload(
+            product_id="p_beauty_011",
+            name="珊珂洗颜专科洁面乳",
+            category="美妆护肤",
+            skin_type_match=["油性"],
+        )
+        assert p.product_id == "p_beauty_011"
+        assert p.skin_type_match == ["油性"]
+
+    def test_evidence_payload(self):
+        e = EvidencePayload(source_type="chunk", snippet="safe", source_id="c1")
+        assert e.source_type == "chunk"
+
+    def test_quick_action_payload_compare(self):
+        a = QuickActionPayload(action_id="compare", label="加入对比", action="compare")
+        assert a.action == "compare"
+
+    def test_alternative_payload(self):
+        a = AlternativePayload(product_id="p1", name="薇诺娜特护霜")
+        assert a.product_id == "p1"
+
+
+class TestEnvelopeFields:
+    def test_event_seq_increment(self):
+        seq = EventSeq("turn_001")
+        assert seq.next() == 1
+        assert seq.next() == 2
+        assert seq.event_id() == "turn_001:2"
+
+    def test_schema_version_default(self):
+        e = ThinkingEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="thinking_t1", stage="understanding", message="test"
+        )
+        assert e.schema_version == "2026-05-20"
+
+    def test_display_mode_defaults(self):
+        e = ThinkingEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="thinking_t1", stage="x", message="y"
+        )
+        assert e.display_mode == "inline_thinking"
+
+        d = DoneEvent(session_id="s1", turn_id="t1", seq=2, event_id="t1:2", node_id="done_t1")
+        assert d.display_mode == "none"
+
+    def test_product_card_requires_deck_id(self):
+        e = ProductCardEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="product_p1", deck_id="deck_t1",
+            rank=1,
+            product=ProductPayload(product_id="p1", name="洁面乳", category="美妆护肤"),
+            reason="油性适用",
+            evidence=[EvidencePayload(source_type="chunk", snippet="s")],
+        )
+        assert e.deck_id == "deck_t1"
+        assert e.display_mode == "swipe_deck_item"
+
+
+class TestEventModels:
+    def test_thinking_event(self):
+        e = ThinkingEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="thinking_t1", stage="understanding", message="test"
+        )
+        assert e.event == "thinking"
+        data = e.model_dump()
+        assert data["stage"] == "understanding"
+
+    def test_clarification_event(self):
+        e = ClarificationEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="clarification_t1",
+            question="请问您的肤质是偏油性还是干性？",
+            required_slots=["category"],
+            suggested_options=["油性", "干性", "混合", "敏感"],
+        )
+        assert e.event == "clarification"
+
+    def test_criteria_card_event(self):
+        e = CriteriaCardEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="criteria_c1",
+            criteria=CriteriaPayload(
+                category="美妆护肤",
+                constraints=Constraints(skin_type="油性", budget_max=200),
+            ),
+            quick_actions=[],
+        )
+        assert e.editable is True
+        assert isinstance(e.criteria, CriteriaPayload)
+
+    def test_text_delta_event(self):
+        e = TextDeltaEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="ai_text_t1", message_id="m1", delta="hello", done=False
+        )
+        assert e.delta == "hello"
+        assert e.done is False
+
+    def test_product_card_event(self):
+        e = ProductCardEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="product_p1", deck_id="deck_t1",
+            rank=1,
+            product=ProductPayload(product_id="p1", name="洁面乳", category="美妆护肤"),
+            reason="油性适用",
+            evidence=[EvidencePayload(source_type="chunk", snippet="油皮推荐", source_id="c1")],
+        )
+        assert e.rank == 1
+        assert isinstance(e.product, ProductPayload)
+
+    def test_final_decision_event(self):
+        e = FinalDecisionEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="decision_t1", winner_product_id="p1", summary="选珊珂洁面乳",
+        )
+        assert e.winner_product_id == "p1"
+
+    def test_cart_action_event(self):
+        e = CartActionEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="cart_t1", action="add", product_id="p1", status="success"
+        )
+        assert e.event == "cart_action"
+
+    def test_done_event(self):
+        e = DoneEvent(session_id="s1", turn_id="t1", seq=1, event_id="t1:1", node_id="done_t1")
+        assert e.event == "done"
+
+    def test_error_event(self):
+        e = ErrorEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="error_t1", code="TIMEOUT", message="retry please"
+        )
+        assert e.retryable is True
+
+
+class TestFormatSSE:
+    def test_format_sse_wire_format(self):
+        e = ThinkingEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="thinking_t1", stage="x", message="y"
+        )
+        s = format_sse(e)
+        assert s.startswith("event: thinking\n")
+        assert 'data: {"schema_version"' in s
+        assert s.endswith("\n\n")
+
+    def test_format_sse_all_types(self):
+        events = [
+            DoneEvent(session_id="s1", turn_id="t1", seq=1, event_id="t1:1", node_id="done_t1"),
+            ErrorEvent(session_id="s1", turn_id="t1", seq=2, event_id="t1:2", node_id="error_t1", code="X", message="Y"),
+            TextDeltaEvent(session_id="s1", turn_id="t1", seq=3, event_id="t1:3", node_id="text_t1", message_id="m1", delta="hi"),
+            CartActionEvent(session_id="s1", turn_id="t1", seq=4, event_id="t1:4", node_id="cart_t1", action="add", product_id="p1", status="success"),
+        ]
+        for e in events:
+            s = format_sse(e)
+            assert s.startswith(f"event: {e.event}\n")
+            assert s.endswith("\n\n")
+
+
+class TestParseSSEEvent:
+    def test_parse_thinking(self):
+        e = ThinkingEvent(
+            session_id="s1", turn_id="t1", seq=1, event_id="t1:1",
+            node_id="thinking_t1", stage="x", message="y"
+        )
+        data = e.model_dump_json()
+        parsed = parse_sse_event(data)
+        assert isinstance(parsed, ThinkingEvent)
+        assert parsed.stage == "x"
+        assert parsed.turn_id == "t1"
+        assert parsed.seq == 1
+
+    def test_parse_unknown_tag(self):
+        assert parse_sse_event('{"event":"unknown","session_id":"s1"}') is None
+
+
+class TestSchemaValidation:
+    def test_all_events_valid_against_schema(self, sse_schema):
+        seq = EventSeq("turn_schema_test")
+        events = [
+            ThinkingEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="thinking_turn_schema_test", stage="x", message="y"
+            ),
+            ClarificationEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="clarification_turn_schema_test", question="q?"
+            ),
+            CriteriaCardEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="criteria_c1",
+                criteria=CriteriaPayload(category="美妆护肤", constraints=Constraints(skin_type="油性")),
+            ),
+            TextDeltaEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="ai_text_turn_schema_test", message_id="m1", delta="d"
+            ),
+            ProductCardEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="product_p1", deck_id="deck_turn_schema_test",
+                rank=1,
+                product=ProductPayload(product_id="p1", name="T", category="美妆护肤"),
+                reason="r",
+                evidence=[EvidencePayload(source_type="chunk", snippet="s")],
+            ),
+            CartActionEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="cart_turn_schema_test", action="add", product_id="p1", status="success"
+            ),
+            FinalDecisionEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="decision_turn_schema_test", winner_product_id="p1", summary="s"
+            ),
+            DoneEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="done_turn_schema_test"
+            ),
+            ErrorEvent(
+                session_id="s1", turn_id="turn_schema_test", seq=seq.next(), event_id=seq.event_id(),
+                node_id="error_turn_schema_test", code="X", message="Y"
+            ),
+        ]
+        for e in events:
+            data = e.model_dump()
+            jsonschema.validate(data, sse_schema)
+
+    def test_golden_trace_valid(self, sse_schema, golden_budget_beauty):
+        from tests.conftest import parse_sse_stream
+
+        events = parse_sse_stream(golden_budget_beauty)
+        assert len(events) >= 5
+        for tag, data in events:
+            assert data["event"] == tag

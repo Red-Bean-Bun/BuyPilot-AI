@@ -1,0 +1,29 @@
+event: thinking
+data: {"event": "thinking", "session_id": "demo_001", "stage": "understanding", "message": "正在理解肤质、场景、预算与成分约束"}
+
+event: criteria_card
+data: {"event": "criteria_card", "session_id": "demo_001", "editable": true, "criteria": {"category": "美妆护肤", "skin_type": "油性", "budget_min": null, "budget_max": 200, "ingredient_avoid": [], "use_scenario": "日常护肤"}, "quick_actions": [{"action_id": "budget_low", "label": "预算压低", "action": "criteria_patch", "criteria_patch": {"budget_max": 150}}, {"action_id": "sensitive_skin", "label": "敏感肌适用", "action": "criteria_patch", "criteria_patch": {"skin_type": "敏感"}}, {"action_id": "no_alcohol", "label": "不要含酒精", "action": "criteria_patch", "criteria_patch": {"ingredient_avoid": ["酒精"]}}]}
+
+event: text_delta
+data: {"event": "text_delta", "session_id": "demo_001", "message_id": "msg_ai_01", "delta": "我先按油性肌肤、200元以内、日常护肤来筛选。", "done": false}
+
+event: text_delta
+data: {"event": "text_delta", "session_id": "demo_001", "message_id": "msg_ai_01", "delta": "下面给你几款更适合油皮日常洁面的选择。", "done": true}
+
+event: thinking
+data: {"event": "thinking", "session_id": "demo_001", "stage": "searching", "message": "找到3个匹配商品..."}
+
+event: product_card
+data: {"event": "product_card", "session_id": "demo_001", "rank": 1, "product": {"product_id": "p_beauty_011", "name": "珊珂洗颜专科绵润泡沫洁面乳", "price": 52, "currency": "CNY", "image_url": "https://example.com/p_beauty_011.jpg", "skin_type_match": ["油性", "混合"], "ingredient_tags": ["氨基酸", "绵润泡沫"], "ingredient_avoid": [], "use_scenario": ["日常护肤"], "sub_category": "洁面"}, "reason": "油皮清洁力强，泡沫绵密不刺激，性价比极高。", "risk_notes": ["含微量香精，极敏感肌需留意。"], "evidence": [{"source_type": "product_chunk", "snippet": "珊珂洗颜专科绵润泡沫洁面乳，油性肌肤适用，氨基酸配方，52元", "source_id": "chunk_beauty_011"}], "actions": [{"action_id": "show_evidence", "label": "看证据", "action": "open_evidence"}, {"action_id": "dislike_product", "label": "不喜欢这个", "action": "feedback", "feedback_type": "not_interested"}]}
+
+event: product_card
+data: {"event": "product_card", "session_id": "demo_001", "rank": 2, "product": {"product_id": "p_beauty_006", "name": "巴黎欧莱雅新多重防护隔离露", "price": 170, "currency": "CNY", "image_url": "https://example.com/p_beauty_006.jpg", "skin_type_match": ["油性", "混合"], "ingredient_tags": ["防晒", "多重防护"], "ingredient_avoid": [], "use_scenario": ["日常护肤", "户外"], "sub_category": "防晒"}, "reason": "油皮防晒首选，轻薄不油腻。", "risk_notes": [], "evidence": [{"source_type": "product_chunk", "snippet": "巴黎欧莱雅新多重防护隔离露，油性适用，轻薄防晒，170元", "source_id": "chunk_beauty_006"}], "actions": [{"action_id": "show_evidence", "label": "看证据", "action": "open_evidence"}, {"action_id": "dislike_product", "label": "不喜欢这个", "action": "feedback", "feedback_type": "not_interested"}]}
+
+event: product_card
+data: {"event": "product_card", "session_id": "demo_001", "rank": 3, "product": {"product_id": "p_beauty_010", "name": "安热沙金灿倍护防晒乳", "price": 298, "currency": "CNY", "image_url": "https://example.com/p_beauty_010.jpg", "skin_type_match": ["油性", "混合", "敏感"], "ingredient_tags": ["高倍防晒", "金灿防护"], "ingredient_avoid": [], "use_scenario": ["户外", "日常护肤"], "sub_category": "防晒"}, "reason": "防晒标杆产品，防护力最强但略超预算。", "risk_notes": ["价格略超200元预算。"], "evidence": [{"source_type": "product_chunk", "snippet": "安热沙金灿倍护防晒乳，多肤质适用，高倍防晒，298元", "source_id": "chunk_beauty_010"}], "actions": [{"action_id": "show_evidence", "label": "看证据", "action": "open_evidence"}, {"action_id": "dislike_product", "label": "不喜欢这个", "action": "feedback", "feedback_type": "not_interested"}]}
+
+event: final_decision
+data: {"event": "final_decision", "session_id": "demo_001", "winner_product_id": "p_beauty_011", "summary": "如果你更看重控油效果和性价比，优先选珊珂洗颜专科洁面乳。", "why": ["油性适用", "200元内", "控油效果好", "性价比高"], "not_for": ["若你希望避免含香精产品，不建议Top1"], "alternatives": [{"product_id": "p_beauty_006", "name": "巴黎欧莱雅新多重防护隔离露"}, {"product_id": "p_beauty_010", "name": "安热沙金灿倍护防晒乳"}], "next_actions": [{"action_id": "cheaper", "label": "再便宜一点", "action": "criteria_patch", "criteria_patch": {"budget_max": 150}}, {"action_id": "sensitive_skin", "label": "敏感肌适用", "action": "criteria_patch", "criteria_patch": {"skin_type": "敏感"}}, {"action_id": "compare", "label": "加入对比", "action": "compare"}]}
+
+event: done
+data: {"event": "done", "session_id": "demo_001"}

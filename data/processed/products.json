@@ -1,0 +1,6864 @@
+[
+  {
+    "id": "p_beauty_001",
+    "name": "雅诗兰黛特润修护肌活精华露淡纹紧致保湿夜间修护抗初老精华30ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 720.0,
+    "brand": "雅诗兰黛",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_001_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_001_1",
+          "properties": {
+            "容量": "30ml 经典装"
+          },
+          "price": 720.0
+        },
+        {
+          "sku_id": "s_p_beauty_001_2",
+          "properties": {
+            "容量": "50ml 加大装"
+          },
+          "price": 980.0
+        },
+        {
+          "sku_id": "s_p_beauty_001_3",
+          "properties": {
+            "容量": "75ml 家用装"
+          },
+          "price": 1260.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_002",
+    "name": "兰蔻小黑瓶全新精华肌底液修护维稳细腻毛孔提亮肤色30ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 760.0,
+    "brand": "兰蔻",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_002_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_002_1",
+          "properties": {
+            "容量": "30ml 标准装"
+          },
+          "price": 760.0
+        },
+        {
+          "sku_id": "s_p_beauty_002_2",
+          "properties": {
+            "容量": "50ml 加大装"
+          },
+          "price": 1080.0
+        },
+        {
+          "sku_id": "s_p_beauty_002_3",
+          "properties": {
+            "容量": "75ml 家庭装"
+          },
+          "price": 1480.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_003",
+    "name": "SK-II护肤精华露神仙水晶透保湿调理角质收缩毛孔230ml",
+    "category": "美妆护肤",
+    "sub_category": "化妆水",
+    "price": 1690.0,
+    "brand": "SK-II",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_003_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_003_1",
+          "properties": {
+            "容量": "160ml 标准装"
+          },
+          "price": 1240.0
+        },
+        {
+          "sku_id": "s_p_beauty_003_2",
+          "properties": {
+            "容量": "230ml 经典大容量"
+          },
+          "price": 1690.0
+        },
+        {
+          "sku_id": "s_p_beauty_003_3",
+          "properties": {
+            "容量": "75ml 旅行装"
+          },
+          "price": 620.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_004",
+    "name": "资生堂新红妍肌活精华露红腰子修护维稳强韧肌底精华50ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 590.0,
+    "brand": "资生堂",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_004_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_004_1",
+          "properties": {
+            "容量": "30ml 经典装"
+          },
+          "price": 590.0
+        },
+        {
+          "sku_id": "s_p_beauty_004_2",
+          "properties": {
+            "容量": "50ml 加大装"
+          },
+          "price": 860.0
+        },
+        {
+          "sku_id": "s_p_beauty_004_3",
+          "properties": {
+            "容量": "75ml 家用装"
+          },
+          "price": 1040.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_005",
+    "name": "科颜氏新集焕白均衡亮肤淡斑精华液提亮肤色淡化斑点精华30ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 520.0,
+    "brand": "科颜氏",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_005_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_005_1",
+          "properties": {
+            "容量": "30ml 标准装"
+          },
+          "price": 520.0
+        },
+        {
+          "sku_id": "s_p_beauty_005_2",
+          "properties": {
+            "容量": "50ml 加大装"
+          },
+          "price": 780.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_006",
+    "name": "巴黎欧莱雅新多重防护隔离露水感轻薄高倍防晒修护提亮30ml",
+    "category": "美妆护肤",
+    "sub_category": "防晒",
+    "price": 170.0,
+    "brand": "巴黎欧莱雅",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_006_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_006_1",
+          "properties": {
+            "规格": "30ml 水感轻肌款"
+          },
+          "price": 170.0
+        },
+        {
+          "sku_id": "s_p_beauty_006_2",
+          "properties": {
+            "规格": "40ml 清爽型"
+          },
+          "price": 190.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_007",
+    "name": "薇诺娜舒敏保湿特护霜敏感肌修护屏障舒缓干痒保湿面霜50g",
+    "category": "美妆护肤",
+    "sub_category": "面霜",
+    "price": 268.0,
+    "brand": "薇诺娜",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_007_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_007_1",
+          "properties": {
+            "规格": "15g 体验装"
+          },
+          "price": 89.0
+        },
+        {
+          "sku_id": "s_p_beauty_007_2",
+          "properties": {
+            "规格": "50g 标准装"
+          },
+          "price": 268.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_008",
+    "name": "玉兰油新生塑颜金纯面霜紧致提拉淡纹保湿抗初老大红瓶50g",
+    "category": "美妆护肤",
+    "sub_category": "面霜",
+    "price": 239.0,
+    "brand": "玉兰油",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_008_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_008_1",
+          "properties": {
+            "规格": "50g 日霜"
+          },
+          "price": 239.0
+        },
+        {
+          "sku_id": "s_p_beauty_008_2",
+          "properties": {
+            "规格": "50g 滋润型"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_beauty_008_3",
+          "properties": {
+            "规格": "14g 随身装"
+          },
+          "price": 89.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_009",
+    "name": "珀莱雅弹润透亮青春精华液双抗精华提亮肤色淡纹保湿精华50ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 280.0,
+    "brand": "珀莱雅",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_009_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_009_1",
+          "properties": {
+            "容量": "30ml 标准装"
+          },
+          "price": 210.0
+        },
+        {
+          "sku_id": "s_p_beauty_009_2",
+          "properties": {
+            "容量": "50ml 双抗精华2.0"
+          },
+          "price": 280.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_010",
+    "name": "安热沙金灿倍护防晒乳高倍防水防汗清爽户外面部身体防晒60ml",
+    "category": "美妆护肤",
+    "sub_category": "防晒",
+    "price": 298.0,
+    "brand": "安热沙",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_010_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_010_1",
+          "properties": {
+            "规格": "60ml 经典金瓶"
+          },
+          "price": 298.0
+        },
+        {
+          "sku_id": "s_p_beauty_010_2",
+          "properties": {
+            "规格": "20ml 便携装"
+          },
+          "price": 118.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_011",
+    "name": "珊珂洗颜专科绵润泡沫洁面乳细腻丰富泡沫温和清洁洁面120g",
+    "category": "美妆护肤",
+    "sub_category": "洁面",
+    "price": 52.0,
+    "brand": "珊珂",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_011_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_011_1",
+          "properties": {
+            "规格": "120g 标准装"
+          },
+          "price": 52.0
+        },
+        {
+          "sku_id": "s_p_beauty_011_2",
+          "properties": {
+            "规格": "150ml 起泡泵装"
+          },
+          "price": 69.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_012",
+    "name": "理肤泉特安舒缓修复霜滋润型敏感肌保湿修护屏障面霜40ml",
+    "category": "美妆护肤",
+    "sub_category": "面霜",
+    "price": 260.0,
+    "brand": "理肤泉",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_012_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_012_1",
+          "properties": {
+            "规格": "40ml 滋润型"
+          },
+          "price": 260.0
+        },
+        {
+          "sku_id": "s_p_beauty_012_2",
+          "properties": {
+            "规格": "40ml 清爽型"
+          },
+          "price": 260.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_013",
+    "name": "方里柔焦蜜粉饼控油定妆细腻粉质隐匿毛孔提亮肤色粉饼7g",
+    "category": "美妆护肤",
+    "sub_category": "蜜粉",
+    "price": 99.0,
+    "brand": "方里",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_013_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_013_1",
+          "properties": {
+            "产品规格": "7g 清透色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_beauty_013_2",
+          "properties": {
+            "产品规格": "12g 清透色补充装"
+          },
+          "price": 139.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_014",
+    "name": "花西子空气蜜粉轻盈定妆控油提亮肤色细腻粉质散粉8.5g",
+    "category": "美妆护肤",
+    "sub_category": "蜜粉",
+    "price": 169.0,
+    "brand": "花西子",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_014_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_014_1",
+          "properties": {
+            "规格": "8.5g 经典空气蜜粉"
+          },
+          "price": 169.0
+        },
+        {
+          "sku_id": "s_p_beauty_014_2",
+          "properties": {
+            "规格": "8.5g 控油款"
+          },
+          "price": 169.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_015",
+    "name": "完美日记仿生膜精华唇釉丝绒哑光滋润显色持妆唇部彩妆3g",
+    "category": "美妆护肤",
+    "sub_category": "唇釉",
+    "price": 120.0,
+    "brand": "完美日记",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_015_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_015_1",
+          "properties": {
+            "色号规格": "3g 经典色号"
+          },
+          "price": 120.0
+        },
+        {
+          "sku_id": "s_p_beauty_015_2",
+          "properties": {
+            "色号规格": "3g 限定色号"
+          },
+          "price": 129.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_016",
+    "name": "AHC塑颜修护全脸眼霜紧致淡纹保湿提亮多效眼周护理30ml",
+    "category": "美妆护肤",
+    "sub_category": "眼霜",
+    "price": 139.0,
+    "brand": "AHC",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_016_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_016_1",
+          "properties": {
+            "规格": "30ml 第七代全脸眼霜"
+          },
+          "price": 139.0
+        },
+        {
+          "sku_id": "s_p_beauty_016_2",
+          "properties": {
+            "规格": "30ml 升级版"
+          },
+          "price": 159.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_017",
+    "name": "芳珂纳米温和净化卸妆油深层清洁毛孔无添加卸妆液120ml",
+    "category": "美妆护肤",
+    "sub_category": "卸妆",
+    "price": 178.0,
+    "brand": "芳珂",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_017_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_017_1",
+          "properties": {
+            "规格": "120ml 经典蓝瓶"
+          },
+          "price": 178.0
+        },
+        {
+          "sku_id": "s_p_beauty_017_2",
+          "properties": {
+            "规格": "120ml 限量设计款"
+          },
+          "price": 198.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_018",
+    "name": "The Ordinary烟酰胺10%锌1%精华液平衡油脂淡化毛孔提亮肤色30ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 59.0,
+    "brand": "The Ordinary",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_018_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_018_1",
+          "properties": {
+            "容量": "30ml 标准装"
+          },
+          "price": 59.0
+        },
+        {
+          "sku_id": "s_p_beauty_018_2",
+          "properties": {
+            "容量": "60ml 大容量装"
+          },
+          "price": 98.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_019",
+    "name": "兰蔻清滢柔肤水大粉水保湿舒缓干性肌肤柔润爽肤水400ml",
+    "category": "美妆护肤",
+    "sub_category": "化妆水",
+    "price": 582.0,
+    "brand": "兰蔻",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_019_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_019_1",
+          "properties": {
+            "容量": "400ml 清滢柔肤水"
+          },
+          "price": 582.0
+        },
+        {
+          "sku_id": "s_p_beauty_019_2",
+          "properties": {
+            "容量": "200ml 旅行装"
+          },
+          "price": 360.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_020",
+    "name": "雅诗兰黛持妆粉底液SPF10PA持久遮瑕控油抗汗清透底妆30ml",
+    "category": "美妆护肤",
+    "sub_category": "粉底液",
+    "price": 440.0,
+    "brand": "雅诗兰黛",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_020_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_020_1",
+          "properties": {
+            "版本": "30ml 经典持妆粉底液"
+          },
+          "price": 440.0
+        },
+        {
+          "sku_id": "s_p_beauty_020_2",
+          "properties": {
+            "版本": "30ml 油皮友好色号"
+          },
+          "price": 440.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_021",
+    "name": "科颜氏牛油果保湿眼霜滋润补水细腻质地淡化干纹眼周护理28g",
+    "category": "美妆护肤",
+    "sub_category": "眼霜",
+    "price": 320.0,
+    "brand": "科颜氏",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_021_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_021_1",
+          "properties": {
+            "容量": "14g 便携装"
+          },
+          "price": 210.0
+        },
+        {
+          "sku_id": "s_p_beauty_021_2",
+          "properties": {
+            "容量": "28g 标准装"
+          },
+          "price": 320.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_022",
+    "name": "薇诺娜极润保湿面膜密集补水舒缓修护肌肤屏障涂抹式面膜75g",
+    "category": "美妆护肤",
+    "sub_category": "面膜",
+    "price": 199.0,
+    "brand": "薇诺娜",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_022_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_022_1",
+          "properties": {
+            "产品规格": "75g 涂抹式面膜"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_beauty_022_2",
+          "properties": {
+            "产品规格": "25g*5片 贴片装面膜"
+          },
+          "price": 168.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_023",
+    "name": "理肤泉特护清盈防晒乳高倍防晒清爽控油易敏肌适用面部防晒50ml",
+    "category": "美妆护肤",
+    "sub_category": "防晒",
+    "price": 268.0,
+    "brand": "理肤泉",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_023_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_023_1",
+          "properties": {
+            "产品规格": "50ml 清盈型"
+          },
+          "price": 268.0
+        },
+        {
+          "sku_id": "s_p_beauty_023_2",
+          "properties": {
+            "产品规格": "50ml 轻薄无润色"
+          },
+          "price": 268.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_024",
+    "name": "珀莱雅赋能鲜颜淡纹紧致精华液抗皱紧致提升弹润淡化细纹30ml",
+    "category": "美妆护肤",
+    "sub_category": "精华",
+    "price": 300.0,
+    "brand": "珀莱雅",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_024_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_024_1",
+          "properties": {
+            "容量": "30ml 赋能鲜颜淡纹精华"
+          },
+          "price": 300.0
+        },
+        {
+          "sku_id": "s_p_beauty_024_2",
+          "properties": {
+            "容量": "45ml 加大装"
+          },
+          "price": 398.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_beauty_025",
+    "name": "花西子螺黛生花眉笔细节点描顺滑显色防晕染持久双头眉笔0.08g",
+    "category": "美妆护肤",
+    "sub_category": "眉笔",
+    "price": 89.0,
+    "brand": "花西子",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/1_美妆护肤/images/p_beauty_025_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_beauty_025_1",
+          "properties": {
+            "色号": "0.08g 经典色号"
+          },
+          "price": 89.0
+        },
+        {
+          "sku_id": "s_p_beauty_025_2",
+          "properties": {
+            "色号": "0.08g 自然棕"
+          },
+          "price": 89.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_001",
+    "name": "Apple iPhone 17 Pro 6.3英寸 A19 Pro 256GB 全网通旗舰手机",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 8999.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_001_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_001_1",
+          "properties": {
+            "存储": "256GB",
+            "颜色": "宇宙橙 Cosmic Orange",
+            "版本": "全网通版"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_001_2",
+          "properties": {
+            "存储": "256GB",
+            "颜色": "远峰蓝",
+            "版本": "全网通版"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_001_3",
+          "properties": {
+            "存储": "256GB",
+            "颜色": "深空黑",
+            "版本": "全网通版"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_001_4",
+          "properties": {
+            "存储": "512GB",
+            "颜色": "宇宙橙 Cosmic Orange",
+            "版本": "全网通版"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_001_5",
+          "properties": {
+            "存储": "512GB",
+            "颜色": "远峰蓝",
+            "版本": "全网通版"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_001_6",
+          "properties": {
+            "存储": "512GB",
+            "颜色": "深空黑",
+            "版本": "全网通版"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_001_7",
+          "properties": {
+            "存储": "1TB",
+            "颜色": "宇宙橙 Cosmic Orange",
+            "版本": "全网通版"
+          },
+          "price": 12499.0
+        },
+        {
+          "sku_id": "s_p_digital_001_8",
+          "properties": {
+            "存储": "1TB",
+            "颜色": "远峰蓝",
+            "版本": "全网通版"
+          },
+          "price": 12499.0
+        },
+        {
+          "sku_id": "s_p_digital_001_9",
+          "properties": {
+            "存储": "1TB",
+            "颜色": "深空黑",
+            "版本": "全网通版"
+          },
+          "price": 12499.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_002",
+    "name": "华为HUAWEI Pura 90 Pro 超感光影像曲面屏轻薄旗舰手机12+256GB",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 6999.0,
+    "brand": "华为",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_002_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_002_1",
+          "properties": {
+            "存储": "12GB+256GB",
+            "颜色": "星芒黑",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_002_2",
+          "properties": {
+            "存储": "12GB+256GB",
+            "颜色": "雪域白",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_002_3",
+          "properties": {
+            "存储": "12GB+256GB",
+            "颜色": "幻影紫",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_002_4",
+          "properties": {
+            "存储": "12GB+256GB",
+            "颜色": "青釉绿",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_002_5",
+          "properties": {
+            "存储": "12GB+512GB",
+            "颜色": "星芒黑",
+            "版本": "高配版"
+          },
+          "price": 7699.0
+        },
+        {
+          "sku_id": "s_p_digital_002_6",
+          "properties": {
+            "存储": "12GB+512GB",
+            "颜色": "雪域白",
+            "版本": "高配版"
+          },
+          "price": 7699.0
+        },
+        {
+          "sku_id": "s_p_digital_002_7",
+          "properties": {
+            "存储": "12GB+512GB",
+            "颜色": "幻影紫",
+            "版本": "高配版"
+          },
+          "price": 7699.0
+        },
+        {
+          "sku_id": "s_p_digital_002_8",
+          "properties": {
+            "存储": "12GB+512GB",
+            "颜色": "青釉绿",
+            "版本": "高配版"
+          },
+          "price": 7699.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_003",
+    "name": "Apple iPhone 17 Pro Max 6.9英寸 A19 Pro 256GB 大屏旗舰手机",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 9999.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_003_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_003_1",
+          "properties": {
+            "存储": "256GB",
+            "颜色": "宇宙橙 Cosmic Orange",
+            "版本": "全网通版"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_003_2",
+          "properties": {
+            "存储": "256GB",
+            "颜色": "冰川蓝",
+            "版本": "全网通版"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_003_3",
+          "properties": {
+            "存储": "256GB",
+            "颜色": "钛金色",
+            "版本": "全网通版"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_003_4",
+          "properties": {
+            "存储": "512GB",
+            "颜色": "宇宙橙 Cosmic Orange",
+            "版本": "全网通版"
+          },
+          "price": 11499.0
+        },
+        {
+          "sku_id": "s_p_digital_003_5",
+          "properties": {
+            "存储": "512GB",
+            "颜色": "冰川蓝",
+            "版本": "全网通版"
+          },
+          "price": 11499.0
+        },
+        {
+          "sku_id": "s_p_digital_003_6",
+          "properties": {
+            "存储": "512GB",
+            "颜色": "钛金色",
+            "版本": "全网通版"
+          },
+          "price": 11499.0
+        },
+        {
+          "sku_id": "s_p_digital_003_7",
+          "properties": {
+            "存储": "1TB",
+            "颜色": "宇宙橙 Cosmic Orange",
+            "版本": "全网通版"
+          },
+          "price": 13499.0
+        },
+        {
+          "sku_id": "s_p_digital_003_8",
+          "properties": {
+            "存储": "1TB",
+            "颜色": "冰川蓝",
+            "版本": "全网通版"
+          },
+          "price": 13499.0
+        },
+        {
+          "sku_id": "s_p_digital_003_9",
+          "properties": {
+            "存储": "1TB",
+            "颜色": "钛金色",
+            "版本": "全网通版"
+          },
+          "price": 13499.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_004",
+    "name": "华为HUAWEI MateBook 14 鸿蒙版 14英寸轻薄高性能生产力笔记本",
+    "category": "数码电子",
+    "sub_category": "笔记本电脑",
+    "price": 6299.0,
+    "brand": "华为",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_004_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_004_1",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "锐龙版"
+          },
+          "price": 6299.0
+        },
+        {
+          "sku_id": "s_p_digital_004_2",
+          "properties": {
+            "存储": "16GB+1TB",
+            "版本": "锐龙版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_004_3",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "鸿蒙版"
+          },
+          "price": 6499.0
+        },
+        {
+          "sku_id": "s_p_digital_004_4",
+          "properties": {
+            "存储": "16GB+1TB",
+            "版本": "鸿蒙版"
+          },
+          "price": 7199.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_005",
+    "name": "华为HUAWEI MatePad Pro Max 12.6英寸高刷屏多任务办公平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 4999.0,
+    "brand": "华为",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_005_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_005_1",
+          "properties": {
+            "存储规格": "8GB+256GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 4999.0
+        },
+        {
+          "sku_id": "s_p_digital_005_2",
+          "properties": {
+            "存储规格": "12GB+256GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 5299.0
+        },
+        {
+          "sku_id": "s_p_digital_005_3",
+          "properties": {
+            "存储规格": "8GB+512GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 5499.0
+        },
+        {
+          "sku_id": "s_p_digital_005_4",
+          "properties": {
+            "存储规格": "12GB+512GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 5799.0
+        },
+        {
+          "sku_id": "s_p_digital_005_5",
+          "properties": {
+            "存储规格": "8GB+256GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 5599.0
+        },
+        {
+          "sku_id": "s_p_digital_005_6",
+          "properties": {
+            "存储规格": "12GB+256GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 5899.0
+        },
+        {
+          "sku_id": "s_p_digital_005_7",
+          "properties": {
+            "存储规格": "8GB+512GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 6099.0
+        },
+        {
+          "sku_id": "s_p_digital_005_8",
+          "properties": {
+            "存储规格": "12GB+512GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 6399.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_006",
+    "name": "Apple MacBook Pro 14英寸 M5 芯片 16GB 512GB 专业高性能笔记本电脑",
+    "category": "数码电子",
+    "sub_category": "笔记本电脑",
+    "price": 13499.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_006_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_006_1",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "16GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 13499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_2",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "16GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 13499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_3",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "16GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 14999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_4",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "16GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 14999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_5",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 15499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_6",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 15499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_7",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 16999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_8",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 16999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_9",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 16499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_10",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 16499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_11",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 17499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_12",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "24GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 17499.0
+        },
+        {
+          "sku_id": "s_p_digital_006_13",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "32GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 16999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_14",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "32GB",
+            "固态硬盘容量": "512GB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 16999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_15",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "32GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "深空黑"
+          },
+          "price": 17999.0
+        },
+        {
+          "sku_id": "s_p_digital_006_16",
+          "properties": {
+            "屏幕尺寸": "14英寸",
+            "芯片型号": "M5 Pro 芯片",
+            "内存容量": "32GB",
+            "固态硬盘容量": "1TB SSD",
+            "机身颜色": "银色"
+          },
+          "price": 17999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_007",
+    "name": "华为HUAWEI FreeBuds Pro 5 主动降噪真无线蓝牙耳机高解析音质",
+    "category": "数码电子",
+    "sub_category": "真无线耳机",
+    "price": 1699.0,
+    "brand": "华为",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_007_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_007_1",
+          "properties": {
+            "版本": "标准版",
+            "颜色": "典雅黑"
+          },
+          "price": 1699.0
+        },
+        {
+          "sku_id": "s_p_digital_007_2",
+          "properties": {
+            "版本": "标准版",
+            "颜色": "冰霜银"
+          },
+          "price": 1699.0
+        },
+        {
+          "sku_id": "s_p_digital_007_3",
+          "properties": {
+            "版本": "标准版",
+            "颜色": "羽沙白"
+          },
+          "price": 1699.0
+        },
+        {
+          "sku_id": "s_p_digital_007_4",
+          "properties": {
+            "版本": "有线充基础版",
+            "颜色": "典雅黑"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_digital_007_5",
+          "properties": {
+            "版本": "有线充基础版",
+            "颜色": "冰霜银"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_digital_007_6",
+          "properties": {
+            "版本": "有线充基础版",
+            "颜色": "羽沙白"
+          },
+          "price": 1499.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_008",
+    "name": "小米 17 Ultra 2K高刷屏潜望长焦澎湃芯片影像旗舰5G手机12+256GB",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 7499.0,
+    "brand": "小米",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_008_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_008_1",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "标准版"
+          },
+          "price": 7499.0
+        },
+        {
+          "sku_id": "s_p_digital_008_2",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 8299.0
+        },
+        {
+          "sku_id": "s_p_digital_008_3",
+          "properties": {
+            "存储": "16GB+1TB",
+            "版本": "顶配版"
+          },
+          "price": 9299.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_009",
+    "name": "小米 17 Max 大屏长续航高性能影音游戏5G智能手机12+256GB",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 6499.0,
+    "brand": "小米",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_009_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_009_1",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "标准版"
+          },
+          "price": 6499.0
+        },
+        {
+          "sku_id": "s_p_digital_009_2",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "高配版"
+          },
+          "price": 6699.0
+        },
+        {
+          "sku_id": "s_p_digital_009_3",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 6899.0
+        },
+        {
+          "sku_id": "s_p_digital_009_4",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 7099.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_010",
+    "name": "小米 MIX Fold 5 内折大屏旗舰折叠屏手机多任务办公影音利器",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 9999.0,
+    "brand": "小米",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_010_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_010_1",
+          "properties": {
+            "存储配置": "12GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_010_2",
+          "properties": {
+            "存储配置": "12GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_010_3",
+          "properties": {
+            "存储配置": "16GB+1TB",
+            "版本": "标准版"
+          },
+          "price": 10799.0
+        },
+        {
+          "sku_id": "s_p_digital_010_4",
+          "properties": {
+            "存储配置": "16GB+1TB",
+            "版本": "高配版"
+          },
+          "price": 11299.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_011",
+    "name": "小米平板 8 Pro 12.1英寸高刷大屏影音娱乐学习办公平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 3299.0,
+    "brand": "小米",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_011_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_011_1",
+          "properties": {
+            "运行内存": "8GB",
+            "机身存储": "256GB",
+            "网络版本": "Wi-Fi版"
+          },
+          "price": 3299.0
+        },
+        {
+          "sku_id": "s_p_digital_011_2",
+          "properties": {
+            "运行内存": "8GB",
+            "机身存储": "512GB",
+            "网络版本": "Wi-Fi版"
+          },
+          "price": 3599.0
+        },
+        {
+          "sku_id": "s_p_digital_011_3",
+          "properties": {
+            "运行内存": "12GB",
+            "机身存储": "256GB",
+            "网络版本": "Wi-Fi版"
+          },
+          "price": 3499.0
+        },
+        {
+          "sku_id": "s_p_digital_011_4",
+          "properties": {
+            "运行内存": "12GB",
+            "机身存储": "512GB",
+            "网络版本": "Wi-Fi版"
+          },
+          "price": 3799.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_012",
+    "name": "Apple MacBook Pro 16英寸 M5 Pro 芯片 32GB 1TB 创意设计师笔记本电脑",
+    "category": "数码电子",
+    "sub_category": "笔记本电脑",
+    "price": 21999.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_012_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_012_1",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "32GB",
+            "固态硬盘容量": "1TB SSD",
+            "颜色": "银色"
+          },
+          "price": 21999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_2",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "32GB",
+            "固态硬盘容量": "1TB SSD",
+            "颜色": "深空黑"
+          },
+          "price": 21999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_3",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "32GB",
+            "固态硬盘容量": "2TB SSD",
+            "颜色": "银色"
+          },
+          "price": 23999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_4",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "32GB",
+            "固态硬盘容量": "2TB SSD",
+            "颜色": "深空黑"
+          },
+          "price": 23999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_5",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "48GB",
+            "固态硬盘容量": "1TB SSD",
+            "颜色": "银色"
+          },
+          "price": 25999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_6",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "48GB",
+            "固态硬盘容量": "1TB SSD",
+            "颜色": "深空黑"
+          },
+          "price": 25999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_7",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "48GB",
+            "固态硬盘容量": "2TB SSD",
+            "颜色": "银色"
+          },
+          "price": 27999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_8",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Pro",
+            "运行内存": "48GB",
+            "固态硬盘容量": "2TB SSD",
+            "颜色": "深空黑"
+          },
+          "price": 27999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_9",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Max",
+            "运行内存": "64GB",
+            "固态硬盘容量": "1TB SSD",
+            "颜色": "银色"
+          },
+          "price": 27999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_10",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Max",
+            "运行内存": "64GB",
+            "固态硬盘容量": "1TB SSD",
+            "颜色": "深空黑"
+          },
+          "price": 27999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_11",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Max",
+            "运行内存": "64GB",
+            "固态硬盘容量": "2TB SSD",
+            "颜色": "银色"
+          },
+          "price": 29999.0
+        },
+        {
+          "sku_id": "s_p_digital_012_12",
+          "properties": {
+            "尺寸": "16英寸",
+            "芯片型号": "M5 Max",
+            "运行内存": "64GB",
+            "固态硬盘容量": "2TB SSD",
+            "颜色": "深空黑"
+          },
+          "price": 29999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_013",
+    "name": "Apple iPad Pro 13英寸 (M5) Liquid视网膜 XDR 显示屏 256GB Wi‑Fi 平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 8999.0,
+    "brand": "苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_013_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_013_1",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "256GB",
+            "版本": "Wi‑Fi",
+            "颜色": "深空黑"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_013_2",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "256GB",
+            "版本": "Wi‑Fi",
+            "颜色": "银色"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_013_3",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "256GB",
+            "版本": "蜂窝网络",
+            "颜色": "深空黑"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_013_4",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "256GB",
+            "版本": "蜂窝网络",
+            "颜色": "银色"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_013_5",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "512GB",
+            "版本": "Wi‑Fi",
+            "颜色": "深空黑"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_013_6",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "512GB",
+            "版本": "Wi‑Fi",
+            "颜色": "银色"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_013_7",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "512GB",
+            "版本": "蜂窝网络",
+            "颜色": "深空黑"
+          },
+          "price": 11499.0
+        },
+        {
+          "sku_id": "s_p_digital_013_8",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "存储容量": "512GB",
+            "版本": "蜂窝网络",
+            "颜色": "银色"
+          },
+          "price": 11499.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_014",
+    "name": "OPPO Find N6 内折柔性大屏旗舰折叠屏手机多任务办公影音体验",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 9699.0,
+    "brand": "OPPO",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_014_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_014_1",
+          "properties": {
+            "存储": "12GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 9699.0
+        },
+        {
+          "sku_id": "s_p_digital_014_2",
+          "properties": {
+            "存储": "12GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_014_3",
+          "properties": {
+            "存储": "16GB+1TB",
+            "版本": "标准版"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_014_4",
+          "properties": {
+            "存储": "16GB+1TB",
+            "版本": "高配版"
+          },
+          "price": 11299.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_015",
+    "name": "OPPO Find X9 Ultra 超大底影像旗舰2K高刷屏长续航5G智能手机",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 6999.0,
+    "brand": "OPPO",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_015_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_015_1",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_015_2",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "高配版"
+          },
+          "price": 7399.0
+        },
+        {
+          "sku_id": "s_p_digital_015_3",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 7599.0
+        },
+        {
+          "sku_id": "s_p_digital_015_4",
+          "properties": {
+            "存储": "16GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 7799.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_016",
+    "name": "OPPO Reno 16 Pro 轻薄人像摄影高刷屏快充5G智能手机12+256GB",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 3299.0,
+    "brand": "OPPO",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_016_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_016_1",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "标准版"
+          },
+          "price": 3299.0
+        },
+        {
+          "sku_id": "s_p_digital_016_2",
+          "properties": {
+            "存储": "12GB+256GB",
+            "版本": "高配版"
+          },
+          "price": 3449.0
+        },
+        {
+          "sku_id": "s_p_digital_016_3",
+          "properties": {
+            "存储": "12GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 3549.0
+        },
+        {
+          "sku_id": "s_p_digital_016_4",
+          "properties": {
+            "存储": "12GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 3699.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_017",
+    "name": "vivo X300 Ultra 旗舰影像2K护眼屏长续航高性能5G智能手机",
+    "category": "数码电子",
+    "sub_category": "智能手机",
+    "price": 6999.0,
+    "brand": "vivo",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_017_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_017_1",
+          "properties": {
+            "内存组合": "12GB+256GB",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_017_2",
+          "properties": {
+            "内存组合": "12GB+256GB",
+            "版本": "高配版"
+          },
+          "price": 7399.0
+        },
+        {
+          "sku_id": "s_p_digital_017_3",
+          "properties": {
+            "内存组合": "16GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 7399.0
+        },
+        {
+          "sku_id": "s_p_digital_017_4",
+          "properties": {
+            "内存组合": "16GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 7799.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_018",
+    "name": "Apple AirPods Pro 3 主动降噪真无线蓝牙耳机 心率监测版",
+    "category": "数码电子",
+    "sub_category": "真无线耳机",
+    "price": 1899.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_018_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_018_1",
+          "properties": {
+            "产品版本": "标准版 AirPods Pro 3",
+            "充电盒类型": "MagSafe 充电盒",
+            "定制服务": "无刻印",
+            "附加服务": "无AppleCare+"
+          },
+          "price": 1899.0
+        },
+        {
+          "sku_id": "s_p_digital_018_2",
+          "properties": {
+            "产品版本": "标准版 AirPods Pro 3",
+            "充电盒类型": "MagSafe 充电盒",
+            "定制服务": "无刻印",
+            "附加服务": "含AppleCare+"
+          },
+          "price": 2199.0
+        },
+        {
+          "sku_id": "s_p_digital_018_3",
+          "properties": {
+            "产品版本": "标准版 AirPods Pro 3",
+            "充电盒类型": "普通无线充电盒",
+            "定制服务": "无刻印",
+            "附加服务": "无AppleCare+"
+          },
+          "price": 1799.0
+        },
+        {
+          "sku_id": "s_p_digital_018_4",
+          "properties": {
+            "产品版本": "标准版 AirPods Pro 3",
+            "充电盒类型": "普通无线充电盒",
+            "定制服务": "无刻印",
+            "附加服务": "含AppleCare+"
+          },
+          "price": 2099.0
+        },
+        {
+          "sku_id": "s_p_digital_018_5",
+          "properties": {
+            "产品版本": "AirPods Pro 3 马年特别款",
+            "充电盒类型": "MagSafe 充电盒",
+            "定制服务": "定制镌刻",
+            "附加服务": "无AppleCare+"
+          },
+          "price": 1999.0
+        },
+        {
+          "sku_id": "s_p_digital_018_6",
+          "properties": {
+            "产品版本": "AirPods Pro 3 马年特别款",
+            "充电盒类型": "MagSafe 充电盒",
+            "定制服务": "定制镌刻",
+            "附加服务": "含AppleCare+"
+          },
+          "price": 2299.0
+        },
+        {
+          "sku_id": "s_p_digital_018_7",
+          "properties": {
+            "产品版本": "标准版 AirPods Pro 3",
+            "充电盒类型": "普通无线充电盒",
+            "定制服务": "定制镌刻",
+            "附加服务": "无AppleCare+"
+          },
+          "price": 1849.0
+        },
+        {
+          "sku_id": "s_p_digital_018_8",
+          "properties": {
+            "产品版本": "标准版 AirPods Pro 3",
+            "充电盒类型": "MagSafe 充电盒",
+            "定制服务": "定制镌刻",
+            "附加服务": "含AppleCare+"
+          },
+          "price": 2249.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_019",
+    "name": "vivo Pad 6 Pro 12.1英寸高刷全面屏学习娱乐多任务办公平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 3299.0,
+    "brand": "vivo",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_019_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_019_1",
+          "properties": {
+            "存储配置": "8GB+256GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 3299.0
+        },
+        {
+          "sku_id": "s_p_digital_019_2",
+          "properties": {
+            "存储配置": "12GB+256GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 3599.0
+        },
+        {
+          "sku_id": "s_p_digital_019_3",
+          "properties": {
+            "存储配置": "12GB+512GB",
+            "网络版本": "Wi-Fi 版"
+          },
+          "price": 3899.0
+        },
+        {
+          "sku_id": "s_p_digital_019_4",
+          "properties": {
+            "存储配置": "8GB+256GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 3699.0
+        },
+        {
+          "sku_id": "s_p_digital_019_5",
+          "properties": {
+            "存储配置": "12GB+256GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 3999.0
+        },
+        {
+          "sku_id": "s_p_digital_019_6",
+          "properties": {
+            "存储配置": "12GB+512GB",
+            "网络版本": "全网通5G版"
+          },
+          "price": 4299.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_020",
+    "name": "Apple MacBook Air 13英寸 M5 芯片 16GB 512GB 轻薄便携笔记本电脑",
+    "category": "数码电子",
+    "sub_category": "笔记本电脑",
+    "price": 8499.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_020_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_020_1",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "512GB SSD",
+            "颜色": "天蓝色"
+          },
+          "price": 8499.0
+        },
+        {
+          "sku_id": "s_p_digital_020_2",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "512GB SSD",
+            "颜色": "午夜色"
+          },
+          "price": 8499.0
+        },
+        {
+          "sku_id": "s_p_digital_020_3",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "512GB SSD",
+            "颜色": "星光色"
+          },
+          "price": 8499.0
+        },
+        {
+          "sku_id": "s_p_digital_020_4",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "1TB SSD",
+            "颜色": "天蓝色"
+          },
+          "price": 9499.0
+        },
+        {
+          "sku_id": "s_p_digital_020_5",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "1TB SSD",
+            "颜色": "午夜色"
+          },
+          "price": 9499.0
+        },
+        {
+          "sku_id": "s_p_digital_020_6",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "1TB SSD",
+            "颜色": "星光色"
+          },
+          "price": 9499.0
+        },
+        {
+          "sku_id": "s_p_digital_020_7",
+          "properties": {
+            "屏幕尺寸": "15英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "512GB SSD",
+            "颜色": "天蓝色"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_020_8",
+          "properties": {
+            "屏幕尺寸": "15英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "512GB SSD",
+            "颜色": "午夜色"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_020_9",
+          "properties": {
+            "屏幕尺寸": "15英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "512GB SSD",
+            "颜色": "星光色"
+          },
+          "price": 9999.0
+        },
+        {
+          "sku_id": "s_p_digital_020_10",
+          "properties": {
+            "屏幕尺寸": "15英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "1TB SSD",
+            "颜色": "天蓝色"
+          },
+          "price": 10999.0
+        },
+        {
+          "sku_id": "s_p_digital_020_11",
+          "properties": {
+            "屏幕尺寸": "15英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "1TB SSD",
+            "颜色": "午夜色"
+          },
+          "price": 10999.0
+        },
+        {
+          "sku_id": "s_p_digital_020_12",
+          "properties": {
+            "屏幕尺寸": "15英寸",
+            "芯片": "M5芯片",
+            "内存": "16GB内存",
+            "固态存储": "1TB SSD",
+            "颜色": "星光色"
+          },
+          "price": 10999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_021",
+    "name": "华为 MatePad Pro 13.2英寸 柔性OLED高刷屏轻办公创作旗舰平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 5199.0,
+    "brand": "华为",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_021_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_021_1",
+          "properties": {
+            "屏幕尺寸": "13.2英寸",
+            "存储": "12GB+256GB",
+            "网络版本": "WiFi版",
+            "颜色": "砚黑"
+          },
+          "price": 5199.0
+        },
+        {
+          "sku_id": "s_p_digital_021_2",
+          "properties": {
+            "屏幕尺寸": "13.2英寸",
+            "存储": "12GB+256GB",
+            "网络版本": "WiFi版",
+            "颜色": "宣白"
+          },
+          "price": 5199.0
+        },
+        {
+          "sku_id": "s_p_digital_021_3",
+          "properties": {
+            "屏幕尺寸": "13.2英寸",
+            "存储": "12GB+512GB",
+            "网络版本": "WiFi版",
+            "颜色": "砚黑"
+          },
+          "price": 5699.0
+        },
+        {
+          "sku_id": "s_p_digital_021_4",
+          "properties": {
+            "屏幕尺寸": "13.2英寸",
+            "存储": "12GB+512GB",
+            "网络版本": "WiFi版",
+            "颜色": "宣白"
+          },
+          "price": 5699.0
+        },
+        {
+          "sku_id": "s_p_digital_021_5",
+          "properties": {
+            "屏幕尺寸": "13.2英寸",
+            "存储": "12GB+512GB",
+            "网络版本": "星闪键盘套装版",
+            "颜色": "砚黑"
+          },
+          "price": 6299.0
+        },
+        {
+          "sku_id": "s_p_digital_021_6",
+          "properties": {
+            "屏幕尺寸": "13.2英寸",
+            "存储": "16GB+1TB",
+            "网络版本": "星闪键盘套装版",
+            "颜色": "宣白"
+          },
+          "price": 7299.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_022",
+    "name": "联想 ThinkPad X1 Carbon Aura AI 元启版2026 14英寸高端商务轻薄本",
+    "category": "数码电子",
+    "sub_category": "笔记本电脑",
+    "price": 10999.0,
+    "brand": "联想",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_022_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_022_1",
+          "properties": {
+            "存储配置": "16GB+512GB",
+            "产品版本": "商务版"
+          },
+          "price": 10999.0
+        },
+        {
+          "sku_id": "s_p_digital_022_2",
+          "properties": {
+            "存储配置": "16GB+512GB",
+            "产品版本": "高配版"
+          },
+          "price": 11499.0
+        },
+        {
+          "sku_id": "s_p_digital_022_3",
+          "properties": {
+            "存储配置": "32GB+1TB",
+            "产品版本": "商务版"
+          },
+          "price": 12499.0
+        },
+        {
+          "sku_id": "s_p_digital_022_4",
+          "properties": {
+            "存储配置": "32GB+1TB",
+            "产品版本": "高配版"
+          },
+          "price": 12999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_023",
+    "name": "联想 ThinkBook 14+ 2026 全面屏高性能轻薄本商务学习笔记本电脑",
+    "category": "数码电子",
+    "sub_category": "笔记本电脑",
+    "price": 6999.0,
+    "brand": "联想",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_023_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_023_1",
+          "properties": {
+            "存储配置": "16GB+512GB",
+            "版本": "标准版"
+          },
+          "price": 6999.0
+        },
+        {
+          "sku_id": "s_p_digital_023_2",
+          "properties": {
+            "存储配置": "16GB+512GB",
+            "版本": "高配版"
+          },
+          "price": 7499.0
+        },
+        {
+          "sku_id": "s_p_digital_023_3",
+          "properties": {
+            "存储配置": "32GB+1TB",
+            "版本": "标准版"
+          },
+          "price": 7499.0
+        },
+        {
+          "sku_id": "s_p_digital_023_4",
+          "properties": {
+            "存储配置": "32GB+1TB",
+            "版本": "高配版"
+          },
+          "price": 7999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_024",
+    "name": "Apple iPad Pro 13 英寸 M4 芯片 256GB Wi‑Fi 平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 8999.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_024_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_024_1",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "256GB",
+            "网络版本": "Wi‑Fi",
+            "颜色": "银色"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_2",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "256GB",
+            "网络版本": "Wi‑Fi",
+            "颜色": "深空黑"
+          },
+          "price": 8999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_3",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "256GB",
+            "网络版本": "Wi‑Fi + 蜂窝",
+            "颜色": "银色"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_024_4",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "256GB",
+            "网络版本": "Wi‑Fi + 蜂窝",
+            "颜色": "深空黑"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_024_5",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "512GB",
+            "网络版本": "Wi‑Fi",
+            "颜色": "银色"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_024_6",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "512GB",
+            "网络版本": "Wi‑Fi",
+            "颜色": "深空黑"
+          },
+          "price": 10499.0
+        },
+        {
+          "sku_id": "s_p_digital_024_7",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "512GB",
+            "网络版本": "Wi‑Fi + 蜂窝",
+            "颜色": "银色"
+          },
+          "price": 11999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_8",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "512GB",
+            "网络版本": "Wi‑Fi + 蜂窝",
+            "颜色": "深空黑"
+          },
+          "price": 11999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_9",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "1TB",
+            "网络版本": "Wi‑Fi",
+            "颜色": "银色"
+          },
+          "price": 11999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_10",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "1TB",
+            "网络版本": "Wi‑Fi",
+            "颜色": "深空黑"
+          },
+          "price": 11999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_11",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "1TB",
+            "网络版本": "Wi‑Fi + 蜂窝",
+            "颜色": "银色"
+          },
+          "price": 12999.0
+        },
+        {
+          "sku_id": "s_p_digital_024_12",
+          "properties": {
+            "屏幕尺寸": "13英寸",
+            "芯片": "M4芯片",
+            "存储": "1TB",
+            "网络版本": "Wi‑Fi + 蜂窝",
+            "颜色": "深空黑"
+          },
+          "price": 12999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_digital_025",
+    "name": "Apple iPad Air 11英寸 2026款 M4 芯片 128GB Wi‑Fi 轻薄学习娱乐平板电脑",
+    "category": "数码电子",
+    "sub_category": "平板电脑",
+    "price": 4799.0,
+    "brand": "Apple 苹果",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/2_数码电子/images/p_digital_025_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_digital_025_1",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "128GB",
+            "版本": "Wi‑Fi版",
+            "颜色": "深空灰"
+          },
+          "price": 4799.0
+        },
+        {
+          "sku_id": "s_p_digital_025_2",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "128GB",
+            "版本": "Wi‑Fi版",
+            "颜色": "蓝色"
+          },
+          "price": 4799.0
+        },
+        {
+          "sku_id": "s_p_digital_025_3",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "128GB",
+            "版本": "Wi‑Fi版",
+            "颜色": "星光色"
+          },
+          "price": 4799.0
+        },
+        {
+          "sku_id": "s_p_digital_025_4",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "256GB",
+            "版本": "Wi‑Fi版",
+            "颜色": "深空灰"
+          },
+          "price": 5299.0
+        },
+        {
+          "sku_id": "s_p_digital_025_5",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "256GB",
+            "版本": "Wi‑Fi版",
+            "颜色": "蓝色"
+          },
+          "price": 5299.0
+        },
+        {
+          "sku_id": "s_p_digital_025_6",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "256GB",
+            "版本": "Wi‑Fi版",
+            "颜色": "星光色"
+          },
+          "price": 5299.0
+        },
+        {
+          "sku_id": "s_p_digital_025_7",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "128GB",
+            "版本": "蜂窝网络版",
+            "颜色": "深空灰"
+          },
+          "price": 6099.0
+        },
+        {
+          "sku_id": "s_p_digital_025_8",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "128GB",
+            "版本": "蜂窝网络版",
+            "颜色": "蓝色"
+          },
+          "price": 6099.0
+        },
+        {
+          "sku_id": "s_p_digital_025_9",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "128GB",
+            "版本": "蜂窝网络版",
+            "颜色": "星光色"
+          },
+          "price": 6099.0
+        },
+        {
+          "sku_id": "s_p_digital_025_10",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "256GB",
+            "版本": "蜂窝网络版",
+            "颜色": "深空灰"
+          },
+          "price": 6599.0
+        },
+        {
+          "sku_id": "s_p_digital_025_11",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "256GB",
+            "版本": "蜂窝网络版",
+            "颜色": "蓝色"
+          },
+          "price": 6599.0
+        },
+        {
+          "sku_id": "s_p_digital_025_12",
+          "properties": {
+            "屏幕尺寸": "11英寸",
+            "存储": "256GB",
+            "版本": "蜂窝网络版",
+            "颜色": "星光色"
+          },
+          "price": 6599.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_001",
+    "name": "优衣库 U AIRism 棉质宽松圆领短袖T恤 男装 基础纯色上衣",
+    "category": "服饰运动",
+    "sub_category": "短袖T恤",
+    "price": 99.0,
+    "brand": "优衣库",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_001_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_001_1",
+          "properties": {
+            "尺码": "S码",
+            "颜色": "黑色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_2",
+          "properties": {
+            "尺码": "S码",
+            "颜色": "白色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_3",
+          "properties": {
+            "尺码": "S码",
+            "颜色": "深蓝色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_4",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_5",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "白色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_6",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "深蓝色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_7",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_8",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "白色"
+          },
+          "price": 99.0
+        },
+        {
+          "sku_id": "s_p_clothes_001_9",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "深蓝色"
+          },
+          "price": 99.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_002",
+    "name": "优衣库 DRY-EX 超快干圆领短袖T恤 男装 运动训练上衣",
+    "category": "服饰运动",
+    "sub_category": "短袖T恤",
+    "price": 129.0,
+    "brand": "优衣库",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_002_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_002_1",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "灰色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_2",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_3",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "蓝色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_4",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "灰色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_5",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_6",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "蓝色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_7",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "灰色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_8",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "黑色"
+          },
+          "price": 129.0
+        },
+        {
+          "sku_id": "s_p_clothes_002_9",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "蓝色"
+          },
+          "price": 129.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_003",
+    "name": "Nike Dri-FIT 男子训练短袖T恤 速干透气运动上衣",
+    "category": "服饰运动",
+    "sub_category": "短袖T恤",
+    "price": 199.0,
+    "brand": "耐克",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_003_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_003_1",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "白色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_2",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_3",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "深灰色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_4",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "白色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_5",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_6",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "深灰色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_7",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "白色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_8",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "黑色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_003_9",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "深灰色"
+          },
+          "price": 199.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_004",
+    "name": "adidas Essentials 三条纹 男子针织运动长裤 日常休闲收口裤",
+    "category": "服饰运动",
+    "sub_category": "运动长裤",
+    "price": 299.0,
+    "brand": "阿迪达斯",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_004_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_004_1",
+          "properties": {
+            "尺码": "M码",
+            "配色": "黑色白三条纹"
+          },
+          "price": 299.0
+        },
+        {
+          "sku_id": "s_p_clothes_004_2",
+          "properties": {
+            "尺码": "L码",
+            "配色": "黑色白三条纹"
+          },
+          "price": 299.0
+        },
+        {
+          "sku_id": "s_p_clothes_004_3",
+          "properties": {
+            "尺码": "XL码",
+            "配色": "黑色白三条纹"
+          },
+          "price": 299.0
+        },
+        {
+          "sku_id": "s_p_clothes_004_4",
+          "properties": {
+            "尺码": "M码",
+            "配色": "深蓝白三条纹"
+          },
+          "price": 309.0
+        },
+        {
+          "sku_id": "s_p_clothes_004_5",
+          "properties": {
+            "尺码": "L码",
+            "配色": "深蓝白三条纹"
+          },
+          "price": 309.0
+        },
+        {
+          "sku_id": "s_p_clothes_004_6",
+          "properties": {
+            "尺码": "XL码",
+            "配色": "深蓝白三条纹"
+          },
+          "price": 309.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_005",
+    "name": "李宁 运动生活系列 男子连帽套头卫衣 基础Logo印花上衣",
+    "category": "服饰运动",
+    "sub_category": "卫衣",
+    "price": 259.0,
+    "brand": "李宁",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_005_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_005_1",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "灰色"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_2",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_3",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "深蓝色"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_4",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "灰色"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_5",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_6",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "深蓝色"
+          },
+          "price": 259.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_7",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "灰色"
+          },
+          "price": 269.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_8",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "黑色"
+          },
+          "price": 269.0
+        },
+        {
+          "sku_id": "s_p_clothes_005_9",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "深蓝色"
+          },
+          "price": 269.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_006",
+    "name": "Nike Sportswear Club 男子针织运动长裤 基础休闲束脚裤",
+    "category": "服饰运动",
+    "sub_category": "运动长裤",
+    "price": 349.0,
+    "brand": "Nike",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_006_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_006_1",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "深灰色"
+          },
+          "price": 349.0
+        },
+        {
+          "sku_id": "s_p_clothes_006_2",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色"
+          },
+          "price": 349.0
+        },
+        {
+          "sku_id": "s_p_clothes_006_3",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "黑色"
+          },
+          "price": 359.0
+        },
+        {
+          "sku_id": "s_p_clothes_006_4",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色"
+          },
+          "price": 349.0
+        },
+        {
+          "sku_id": "s_p_clothes_006_5",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "深灰色"
+          },
+          "price": 349.0
+        },
+        {
+          "sku_id": "s_p_clothes_006_6",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "深灰色"
+          },
+          "price": 359.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_007",
+    "name": "Nike Air Zoom Pegasus 41 男子缓震跑步鞋日常训练公路跑鞋",
+    "category": "服饰运动",
+    "sub_category": "跑步鞋",
+    "price": 899.0,
+    "brand": "耐克",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_007_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_007_1",
+          "properties": {
+            "款型": "男款",
+            "尺码": "39码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_2",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_3",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40.5码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_4",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_5",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_6",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42.5码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_7",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_8",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_9",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44.5码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_10",
+          "properties": {
+            "款型": "男款",
+            "尺码": "45码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_11",
+          "properties": {
+            "款型": "男款",
+            "尺码": "46码",
+            "鞋楦": "标准楦"
+          },
+          "price": 899.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_12",
+          "properties": {
+            "款型": "男款",
+            "尺码": "39码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_13",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_14",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40.5码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_15",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_16",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_17",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42.5码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_18",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_19",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_20",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44.5码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_21",
+          "properties": {
+            "款型": "男款",
+            "尺码": "45码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        },
+        {
+          "sku_id": "s_p_clothes_007_22",
+          "properties": {
+            "款型": "男款",
+            "尺码": "46码",
+            "鞋楦": "宽楦"
+          },
+          "price": 949.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_008",
+    "name": "adidas Ultraboost 5 男子缓震跑步鞋针织鞋面日常慢跑训练鞋",
+    "category": "服饰运动",
+    "sub_category": "跑步鞋",
+    "price": 1399.0,
+    "brand": "阿迪达斯",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_008_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_008_1",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_2",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40.5码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_3",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_4",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41.5码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_5",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_6",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42.5码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_7",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_8",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43.5码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_9",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_10",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44.5码"
+          },
+          "price": 1399.0
+        },
+        {
+          "sku_id": "s_p_clothes_008_11",
+          "properties": {
+            "款型": "男款",
+            "尺码": "45码"
+          },
+          "price": 1399.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_009",
+    "name": "HOKA Clifton 9 男子缓震公路跑鞋厚底回弹日常长距离训练鞋",
+    "category": "服饰运动",
+    "sub_category": "跑步鞋",
+    "price": 1099.0,
+    "brand": "HOKA",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_009_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_009_1",
+          "properties": {
+            "款型": "男款",
+            "颜色": "经典黑",
+            "尺码": "40码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_2",
+          "properties": {
+            "款型": "男款",
+            "颜色": "经典黑",
+            "尺码": "41码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_3",
+          "properties": {
+            "款型": "男款",
+            "颜色": "经典黑",
+            "尺码": "42码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_4",
+          "properties": {
+            "款型": "男款",
+            "颜色": "经典黑",
+            "尺码": "42.5码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_5",
+          "properties": {
+            "款型": "男款",
+            "颜色": "经典黑",
+            "尺码": "43码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_6",
+          "properties": {
+            "款型": "男款",
+            "颜色": "经典黑",
+            "尺码": "44码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_7",
+          "properties": {
+            "款型": "男款",
+            "颜色": "云朵白",
+            "尺码": "40码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_8",
+          "properties": {
+            "款型": "男款",
+            "颜色": "云朵白",
+            "尺码": "41码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_9",
+          "properties": {
+            "款型": "男款",
+            "颜色": "云朵白",
+            "尺码": "42码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_10",
+          "properties": {
+            "款型": "男款",
+            "颜色": "云朵白",
+            "尺码": "42.5码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_11",
+          "properties": {
+            "款型": "男款",
+            "颜色": "云朵白",
+            "尺码": "43码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_12",
+          "properties": {
+            "款型": "男款",
+            "颜色": "云朵白",
+            "尺码": "44码"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_13",
+          "properties": {
+            "款型": "男款",
+            "颜色": "雾霾蓝",
+            "尺码": "40码"
+          },
+          "price": 1119.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_14",
+          "properties": {
+            "款型": "男款",
+            "颜色": "雾霾蓝",
+            "尺码": "41码"
+          },
+          "price": 1119.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_15",
+          "properties": {
+            "款型": "男款",
+            "颜色": "雾霾蓝",
+            "尺码": "42码"
+          },
+          "price": 1119.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_16",
+          "properties": {
+            "款型": "男款",
+            "颜色": "雾霾蓝",
+            "尺码": "42.5码"
+          },
+          "price": 1119.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_17",
+          "properties": {
+            "款型": "男款",
+            "颜色": "雾霾蓝",
+            "尺码": "43码"
+          },
+          "price": 1119.0
+        },
+        {
+          "sku_id": "s_p_clothes_009_18",
+          "properties": {
+            "款型": "男款",
+            "颜色": "雾霾蓝",
+            "尺码": "44码"
+          },
+          "price": 1119.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_010",
+    "name": "特步 160X 6.0 PRO 碳板竞速跑鞋马拉松训练比赛轻量跑步鞋",
+    "category": "服饰运动",
+    "sub_category": "跑步鞋",
+    "price": 999.0,
+    "brand": "特步",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_010_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_010_1",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "39码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_010_2",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "40码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_010_3",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "41码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_010_4",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "42码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_010_5",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "43码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_010_6",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "44码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_010_7",
+          "properties": {
+            "适用性别": "男款",
+            "鞋码": "45码"
+          },
+          "price": 999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_011",
+    "name": "Nike LeBron XXI EP 男子中帮实战篮球鞋全掌缓震室内外场地训练鞋",
+    "category": "服饰运动",
+    "sub_category": "篮球鞋",
+    "price": 1599.0,
+    "brand": "耐克",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_011_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_011_1",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "42码",
+            "版本": "EP版",
+            "鞋楦类型": "宽楦"
+          },
+          "price": 1599.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_2",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "43码",
+            "版本": "EP版",
+            "鞋楦类型": "宽楦"
+          },
+          "price": 1599.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_3",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "40码",
+            "版本": "EP版",
+            "鞋楦类型": "宽楦"
+          },
+          "price": 1599.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_4",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "41码",
+            "版本": "EP版",
+            "鞋楦类型": "宽楦"
+          },
+          "price": 1599.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_5",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "44码",
+            "版本": "EP版",
+            "鞋楦类型": "宽楦"
+          },
+          "price": 1599.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_6",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "45码",
+            "版本": "EP版",
+            "鞋楦类型": "宽楦"
+          },
+          "price": 1599.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_7",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "40码",
+            "版本": "EP版",
+            "鞋楦类型": "常规楦"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_8",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "41码",
+            "版本": "EP版",
+            "鞋楦类型": "常规楦"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_9",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "42码",
+            "版本": "EP版",
+            "鞋楦类型": "常规楦"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_10",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "43码",
+            "版本": "EP版",
+            "鞋楦类型": "常规楦"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_11",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "44码",
+            "版本": "EP版",
+            "鞋楦类型": "常规楦"
+          },
+          "price": 1499.0
+        },
+        {
+          "sku_id": "s_p_clothes_011_12",
+          "properties": {
+            "适用人群": "男款",
+            "尺码": "45码",
+            "版本": "EP版",
+            "鞋楦类型": "常规楦"
+          },
+          "price": 1499.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_012",
+    "name": "安踏 KT9 氮科技实战篮球鞋中帮缓震支撑外场内场训练比赛鞋",
+    "category": "服饰运动",
+    "sub_category": "篮球鞋",
+    "price": 999.0,
+    "brand": "安踏",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_012_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_012_1",
+          "properties": {
+            "款型": "男款",
+            "尺码": "39码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_2",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_3",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40.5码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_4",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_5",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_6",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42.5码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_7",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_8",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_9",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44.5码"
+          },
+          "price": 999.0
+        },
+        {
+          "sku_id": "s_p_clothes_012_10",
+          "properties": {
+            "款型": "男款",
+            "尺码": "45码"
+          },
+          "price": 999.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_013",
+    "name": "李宁 韦德之道 全城12 实战篮球专业比赛鞋缓震支撑后卫前锋鞋",
+    "category": "服饰运动",
+    "sub_category": "篮球鞋",
+    "price": 1199.0,
+    "brand": "李宁",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_013_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_013_1",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "39码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_2",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "40码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_3",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "41码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_4",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "42码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_5",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "43码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_6",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "44码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_7",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "白蓝主场色",
+            "尺码": "45码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_8",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "39码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_9",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "40码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_10",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "41码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_11",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "42码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_12",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "43码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_13",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "44码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_14",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "暗夜黑实战色",
+            "尺码": "45码"
+          },
+          "price": 1199.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_15",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "39码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_16",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "40码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_17",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "41码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_18",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "42码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_19",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "43码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_20",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "44码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_21",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "樱花粉限定色",
+            "尺码": "45码"
+          },
+          "price": 1249.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_22",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "39码"
+          },
+          "price": 1299.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_23",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "40码"
+          },
+          "price": 1299.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_24",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "41码"
+          },
+          "price": 1299.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_25",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "42码"
+          },
+          "price": 1299.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_26",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "43码"
+          },
+          "price": 1299.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_27",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "44码"
+          },
+          "price": 1299.0
+        },
+        {
+          "sku_id": "s_p_clothes_013_28",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "涂鸦艺术限定色",
+            "尺码": "45码"
+          },
+          "price": 1299.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_014",
+    "name": "SALOMON X ULTRA 4 GORE-TEX 男子防水徒步鞋轻量抓地登山越野鞋",
+    "category": "服饰运动",
+    "sub_category": "徒步鞋",
+    "price": 1198.0,
+    "brand": "萨洛蒙",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_014_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_014_1",
+          "properties": {
+            "款型": "男款",
+            "尺码": "39码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1198.0
+        },
+        {
+          "sku_id": "s_p_clothes_014_2",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1198.0
+        },
+        {
+          "sku_id": "s_p_clothes_014_3",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1198.0
+        },
+        {
+          "sku_id": "s_p_clothes_014_4",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1198.0
+        },
+        {
+          "sku_id": "s_p_clothes_014_5",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1198.0
+        },
+        {
+          "sku_id": "s_p_clothes_014_6",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1198.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_015",
+    "name": "Merrell MOAB 3 GTX 男子防水登山徒步鞋稳定支撑户外多地形鞋",
+    "category": "服饰运动",
+    "sub_category": "徒步鞋",
+    "price": 1099.0,
+    "brand": "迈乐",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_015_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_015_1",
+          "properties": {
+            "款型": "男款",
+            "尺码": "39码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_015_2",
+          "properties": {
+            "款型": "男款",
+            "尺码": "40码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_015_3",
+          "properties": {
+            "款型": "男款",
+            "尺码": "41码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_015_4",
+          "properties": {
+            "款型": "男款",
+            "尺码": "42码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_015_5",
+          "properties": {
+            "款型": "男款",
+            "尺码": "43码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_015_6",
+          "properties": {
+            "款型": "男款",
+            "尺码": "44码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        },
+        {
+          "sku_id": "s_p_clothes_015_7",
+          "properties": {
+            "款型": "男款",
+            "尺码": "45码",
+            "版本": "GORE-TEX"
+          },
+          "price": 1099.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_016",
+    "name": "Lululemon Align 高腰紧身裤 25英寸 女士瑜伽裤柔软裸感运动裤",
+    "category": "服饰运动",
+    "sub_category": "瑜伽裤",
+    "price": 880.0,
+    "brand": "露露乐蒙",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_016_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_016_1",
+          "properties": {
+            "款式": "女款",
+            "尺码": "2号",
+            "裤长": "25英寸",
+            "颜色": "黑色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_2",
+          "properties": {
+            "款式": "女款",
+            "尺码": "2号",
+            "裤长": "25英寸",
+            "颜色": "经典裸色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_3",
+          "properties": {
+            "款式": "女款",
+            "尺码": "2号",
+            "裤长": "25英寸",
+            "颜色": "象牙白"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_4",
+          "properties": {
+            "款式": "女款",
+            "尺码": "2号",
+            "裤长": "25英寸",
+            "颜色": "海军蓝"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_5",
+          "properties": {
+            "款式": "女款",
+            "尺码": "4号",
+            "裤长": "25英寸",
+            "颜色": "黑色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_6",
+          "properties": {
+            "款式": "女款",
+            "尺码": "4号",
+            "裤长": "25英寸",
+            "颜色": "经典裸色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_7",
+          "properties": {
+            "款式": "女款",
+            "尺码": "4号",
+            "裤长": "25英寸",
+            "颜色": "象牙白"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_8",
+          "properties": {
+            "款式": "女款",
+            "尺码": "4号",
+            "裤长": "25英寸",
+            "颜色": "海军蓝"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_9",
+          "properties": {
+            "款式": "女款",
+            "尺码": "6号",
+            "裤长": "25英寸",
+            "颜色": "黑色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_10",
+          "properties": {
+            "款式": "女款",
+            "尺码": "6号",
+            "裤长": "25英寸",
+            "颜色": "经典裸色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_11",
+          "properties": {
+            "款式": "女款",
+            "尺码": "6号",
+            "裤长": "25英寸",
+            "颜色": "象牙白"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_12",
+          "properties": {
+            "款式": "女款",
+            "尺码": "6号",
+            "裤长": "25英寸",
+            "颜色": "海军蓝"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_13",
+          "properties": {
+            "款式": "女款",
+            "尺码": "8号",
+            "裤长": "25英寸",
+            "颜色": "黑色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_14",
+          "properties": {
+            "款式": "女款",
+            "尺码": "8号",
+            "裤长": "25英寸",
+            "颜色": "经典裸色"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_15",
+          "properties": {
+            "款式": "女款",
+            "尺码": "8号",
+            "裤长": "25英寸",
+            "颜色": "象牙白"
+          },
+          "price": 880.0
+        },
+        {
+          "sku_id": "s_p_clothes_016_16",
+          "properties": {
+            "款式": "女款",
+            "尺码": "8号",
+            "裤长": "25英寸",
+            "颜色": "海军蓝"
+          },
+          "price": 880.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_017",
+    "name": "Arc'teryx Gamma Pant 男子软壳长裤耐磨弹力户外徒步攀爬长裤",
+    "category": "服饰运动",
+    "sub_category": "户外裤",
+    "price": 1290.0,
+    "brand": "始祖鸟",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_017_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_017_1",
+          "properties": {
+            "版本": "男款",
+            "尺码": "28码"
+          },
+          "price": 1290.0
+        },
+        {
+          "sku_id": "s_p_clothes_017_2",
+          "properties": {
+            "版本": "男款",
+            "尺码": "30码"
+          },
+          "price": 1290.0
+        },
+        {
+          "sku_id": "s_p_clothes_017_3",
+          "properties": {
+            "版本": "男款",
+            "尺码": "32码"
+          },
+          "price": 1290.0
+        },
+        {
+          "sku_id": "s_p_clothes_017_4",
+          "properties": {
+            "版本": "男款",
+            "尺码": "34码"
+          },
+          "price": 1290.0
+        },
+        {
+          "sku_id": "s_p_clothes_017_5",
+          "properties": {
+            "版本": "男款",
+            "尺码": "36码"
+          },
+          "price": 1290.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_018",
+    "name": "The North Face Borealis 28L 多功能通勤户外双肩背包",
+    "category": "服饰运动",
+    "sub_category": "背包",
+    "price": 1098.0,
+    "brand": "The North Face",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_018_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_018_1",
+          "properties": {
+            "容量": "28L",
+            "颜色": "黑色 Black",
+            "版本": "通勤背包"
+          },
+          "price": 1098.0
+        },
+        {
+          "sku_id": "s_p_clothes_018_2",
+          "properties": {
+            "容量": "28L",
+            "颜色": "白色 Gardenia White",
+            "版本": "通勤背包"
+          },
+          "price": 1098.0
+        },
+        {
+          "sku_id": "s_p_clothes_018_3",
+          "properties": {
+            "容量": "28L",
+            "颜色": "灰色 Asphalt Grey",
+            "版本": "通勤背包"
+          },
+          "price": 1098.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_019",
+    "name": "Nike Heritage86 Futura Logo 经典刺绣棒球帽 可调节帽围",
+    "category": "服饰运动",
+    "sub_category": "帽子",
+    "price": 169.0,
+    "brand": "Nike",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_019_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_019_1",
+          "properties": {
+            "尺码": "均码",
+            "帽身颜色": "黑色",
+            "刺绣logo配色": "白勾",
+            "帽围类型": "可调节帽围"
+          },
+          "price": 169.0
+        },
+        {
+          "sku_id": "s_p_clothes_019_2",
+          "properties": {
+            "尺码": "均码",
+            "帽身颜色": "黑色",
+            "刺绣logo配色": "黑勾",
+            "帽围类型": "可调节帽围"
+          },
+          "price": 169.0
+        },
+        {
+          "sku_id": "s_p_clothes_019_3",
+          "properties": {
+            "尺码": "均码",
+            "帽身颜色": "白色",
+            "刺绣logo配色": "白勾",
+            "帽围类型": "可调节帽围"
+          },
+          "price": 169.0
+        },
+        {
+          "sku_id": "s_p_clothes_019_4",
+          "properties": {
+            "尺码": "均码",
+            "帽身颜色": "白色",
+            "刺绣logo配色": "黑勾",
+            "帽围类型": "可调节帽围"
+          },
+          "price": 169.0
+        },
+        {
+          "sku_id": "s_p_clothes_019_5",
+          "properties": {
+            "尺码": "均码",
+            "帽身颜色": "藏蓝色",
+            "刺绣logo配色": "白勾",
+            "帽围类型": "可调节帽围"
+          },
+          "price": 179.0
+        },
+        {
+          "sku_id": "s_p_clothes_019_6",
+          "properties": {
+            "尺码": "均码",
+            "帽身颜色": "藏蓝色",
+            "刺绣logo配色": "黑勾",
+            "帽围类型": "可调节帽围"
+          },
+          "price": 179.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_020",
+    "name": "迪卡侬 KALENJI 男子跑步速干T恤轻薄透气基础训练短袖上衣",
+    "category": "服饰运动",
+    "sub_category": "速干T恤",
+    "price": 79.0,
+    "brand": "迪卡侬",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_020_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_020_1",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "纯净白",
+            "尺码": "S码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_2",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "纯净白",
+            "尺码": "M码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_3",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "纯净白",
+            "尺码": "L码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_4",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "纯净白",
+            "尺码": "XL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_5",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "纯净白",
+            "尺码": "XXL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_6",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "经典黑",
+            "尺码": "S码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_7",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "经典黑",
+            "尺码": "M码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_8",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "经典黑",
+            "尺码": "L码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_9",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "经典黑",
+            "尺码": "XL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_10",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "经典黑",
+            "尺码": "XXL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_11",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "深麻灰",
+            "尺码": "S码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_12",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "深麻灰",
+            "尺码": "M码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_13",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "深麻灰",
+            "尺码": "L码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_14",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "深麻灰",
+            "尺码": "XL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_15",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "深麻灰",
+            "尺码": "XXL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_16",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "藏青色",
+            "尺码": "S码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_17",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "藏青色",
+            "尺码": "M码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_18",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "藏青色",
+            "尺码": "L码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_19",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "藏青色",
+            "尺码": "XL码"
+          },
+          "price": 79.0
+        },
+        {
+          "sku_id": "s_p_clothes_020_20",
+          "properties": {
+            "适用性别": "男款",
+            "颜色": "藏青色",
+            "尺码": "XXL码"
+          },
+          "price": 79.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_021",
+    "name": "Nike Dri-FIT Miler 男子速干短袖跑步上衣轻薄透气公路训练T恤",
+    "category": "服饰运动",
+    "sub_category": "速干T恤",
+    "price": 249.0,
+    "brand": "耐克",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_021_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_021_1",
+          "properties": {
+            "版本": "男款",
+            "颜色": "经典黑",
+            "尺码": "S码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_2",
+          "properties": {
+            "版本": "男款",
+            "颜色": "经典黑",
+            "尺码": "M码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_3",
+          "properties": {
+            "版本": "男款",
+            "颜色": "经典黑",
+            "尺码": "L码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_4",
+          "properties": {
+            "版本": "男款",
+            "颜色": "经典黑",
+            "尺码": "XL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_5",
+          "properties": {
+            "版本": "男款",
+            "颜色": "经典黑",
+            "尺码": "XXL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_6",
+          "properties": {
+            "版本": "男款",
+            "颜色": "纯净白",
+            "尺码": "S码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_7",
+          "properties": {
+            "版本": "男款",
+            "颜色": "纯净白",
+            "尺码": "M码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_8",
+          "properties": {
+            "版本": "男款",
+            "颜色": "纯净白",
+            "尺码": "L码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_9",
+          "properties": {
+            "版本": "男款",
+            "颜色": "纯净白",
+            "尺码": "XL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_10",
+          "properties": {
+            "版本": "男款",
+            "颜色": "纯净白",
+            "尺码": "XXL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_11",
+          "properties": {
+            "版本": "男款",
+            "颜色": "深麻灰",
+            "尺码": "S码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_12",
+          "properties": {
+            "版本": "男款",
+            "颜色": "深麻灰",
+            "尺码": "M码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_13",
+          "properties": {
+            "版本": "男款",
+            "颜色": "深麻灰",
+            "尺码": "L码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_14",
+          "properties": {
+            "版本": "男款",
+            "颜色": "深麻灰",
+            "尺码": "XL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_15",
+          "properties": {
+            "版本": "男款",
+            "颜色": "深麻灰",
+            "尺码": "XXL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_16",
+          "properties": {
+            "版本": "男款",
+            "颜色": "藏青色",
+            "尺码": "S码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_17",
+          "properties": {
+            "版本": "男款",
+            "颜色": "藏青色",
+            "尺码": "M码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_18",
+          "properties": {
+            "版本": "男款",
+            "颜色": "藏青色",
+            "尺码": "L码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_19",
+          "properties": {
+            "版本": "男款",
+            "颜色": "藏青色",
+            "尺码": "XL码"
+          },
+          "price": 249.0
+        },
+        {
+          "sku_id": "s_p_clothes_021_20",
+          "properties": {
+            "版本": "男款",
+            "颜色": "藏青色",
+            "尺码": "XXL码"
+          },
+          "price": 249.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_022",
+    "name": "adidas Originals 三叶草 男子连帽卫衣 经典logo套头上衣",
+    "category": "服饰运动",
+    "sub_category": "卫衣",
+    "price": 459.0,
+    "brand": "阿迪达斯",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_022_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_022_1",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色",
+            "logo配色": "白logo"
+          },
+          "price": 459.0
+        },
+        {
+          "sku_id": "s_p_clothes_022_2",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色",
+            "logo配色": "白logo"
+          },
+          "price": 459.0
+        },
+        {
+          "sku_id": "s_p_clothes_022_3",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "黑色",
+            "logo配色": "白logo"
+          },
+          "price": 459.0
+        },
+        {
+          "sku_id": "s_p_clothes_022_4",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "藏蓝色",
+            "logo配色": "白logo"
+          },
+          "price": 479.0
+        },
+        {
+          "sku_id": "s_p_clothes_022_5",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "藏蓝色",
+            "logo配色": "白logo"
+          },
+          "price": 479.0
+        },
+        {
+          "sku_id": "s_p_clothes_022_6",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "藏蓝色",
+            "logo配色": "白logo"
+          },
+          "price": 479.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_023",
+    "name": "优衣库 男装 DRY 速干运动短裤 轻薄透气训练裤",
+    "category": "服饰运动",
+    "sub_category": "运动短裤",
+    "price": 149.0,
+    "brand": "优衣库",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_023_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_023_1",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "黑色"
+          },
+          "price": 149.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_2",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "深灰色"
+          },
+          "price": 149.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_3",
+          "properties": {
+            "尺码": "M码",
+            "颜色": "藏蓝色"
+          },
+          "price": 149.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_4",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "黑色"
+          },
+          "price": 149.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_5",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "深灰色"
+          },
+          "price": 149.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_6",
+          "properties": {
+            "尺码": "L码",
+            "颜色": "藏蓝色"
+          },
+          "price": 149.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_7",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "黑色"
+          },
+          "price": 159.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_8",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "深灰色"
+          },
+          "price": 159.0
+        },
+        {
+          "sku_id": "s_p_clothes_023_9",
+          "properties": {
+            "尺码": "XL码",
+            "颜色": "藏蓝色"
+          },
+          "price": 159.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_024",
+    "name": "The North Face Horizon 轻量速干运动鸭舌帽防晒透气户外遮阳帽",
+    "category": "服饰运动",
+    "sub_category": "帽子",
+    "price": 199.0,
+    "brand": "北面",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_024_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_024_1",
+          "properties": {
+            "尺码": "均码",
+            "帽围调节方式": "可调节",
+            "颜色": "经典黑"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_024_2",
+          "properties": {
+            "尺码": "均码",
+            "帽围调节方式": "可调节",
+            "颜色": "米白色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_024_3",
+          "properties": {
+            "尺码": "均码",
+            "帽围调节方式": "可调节",
+            "颜色": "藏青色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_024_4",
+          "properties": {
+            "尺码": "均码",
+            "帽围调节方式": "可调节",
+            "颜色": "浅灰色"
+          },
+          "price": 199.0
+        },
+        {
+          "sku_id": "s_p_clothes_024_5",
+          "properties": {
+            "尺码": "均码",
+            "帽围调节方式": "可调节",
+            "颜色": "森林绿"
+          },
+          "price": 199.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_clothes_025",
+    "name": "Osprey DAYLITE PLUS 日光+ 20L 户外多功能双肩背包轻量通勤包",
+    "category": "服饰运动",
+    "sub_category": "背包",
+    "price": 699.0,
+    "brand": "Osprey",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/3_服饰运动/images/p_clothes_025_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_clothes_025_1",
+          "properties": {
+            "容量": "20L",
+            "版本": "通用款",
+            "颜色": "黑色"
+          },
+          "price": 699.0
+        },
+        {
+          "sku_id": "s_p_clothes_025_2",
+          "properties": {
+            "容量": "20L",
+            "版本": "通用款",
+            "颜色": "都市蓝"
+          },
+          "price": 699.0
+        },
+        {
+          "sku_id": "s_p_clothes_025_3",
+          "properties": {
+            "容量": "20L",
+            "版本": "通用款",
+            "颜色": "星尘灰"
+          },
+          "price": 699.0
+        },
+        {
+          "sku_id": "s_p_clothes_025_4",
+          "properties": {
+            "容量": "20L",
+            "版本": "通用款",
+            "颜色": "户外绿"
+          },
+          "price": 699.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_001",
+    "name": "三顿半 数字星球系列 超即溶精品咖啡1-6号 18颗装精品速溶咖啡",
+    "category": "食品生活",
+    "sub_category": "咖啡",
+    "price": 138.0,
+    "brand": "三顿半",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_001_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_001_1",
+          "properties": {
+            "口味": "1号",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 128.0
+        },
+        {
+          "sku_id": "s_p_food_001_2",
+          "properties": {
+            "口味": "2号",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 128.0
+        },
+        {
+          "sku_id": "s_p_food_001_3",
+          "properties": {
+            "口味": "3号",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 128.0
+        },
+        {
+          "sku_id": "s_p_food_001_4",
+          "properties": {
+            "口味": "4号",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 128.0
+        },
+        {
+          "sku_id": "s_p_food_001_5",
+          "properties": {
+            "口味": "5号",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 128.0
+        },
+        {
+          "sku_id": "s_p_food_001_6",
+          "properties": {
+            "口味": "6号",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 128.0
+        },
+        {
+          "sku_id": "s_p_food_001_7",
+          "properties": {
+            "口味": "1-6号混合",
+            "数量": "18颗",
+            "包装": "礼盒装"
+          },
+          "price": 138.0
+        },
+        {
+          "sku_id": "s_p_food_001_8",
+          "properties": {
+            "口味": "1号",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 238.0
+        },
+        {
+          "sku_id": "s_p_food_001_9",
+          "properties": {
+            "口味": "2号",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 238.0
+        },
+        {
+          "sku_id": "s_p_food_001_10",
+          "properties": {
+            "口味": "3号",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 238.0
+        },
+        {
+          "sku_id": "s_p_food_001_11",
+          "properties": {
+            "口味": "4号",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 238.0
+        },
+        {
+          "sku_id": "s_p_food_001_12",
+          "properties": {
+            "口味": "5号",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 238.0
+        },
+        {
+          "sku_id": "s_p_food_001_13",
+          "properties": {
+            "口味": "6号",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 238.0
+        },
+        {
+          "sku_id": "s_p_food_001_14",
+          "properties": {
+            "口味": "1-6号混合",
+            "数量": "36颗",
+            "包装": "加大装"
+          },
+          "price": 258.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_002",
+    "name": "雀巢咖啡 1+2原味 三合一速溶咖啡粉100条装即冲奶香咖啡饮品",
+    "category": "食品生活",
+    "sub_category": "咖啡",
+    "price": 60.0,
+    "brand": "雀巢",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_002_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_002_1",
+          "properties": {
+            "单条净含量": "13g",
+            "内含条数": "100条",
+            "包装类型": "家庭装"
+          },
+          "price": 60.0
+        },
+        {
+          "sku_id": "s_p_food_002_2",
+          "properties": {
+            "单条净含量": "13g",
+            "内含条数": "50条",
+            "包装类型": "小包装"
+          },
+          "price": 35.0
+        },
+        {
+          "sku_id": "s_p_food_002_3",
+          "properties": {
+            "单条净含量": "13g",
+            "内含条数": "50条",
+            "包装类型": "家庭装"
+          },
+          "price": 30.0
+        },
+        {
+          "sku_id": "s_p_food_002_4",
+          "properties": {
+            "单条净含量": "13g",
+            "内含条数": "100条",
+            "包装类型": "小包装"
+          },
+          "price": 68.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_003",
+    "name": "农夫山泉 东方树叶 无糖乌龙茶饮料500ml 瓶装茶饮低糖替代方案",
+    "category": "食品生活",
+    "sub_category": "茶饮",
+    "price": 4.0,
+    "brand": "东方树叶",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_003_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_003_1",
+          "properties": {
+            "容量": "500ml",
+            "包装": "单瓶装"
+          },
+          "price": 4.0
+        },
+        {
+          "sku_id": "s_p_food_003_2",
+          "properties": {
+            "容量": "500ml",
+            "包装": "15瓶整箱"
+          },
+          "price": 55.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_004",
+    "name": "元气森林 0糖0脂0卡 白桃味气泡水480ml 碳酸饮料即饮苏打型饮品",
+    "category": "食品生活",
+    "sub_category": "碳酸饮料",
+    "price": 4.5,
+    "brand": "元气森林",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_004_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_004_1",
+          "properties": {
+            "容量": "480ml",
+            "口味": "白桃味",
+            "包装规格": "单瓶"
+          },
+          "price": 4.5
+        },
+        {
+          "sku_id": "s_p_food_004_2",
+          "properties": {
+            "容量": "480ml",
+            "口味": "白桃味",
+            "包装规格": "15瓶整箱"
+          },
+          "price": 65.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_005",
+    "name": "东鹏特饮 维生素功能饮料500ml 经典瓶装补充能量含牛磺酸咖啡因",
+    "category": "食品生活",
+    "sub_category": "功能饮料",
+    "price": 5.0,
+    "brand": "东鹏",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_005_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_005_1",
+          "properties": {
+            "容量": "500ml",
+            "数量": "1瓶",
+            "包装": "散装单瓶"
+          },
+          "price": 5.0
+        },
+        {
+          "sku_id": "s_p_food_005_2",
+          "properties": {
+            "容量": "500ml",
+            "数量": "6瓶",
+            "包装": "塑封组合装"
+          },
+          "price": 28.0
+        },
+        {
+          "sku_id": "s_p_food_005_3",
+          "properties": {
+            "容量": "500ml",
+            "数量": "15瓶",
+            "包装": "原厂整箱"
+          },
+          "price": 68.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_006",
+    "name": "红牛 维生素功能饮料250ml*24罐整箱补充能量含牛磺酸咖啡因",
+    "category": "食品生活",
+    "sub_category": "功能饮料",
+    "price": 120.0,
+    "brand": "红牛",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_006_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_006_1",
+          "properties": {
+            "容量": "250ml",
+            "每箱数量": "12罐",
+            "包装": "小箱装",
+            "版本": "国产版"
+          },
+          "price": 68.0
+        },
+        {
+          "sku_id": "s_p_food_006_2",
+          "properties": {
+            "容量": "250ml",
+            "每箱数量": "24罐",
+            "包装": "整箱装",
+            "版本": "国产版"
+          },
+          "price": 120.0
+        },
+        {
+          "sku_id": "s_p_food_006_3",
+          "properties": {
+            "容量": "250ml",
+            "每箱数量": "12罐",
+            "包装": "整箱装",
+            "版本": "国产版"
+          },
+          "price": 70.0
+        },
+        {
+          "sku_id": "s_p_food_006_4",
+          "properties": {
+            "容量": "250ml",
+            "每箱数量": "24罐",
+            "包装": "小箱装",
+            "版本": "国产版"
+          },
+          "price": 128.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_007",
+    "name": "伊利 金典 有机纯牛奶250ml*12盒 甄选有机奶源常温盒装牛奶",
+    "category": "食品生活",
+    "sub_category": "牛奶",
+    "price": 72.0,
+    "brand": "金典",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_007_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_007_1",
+          "properties": {
+            "容量": "250ml",
+            "整箱盒数": "12盒",
+            "产品类型": "有机纯牛奶"
+          },
+          "price": 72.0
+        },
+        {
+          "sku_id": "s_p_food_007_2",
+          "properties": {
+            "容量": "250ml",
+            "整箱盒数": "24盒",
+            "产品类型": "有机纯牛奶"
+          },
+          "price": 135.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_008",
+    "name": "蒙牛 纯甄 常温风味酸牛奶经典原味200g*10盒发酵乳饮品",
+    "category": "食品生活",
+    "sub_category": "酸奶",
+    "price": 55.0,
+    "brand": "纯甄",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_008_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_008_1",
+          "properties": {
+            "单盒容量": "200g",
+            "整箱盒数": "10盒",
+            "口味": "经典原味"
+          },
+          "price": 55.0
+        },
+        {
+          "sku_id": "s_p_food_008_2",
+          "properties": {
+            "单盒容量": "200g",
+            "整箱盒数": "20盒",
+            "口味": "经典原味"
+          },
+          "price": 105.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_009",
+    "name": "三只松鼠 每日坚果750g/30袋 混合坚果仁干果礼盒独立小包装",
+    "category": "食品生活",
+    "sub_category": "坚果/零食",
+    "price": 99.0,
+    "brand": "三只松鼠",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_009_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_009_1",
+          "properties": {
+            "总袋数": "15袋",
+            "包装类型": "简装"
+          },
+          "price": 59.0
+        },
+        {
+          "sku_id": "s_p_food_009_2",
+          "properties": {
+            "总袋数": "15袋",
+            "包装类型": "礼盒装"
+          },
+          "price": 69.0
+        },
+        {
+          "sku_id": "s_p_food_009_3",
+          "properties": {
+            "总袋数": "30袋",
+            "包装类型": "简装"
+          },
+          "price": 89.0
+        },
+        {
+          "sku_id": "s_p_food_009_4",
+          "properties": {
+            "总袋数": "30袋",
+            "包装类型": "礼盒装"
+          },
+          "price": 99.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_010",
+    "name": "良品铺子 肉松饼1000g/箱 松软糕点休闲零食早餐代餐点心",
+    "category": "食品生活",
+    "sub_category": "坚果/零食",
+    "price": 59.0,
+    "brand": "良品铺子",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_010_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_010_1",
+          "properties": {
+            "数量": "约20枚",
+            "容量": "500g"
+          },
+          "price": 35.0
+        },
+        {
+          "sku_id": "s_p_food_010_2",
+          "properties": {
+            "数量": "约20枚",
+            "容量": "1000g"
+          },
+          "price": 62.0
+        },
+        {
+          "sku_id": "s_p_food_010_3",
+          "properties": {
+            "数量": "约40枚",
+            "容量": "500g"
+          },
+          "price": 32.0
+        },
+        {
+          "sku_id": "s_p_food_010_4",
+          "properties": {
+            "数量": "约40枚",
+            "容量": "1000g"
+          },
+          "price": 59.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_011",
+    "name": "康师傅 经典红烧牛肉面110g*12桶装方便面泡面速食面整箱装",
+    "category": "食品生活",
+    "sub_category": "方便食品",
+    "price": 45.0,
+    "brand": "康师傅",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_011_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_011_1",
+          "properties": {
+            "口味": "红烧牛肉味",
+            "容量": "110g",
+            "数量": "6桶"
+          },
+          "price": 26.0
+        },
+        {
+          "sku_id": "s_p_food_011_2",
+          "properties": {
+            "口味": "红烧牛肉味",
+            "容量": "110g",
+            "数量": "12桶"
+          },
+          "price": 45.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_012",
+    "name": "统一 老坛酸菜牛肉面来一桶121g*12桶方便面泡面酸辣风味整箱",
+    "category": "食品生活",
+    "sub_category": "方便食品",
+    "price": 50.0,
+    "brand": "统一",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_012_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_012_1",
+          "properties": {
+            "容量": "121g",
+            "包装数量": "12桶",
+            "口味": "老坛酸菜牛肉味"
+          },
+          "price": 50.0
+        },
+        {
+          "sku_id": "s_p_food_012_2",
+          "properties": {
+            "容量": "121g",
+            "包装数量": "6桶",
+            "口味": "老坛酸菜牛肉味"
+          },
+          "price": 28.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_013",
+    "name": "海天 金标生抽1.9L 瓶装酱油 家用厨房调味料酱香鲜味佐餐蘸料",
+    "category": "食品生活",
+    "sub_category": "调味品",
+    "price": 22.0,
+    "brand": "海天",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_013_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_013_1",
+          "properties": {
+            "容量": "1.9L",
+            "包装": "大瓶装"
+          },
+          "price": 22.0
+        },
+        {
+          "sku_id": "s_p_food_013_2",
+          "properties": {
+            "容量": "500ml",
+            "包装": "小瓶装"
+          },
+          "price": 9.0
+        },
+        {
+          "sku_id": "s_p_food_013_3",
+          "properties": {
+            "容量": "500ml",
+            "包装": "大瓶装"
+          },
+          "price": 16.9
+        },
+        {
+          "sku_id": "s_p_food_013_4",
+          "properties": {
+            "容量": "1.9L",
+            "包装": "小瓶装"
+          },
+          "price": 20.9
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_014",
+    "name": "农夫山泉 东方树叶 无糖茉莉花茶饮料 500ml×15 瓶装茶饮",
+    "category": "食品生活",
+    "sub_category": "茶饮",
+    "price": 75.0,
+    "brand": "农夫山泉",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_014_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_014_1",
+          "properties": {
+            "容量": "500ml",
+            "每箱数量": "15瓶",
+            "包装": "整箱装"
+          },
+          "price": 75.0
+        },
+        {
+          "sku_id": "s_p_food_014_2",
+          "properties": {
+            "容量": "500ml",
+            "每箱数量": "15瓶",
+            "包装": "量贩装"
+          },
+          "price": 70.0
+        },
+        {
+          "sku_id": "s_p_food_014_3",
+          "properties": {
+            "容量": "500ml",
+            "每箱数量": "24瓶",
+            "包装": "整箱装"
+          },
+          "price": 118.0
+        },
+        {
+          "sku_id": "s_p_food_014_4",
+          "properties": {
+            "容量": "500ml",
+            "每箱数量": "24瓶",
+            "包装": "量贩装"
+          },
+          "price": 115.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_015",
+    "name": "可口可乐 零度汽水 无糖碳酸饮料 330ml×24 罐装",
+    "category": "食品生活",
+    "sub_category": "碳酸饮料",
+    "price": 75.0,
+    "brand": "可口可乐",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_015_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_015_1",
+          "properties": {
+            "容量": "330ml",
+            "数量": "24罐",
+            "包装": "易拉罐整箱"
+          },
+          "price": 75.0
+        },
+        {
+          "sku_id": "s_p_food_015_2",
+          "properties": {
+            "容量": "330ml",
+            "数量": "12罐",
+            "包装": "迷你装"
+          },
+          "price": 42.0
+        },
+        {
+          "sku_id": "s_p_food_015_3",
+          "properties": {
+            "容量": "330ml",
+            "数量": "12罐",
+            "包装": "易拉罐整箱"
+          },
+          "price": 38.0
+        },
+        {
+          "sku_id": "s_p_food_015_4",
+          "properties": {
+            "容量": "330ml",
+            "数量": "24罐",
+            "包装": "迷你装"
+          },
+          "price": 79.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_016",
+    "name": "蒙牛 特仑苏 纯牛奶 250ml×16 盒装 常温乳制品",
+    "category": "食品生活",
+    "sub_category": "牛奶",
+    "price": 85.0,
+    "brand": "蒙牛",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_016_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_016_1",
+          "properties": {
+            "单盒容量": "250ml",
+            "整箱数量": "16盒",
+            "包装类型": "家庭装"
+          },
+          "price": 85.0
+        },
+        {
+          "sku_id": "s_p_food_016_2",
+          "properties": {
+            "单盒容量": "250ml",
+            "整箱数量": "16盒",
+            "包装类型": "礼盒装"
+          },
+          "price": 89.0
+        },
+        {
+          "sku_id": "s_p_food_016_3",
+          "properties": {
+            "单盒容量": "250ml",
+            "整箱数量": "24盒",
+            "包装类型": "家庭装"
+          },
+          "price": 108.0
+        },
+        {
+          "sku_id": "s_p_food_016_4",
+          "properties": {
+            "单盒容量": "250ml",
+            "整箱数量": "24盒",
+            "包装类型": "礼盒装"
+          },
+          "price": 118.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_017",
+    "name": "伊利 安慕希 希腊风味常温酸奶 原味 205g×10 盒装",
+    "category": "食品生活",
+    "sub_category": "酸奶",
+    "price": 68.0,
+    "brand": "伊利",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_017_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_017_1",
+          "properties": {
+            "口味": "原味",
+            "整箱规格": "205g×10盒",
+            "包装类型": "普通装"
+          },
+          "price": 68.0
+        },
+        {
+          "sku_id": "s_p_food_017_2",
+          "properties": {
+            "口味": "原味",
+            "整箱规格": "205g×10盒",
+            "包装类型": "组合装"
+          },
+          "price": 62.0
+        },
+        {
+          "sku_id": "s_p_food_017_3",
+          "properties": {
+            "口味": "原味",
+            "整箱规格": "205g×16盒",
+            "包装类型": "普通装"
+          },
+          "price": 108.0
+        },
+        {
+          "sku_id": "s_p_food_017_4",
+          "properties": {
+            "口味": "原味",
+            "整箱规格": "205g×16盒",
+            "包装类型": "组合装"
+          },
+          "price": 99.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_018",
+    "name": "李锦记 特级草菇老抽 1.65L 瓶装酱油 家庭厨房调味品",
+    "category": "食品生活",
+    "sub_category": "调味品",
+    "price": 29.0,
+    "brand": "李锦记",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_018_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_018_1",
+          "properties": {
+            "容量": "500ml",
+            "包装类型": "玻璃瓶装"
+          },
+          "price": 15.0
+        },
+        {
+          "sku_id": "s_p_food_018_2",
+          "properties": {
+            "容量": "500ml",
+            "包装类型": "塑料瓶装"
+          },
+          "price": 9.0
+        },
+        {
+          "sku_id": "s_p_food_018_3",
+          "properties": {
+            "容量": "1.65L",
+            "包装类型": "玻璃瓶装"
+          },
+          "price": 32.0
+        },
+        {
+          "sku_id": "s_p_food_018_4",
+          "properties": {
+            "容量": "1.65L",
+            "包装类型": "家庭塑料装"
+          },
+          "price": 29.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_019",
+    "name": "百草味 每日坚果A款 750g/30袋 混合坚果零食礼盒",
+    "category": "食品生活",
+    "sub_category": "坚果/零食",
+    "price": 118.0,
+    "brand": "百草味",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_019_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_019_1",
+          "properties": {
+            "规格": "25g×30袋",
+            "版本": "经典混合坚果"
+          },
+          "price": 118.0
+        },
+        {
+          "sku_id": "s_p_food_019_2",
+          "properties": {
+            "规格": "25g×30袋",
+            "版本": "家庭分享装"
+          },
+          "price": 111.0
+        },
+        {
+          "sku_id": "s_p_food_019_3",
+          "properties": {
+            "规格": "25g×40袋",
+            "版本": "经典混合坚果"
+          },
+          "price": 157.0
+        },
+        {
+          "sku_id": "s_p_food_019_4",
+          "properties": {
+            "规格": "25g×40袋",
+            "版本": "家庭分享装"
+          },
+          "price": 148.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_020",
+    "name": "日清 合味道 海鲜风味 杯装方便面 79g×12 杯整箱",
+    "category": "食品生活",
+    "sub_category": "方便食品",
+    "price": 69.0,
+    "brand": "日清",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_020_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_020_1",
+          "properties": {
+            "容量": "79g/杯",
+            "数量": "12杯整箱",
+            "口味": "海鲜风味"
+          },
+          "price": 69.0
+        },
+        {
+          "sku_id": "s_p_food_020_2",
+          "properties": {
+            "容量": "79g/杯",
+            "数量": "12杯整箱",
+            "口味": "混合口味装"
+          },
+          "price": 72.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_021",
+    "name": "康师傅 红烧牛肉面 方便面袋装 114g×5 袋 五连包整袋",
+    "category": "食品生活",
+    "sub_category": "方便食品",
+    "price": 18.9,
+    "brand": "康师傅",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_021_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_021_1",
+          "properties": {
+            "口味": "红烧牛肉面",
+            "规格": "114g×5袋",
+            "包装": "五连包"
+          },
+          "price": 18.9
+        },
+        {
+          "sku_id": "s_p_food_021_2",
+          "properties": {
+            "口味": "红烧牛肉面",
+            "规格": "114g×10袋",
+            "包装": "家庭装"
+          },
+          "price": 35.0
+        },
+        {
+          "sku_id": "s_p_food_021_3",
+          "properties": {
+            "口味": "红烧牛肉面",
+            "规格": "114g×20袋",
+            "包装": "整箱装"
+          },
+          "price": 68.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_022",
+    "name": "三顿半 冷萃超即溶 黑咖啡 6颗装 冷泡即溶精品速溶咖啡",
+    "category": "食品生活",
+    "sub_category": "咖啡",
+    "price": 58.0,
+    "brand": "三顿半",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_022_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_022_1",
+          "properties": {
+            "数量": "6颗装",
+            "口味": "冷萃黑咖"
+          },
+          "price": 58.0
+        },
+        {
+          "sku_id": "s_p_food_022_2",
+          "properties": {
+            "数量": "12颗装",
+            "口味": "冷萃黑咖"
+          },
+          "price": 108.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_023",
+    "name": "雀巢 金牌 冻干速溶咖啡 100g 瓶装 黑咖啡",
+    "category": "食品生活",
+    "sub_category": "咖啡",
+    "price": 42.0,
+    "brand": "雀巢",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_023_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_023_1",
+          "properties": {
+            "容量": "100g",
+            "包装": "玻璃瓶装"
+          },
+          "price": 42.0
+        },
+        {
+          "sku_id": "s_p_food_023_2",
+          "properties": {
+            "容量": "200g",
+            "包装": "经济装"
+          },
+          "price": 72.0
+        },
+        {
+          "sku_id": "s_p_food_023_3",
+          "properties": {
+            "容量": "100g",
+            "包装": "经济装"
+          },
+          "price": 36.0
+        },
+        {
+          "sku_id": "s_p_food_023_4",
+          "properties": {
+            "容量": "200g",
+            "包装": "玻璃瓶装"
+          },
+          "price": 78.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_024",
+    "name": "元气森林 白葡萄味 苏打气泡水 480ml×12 0糖0脂0卡",
+    "category": "食品生活",
+    "sub_category": "碳酸饮料",
+    "price": 52.0,
+    "brand": "元气森林",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_024_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_024_1",
+          "properties": {
+            "口味": "白葡萄味",
+            "容量": "480ml",
+            "数量": "12瓶",
+            "包装": "整箱装"
+          },
+          "price": 52.0
+        },
+        {
+          "sku_id": "s_p_food_024_2",
+          "properties": {
+            "口味": "白葡萄味",
+            "容量": "480ml",
+            "数量": "12瓶",
+            "包装": "量贩装"
+          },
+          "price": 48.0
+        },
+        {
+          "sku_id": "s_p_food_024_3",
+          "properties": {
+            "口味": "白葡萄味",
+            "容量": "480ml",
+            "数量": "24瓶",
+            "包装": "整箱装"
+          },
+          "price": 100.0
+        },
+        {
+          "sku_id": "s_p_food_024_4",
+          "properties": {
+            "口味": "白葡萄味",
+            "容量": "480ml",
+            "数量": "24瓶",
+            "包装": "量贩装"
+          },
+          "price": 96.0
+        }
+      ]
+    }
+  },
+  {
+    "id": "p_food_025",
+    "name": "农夫山泉 水溶C100 柠檬味饮料 445ml×15 瓶装 维生素C饮品",
+    "category": "食品生活",
+    "sub_category": "功能饮料",
+    "price": 89.0,
+    "brand": "农夫山泉",
+    "image_urls": [
+      "/mnt/disk1/LZJ/project/BuyPilot-AI/data/raw/ecommerce_agent_dataset/4_食品生活/images/p_food_025_live.jpg"
+    ],
+    "product_url": "",
+    "amazon_seller": null,
+    "metadata": {
+      "skus": [
+        {
+          "sku_id": "s_p_food_025_1",
+          "properties": {
+            "口味": "柠檬味",
+            "容量": "445ml",
+            "箱规": "15瓶",
+            "包装": "整箱装"
+          },
+          "price": 89.0
+        },
+        {
+          "sku_id": "s_p_food_025_2",
+          "properties": {
+            "口味": "柠檬味",
+            "容量": "445ml",
+            "箱规": "15瓶",
+            "包装": "量贩装"
+          },
+          "price": 84.9
+        },
+        {
+          "sku_id": "s_p_food_025_3",
+          "properties": {
+            "口味": "柠檬味",
+            "容量": "445ml",
+            "箱规": "24瓶",
+            "包装": "整箱装"
+          },
+          "price": 139.0
+        },
+        {
+          "sku_id": "s_p_food_025_4",
+          "properties": {
+            "口味": "柠檬味",
+            "容量": "445ml",
+            "箱规": "24瓶",
+            "包装": "量贩装"
+          },
+          "price": 135.0
+        }
+      ]
+    }
+  }
+]
