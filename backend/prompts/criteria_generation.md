@@ -56,7 +56,7 @@
 | 美妆护肤 | skin_type, budget_max, ingredient_avoid, ingredient_prefer, use_scenario |
 | 数码电子 | storage_requirement, screen_size_preference, budget_max, use_scenario |
 | 服饰运动 | sport_type, season, material_preference, budget_max |
-| 零食生活 | dietary, taste_preference, budget_max, use_scenario |
+| 食品生活 | dietary, taste_preference, budget_max, use_scenario |
 
 所有品类共享: budget_max, budget_min, brand_preference。
 

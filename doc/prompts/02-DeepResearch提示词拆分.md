@@ -6,7 +6,7 @@
 
 你的 prompt 里已经明确了几个关键边界：
 
-客户端确定为 **iOS Swift 原生 / SwiftUI 优先**，系统包含 **用户端 + 轻量 Web 后台 + 后端服务**，
+客户端确定为 **Android Kotlin 原生 / Jetpack Compose 优先**，系统包含 **用户端 + 轻量 Web 后台 + 后端服务**，
 
 后台不做订单、库存、支付、商家入驻等完整电商后台，只服务于商品数据、知识库和评测闭环。
 
@@ -21,12 +21,12 @@
 拆成 12 个提示词：
 
 1. **总策略与 MVP 边界**
-2. **iOS SwiftUI 用户端开源组件调研**
+2. **Android Jetpack Compose 用户端开源组件调研**
 3. **后端 FastAPI 与流式服务调研**
 4. **RAG 框架、向量数据库、混合检索调研**
 5. **Rerank 与多模态模型 API 调研**
 6. **轻量 Web 管理后台与评测看板调研**
-7. **商品数据集与知识库构造调研**
+7. **商品数据与知识库构造调研**
 8. **评测框架与指标体系调研**
 9. **开源胶水集成风险与 License 风险调研**
 10. **最终技术选型与架构整合**
@@ -53,7 +53,7 @@ Agent 智能体：实现一个基于 RAG 的多模态电商智能导购 Agent。
 3 人组队，在 3 周内完成一个高完成度、可演示、可答辩、可评测的比赛作品。
 
 赛题要求：
-1. 基于 iOS 原生框架、Node.js/Python/Go 后端服务、向量数据库和大模型 OpenAPI，构建“意图理解 - 智能咨询 - 决策辅助”的电商 AI 导购系统。
+1. 基于 Android 原生框架、Node.js/Python/Go 后端服务、向量数据库和大模型 OpenAPI，构建“意图理解 - 智能咨询 - 决策辅助”的电商 AI 导购系统。
 2. 支持上传非结构化商品详情与营销文档，构建专属知识库。
 3. 使用 RAG 保证回复专业性和准确性。
 4. 客户端需要接近“豆包”的流式交互体验。
@@ -68,16 +68,16 @@ Agent 智能体：实现一个基于 RAG 的多模态电商智能导购 Agent。
 3. 使用 AI Coding / vibe coding。
 4. 不适合从 0 完整开发所有模块。
 5. 优先使用成熟开源项目、模板、组件做胶水集成。
-6. 客户端已确定采用 iOS Swift 原生开发，优先 SwiftUI。
+6. 客户端已确定采用 Android Kotlin 原生开发，优先 Jetpack Compose。
 7. 系统按三部分设计：
-   - 用户端：iOS Swift 原生导购 App，负责文字/图片输入、流式对话、商品卡片实时渲染、swipe 反馈、商品详情和最终决策卡。
+   - 用户端：Android Kotlin 原生导购 App，负责文字/图片输入、流式对话、商品卡片实时渲染、swipe 反馈、商品详情和最终决策卡。
    - 后台端：轻量 Web 管理后台，负责商品结构化数据维护、商品详情/营销文档上传、知识库切分与入库状态查看、用户反馈查看、评测任务触发与评测结果可视化。
    - 后端服务：负责会话管理、意图理解、购买标准生成、商品结构化检索、RAG、rerank、多模态解析、流式输出、反馈记录和评测接口。
 8. 后台端不是完整商家后台，不做订单、库存、支付、商家入驻、多角色审核等复杂电商能力。
 
 产品战略：
-1. 不做真正全品类泛电商。
-2. 前台可以包装成“泛电商导购 Agent”，后台优先聚焦 3C / 数码配件 / 平板 / 耳机 / 手机 / 键盘鼠标等高参数、强对比、易结构化品类。
+1. 不做无限泛化的全品类电商。
+2. 使用导师官方 100 条脱敏电商数据，覆盖美妆护肤、数码电子、服饰运动、食品生活 4 个品类。
 3. 不做普通聊天机器人。
 4. 核心不是“聊天”，而是“购物决策 Agent”。
 5. 用户购物的本质不是搜索商品，而是降低决策不确定性。
@@ -155,7 +155,7 @@ MVP 交互：
    - 业务理解？
 
 2. 我们当前战略是否合理？
-   - 前台包装泛电商，后台聚焦 3C / 数码 / 外设高参数品类，是否合理？
+   - 使用导师官方 100 条数据做多品类导购验证，是否合理？
    - “决策辅助”优先于“商品搜索”，是否合理？
    - “购买标准生成”作为核心模块，是否合理？
    - 混合检索优先于纯向量检索，是否合理？
@@ -178,7 +178,7 @@ MVP 交互：
    - 不做会不会影响答辩
    - 如何在答辩中解释这个取舍
 
-6. 请给出 3 条最强 Demo 场景：
+6. 请给出 4 条最强 Demo 场景：
    - 预算型导购
    - 图片输入识别
    - 商品对比 / 避坑
@@ -194,7 +194,7 @@ MVP 交互：
 4. 最小可赢 MVP
 5. P0/P1/P2 功能表
 6. 必砍功能表
-7. 三条 Demo 路径
+7. 4 条 Demo 路径
 8. 最大风险与止损策略
 9. 最终建议
 
@@ -206,15 +206,15 @@ MVP 交互：
 
 ---
 
-# 提示词 2：iOS SwiftUI 用户端开源组件调研
+# 提示词 2：Android Jetpack Compose 用户端开源组件调研
 
-用途：专门调研 iOS 用户端。避免 DeepResearch 又跑去研究 Android、Flutter、React Native，像技术选型自助餐一样拿满一盘。
+用途：专门调研 Android 用户端。避免 DeepResearch 又跑去研究 Android、Flutter、React Native，像技术选型自助餐一样拿满一盘。
 
 ```Plain Text
-请基于公共上下文，进行一次“iOS SwiftUI 用户端开源组件与实现方案”专项 Deep Research。
+请基于公共上下文，进行一次“Android Jetpack Compose 用户端开源组件与实现方案”专项 Deep Research。
 
 研究目标：
-为比赛用户端选择可快速复用的 SwiftUI / UIKit 开源组件、示例代码和官方能力，帮助 3 人团队在 3 周内完成 iOS 原生导购 App。
+为比赛用户端选择可快速复用的 Jetpack Compose / AndroidX 开源组件、示例代码和官方能力，帮助 3 人团队在 3 周内完成 Android 原生导购 App。
 
 用户端必须支持：
 1. 文字输入
@@ -231,42 +231,41 @@ MVP 交互：
 
 请重点研究：
 
-A. SwiftUI 聊天 UI / Message List
+A. Jetpack Compose 聊天 UI / Message List
 - 支持流式增量消息渲染
 - 支持 Markdown 或富文本
 - 支持图片消息
 - 支持自定义消息气泡
 - 是否适合魔改为导购旁白
 
-B. SwiftUI swipe card / Tinder-like card stack
-- 是否支持 DragGesture
+B. Jetpack Compose swipe card / Tinder-like card stack
+- 是否支持 pointerInput / draggable / swipe 手势
 - 是否可控制左滑/右滑反馈
 - 是否易于嵌入商品卡片
 - 是否维护活跃
 - 是否适合比赛快速集成
 
 C. 商品卡片 UI
-- 是否有 SwiftUI card component 示例
+- 是否有 Jetpack Compose card component 示例
 - 是否适合展示图片、价格、参数、推荐理由、风险标签
 - 是否可做实时插入和动画
 
 D. 图片选择与预览
-- PhotosPicker
-- PHPickerViewController
+- Photo Picker
 - 相机/相册能力
 - 图片压缩、上传 multipart/form-data
-- 和 SwiftUI 集成难度
+- 和 Jetpack Compose 集成难度
 
 E. 流式通信
-- URLSession SSE 支持方式
-- Swift EventSource 开源库
-- Starscream WebSocket
+- OkHttp SSE 开源库
+- Retrofit/OkHttp 网络层组合
+- Ktor Client 备选方案
 - 是否推荐 SSE 还是 WebSocket
 - 对比赛场景哪个更稳
 
-F. iOS App 架构
-- SwiftUI + MVVM 是否足够
-- 是否需要 Combine / async-await
+F. Android App 架构
+- Jetpack Compose + MVVM 是否足够
+- 是否需要 ViewModel + StateFlow + Coroutines
 - 网络层如何组织
 - 状态管理如何避免复杂化
 
@@ -274,7 +273,7 @@ F. iOS App 架构
 1. 项目名称
 2. GitHub URL / 官方文档 URL
 3. 能力类别：聊天 UI / swipe card / 图片选择 / SSE / WebSocket / 卡片组件 / 架构模板
-4. 技术栈：SwiftUI / UIKit / Swift Package / CocoaPods 等
+4. 技术栈：Kotlin / Jetpack Compose / AndroidX / Gradle 等
 5. License
 6. 最近维护活跃度：
    - 最近 commit
@@ -296,23 +295,23 @@ F. iOS App 架构
 - swipe card 组件或示例 3-5 个
 - SSE/WebSocket 方案 3-5 个
 - 图片选择/上传方案 2-4 个
-- SwiftUI 架构示例 2-3 个
+- Jetpack Compose 架构示例 2-3 个
 
 最后请给出：
-1. 最推荐的 iOS 用户端技术组合
+1. 最推荐的 Android 用户端技术组合
 2. 页面结构建议：
    - 首页 / 任务输入页
    - 聊天 + 卡片流页
    - 商品详情页
    - 候选商品页
    - 最终决策卡页
-3. 第 1 周 iOS 端最小可演示目标
+3. 第 1 周 Android 端最小可演示目标
 4. 哪些 UI 功能必须砍掉
 5. 为什么这套方案适合 3 周比赛
 
 要求：
-- 不要重点研究 Android、Flutter、React Native。
-- 如果引用非 iOS 技术，只能作为交互参考，不能作为主路线。
+- 不要重点研究 iOS、Flutter、React Native。
+- 如果引用非 Android 技术，只能作为交互参考，不能作为主路线。
 - 必须给来源链接。
 ```
 
@@ -326,7 +325,7 @@ F. iOS App 架构
 请基于公共上下文，进行一次“Python FastAPI 后端服务模板与流式接口”专项 Deep Research。
 
 研究目标：
-找到适合 3 周比赛快速落地的后端服务架构和开源模板。后端需要支撑 iOS 用户端、轻量 Web 后台、RAG pipeline、流式输出、文件上传、反馈记录和评测接口。
+找到适合 3 周比赛快速落地的后端服务架构和开源模板。后端需要支撑 Android 用户端、轻量 Web 后台、RAG pipeline、流式输出、文件上传、反馈记录和评测接口。
 
 请重点研究：
 
@@ -352,7 +351,7 @@ F. iOS App 架构
    - WebSocket
    - HTTP chunked streaming
    对本项目场景判断：
-   - iOS 端接入复杂度
+   - Android 端接入复杂度
    - 服务端实现复杂度
    - 稳定性
    - 断线重连
@@ -480,7 +479,7 @@ F. iOS App 架构
 - Python FastAPI 集成难度
 - metadata filter 支持
 - 是否适合商品结构化表 + 文档向量表混合检索
-- 是否适合小规模 30-100 商品 + 数百文档 chunk
+- 是否适合官方 100 条商品 + 数百文档 chunk
 - 运维复杂度
 - License
 
@@ -583,7 +582,7 @@ A. Rerank 方案
 - API 成本
 - 本地部署成本
 - 是否支持商品导购场景
-- 是否适合 30-100 商品小规模 Demo
+- 是否适合官方 100 条商品小规模 Demo
 - 和 FastAPI / LangChain / LlamaIndex 集成难度
 - 3 周比赛风险
 - License / 商用限制
@@ -733,18 +732,18 @@ D. 和导购链路的集成方式
 
 ---
 
-# 提示词 7：商品数据集与知识库构造调研
+# 提示词 7：商品数据与知识库构造调研
 
 用途：解决“数据从哪里来”。比赛作品败在没数据上非常常见，毕竟模型不会凭空长出商品宇宙。
 
 ```Plain Text
-请基于公共上下文，进行一次“电商商品数据集与知识库构造”专项 Deep Research。
+请基于公共上下文，进行一次“电商商品数据与知识库构造”专项 Deep Research。
 
 研究目标：
-为比赛快速构造一个适合 RAG 与导购决策的商品知识库。优先聚焦 3C / 数码配件 / 平板 / 耳机 / 手机 / 键盘鼠标等高参数品类。
+基于导师官方 100 条脱敏电商数据，构造适合 RAG 与导购决策的商品知识库。重点覆盖美妆护肤、数码电子、服饰运动、食品生活 4 个品类。
 
 数据目标：
-1. 30-100 个商品样本。
+1. 官方 100 个商品样本。
 2. 每个商品有结构化属性。
 3. 每个商品有非结构化文档：
    - 商品详情
@@ -762,13 +761,14 @@ D. 和导购链路的集成方式
 
 请研究：
 
-1. 公开电商数据集
-   - Amazon 商品数据
-   - BestBuy / Cdiscount / Kaggle 电商商品数据
-   - 中文电商商品数据
-   - 商品评价数据
-   - 3C 产品参数数据
-   - 其他可合法使用的数据源
+1. 官方数据结构与补充材料
+   - 导师官方 100 条商品 JSON
+   - 官方本地商品图片
+   - marketing_description
+   - FAQ
+   - reviews
+   - SKUs
+   - rag_knowledge
 
 2. 数据许可证
    - 是否可以用于比赛 Demo
@@ -829,7 +829,7 @@ D. 和导购链路的集成方式
 5. 商品结构化 schema
 6. 非结构化文档模板
 7. 评测样本构造方法
-8. 推荐的 30-100 商品数据范围
+8. 推荐的官方 100 条数据入库范围
 9. 数据风险与规避方法
 10. 第一周如何最快生成可用数据
 
@@ -937,7 +937,7 @@ D. 和导购链路的集成方式
 
 1. 哪些模块适合直接使用开源？
    例如：
-   - SwiftUI UI 组件
+   - Jetpack Compose UI 组件
    - SSE/WebSocket 库
    - FastAPI 模板
    - RAG 框架
@@ -1080,7 +1080,7 @@ D. 和导购链路的集成方式
 
 4. 请设计最终系统架构。
    必须包含：
-   - iOS SwiftUI 用户端
+   - Android Jetpack Compose 用户端
    - 轻量 Web 管理后台
    - FastAPI 后端
    - PostgreSQL / pgvector 或其他最终数据库
@@ -1098,14 +1098,14 @@ D. 和导购链路的集成方式
    - 数据流图
 
 6. 请给出模块边界：
-   - iOS 端负责什么
+   - Android 端负责什么
    - Web 后台负责什么
    - 后端业务服务负责什么
    - Agent / RAG 模块负责什么
    - 评测模块负责什么
 
 7. 请给出三人分工：
-   A. iOS / 产品体验
+   A. Android / 产品体验
    B. 业务后端 / 数据 / 轻量后台
    C. Agent / RAG / 评测
 
@@ -1142,7 +1142,7 @@ D. 和导购链路的集成方式
 【粘贴提示词 10 生成的最终推荐架构】
 
 目标：
-让 AI Coding 工具可以直接根据本契约生成后端、iOS 端、后台端的代码骨架。请优先简单稳定，不要设计企业级复杂架构。
+让 AI Coding 工具可以直接根据本契约生成后端、Android 端、后台端的代码骨架。请优先简单稳定，不要设计企业级复杂架构。
 
 请输出：
 
@@ -1256,8 +1256,8 @@ D. 和导购链路的集成方式
    - record_feedback
    - run_evaluation
 
-9. iOS 数据模型
-   请给出 Swift struct 示例：
+9. Android 数据模型
+   请给出 Kotlin data class 示例：
    - TaskSummary
    - ChatMessage
    - ProductCard
@@ -1296,8 +1296,8 @@ D. 和导购链路的集成方式
 【粘贴提示词 11 结果摘要】
 
 团队角色：
-A. iOS / 产品体验
-- SwiftUI 用户端
+A. Android / 产品体验
+- Jetpack Compose 用户端
 - 流式对话
 - 商品卡片
 - 图片上传
@@ -1361,13 +1361,13 @@ C. Agent / RAG / 评测
 4. 并行开发策略
    - 哪些接口先 mock
    - 哪些 schema 必须先冻结
-   - iOS 如何使用 mock 数据并行开发
+   - Android 如何使用 mock 数据并行开发
    - 后台如何先接静态评测数据
    - RAG 如何先用小数据集跑通
 
 5. 风险清单
    请按严重程度排序：
-   - iOS 流式渲染不稳定
+   - Android 流式渲染不稳定
    - swipe card 状态管理复杂
    - RAG 效果不好
    - 数据集不足
@@ -1398,8 +1398,8 @@ C. Agent / RAG / 评测
    - 如何证明推荐效果变好了？
    - 开源项目用了哪些？
    - 你们自己的创新在哪里？
-   - 为什么只聚焦 3C / 数码品类？
-   - 如果推广到泛电商怎么做？
+   - 为什么用官方 4 品类数据？
+   - 如果扩展到更多品类怎么做？
    - 3 周内如何保证稳定？
 
 8. 最终行动清单
@@ -1422,7 +1422,7 @@ C. Agent / RAG / 评测
 ```Plain Text
 第一批并行：
 1 总策略与 MVP 边界
-2 iOS 用户端
+2 Android 用户端
 3 FastAPI 后端
 4 RAG / 向量数据库
 5 Rerank / 多模态
@@ -1445,7 +1445,7 @@ C. Agent / RAG / 评测
 
 ```Plain Text
 1 总策略与 MVP 边界
-2 iOS 用户端
+2 Android 用户端
 4 RAG / 向量数据库
 8 评测框架
 10 最终技术选型与架构整合
@@ -1479,7 +1479,7 @@ C. Agent / RAG / 评测
 - 调研员
 - 架构师
 - 产品经理
-- iOS 工程师
+- Android 工程师
 - 后端工程师
 - RAG 工程师
 - 数据工程师

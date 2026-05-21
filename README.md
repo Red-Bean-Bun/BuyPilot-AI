@@ -10,7 +10,7 @@
 |--------|------|
 | 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
-| LLM | 百炼平台（Qwen-Turbo / Qwen-Plus / Qwen-VL-Plus / text-embedding-v3 / gte-rerank） |
+| LLM | 双轨并行：火山引擎 Doubao（意图识别主力）+ 百炼 Qwen（生成/多模态/Embedding/Rerank 主力） |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
 | 商品数据源 | 导师官方脱敏电商数据（100条，4品类×25） |
@@ -36,14 +36,18 @@
 
 ```
 doc/
-├── strategy/          战略与决策          ← 先读这里，理解"为什么做"
+├── strategy/          战略与决策          ← 先读 02；01 为 Pivot 前历史稿
 │   ├── 01-比赛背景与战略决策.md
 │   └── 02-策略研究报告.md
 ├── prd/               产品需求文档        ← 开工依据，定义"做什么"
 │   ├── 01-Android前端PRD.md
-│   └── 02-后端与AgentPRD.md
+│   ├── 01-附录-表格内容.md
+│   ├── 02-后端与AgentPRD.md
+│   └── 03-后端同步变更说明.md
 ├── decisions/         架构决策记录        ← 开发过程中的关键决策
-│   └── 决策记录.md
+│   ├── 决策记录.md
+│   ├── 2026-05-20-官方文档对齐迭代.md
+│   └── 2026-05-20-数据品类Pivot.md
 ├── research/          调研参考           ← 队友原始调研
 │   └── 队友原始调研-多模态电商导购.md
 ├── risk/              风险预判           ← 卡点清单，开发前必读
@@ -81,10 +85,10 @@ doc/
 │   └── tests/                   ← 按层对应的测试
 │
 ├── data/                        ← 数据层
-│   ├── raw/                     ← 原始 Amazon CSV
-│   ├── images/                  ← 全量商品图片（本地化）
-│   ├── processed/               ← LLM 提取的结构化结果
-│   └── scripts/                 ← 数据处理脚本（可迭代）
+│   ├── official/                ← 导师官方 100 条脱敏电商数据
+│   ├── images/                  ← 官方数据自带本地商品图片
+│   ├── processed/               ← 入库前清洗/metadata 推断结果
+│   └── scripts/                 ← 官方 JSON 入库与评测样本生成脚本
 │
 ├── eval/                        ← 评测
 │   ├── datasets/                ← 测试样本
@@ -98,8 +102,8 @@ doc/
 
 | 文档 | 谁看 | 什么时候看 |
 |------|------|-----------|
-| **01-比赛背景与战略决策** | 全员 | 第一天，定调 |
-| **02-策略研究报告** | 全员 | 架构选型前 |
+| **02-策略研究报告** | 全员 | 当前战略与架构选型依据 |
+| **01-比赛背景与战略决策** | 全员 | 历史背景参考，已被 2026-05-20 Pivot 覆盖 |
 | **决策记录** | 全员 | 开发前 + 有分歧时对照 |
 | **01-Android前端PRD** | 前端开发 | 开工前 + 联调时对照 |
 | **02-后端与AgentPRD** | 后端/Agent开发 | 开工前 + 联调时对照 |
@@ -122,15 +126,16 @@ doc/
 ```
 用户输入 (Android)
   ↓
-意图识别 (Qwen-Turbo) + 槽位检查
+意图识别 (Doubao primary / Qwen-Turbo fallback) + 槽位检查
+  ↓ add_to_cart意图 → cart_action事件 → 购物车状态更新
   ↓ 并行
-购买标准生成 (Qwen-Plus)  |  投机检索 (embedding + 硬过滤)
+购买标准生成 (Qwen-Plus primary / Doubao fallback)  |  投机检索 (embedding + 硬过滤)
   ↓
 混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(gte)
   ↓
 推荐解释生成 (Qwen-Plus) + 证据绑定
   ↓
-SSE 事件流：thinking → criteria_card → text_delta → product_card → final_decision → done
+SSE 事件流：thinking → clarification → criteria_card → text_delta → product_card → cart_action → final_decision → done
   ↓
 Android Compose + LazyColumn 卡片渲染
   ↓

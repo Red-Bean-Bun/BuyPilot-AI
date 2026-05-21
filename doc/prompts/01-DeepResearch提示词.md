@@ -6,7 +6,7 @@
 
 ## 为什么拆分
 
-原 prompt 同时要求模型扮演：调研员、架构师、产品经理、iOS工程师、后端工程师、RAG工程师、数据工程师、评测工程师、项目经理、答辩教练。这不是 DeepResearch，这是让一个虚拟顾问模拟一家创业公司，还不发工资。
+原 prompt 同时要求模型扮演：调研员、架构师、产品经理、Android工程师、后端工程师、RAG工程师、数据工程师、评测工程师、项目经理、答辩教练。这不是 DeepResearch，这是让一个虚拟顾问模拟一家创业公司，还不发工资。
 
 拆分后每轮只解决一个决策面，最后再收束。产出链：
 
@@ -46,16 +46,16 @@
 
 团队约束：
 1. 3 人团队，开发周期 3 周，使用 AI Coding / vibe coding
-2. 客户端：Android 原生（Kotlin + Jetpack Compose + Stream Chat Android Compose SDK）
+2. 客户端：Android 原生（Kotlin + Jetpack Compose + OkHttp SSE）
 3. 后端：Python FastAPI + PostgreSQL + pgvector
-4. LLM：百炼平台（Qwen-Turbo / Qwen-Plus / Qwen-VL-Plus / text-embedding-v3 / gte-rerank）
+4. LLM：双轨并行（Doubao 做意图识别主力，百炼 Qwen 做生成/多模态/Embedding/Rerank 主力）
 5. 系统三部分：用户端 Android App、轻量 Web 后台、后端服务
 
 产品战略：
-1. 品类聚焦亲子玩具（Toys & Games），前台可包装泛电商，后台做深玩具数据
+1. 品类使用导师官方 100 条脱敏电商数据，覆盖美妆护肤/数码电子/服饰运动/食品生活 4 个品类
 2. 不做普通聊天机器人，核心是"购物决策 Agent"
 3. 用户缺的不是更多信息，而是判断标准
-4. 混合检索：SQL/JSON filter（适龄/预算/安全）+ vector retrieval（语义）+ rerank
+4. 混合检索：SQL/JSON filter（价格/品类/metadata 约束）+ vector retrieval（语义）+ rerank
 5. 评测闭环必须作为答辩亮点
 
 MVP 保留：文字输入、图片输入、流式对话、商品卡片、左滑不喜欢、右滑喜欢、点击详情、最终决策卡
@@ -71,12 +71,12 @@ MVP 暂缓：上滑/下滑复杂手势、复杂抽屉、长期用户画像、完
 | 序号 | 提示词名称 | 用途 | 对应文件位置 |
 |------|-----------|------|-------------|
 | 1 | 总策略与 MVP 边界 | 定战略边界，判断比赛考察什么 | 提示词 1 |
-| 2 | Android 用户端开源组件调研 | 找 Compose/Stream/OkHttp SSE 可用组件 | 提示词 2 |
+| 2 | Android 用户端开源组件调研 | 找 Compose/OkHttp SSE/Photo Picker 可用组件 | 提示词 2 |
 | 3 | FastAPI 后端与流式服务调研 | 后端骨架、SSE、文件上传 | 提示词 3 |
 | 4 | RAG 框架 / 向量数据库 / 混合检索 | 核心技术：结构化+向量+Rerank | 提示词 4 |
 | 5 | Rerank 与多模态模型 API | 图片理解、重排模型选型 | 提示词 5 |
 | 6 | 轻量 Web 后台与评测看板 | 商品管理、知识库、评测可视化 | 提示词 6 |
-| 7 | 商品数据集与知识库构造 | 玩具数据从哪来，怎么构造 | 提示词 7 |
+| 7 | 商品数据与知识库构造 | 官方 100 条数据怎么入库、chunk 和构造评测样本 | 提示词 7 |
 | 8 | 评测框架与指标体系 | 答辩亮点：自动化评测闭环 | 提示词 8 |
 | 9 | 开源胶水集成风险 | License、依赖冲突、避免套壳 | 提示词 9 |
 | 10 | 最终技术选型与架构整合 | 收束前面结果，出一套架构 | 提示词 10 |

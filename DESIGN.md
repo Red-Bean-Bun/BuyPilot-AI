@@ -1,6 +1,6 @@
 ---
 name: BuyPilot-AI
-description: AI guided toy shopping assistant for Android
+description: AI guided multi-category shopping assistant for Android
 colors:
   primary: "#FF6A3D"
   primary-soft: "#FFE5DA"

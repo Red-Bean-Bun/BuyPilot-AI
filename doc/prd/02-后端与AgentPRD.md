@@ -135,7 +135,7 @@
   "use_scenario": "日常训练"
 }
 
-// 飶品生活
+// 食品生活
 {
   "dietary": ["无糖", "0脂0卡"],
   "taste": "原味",
@@ -190,7 +190,6 @@ products (
   brand         TEXT,
   image_urls    TEXT[],
   product_url   TEXT,
-  amazon_seller BOOLEAN,
   metadata      JSONB DEFAULT '{}'       -- 品类结构化属性（如肤质适用、存储规格、运动类型等）
 )
 
@@ -423,7 +422,7 @@ async def chat_stream(user_input, image_url=None, history=None):
     # ====== T0: slot_checker + intent 并行 ======
     slot_result, intent_result = await asyncio.gather(
         check_required_slots(user_input),        # ~0ms
-        analyze_intent(user_input, history),      # ~1.5s (Qwen-Turbo)
+        analyze_intent(user_input, history),      # ~1.5s (Doubao primary / Qwen-Turbo fallback)
     )
 
     if slot_result.needs_clarification:
@@ -930,7 +929,7 @@ backend/
 │   │
 │   ├── services/                # 业务逻辑层（检索、LLM、评测）
 │   │   ├── __init__.py
-│   │   ├── llm_client.py        # 百炼平台 LLM 客户端（Profile驱动，支持流式 async generator）
+│   │   ├── llm_client.py        # Doubao/Qwen 双轨 LLM 客户端（Profile驱动，支持流式 async generator）
 │   │   ├── retriever.py         # 混合检索（硬过滤+向量召回并行 + pgvector + rerank）
 │   │   ├── embedding.py         # 百炼 embedding 客户端（含投机预计算接口）
 │   │   ├── reranker.py          # gte-rerank 客户端
@@ -1154,8 +1153,8 @@ volumes:
 | 16 | admin API（5 个文件拆分） | 管理后台能展示评测闭环 |
 | 17 | baseline 评测运行，记录指标 | eval_runs 表有数据 |
 | 18 | 优化策略运行（加硬过滤 → 加 Rerank → Prompt v2） | 版本对比数据 |
-| 19 | 3 条 Demo 剧本 + RAGAS P1 尝试 | Demo 稳定，RAGAS 数据可选展示 |
-| 20 | 完整彩排 + 全量数据入库（P2） | 端到端流畅 |
+| 19 | 4 条 Demo 剧本 + RAGAS P1 尝试 | Demo 稳定，RAGAS 数据可选展示 |
+| 20 | 完整彩排 + 官方 100 条数据一致性复查 | 端到端流畅 |
 | 21 | 冻结功能，只修 bug | 系统稳定 |
 
 
