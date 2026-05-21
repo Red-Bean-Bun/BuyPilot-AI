@@ -12,7 +12,7 @@
 | LLM | **双轨并行**：火山引擎 Doubao（意图识别主力）+ 百炼 Qwen（生成主力） |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
-| 模型切换 | 配置层 dict + call_llm() 函数，按任务类型选 primary/fallback |
+| 模型切换 | task-oriented interface（analyze_intent / generate_criteria / generate_recommendation / analyze_image），内部按 TASK_MODEL_MAP 选 primary/fallback |
 
 ### 模型-任务映射（双轨策略）
 
@@ -109,8 +109,7 @@ UI → Runtime → Service → Repo → Config/Types
 
 - 依赖只能自上而下流动，禁止反向/横向/循环依赖
 - 业务逻辑只能在 Service 层
-- 副作用（IO/DB/网络/外部 API）必须可定位、可替换、可测试
-- 所有边界必须显式类型化，禁止隐式 dict 和无 schema JSON
+- 所有 LLM 调用和数据库查询必须通过 Service 层的 task-oriented interface 执行。禁止在 Runtime 层直接调用 LLM SDK 或在 API 层直接执行 SQL。违反即架构错误。
 - 配置集中管理，禁止 `os.getenv()` 散落在业务代码中
 
 ---
@@ -222,7 +221,7 @@ UI → Runtime → Service → Repo → Config/Types
 | LLM 接入 | 双轨：火山引擎 Doubao + 百炼 Qwen | 意图/生成/多模态 |
 | Embedding | text-embedding-v3 (1024维, 百炼) | 文档向量化 |
 | Rerank | gte-rerank (百炼) | 检索重排 |
-| 模型切换 | 配置层 dict + call_llm() | 按任务类型选primary/fallback |
+| 模型切换 | task-oriented interface | analyze_intent / generate_criteria / generate_recommendation / analyze_image，内部按 TASK_MODEL_MAP 选 primary/fallback |
 | 部署 | Docker Compose | FastAPI + PostgreSQL |
 
 ---
@@ -236,7 +235,7 @@ UI → Runtime → Service → Repo → Config/Types
   ↓ add_to_cart意图 → cart_action事件 → 加购操作
   ↓ 需要澄清时 → clarification 事件（多问题模式，每题带 suggested_options）
   ↓ 并行
-购买标准生成 (Qwen-Plus primary / Doubao fallback) → 约束列表 → 展平为 CriteriaPayload  |  投机检索 (embedding + 硬过滤)
+购买标准生成 (Qwen-Plus primary / Doubao fallback) → 约束列表 → 展平为 CriteriaPayload（封闭 DSL，constraints 为显式枚举字段）  |  投机检索 (embedding + 硬过滤)
   ↓
 混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(gte)
   ↓
@@ -251,6 +250,47 @@ Android Compose + LazyColumn 卡片渲染
 ```
 
 > SSE 事件协议以 `doc/prd/01-Android前端PRD.md` 和 `doc/prd/02-后端与AgentPRD.md` 为准，两份 PRD 已对齐。
+
+---
+
+## 系统铁律（System Invariants）
+
+违反以下任何一条即架构错误，必须立即修复，不可通过 patch 绕过。
+
+### 铁律 1：SSE 事件协议封闭性
+
+- SSE event type 禁止新增。现有的 8+1 个 type（thinking / clarification / criteria_card / text_delta / product_card / cart_action / final_decision / done + error）是全集。新功能无法映射到现有 type 时，先改业务设计，不是加新 type。
+- 每个 event 的 field 变更必须同步更新 `contracts/` 目录的 JSON Schema 和 Android ChatUiNode。单边修改即架构错误。
+
+### 铁律 2：CriteriaPayload 封闭 DSL
+
+- `Constraints` 使用平铺字段 + `| None`，所有允许的约束维度在 schema 中显式枚举。禁止 `dict[str, Any]`。
+- 前端只消费 `chips: list[str]`，不依赖 constraints 键名语义。constraints 只约束后端检索硬过滤。
+- 不能进入 schema 的需求，不值得自动化。
+
+### 铁律 3：Prompt 边界
+
+- Prompt 只能做三件事：组织语言、提取结构化意图、指导生成质量。
+- 路由逻辑和硬过滤条件必须代码化。品类关键词映射表属于路由逻辑，禁止写进 prompt。
+
+### 铁律 4：LLM 调用 task-oriented interface
+
+- LLM 调用必须是 task-oriented interface（analyze_intent / generate_criteria / generate_recommendation / analyze_image），每个接口返回结构化的 Pydantic model，禁止返回 raw str 让调用方自己解析。
+- 所有 LLM 调用和数据库查询必须通过 Service 层的 task-oriented interface 执行。禁止在 Runtime 层直接调用 LLM SDK 或在 API 层直接执行 SQL。
+
+---
+
+## 熵增 Kill Switch
+
+出现以下情况必须暂停开发、先重构：
+
+| Kill Switch | 含义 | 典型表现 |
+|------------|------|---------|
+| 同一语义出现 3+ 表示方式 | AI 编码最常见的熵源 | 同一"价格范围"叫 budget_range / price_filter / cost_constraint |
+| 同一 event type 出现条件分支语义 | SSE 铁律的预警信号 | ThinkingEvent 既表示 UI 加载又表示 Agent 推理状态 |
+| 单个 prompt 超 300 行 | 可量化红线 | prompt 里堆叠了多种业务规则和特殊情况 |
+| 无法画出清晰数据流 | 架构崩坏的核心信号 | 某个功能的数据来源和去向说不清楚 |
+| 单品类 constraints 超 8 个 `| None` 字段 | 封闭 DSL 的健康指标 | DSL 设计过于膨胀，需要重新审视品类约束维度 |
 
 ---
 

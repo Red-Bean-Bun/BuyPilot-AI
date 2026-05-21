@@ -39,6 +39,7 @@ capture/
 
 # Database
 postgres_data/
+*.db
 
 # Project Specific
 logs/
