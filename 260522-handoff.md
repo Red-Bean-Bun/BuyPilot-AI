@@ -18,7 +18,7 @@
 | 图片可访问 URL | `ProductPayload.image_url` 仍多为 raw 相对路径 | Android/前端不能稳定加载本地 raw 图片；需要 FastAPI static mount 或 image proxy | P1 |
 | 9 张表 + trace/evidence/eval/cart | `models.py` 已有 Product/ProductChunk/Conversation/Feedback/CartItem/EvalRun/RetrievalTrace/EvidenceLink/EvalSample | schema 是 SQLite/JSON 友好版，不是 PRD PostgreSQL DDL；conversation trace 未完整 FK 串联 | P1/P2 |
 | 后台写 trace/evidence，不阻塞流式 | pipeline 在推荐后同步写 `retrieval_traces/evidence_links` | 简单可用，但不是后台任务；慢 DB 会阻塞 done 前收尾 | P2 |
-| Admin API、RAGAS eval、baseline eval | 有 eval table skeleton | 未实现 admin API、RAGAS、baseline runner | P2 |
+| Admin API、RAGAS eval、baseline eval | ✅ 已完成。13 指标（6 确定性 + 7 LLM Judge），15 条样本，CLI + API + Streamlit 看板 | 见 `eval-module-handoff.md` | Done |
 
 ## 1. 当前任务目标
 
@@ -235,8 +235,11 @@ cd /mnt/disk1/LZJ/project/BuyPilot-AI/backend
    - 当前同步写 trace/evidence，`conversation_id` 关联不完整。
    - PRD 期望后台写入，不影响 SSE。
 
-9. **Admin/eval/RAGAS**
-   - 表 skeleton 有，业务闭环未做。
+9. **Admin/eval** ✅ 已完成
+   - 评测模块完整实现，见 `eval-module-handoff.md`。
+   - CLI：`python -m src.scripts.eval --strategy baseline`
+   - API：`/admin/eval/runs`、`/admin/eval/samples`
+   - 看板：`streamlit run static/eval_dashboard.py`
 
 ## 6. 建议接手路径
 

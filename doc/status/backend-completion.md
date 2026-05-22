@@ -41,9 +41,9 @@
 |---|------|------|---------|---------|------|
 | 21 | Thinking 心跳（800ms） | ❌ 未完成 | 4.4 | `runtime/pipeline.py` | 当前只在阶段边界发 thinking，LLM 等待期间无事件 |
 | 22 | 取消生成（Cancel） | ❌ 未完成 | 5.2 | `api/cancel.py` | 端点返回 `{"canceled": true}` 但不做任何事 |
-| 23 | 评测模块（4 个 deterministic 指标） | ❌ 未完成 | 6.1 | `services/eval/`（不存在） | `repos/eval_runs.py` 是空文件 |
-| 24 | 评测样本（15 条） | ❌ 未完成 | 6.3 | — | eval_samples 表已定义但无数据 |
-| 25 | 管理后台 API | ❌ 未完成 | 5.2 | `api/admin_*.py`（不存在） | 无管理后台端点 |
+| 23 | 评测模块（13 个指标） | ✅ 已完成 | 6.1 | `services/eval/` | 6 个确定性指标 + 7 个 LLM Judge 指标，Qwen-Plus 做 Judge，无需额外依赖 |
+| 24 | 评测样本（15 条） | ✅ 已完成 | 6.3 | `data/eval/eval_samples.json` | 15 条覆盖 8 种场景 × 4 品类 × 3 难度 |
+| 25 | 管理后台 API | ✅ 已完成 | 5.2 | `api/admin_eval.py` | GET/POST /admin/eval/runs, GET /admin/eval/samples, POST /admin/eval/samples/seed |
 | 26 | 4 条 Demo 路径稳定性打磨 | ⚠️ 部分完成 | — | — | 仅 Demo 1 已验证跑通，Demo 2/3/4 有 gap |
 
 ## 工程质量（评审权重 25%）
@@ -57,6 +57,7 @@
 | 31 | Docker Compose | ✅ 有 | `deploy/docker-compose.yml`（FastAPI + PostgreSQL） |
 | 32 | Prompt 文件 | ⚠️ 半成品 | `backend/prompts/` 下 6 个 .md 文件已写好，但运行时从未加载（llm_client.py 用硬编码字符串） |
 | 33 | 接口契约文档 | ✅ 有 | `contracts/sse-events.schema.json` + 3 个 golden trace 示例 |
+| 34 | 评测看板（Streamlit） | ✅ 已完成 | `static/eval_dashboard.py`，4 页：总览/版本对比/样本详情/错误分析，`streamlit run` 启动 |
 
 ## 4 条 Demo 路径状态
 

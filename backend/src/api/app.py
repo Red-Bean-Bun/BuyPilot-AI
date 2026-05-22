@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from src.api.admin_eval import admin_eval_router
 from src.api.cart import cart_router
 from src.api.cancel import cancel_router
 from src.api.chat import chat_router
@@ -15,6 +16,7 @@ app.include_router(cancel_router)
 app.include_router(feedback_router)
 app.include_router(upload_router)
 app.include_router(cart_router)
+app.include_router(admin_eval_router)
 
 
 @app.get("/health")

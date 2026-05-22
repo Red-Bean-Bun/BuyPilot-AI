@@ -79,7 +79,10 @@ class EvalRun(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     run_name: str
     strategy_tag: str | None = None
+    prompt_version: str | None = None
+    git_commit: str | None = None
     metrics: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    samples_detail: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     sample_count: int | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -116,9 +119,11 @@ class EvalSample(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     question: str
-    must_have: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    preferred: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    forbidden: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    difficulty: str | None = None
+    image_path: str | None = None
+    context: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     scenario_type: str | None = None
+    difficulty: str | None = None
+    ground_truth: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now)
 
