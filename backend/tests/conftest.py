@@ -41,7 +41,7 @@ def mock_external_ai(monkeypatch):
 @pytest.fixture
 def sse_schema():
     path = CONTRACTS_DIR / "sse-events.schema.json"
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -50,7 +50,7 @@ def golden_budget_beauty():
     path = CONTRACTS_DIR / "examples" / "demo_budget_beauty.sse"
     if not path.exists():
         pytest.skip("golden trace not found")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
