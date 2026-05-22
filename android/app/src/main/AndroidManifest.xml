@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.buypilot">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
+        android:name=".BuyPilotApplication"
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:label="BuyPilot"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:icon="@mipmap/ic_launcher">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
-            android:name=".ui.ChatScreen"
+            android:name=".MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

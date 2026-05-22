@@ -15,3 +15,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "BuyPilot"
 include(":app")
+include(":core:common")
+include(":core:model")
+include(":core:network")
+include(":core:database")
+include(":core:data")
+include(":feature:chat")
+include(":feature:history")
