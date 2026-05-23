@@ -41,11 +41,7 @@ def list_all(limit: int = 50) -> list[EvalRun]:
     """Return recent eval runs, newest first."""
     create_db_and_tables()
     with Session(get_engine()) as session:
-        return list(
-            session.exec(
-                select(EvalRun).order_by(EvalRun.created_at.desc()).limit(limit)
-            ).all()
-        )
+        return list(session.exec(select(EvalRun).order_by(EvalRun.created_at.desc()).limit(limit)).all())
 
 
 def get_by_id(run_id: str) -> EvalRun | None:

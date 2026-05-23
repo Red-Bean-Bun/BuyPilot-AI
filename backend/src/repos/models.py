@@ -9,6 +9,8 @@ from uuid import uuid4
 from sqlalchemy import Column, JSON
 from sqlmodel import Field, SQLModel
 
+from src.repos.vector import EMBEDDING_DIMENSIONS, EmbeddingType
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -35,7 +37,7 @@ class ProductChunk(SQLModel, table=True):
     product_id: str = Field(foreign_key="products.id", index=True)
     chunk_text: str
     chunk_index: int
-    embedding: list[float] = Field(default_factory=list, sa_column=Column(JSON))
+    embedding: list[float] = Field(default_factory=list, sa_column=Column(EmbeddingType(EMBEDDING_DIMENSIONS)))
     chunk_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column("metadata", JSON))
 
 
@@ -126,4 +128,3 @@ class EvalSample(SQLModel, table=True):
     ground_truth: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utc_now)
-

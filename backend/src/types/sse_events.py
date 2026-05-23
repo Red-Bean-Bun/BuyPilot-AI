@@ -52,6 +52,7 @@ def now_ms() -> int:
 
 class Constraints(BaseModel):
     """封闭 DSL —— 所有允许的约束维度显式枚举，禁止 dict[str, Any]"""
+
     # 通用字段（所有品类共享）
     budget_min: float | None = None
     budget_max: float | None = None

@@ -1,6 +1,9 @@
 # Repository Layer
 
 Repo 层负责数据持久化（SQLModel + pgvector），包含 products、conversations、feedbacks 等表的读写操作。
-当前为空 —— mock pipeline 不连接数据库。
 
-当实现 8 张数据库表后，每个表的 DAO/Repo 放在此目录下。
+边界约束：
+
+- Repo 可以依赖 `config`、`types`、同层 Repo 模块和数据库库。
+- Repo 不依赖 `services`、`runtime` 或 `api`。
+- 业务编排、LLM 调用、embedding、chunking 等逻辑放在 `services/`。

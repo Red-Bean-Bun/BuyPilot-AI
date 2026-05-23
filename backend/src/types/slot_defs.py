@@ -27,4 +27,3 @@ REQUIRED_SLOTS = tuple(name for name, slot in SLOT_DEFS.items() if slot.requirem
 
 def is_required_slot(slot_name: str) -> bool:
     return slot_name in REQUIRED_SLOTS
-

@@ -11,28 +11,19 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from src.config.domain_terms import (
+    INGREDIENT_TERMS,
+    SKIN_TERMS,
+    scenario_from_text,
+    extract_skin_types,
+    extract_terms,
+    has_negation_prefix,
+)
 from src.config.settings import get_settings
 from src.types.sse_events import ProductPayload
 
 
-SKIN_TYPES = ["油性", "混合", "混油", "干性", "敏感", "中性", "痘肌"]
-INGREDIENT_TERMS = [
-    "酒精",
-    "香精",
-    "烟酰胺",
-    "透明质酸",
-    "氨基酸",
-    "水杨酸",
-    "视黄醇",
-    "神经酰胺",
-    "二裂酵母",
-    "马齿苋",
-    "防晒",
-    "控油",
-    "保湿",
-    "修护",
-    "抗初老",
-]
+SKIN_TYPES = list(SKIN_TERMS)
 
 
 def dataset_dir() -> Path:
@@ -66,14 +57,12 @@ def get_raw_product(product_id: str) -> dict[str, Any] | None:
 
 
 def list_products() -> list[ProductPayload]:
-    return [_payload_from_raw(raw) for raw in load_raw_products()]
+    return [product.model_copy(deep=True) for product in _product_payloads()]
 
 
 def get_product(product_id: str) -> ProductPayload | None:
-    raw = get_raw_product(product_id)
-    if raw is None:
-        return None
-    return _payload_from_raw(raw)
+    product = _product_index().get(product_id)
+    return product.model_copy(deep=True) if product else None
 
 
 def build_product_text(raw: dict[str, Any]) -> str:
@@ -121,22 +110,27 @@ def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
     )
 
 
+@lru_cache(maxsize=1)
+def _product_payloads() -> tuple[ProductPayload, ...]:
+    return tuple(_payload_from_raw(raw) for raw in load_raw_products())
+
+
+@lru_cache(maxsize=1)
+def _product_index() -> dict[str, ProductPayload]:
+    return {product.product_id: product for product in _product_payloads()}
+
+
 def _extract_terms(text: str, terms: list[str]) -> list[str]:
-    return [term for term in terms if term in text]
+    return extract_terms(text, terms)
+
+
+def _has_negation_prefix(text: str, term: str) -> bool:
+    return has_negation_prefix(text, term)
 
 
 def _extract_skin_types(text: str) -> list[str]:
-    found = _extract_terms(text, SKIN_TYPES)
-    normalized: list[str] = []
-    for item in found:
-        value = "混合性" if item in {"混合", "混油"} else item
-        if value not in normalized:
-            normalized.append(value)
-    return normalized
+    return extract_skin_types(text)
 
 
 def _extract_scenario(text: str) -> str | None:
-    for scenario in ["通勤", "户外", "运动", "日常", "夜间", "办公", "送礼", "旅行", "露营"]:
-        if scenario in text:
-            return scenario
-    return None
+    return scenario_from_text(text)

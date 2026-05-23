@@ -26,4 +26,3 @@ class PipelineState(TypedDict, total=False):
     reranked_results: list[ProductPayload] | None
     recommendation_text: str | None
     decision: dict[str, Any] | None
-

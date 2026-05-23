@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -12,8 +11,9 @@ from src.api.chat import chat_router
 from src.api.feedback import feedback_router
 from src.api.upload import upload_router
 from src.config.settings import get_settings
-from src.repos.database import create_db_and_tables
-from src.repos.ingest import EXPECTED_EMBEDDING_DIMENSIONS, seed_products_if_needed
+from src.runtime.cancel_registry import active_turn_count
+from src.services.async_io import run_sync_io
+from src.services.startup import initialize_database
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -21,17 +21,17 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await asyncio.to_thread(_initialize_database)
+    await run_sync_io(_initialize_database)
     yield
 
 
 def _initialize_database() -> None:
-    create_db_and_tables()
-    if not settings.auto_seed_on_startup:
-        return
-    expected_dimensions = EXPECTED_EMBEDDING_DIMENSIONS if settings.auto_seed_strict_embeddings else None
-    stats = seed_products_if_needed(expected_embedding_dimensions=expected_dimensions)
-    logger.info("Database seed check completed: %s", stats)
+    stats = initialize_database(
+        auto_seed=settings.auto_seed_on_startup,
+        strict_embeddings=settings.auto_seed_strict_embeddings,
+    )
+    if stats is not None:
+        logger.info("Database seed check completed: %s", stats)
 
 
 app = FastAPI(title="BuyPilot-AI", version="0.1.0", lifespan=lifespan)
@@ -46,4 +46,10 @@ app.include_router(admin_eval_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": settings.app_name}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "strict_runtime": settings.strict_runtime,
+        "fallback_policy": "fail_fast" if settings.strict_runtime else "demo_visible_degradation",
+        "active_turns": active_turn_count(),
+    }
