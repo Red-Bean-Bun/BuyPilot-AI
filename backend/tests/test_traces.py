@@ -1,7 +1,7 @@
 import pytest
 from sqlmodel import Session, select
 
-from src.repos.ingest import seed_products
+from src.services.product_ingest import seed_products
 from src.repos.models import EvidenceLink, RetrievalTrace
 from src.runtime.pipeline import chat_stream
 from src.types.schemas import ChatStreamRequest
@@ -40,5 +40,7 @@ def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch, tmp_p
     assert traces[0].selected_ids
     timings = traces[0].filters_applied.get("_stage_timings_ms", {})
     assert {"intent", "criteria", "retrieve", "recommendation", "decision"} <= set(timings)
+    fallbacks = traces[0].filters_applied.get("_fallbacks", [])
+    assert any(item.get("component") == "rerank.texts" for item in fallbacks)
     assert links
     assert links[0].product_id in traces[0].selected_ids

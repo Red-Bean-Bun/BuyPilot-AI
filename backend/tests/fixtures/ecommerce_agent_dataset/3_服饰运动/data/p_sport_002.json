@@ -1,0 +1,32 @@
+{
+  "product_id": "p_sport_002",
+  "title": "李宁缓震跑步鞋日常训练轻便运动鞋",
+  "brand": "李宁",
+  "category": "服饰运动",
+  "sub_category": "跑鞋",
+  "base_price": 399.0,
+  "image_path": "3_服饰运动/images/p_sport_002.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_sport_002_1",
+      "properties": {"尺码": "42"},
+      "price": 399.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "这款李宁跑步鞋适合日常训练和公路慢跑，缓震舒适，鞋面透气，价格友好。",
+    "official_faq": [
+      {
+        "question": "适合新手跑者吗？",
+        "answer": "适合，新手日常训练和通勤慢跑都可以。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "跑者B",
+        "rating": 5,
+        "content": "比预期轻，训练穿很舒服，性价比高。"
+      }
+    ]
+  }
+}

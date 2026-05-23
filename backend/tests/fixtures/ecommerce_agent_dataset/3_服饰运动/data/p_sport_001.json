@@ -1,0 +1,32 @@
+{
+  "product_id": "p_sport_001",
+  "title": "耐克轻量跑步鞋日常训练缓震运动鞋",
+  "brand": "Nike",
+  "category": "服饰运动",
+  "sub_category": "跑鞋",
+  "base_price": 499.0,
+  "image_path": "3_服饰运动/images/p_sport_001.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_sport_001_1",
+      "properties": {"尺码": "42"},
+      "price": 499.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "这款 Nike 跑鞋适合日常训练和通勤慢跑，脚感轻量，缓震稳定，适合入门跑者。",
+    "official_faq": [
+      {
+        "question": "适合长距离跑步吗？",
+        "answer": "适合日常训练，长距离竞速建议选择更专业的竞速跑鞋。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "跑者A",
+        "rating": 4,
+        "content": "日常训练够用，缓震不错。"
+      }
+    ]
+  }
+}

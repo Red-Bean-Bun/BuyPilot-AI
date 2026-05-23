@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 
-from src.repos.ingest import seed_products, seed_products_if_needed
+from src.services.product_ingest import seed_products, seed_products_if_needed
 from src.repos.models import Product, ProductChunk
 from src.repos.products import get_raw_product, list_products, list_raw_products
 

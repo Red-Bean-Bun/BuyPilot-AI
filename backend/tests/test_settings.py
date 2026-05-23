@@ -1,19 +1,5 @@
-from src.config.settings import BACKEND_DIR, TASK_MODEL_MAP, get_settings
+from src.config.settings import BACKEND_DIR, get_settings
 import src.config.settings as settings_module
-
-
-def test_task_model_map_has_required_tasks():
-    required = {
-        "analyze_intent",
-        "generate_criteria",
-        "generate_recommendation",
-        "analyze_image",
-        "embedding",
-        "rerank",
-    }
-    assert required.issubset(TASK_MODEL_MAP)
-    for task in required:
-        assert TASK_MODEL_MAP[task]["primary"]
 
 
 def test_llm_profiles_load():
@@ -41,12 +27,11 @@ def test_relative_sqlite_database_url_resolves_under_backend(monkeypatch):
     assert settings.database_url == f"sqlite:///{BACKEND_DIR / 'buypilot-dev.db'}"
 
 
-def test_startup_seed_flags(monkeypatch):
-    monkeypatch.setenv("AUTO_SEED_ON_STARTUP", "1")
-    monkeypatch.setenv("AUTO_SEED_STRICT_EMBEDDINGS", "1")
+def test_strict_runtime_flag(monkeypatch):
+    monkeypatch.setenv("STRICT_RUNTIME", "1")
     settings_module._settings = None
 
     settings = get_settings()
 
-    assert settings.auto_seed_on_startup is True
-    assert settings.auto_seed_strict_embeddings is True
+    assert settings.strict_runtime is True
+    settings_module._settings = None

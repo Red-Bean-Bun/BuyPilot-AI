@@ -1,0 +1,31 @@
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.schema import CreateTable
+
+from src.repos.database import is_postgres_database_url
+from src.repos.models import ProductChunk
+from src.repos.vector import coerce_vector, vector_to_pg_literal
+
+
+def test_product_chunk_embedding_compiles_to_pgvector_for_postgres():
+    ddl = str(CreateTable(ProductChunk.__table__).compile(dialect=postgresql.dialect()))
+
+    assert "VECTOR(1024)" in ddl
+
+
+def test_product_chunk_embedding_stays_json_for_sqlite():
+    ddl = str(CreateTable(ProductChunk.__table__).compile(dialect=sqlite.dialect()))
+
+    assert "JSON" in ddl
+    assert "VECTOR" not in ddl
+
+
+def test_vector_literal_roundtrip():
+    literal = vector_to_pg_literal([0.125, 1.0, -2.5])
+
+    assert literal == "[0.125,1,-2.5]"
+    assert coerce_vector(literal) == [0.125, 1.0, -2.5]
+
+
+def test_postgres_database_url_detection():
+    assert is_postgres_database_url("postgresql+psycopg://user:pass@localhost:5432/db")
+    assert not is_postgres_database_url("sqlite:///tmp.db")

@@ -31,9 +31,9 @@ def mock_external_ai(monkeypatch):
     async def fake_rerank_request(profile, query, documents, top_n):
         return []
 
-    from src.services import embedding, llm_client, reranker
+    from src.services import embedding, llm_gateway, reranker
 
-    monkeypatch.setattr(llm_client, "_chat_completion", fake_chat_completion)
+    monkeypatch.setattr(llm_gateway, "_chat_completion", fake_chat_completion)
     monkeypatch.setattr(embedding, "_embedding_request", fake_embedding_request)
     monkeypatch.setattr(reranker, "_rerank_request", fake_rerank_request)
 
@@ -81,9 +81,9 @@ def parse_sse_stream(text: str) -> list[tuple[str, dict]]:
         data = None
         for line in lines:
             if line.startswith("event: "):
-                event_type = line[len("event: "):].strip()
+                event_type = line[len("event: ") :].strip()
             elif line.startswith("data: "):
-                data = json.loads(line[len("data: "):].strip())
+                data = json.loads(line[len("data: ") :].strip())
         if event_type and data:
             events.append((event_type, data))
     return events

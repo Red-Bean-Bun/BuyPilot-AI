@@ -1,0 +1,32 @@
+{
+  "product_id": "p_beauty_012",
+  "title": "温和保湿洁面乳干皮敏感肌日常洗面奶100g",
+  "brand": "测试护肤",
+  "category": "美妆护肤",
+  "sub_category": "洁面",
+  "base_price": 129.0,
+  "image_path": "1_美妆护肤/images/p_beauty_012.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_beauty_012_1",
+      "properties": {"规格": "100g"},
+      "price": 129.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "这款洁面乳主打温和保湿，适合干性和敏感肌日常清洁，氨基酸表活，洗后不拔干。配方无酒精，低刺激。",
+    "official_faq": [
+      {
+        "question": "油皮适合吗？",
+        "answer": "可以日常使用，但控油能力弱于清爽控油款。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "干皮用户",
+        "rating": 5,
+        "content": "洗完不干，敏感肌换季用也比较稳定。"
+      }
+    ]
+  }
+}

@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from src.runtime import pipeline as pipeline_module
+from src.runtime.cancel_registry import active_turn_count, cancel_turn
 from src.runtime.pipeline import chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
 from src.types.schemas import ChatStreamRequest, DecisionResult, RecommendationResult
@@ -110,3 +111,43 @@ async def test_pipeline_emits_product_card_before_slow_recommendation_text(monke
     assert tags.index("product_card") < tags.index("text_delta")
     assert tags.index("text_delta") < tags.index("final_decision")
     assert any(event.event == "thinking" and event.stage == "recommending" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_honors_client_turn_cancellation():
+    events = []
+    async for event in chat_stream(
+        "s_cancel",
+        ChatStreamRequest(
+            message="推荐适合油皮的洗面奶，200元以内，日常护肤",
+            client_turn_id="turn_cancel_test",
+        ),
+    ):
+        events.append(event)
+        if event.event == "thinking":
+            assert cancel_turn("s_cancel", "turn_cancel_test") is True
+
+    assert [event.event for event in events] == ["thinking", "done"]
+    assert active_turn_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_error_message_is_sanitized(monkeypatch):
+    async def exploding_intent(body):
+        raise RuntimeError("database password leaked")
+
+    monkeypatch.setattr(pipeline_module, "run_intent", exploding_intent)
+
+    events = [
+        event
+        async for event in chat_stream(
+            "s_error",
+            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤"),
+        )
+    ]
+
+    errors = [event for event in events if event.event == "error"]
+    assert len(errors) == 1
+    assert "database password leaked" not in errors[0].message
+    assert "trace_id=turn_" in errors[0].message
+    assert events[-1].event == "done"

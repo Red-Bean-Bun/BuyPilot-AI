@@ -1,0 +1,37 @@
+{
+  "product_id": "p_beauty_011",
+  "title": "清爽氨基酸洁面乳油皮日常控油温和洗面奶120g",
+  "brand": "测试美妆",
+  "category": "美妆护肤",
+  "sub_category": "洁面",
+  "base_price": 89.0,
+  "image_path": "1_美妆护肤/images/p_beauty_011.jpg",
+  "skus": [
+    {
+      "sku_id": "s_p_beauty_011_1",
+      "properties": {"规格": "120g"},
+      "price": 89.0
+    }
+  ],
+  "rag_knowledge": {
+    "marketing_description": "这款氨基酸洁面乳适合油性肌肤和混合性肌肤日常清洁，泡沫细腻，主打清爽控油和温和保湿。不含酒精和香精，通勤和日常护肤都适用。",
+    "official_faq": [
+      {
+        "question": "敏感肌可以使用吗？",
+        "answer": "配方温和，不含酒精和香精，敏感肌建议先做耳后测试。"
+      }
+    ],
+    "user_reviews": [
+      {
+        "nickname": "小油皮",
+        "rating": 5,
+        "content": "早晚用都清爽，洗完不紧绷，油皮日常使用很合适。"
+      },
+      {
+        "nickname": "阿敏",
+        "rating": 2,
+        "content": "我用后鼻翼有点泛红，敏感肌还是要慎用。"
+      }
+    ]
+  }
+}

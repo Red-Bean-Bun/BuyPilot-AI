@@ -3,15 +3,6 @@ import pytest
 from tests.conftest import collect_sse_stream
 
 
-class TestHealthEndpoint:
-    @pytest.mark.asyncio
-    async def test_health_ok(self, test_client):
-        async with test_client as c:
-            resp = await c.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
-
-
 class TestChatStreamEndpoint:
     @pytest.mark.asyncio
     async def test_stream_returns_events(self, test_client):
@@ -159,30 +150,3 @@ class TestChatStreamEndpoint:
         actions = decisions[0]["next_actions"]
         action_types = [a["action"] for a in actions]
         assert "compare" in action_types
-
-
-class TestUploadImageEndpoint:
-    @pytest.mark.asyncio
-    async def test_upload_image_returns_mock(self, test_client):
-        async with test_client as c:
-            resp = await c.post(
-                "/chat/upload/image",
-                json={"file_name": "test.jpg"},
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "image_url" in data
-        assert data["mime_type"] == "image/jpeg"
-
-
-class TestFeedbackEndpoint:
-    @pytest.mark.asyncio
-    async def test_feedback_returns_received(self, test_client):
-        async with test_client as c:
-            resp = await c.post(
-                "/chat/feedback",
-                json={"session_id": "s1", "feedback_type": "not_interested"},
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "received"
