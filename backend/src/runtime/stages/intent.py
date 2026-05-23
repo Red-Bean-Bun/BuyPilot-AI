@@ -12,4 +12,3 @@ async def run_intent(body: ChatStreamRequest) -> IntentResult:
         history=[item.model_dump() for item in body.history],
         image_url=body.image_url,
     )
-

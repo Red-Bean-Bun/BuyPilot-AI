@@ -9,4 +9,3 @@ async def run_multimodal(image_url: str | None) -> dict | None:
     if not image_url:
         return None
     return await analyze_image(image_url)
-

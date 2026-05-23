@@ -9,4 +9,3 @@ from src.types.sse_events import CriteriaPayload, ProductPayload
 
 async def run_decision(criteria: CriteriaPayload, products: list[ProductPayload]) -> DecisionResult:
     return await generate_decision(criteria, products)
-

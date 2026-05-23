@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from typing import AsyncGenerator
 
+from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX, DEFAULT_CART_PRODUCT_ID
 from src.types.sse_events import (
     AlternativePayload,
     CartActionEvent,
@@ -25,7 +26,7 @@ SSE_CHUNK_DELAY = 0.1
 
 MOCK_PRODUCTS = [
     ProductPayload(
-        product_id="p_beauty_011",
+        product_id=DEFAULT_CART_PRODUCT_ID,
         name="珊珂洗颜专科绵润泡沫洁面乳",
         price=52.0,
         currency="CNY",
@@ -69,9 +70,7 @@ MOCK_PRODUCTS = [
 ]
 
 
-async def mock_pipeline(
-    session_id: str, user_input: str
-) -> AsyncGenerator[SSEEventBase, None]:
+async def mock_pipeline(session_id: str, user_input: str) -> AsyncGenerator[SSEEventBase, None]:
     turn_id = f"turn_{uuid.uuid4().hex[:8]}"
     deck_id = f"deck_{turn_id}"
     seq = EventSeq(turn_id)
@@ -114,7 +113,7 @@ async def mock_pipeline(
                 action_id="budget_low",
                 label="预算压低",
                 action="criteria_patch",
-                criteria_patch={"constraints": {"budget_max": 100}},
+                criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_FALLBACK_MAX}},
             ),
             QuickActionPayload(
                 action_id="sensitive_skin",
@@ -219,7 +218,7 @@ async def mock_pipeline(
         node_id=f"cart_{turn_id}",
         created_at_ms=now_ms(),
         action="add",
-        product_id="p_beauty_011",
+        product_id=DEFAULT_CART_PRODUCT_ID,
         quantity=1,
         status="success",
     )
@@ -245,7 +244,7 @@ async def mock_pipeline(
                 action_id="cheaper",
                 label="再便宜一点",
                 action="criteria_patch",
-                criteria_patch={"constraints": {"budget_max": 100}},
+                criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_FALLBACK_MAX}},
             ),
             QuickActionPayload(
                 action_id="no_alcohol",

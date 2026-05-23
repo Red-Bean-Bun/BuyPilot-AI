@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.repos.conversations import get_last_criteria
-from src.repos.feedbacks import extract_feedback_from_session
+from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX
+from src.services.conversation_state import get_previous_criteria
+from src.services.feedback import get_feedback_context
 from src.services.llm_client import generate_criteria
 from src.types.schemas import ChatStreamRequest, IntentResult
 from src.types.sse_events import Constraints, CriteriaPayload, QuickActionPayload
 
 
 async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentResult) -> CriteriaPayload:
-    existing = get_last_criteria(session_id)
+    existing = get_previous_criteria(session_id)
     if body.criteria_patch:
         return apply_criteria_patch(existing or CriteriaPayload(criteria_id="c_auto_001"), body.criteria_patch)
-    feedback = extract_feedback_from_session(session_id)
+    feedback = get_feedback_context(session_id)
     return await generate_criteria(body.message, intent, feedback=feedback, existing=existing)
 
 
@@ -42,7 +43,7 @@ def criteria_quick_actions() -> list[QuickActionPayload]:
             action_id="budget_low",
             label="预算压低",
             action="criteria_patch",
-            criteria_patch={"constraints": {"budget_max": 100}},
+            criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_FALLBACK_MAX}},
         ),
         QuickActionPayload(
             action_id="sensitive_skin",
@@ -57,4 +58,3 @@ def criteria_quick_actions() -> list[QuickActionPayload]:
             criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
         ),
     ]
-
