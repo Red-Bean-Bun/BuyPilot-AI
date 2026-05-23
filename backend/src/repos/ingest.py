@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func
 from sqlmodel import Session, select
 
 from src.repos.database import create_db_and_tables, get_engine
@@ -71,6 +71,31 @@ def reindex_chunk_embeddings() -> dict[str, int]:
     result = seed_products(expected_embedding_dimensions=EXPECTED_EMBEDDING_DIMENSIONS)
     stats = chunk_embedding_stats()
     return {**result, **stats}
+
+
+def seed_products_if_needed(expected_embedding_dimensions: int | None = None) -> dict[str, int | bool]:
+    """Seed product/chunk tables only when the current database is empty or stale."""
+    create_db_and_tables()
+    with Session(get_engine()) as session:
+        product_count = session.exec(select(func.count(Product.id))).one()
+        chunk_count = session.exec(select(func.count(ProductChunk.id))).one()
+        chunks = session.exec(select(ProductChunk.embedding)).all()
+
+    dimensions = {len(embedding) for embedding in chunks if embedding}
+    current_dimensions = dimensions.pop() if len(dimensions) == 1 else 0
+    dimension_ok = expected_embedding_dimensions is None or current_dimensions == expected_embedding_dimensions
+    if product_count > 0 and chunk_count > 0 and dimension_ok:
+        return {
+            "seeded": False,
+            "products": product_count,
+            "chunks": chunk_count,
+            "embedded_chunks": sum(1 for embedding in chunks if embedding),
+            "embedding_dimensions": current_dimensions,
+        }
+
+    result = seed_products(expected_embedding_dimensions=expected_embedding_dimensions)
+    stats = chunk_embedding_stats()
+    return {"seeded": True, **result, **stats}
 
 
 def chunk_embedding_stats() -> dict[str, int]:

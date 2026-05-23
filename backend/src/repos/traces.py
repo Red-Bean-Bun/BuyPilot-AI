@@ -15,12 +15,16 @@ def write_retrieval_trace(
     products: list[ProductPayload],
     evidences_by_product: dict[str, list[EvidencePayload]],
     conversation_id: str | None = None,
+    stage_timings_ms: dict[str, float] | None = None,
 ) -> str | None:
     create_db_and_tables()
+    filters_applied = criteria.constraints.model_dump()
+    if stage_timings_ms:
+        filters_applied["_stage_timings_ms"] = stage_timings_ms
     trace = RetrievalTrace(
         conversation_id=conversation_id,
         criteria_id=criteria.criteria_id or None,
-        filters_applied=criteria.constraints.model_dump(),
+        filters_applied=filters_applied,
         vector_top_k=[
             {
                 "product_id": product.product_id,
