@@ -1,8 +1,8 @@
 event: thinking
-data: {"event": "thinking", "session_id": "demo_error_001", "stage": "analyzing", "message": "正在连接后端服务..."}
+data: {"schema_version": "2026-05-20", "event": "thinking", "session_id": "demo_error_001", "turn_id": "turn_demo_error", "seq": 1, "event_id": "demo_error_001:1", "node_id": "thinking_error_001", "display_mode": "inline_thinking", "stage": "analyzing", "message": "正在连接后端服务..."}
 
 event: error
-data: {"event": "error", "session_id": "demo_error_001", "code": "LLM_TIMEOUT", "message": "后端服务暂时不可用，请稍后重试", "retryable": true}
+data: {"schema_version": "2026-05-20", "event": "error", "session_id": "demo_error_001", "turn_id": "turn_demo_error", "seq": 2, "event_id": "demo_error_001:2", "node_id": "error_error_001", "display_mode": "inline_card", "code": "LLM_TIMEOUT", "message": "后端服务暂时不可用，请稍后重试", "retryable": true}
 
 event: done
-data: {"event": "done", "session_id": "demo_error_001"}
+data: {"schema_version": "2026-05-20", "event": "done", "session_id": "demo_error_001", "turn_id": "turn_demo_error", "seq": 3, "event_id": "demo_error_001:3", "node_id": "done_error_001", "display_mode": "none"}

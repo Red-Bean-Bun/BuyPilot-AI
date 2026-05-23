@@ -54,6 +54,24 @@ def golden_budget_beauty():
         return f.read()
 
 
+@pytest.fixture
+def golden_clarification():
+    path = CONTRACTS_DIR / "examples" / "demo_clarification.sse"
+    if not path.exists():
+        pytest.skip("golden trace not found")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def golden_error():
+    path = CONTRACTS_DIR / "examples" / "demo_error.sse"
+    if not path.exists():
+        pytest.skip("golden trace not found")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def parse_sse_stream(text: str) -> list[tuple[str, dict]]:
     events = []
     blocks = re.split(r"\n\n+", text.strip())

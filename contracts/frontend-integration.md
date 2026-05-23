@@ -125,10 +125,11 @@ data: {"schema_version":"2026-05-20","event":"done",...}
 thinking(understanding)
 thinking(criteria)
 criteria_card
-text_delta
-text_delta
 thinking(searching)
 product_card x N
+thinking(recommending)
+text_delta
+text_delta
 final_decision
 done
 ```
@@ -542,29 +543,28 @@ none
 
 ## 8. POST /upload/image 和 /chat/upload/image
 
-请求 `ImageUploadRequest`：
+请求：`multipart/form-data`，字段与 Android `ImageUploadApi` 对齐：
 
-```json
-{
-  "file_name": "skincare.jpg",
-  "content_type": "image/jpeg"
-}
-```
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `file` | file | 是 | 图片文件，支持 JPEG/PNG/WebP，最大 5MB |
+| `session_id` | string | 否 | 关联会话 |
+| `purpose` | string | 否 | 默认 `chat_input` |
 
 响应 `ImageUploadResponse`：
 
 ```json
 {
-  "image_url": "https://example.com/upload/mock_skincare.jpg",
+  "image_url": "/uploads/upload_xxx.jpg",
   "width": 1280,
   "height": 960,
   "mime_type": "image/jpeg",
   "ocr_text": null,
-  "analysis": {"status": "received"}
+  "analysis": {"status": "stored"}
 }
 ```
 
-注意：当前不是 multipart 上传，只是 P0 占位请求体。真实文件上传后续需要另行扩展。
+兼容说明：旧 JSON 请求体 `{ "file_name": "...", "content_type": "..." }` 仍保留占位响应，供旧测试或临时联调使用；Android 正式链路应使用 multipart。
 
 ## 9. POST /feedback 和 /chat/feedback
 

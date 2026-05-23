@@ -290,3 +290,22 @@ class TestSchemaValidation:
         assert len(events) >= 5
         for tag, data in events:
             assert data["event"] == tag
+            jsonschema.validate(data, sse_schema)
+
+    def test_golden_trace_clarification_valid(self, sse_schema, golden_clarification):
+        from tests.conftest import parse_sse_stream
+
+        events = parse_sse_stream(golden_clarification)
+        assert len(events) >= 2
+        for tag, data in events:
+            assert data["event"] == tag
+            jsonschema.validate(data, sse_schema)
+
+    def test_golden_trace_error_valid(self, sse_schema, golden_error):
+        from tests.conftest import parse_sse_stream
+
+        events = parse_sse_stream(golden_error)
+        assert len(events) >= 2
+        for tag, data in events:
+            assert data["event"] == tag
+            jsonschema.validate(data, sse_schema)

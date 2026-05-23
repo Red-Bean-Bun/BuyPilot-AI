@@ -38,5 +38,7 @@ def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch, tmp_p
 
     assert traces
     assert traces[0].selected_ids
+    timings = traces[0].filters_applied.get("_stage_timings_ms", {})
+    assert {"intent", "criteria", "retrieve", "recommendation", "decision"} <= set(timings)
     assert links
     assert links[0].product_id in traces[0].selected_ids
