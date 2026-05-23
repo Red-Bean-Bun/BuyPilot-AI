@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from src.types.sse_events import CriteriaPayload, ProductPayload
+from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 
 class MessageLite(BaseModel):
@@ -95,6 +95,7 @@ class IntentResult(BaseModel):
 class RecommendationResult(BaseModel):
     text_chunks: list[str] = Field(default_factory=list)
     products: list[ProductPayload] = Field(default_factory=list)
+    evidence_by_product: dict[str, list[EvidencePayload]] = Field(default_factory=dict)
 
 
 class DecisionResult(BaseModel):
@@ -108,4 +109,3 @@ class SessionState(BaseModel):
     session_id: str
     last_criteria: CriteriaPayload | None = None
     last_product_ids: list[str] = Field(default_factory=list)
-

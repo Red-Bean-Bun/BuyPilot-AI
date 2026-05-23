@@ -15,6 +15,7 @@ import httpx
 from pydantic import ValidationError
 
 from src.config.settings import get_settings
+from src.services.image_upload import image_url_to_provider_url
 from src.types.schemas import DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import Constraints, CriteriaPayload, ProductPayload
 
@@ -40,12 +41,18 @@ def _category_from_text(text: str) -> str | None:
     if any(token in text for token in ("跑鞋", "运动", "衣服", "服饰")):
         return "服饰运动"
     if any(token in text for token in ("食品", "饮料", "零食", "无糖")):
-        return "食品生活"
+        return "食品饮料"
     return None
 
 
 def _budget_from_text(text: str) -> float | None:
-    match = re.search(r"(\d+(?:\.\d+)?)\s*元?(?:以内|以下|内)?", text)
+    match = re.search(r"预算\s*(?:降到|控制在|不超过|约|大概)?\s*(\d+(?:\.\d+)?)", text)
+    if match:
+        return float(match.group(1))
+    match = re.search(r"(\d+(?:\.\d+)?)\s*元\s*(?:以内|以下|内)?", text)
+    if match:
+        return float(match.group(1))
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:以内|以下|内)", text)
     return float(match.group(1)) if match else None
 
 
@@ -95,10 +102,10 @@ async def analyze_intent(message: str, history: list[dict[str, Any]] | None = No
                 return IntentResult.model_validate(parsed)
             except ValidationError:
                 pass
-    if any(token in message for token in ("购物车", "看看车", "查看车")):
-        return IntentResult(intent="view_cart")
     if any(token in message for token in ("加到购物车", "加入购物车", "加购", "买这个")):
         return IntentResult(intent="add_to_cart")
+    if any(token in message for token in ("购物车", "看看车", "查看车")):
+        return IntentResult(intent="view_cart")
     if any(token in message for token in ("不喜欢", "不要这个", "换一个", "太贵")):
         return IntentResult(intent="feedback", extracted_constraints={"feedback_text": message})
 
@@ -226,6 +233,7 @@ async def generate_recommendation(criteria: CriteriaPayload, products: list[Prod
 
 
 async def analyze_image(image_url: str) -> dict[str, Any]:
+    provider_image_url = image_url_to_provider_url(image_url)
     live = await _call_chat_task(
         "analyze_image",
         [
@@ -237,7 +245,7 @@ async def analyze_image(image_url: str) -> dict[str, Any]:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "请识别这张商品图片，输出适合导购检索的简短结构化信息。"},
-                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "image_url", "image_url": {"url": provider_image_url}},
                 ],
             },
         ],

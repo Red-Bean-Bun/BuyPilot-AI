@@ -66,7 +66,7 @@ class Constraints(BaseModel):
     # 服饰运动专属
     sport_type: str | None = None
     season: str | None = None
-    # 食品生活专属
+    # 食品饮料专属
     dietary: list[str] = Field(default_factory=list)
 
 

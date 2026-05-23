@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
+from src.api.upload import handle_upload_image
 from src.repos.cart_items import get_cart
 from src.repos.feedbacks import add_feedback
 from src.runtime.pipeline import chat_stream
-from src.types.schemas import ChatStreamRequest, FeedbackRequest, FeedbackResponse, ImageUploadRequest, ImageUploadResponse
+from src.types.schemas import ChatStreamRequest, FeedbackRequest, FeedbackResponse, ImageUploadResponse
 from src.types.sse_events import format_sse
 
 chat_router = APIRouter(tags=["chat"])
@@ -32,15 +33,8 @@ async def stream_chat(body: ChatStreamRequest):
 
 
 @chat_router.post("/upload/image")
-async def upload_image(body: ImageUploadRequest) -> ImageUploadResponse:
-    return ImageUploadResponse(
-        image_url=f"https://example.com/upload/mock_{body.file_name}",
-        width=1280,
-        height=960,
-        mime_type=body.content_type,
-        ocr_text=None,
-        analysis={"status": "received"},
-    )
+async def upload_image(request: Request) -> ImageUploadResponse:
+    return await handle_upload_image(request)
 
 
 @chat_router.post("/feedback")

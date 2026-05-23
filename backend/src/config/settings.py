@@ -51,10 +51,13 @@ class Settings:
     def __init__(self) -> None:
         self.app_name = os.getenv("APP_NAME", "buypilot-api")
         self.debug = os.getenv("DEBUG", "0") == "1"
-        self.database_url = os.getenv("DATABASE_URL", "sqlite:///./buypilot-dev.db")
+        self.database_url = _resolve_database_url(os.getenv("DATABASE_URL"))
+        self.auto_seed_on_startup = os.getenv("AUTO_SEED_ON_STARTUP", "0") == "1"
+        self.auto_seed_strict_embeddings = os.getenv("AUTO_SEED_STRICT_EMBEDDINGS", "0") == "1"
         self.dataset_dir = Path(
             os.getenv("ECOMMERCE_DATASET_DIR", PROJECT_DIR / "data" / "raw" / "ecommerce_agent_dataset")
         )
+        self.upload_dir = Path(os.getenv("UPLOAD_DIR", BACKEND_DIR / "uploads"))
         self.llm_profiles_path = BACKEND_DIR / "src" / "config" / "llm_profiles.yaml"
         self.task_model_map = TASK_MODEL_MAP
 
@@ -85,3 +88,18 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def _resolve_database_url(raw_url: str | None) -> str:
+    if not raw_url:
+        return f"sqlite:///{BACKEND_DIR / 'buypilot-dev.db'}"
+    if raw_url == "sqlite:///:memory:":
+        return raw_url
+
+    sqlite_prefix = "sqlite:///"
+    if raw_url.startswith(sqlite_prefix) and not raw_url.startswith("sqlite:////"):
+        raw_path = raw_url[len(sqlite_prefix):]
+        db_path = Path(raw_path)
+        if not db_path.is_absolute():
+            return f"sqlite:///{BACKEND_DIR / db_path}"
+    return raw_url

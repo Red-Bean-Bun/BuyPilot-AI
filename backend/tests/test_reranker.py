@@ -43,7 +43,7 @@ async def test_rerank_falls_back_when_config_missing(monkeypatch):
     _reset_settings()
 
     products = [
-        ProductPayload(product_id="p1", name="A", category="食品生活", price=100),
+        ProductPayload(product_id="p1", name="A", category="食品饮料", price=100),
         ProductPayload(product_id="p2", name="B", category="美妆护肤", price=80),
     ]
 

@@ -59,6 +59,20 @@ async def test_generate_criteria_uses_live_json_when_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_analyze_intent_does_not_parse_age_as_budget():
+    result = await llm_client.analyze_intent("给4岁孩子买零食")
+
+    assert "budget_max" not in result.extracted_constraints
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_parses_budget_without_yuan_after_budget_keyword():
+    result = await llm_client.analyze_intent("推荐跑鞋，预算500以内，日常训练")
+
+    assert result.extracted_constraints["budget_max"] == 500
+
+
+@pytest.mark.asyncio
 async def test_generate_recommendation_keeps_retrieved_products(monkeypatch):
     monkeypatch.setenv("BAILIAN_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("BAILIAN_API_KEY", "test-key")

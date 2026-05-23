@@ -19,7 +19,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "给4岁孩子买玩具"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 assert resp.status_code == 200
                 events = await collect_sse_stream(resp)
@@ -61,7 +61,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "给4岁孩子买室内益智玩具，预算200，不要小零件"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -79,7 +79,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "给4岁孩子买玩具"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -98,7 +98,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "给4岁孩子买玩具"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -111,9 +111,10 @@ class TestChatStreamEndpoint:
         first_done = tags.index("done")
 
         assert first_thinking < first_criteria
-        assert first_criteria < first_text_delta
-        assert first_text_delta < first_product
+        assert first_criteria < first_product
+        assert first_product < first_text_delta
         assert first_product < first_decision
+        assert first_text_delta < first_decision
         assert first_decision < first_done
 
     @pytest.mark.asyncio
@@ -122,7 +123,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "给4岁孩子买玩具"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -149,7 +150,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "给4岁孩子买玩具"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
