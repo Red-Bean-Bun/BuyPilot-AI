@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from src.config.settings import get_settings
+from src.config.tuning import (
+    RERANK_AVOID_PENALTY,
+    RERANK_SCORE_BUDGET,
+    RERANK_SCORE_CATEGORY,
+    RERANK_SCORE_SKIN_TYPE,
+    TEXT_RERANK_AVOID_PENALTY,
+)
+from src.services.fallbacks import record_fallback
 from src.types.sse_events import CriteriaPayload, ProductPayload
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -30,6 +41,9 @@ async def rerank(criteria: CriteriaPayload, products: list[ProductPayload], top_
     live = await _call_rerank(criteria, products, top_n)
     if live:
         return live
+    if get_settings().strict_runtime:
+        raise RerankUnavailable("Strict runtime requires live product rerank; deterministic fallback is disabled.")
+    record_fallback("rerank.products", "deterministic_fallback", count=len(products))
     return _deterministic_rerank(criteria, products, top_n)
 
 
@@ -39,20 +53,33 @@ async def rerank_texts(criteria: CriteriaPayload, documents: list[str], top_n: i
     live = await _call_rerank_texts(criteria, documents, top_n)
     if live:
         return live
+    if get_settings().strict_runtime:
+        raise RerankUnavailable("Strict runtime requires live text rerank; deterministic fallback is disabled.")
+    record_fallback("rerank.texts", "deterministic_fallback", count=len(documents))
     return _deterministic_rerank_texts(criteria, documents, top_n)
 
 
-async def _call_rerank(criteria: CriteriaPayload, products: list[ProductPayload], top_n: int) -> list[ProductPayload] | None:
+async def _call_rerank(
+    criteria: CriteriaPayload, products: list[ProductPayload], top_n: int
+) -> list[ProductPayload] | None:
     for profile_name in _task_profile_names("rerank"):
         try:
             profile = _resolve_rerank_profile(profile_name)
-            indexes = await _rerank_request(profile, _query_text(criteria), [_document_text(product) for product in products], top_n)
+            indexes = await _rerank_request(
+                profile, _query_text(criteria), [_document_text(product) for product in products], top_n
+            )
             ranked = [products[index] for index in indexes if 0 <= index < len(products)]
             if ranked:
                 return ranked
-        except RerankUnavailable:
+            record_fallback("rerank.products", "empty_live_result", profile=profile_name)
+            logger.warning("Rerank profile %s returned no valid product ranking; trying fallback", profile_name)
+        except RerankUnavailable as exc:
+            record_fallback("rerank.products", "profile_unavailable", profile=profile_name, detail=str(exc))
+            logger.info("Rerank profile unavailable for %s: %s", profile_name, exc)
             continue
-        except Exception:
+        except Exception as exc:
+            record_fallback("rerank.products", "provider_error", profile=profile_name, error_type=type(exc).__name__)
+            logger.warning("Rerank provider failed for profile %s; trying fallback", profile_name, exc_info=True)
             continue
     return None
 
@@ -65,24 +92,39 @@ async def _call_rerank_texts(criteria: CriteriaPayload, documents: list[str], to
             ranked = [index for index in indexes if 0 <= index < len(documents)]
             if ranked:
                 return ranked
-        except RerankUnavailable:
+            record_fallback("rerank.texts", "empty_live_result", profile=profile_name)
+            logger.warning("Rerank profile %s returned no valid text ranking; trying fallback", profile_name)
+        except RerankUnavailable as exc:
+            record_fallback("rerank.texts", "profile_unavailable", profile=profile_name, detail=str(exc))
+            logger.info("Rerank profile unavailable for %s: %s", profile_name, exc)
             continue
-        except Exception:
+        except Exception as exc:
+            record_fallback("rerank.texts", "provider_error", profile=profile_name, error_type=type(exc).__name__)
+            logger.warning("Rerank provider failed for profile %s; trying fallback", profile_name, exc_info=True)
             continue
     return None
 
 
-def _deterministic_rerank(criteria: CriteriaPayload, products: list[ProductPayload], top_n: int = 5) -> list[ProductPayload]:
+def _deterministic_rerank(
+    criteria: CriteriaPayload, products: list[ProductPayload], top_n: int = 5
+) -> list[ProductPayload]:
     def score(product: ProductPayload) -> tuple[int, float]:
         hard = 0
         if product.category == criteria.category:
-            hard += 3
+            hard += RERANK_SCORE_CATEGORY
         if criteria.constraints.skin_type and criteria.constraints.skin_type in product.skin_type_match:
-            hard += 2
-        if criteria.constraints.budget_max is not None and product.price is not None and product.price <= criteria.constraints.budget_max:
-            hard += 1
-        if any(item in " ".join(product.ingredient_tags + product.ingredient_avoid) for item in criteria.constraints.ingredient_avoid):
-            hard -= 5
+            hard += RERANK_SCORE_SKIN_TYPE
+        if (
+            criteria.constraints.budget_max is not None
+            and product.price is not None
+            and product.price <= criteria.constraints.budget_max
+        ):
+            hard += RERANK_SCORE_BUDGET
+        if any(
+            item in " ".join(product.ingredient_tags + product.ingredient_avoid)
+            for item in criteria.constraints.ingredient_avoid
+        ):
+            hard -= RERANK_AVOID_PENALTY
         return hard, -(product.price or 0.0)
 
     return sorted(products, key=score, reverse=True)[:top_n]
@@ -95,7 +137,7 @@ def _deterministic_rerank_texts(criteria: CriteriaPayload, documents: list[str],
         index, document = row
         exact_matches = sum(1 for token in query_tokens if token and token in document)
         avoid_penalty = sum(1 for token in criteria.constraints.ingredient_avoid if token and token in document)
-        return exact_matches - (avoid_penalty * 3), -index
+        return exact_matches - (avoid_penalty * TEXT_RERANK_AVOID_PENALTY), -index
 
     rows = list(enumerate(documents))
     return [index for index, _ in sorted(rows, key=score, reverse=True)[:top_n]]

@@ -10,7 +10,7 @@ import asyncio
 import json
 import sys
 
-from src.repos.ingest import chunk_embedding_stats
+from src.services.product_ingest import chunk_embedding_stats
 from src.runtime.pipeline import chat_stream
 from src.services.embedding import embed_text
 from src.types.schemas import ChatStreamRequest
@@ -59,8 +59,7 @@ async def run_async_checks() -> None:
 def main() -> None:
     index_stats = chunk_embedding_stats()
     index_ok = (
-        index_stats["embedded_chunks"] > 0
-        and index_stats["embedding_dimensions"] == EXPECTED_EMBEDDING_DIMENSIONS
+        index_stats["embedded_chunks"] > 0 and index_stats["embedding_dimensions"] == EXPECTED_EMBEDDING_DIMENSIONS
     )
     print(json.dumps({"check": "embedding_index", "ok": index_ok, **index_stats}, ensure_ascii=False))
     if not index_ok:

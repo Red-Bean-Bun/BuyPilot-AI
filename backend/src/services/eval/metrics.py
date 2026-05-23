@@ -91,13 +91,9 @@ def compute_constraint_satisfaction(
     """Per-product: fraction of hard constraints satisfied."""
     checks: list[bool] = []
     if constraints.get("max_price"):
-        checks.append(
-            product_metadata.get("price", float("inf")) <= constraints["max_price"]
-        )
+        checks.append(product_metadata.get("price", float("inf")) <= constraints["max_price"])
     if constraints.get("category"):
-        checks.append(
-            product_metadata.get("category") == constraints["category"]
-        )
+        checks.append(product_metadata.get("category") == constraints["category"])
     if constraints.get("forbidden_features"):
         product_text = str(product_metadata).lower()
         for feat in constraints["forbidden_features"]:

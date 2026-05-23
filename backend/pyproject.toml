@@ -24,6 +24,8 @@ dev = [
     "pytest>=8.3.0",
     "jsonschema>=4.23.0",
     "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
 ]
 eval = [
     "streamlit>=1.40.0",
@@ -32,6 +34,21 @@ eval = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E9", "F821", "F822", "F823"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_unused_ignores = true
 
 [tool.setuptools.packages.find]
 include = ["src*"]

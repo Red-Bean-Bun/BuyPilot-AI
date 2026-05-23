@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from src.config.settings import get_settings
+from src.services.fallbacks import record_fallback
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -38,10 +42,30 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             vectors = await _embedding_request(profile, texts)
             if len(vectors) == len(texts):
                 return vectors
-        except EmbeddingUnavailable:
+            record_fallback(
+                "embedding",
+                "invalid_response_count",
+                profile=profile_name,
+                expected=len(texts),
+                actual=len(vectors),
+            )
+            logger.warning(
+                "Embedding profile %s returned %s vectors for %s texts; trying fallback",
+                profile_name,
+                len(vectors),
+                len(texts),
+            )
+        except EmbeddingUnavailable as exc:
+            record_fallback("embedding", "profile_unavailable", profile=profile_name, detail=str(exc))
+            logger.info("Embedding profile unavailable for %s: %s", profile_name, exc)
             continue
-        except Exception:
+        except Exception as exc:
+            record_fallback("embedding", "provider_error", profile=profile_name, error_type=type(exc).__name__)
+            logger.warning("Embedding provider failed for profile %s; trying fallback", profile_name, exc_info=True)
             continue
+    if get_settings().strict_runtime:
+        raise EmbeddingUnavailable("Strict runtime requires live embedding; deterministic fallback is disabled.")
+    record_fallback("embedding", "deterministic_fallback", count=len(texts))
     return [_deterministic_vector(text) for text in texts]
 
 

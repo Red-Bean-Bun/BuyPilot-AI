@@ -52,6 +52,7 @@ class Settings:
         self.app_name = os.getenv("APP_NAME", "buypilot-api")
         self.debug = os.getenv("DEBUG", "0") == "1"
         self.database_url = _resolve_database_url(os.getenv("DATABASE_URL"))
+        self.strict_runtime = os.getenv("STRICT_RUNTIME", "0") == "1"
         self.auto_seed_on_startup = os.getenv("AUTO_SEED_ON_STARTUP", "0") == "1"
         self.auto_seed_strict_embeddings = os.getenv("AUTO_SEED_STRICT_EMBEDDINGS", "0") == "1"
         self.dataset_dir = Path(
@@ -98,7 +99,7 @@ def _resolve_database_url(raw_url: str | None) -> str:
 
     sqlite_prefix = "sqlite:///"
     if raw_url.startswith(sqlite_prefix) and not raw_url.startswith("sqlite:////"):
-        raw_path = raw_url[len(sqlite_prefix):]
+        raw_path = raw_url[len(sqlite_prefix) :]
         db_path = Path(raw_path)
         if not db_path.is_absolute():
             return f"sqlite:///{BACKEND_DIR / db_path}"

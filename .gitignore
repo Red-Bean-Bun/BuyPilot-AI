@@ -44,10 +44,12 @@ postgres_data/
 # Project Specific
 logs/
 temp/
+backend/uploads/
+backend/reports/
 
 .claude/
 .agents/
 .impeccable/
 skills-lock.json
-data/raw/
 actionlint
+doc/BuyPilot-AI-linus-code-review.md

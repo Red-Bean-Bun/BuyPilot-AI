@@ -25,7 +25,7 @@ async def evaluate_faithfulness(answer: str, contexts: list[str]) -> dict[str, f
     if not answer.strip() or not contexts:
         return {"score": 1.0, "unsupported_claims": 0}
 
-    ctx_text = "\n\n---\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
+    ctx_text = "\n\n---\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(contexts))
     prompt = _build_judge_prompt(
         "faithfulness",
         answer=answer,
@@ -35,14 +35,12 @@ async def evaluate_faithfulness(answer: str, contexts: list[str]) -> dict[str, f
     return _parse_score_and_count(result, "faithfulness_score", "unsupported_claims")
 
 
-async def evaluate_context_precision(
-    question: str, contexts: list[str]
-) -> dict[str, float]:
+async def evaluate_context_precision(question: str, contexts: list[str]) -> dict[str, float]:
     """Context Precision: fraction of retrieved chunks relevant to the query."""
     if not contexts:
         return {"score": 0.0, "relevant_count": 0}
 
-    ctx_text = "\n\n---\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
+    ctx_text = "\n\n---\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(contexts))
     prompt = _build_judge_prompt(
         "context_precision",
         question=question,
@@ -52,14 +50,12 @@ async def evaluate_context_precision(
     return _parse_score_and_count(result, "context_precision_score", "relevant_count")
 
 
-async def evaluate_context_recall(
-    answer: str, contexts: list[str]
-) -> dict[str, float]:
+async def evaluate_context_recall(answer: str, contexts: list[str]) -> dict[str, float]:
     """Context Recall: does the retrieved context cover all info needed in the answer?"""
     if not answer.strip() or not contexts:
         return {"score": 0.0, "covered_count": 0}
 
-    ctx_text = "\n\n---\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
+    ctx_text = "\n\n---\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(contexts))
     prompt = _build_judge_prompt(
         "context_recall",
         answer=answer,
@@ -69,14 +65,12 @@ async def evaluate_context_recall(
     return _parse_score_and_count(result, "context_recall_score", "covered_count")
 
 
-async def evaluate_answer_correctness(
-    question: str, answer: str, contexts: list[str]
-) -> dict[str, float]:
+async def evaluate_answer_correctness(question: str, answer: str, contexts: list[str]) -> dict[str, float]:
     """Answer Correctness: does the answer factually address the question?"""
     if not answer.strip():
         return {"score": 0.0, "error_count": 1}
 
-    ctx_text = "\n\n---\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
+    ctx_text = "\n\n---\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(contexts))
     prompt = _build_judge_prompt(
         "answer_correctness",
         question=question,
@@ -113,14 +107,10 @@ async def evaluate_constraint_satisfaction(
         ),
     )
     result = await _call_judge(prompt)
-    return _parse_score_and_count(
-        result, "constraint_satisfaction_score", "violations"
-    )
+    return _parse_score_and_count(result, "constraint_satisfaction_score", "violations")
 
 
-async def evaluate_hallucination_rate(
-    answer: str, contexts: list[str]
-) -> dict[str, float]:
+async def evaluate_hallucination_rate(answer: str, contexts: list[str]) -> dict[str, float]:
     """Hallucination rate: fraction of answer claims unsupported by retrieved context."""
     faithfulness_result = await evaluate_faithfulness(answer, contexts)
     return {
@@ -138,10 +128,8 @@ async def evaluate_multi_turn_consistency(
     if not conversation_history:
         return {"score": 1.0}
 
-    history_text = "\n".join(
-        f"{t['role']}: {t['content']}" for t in conversation_history
-    )
-    ctx_text = "\n\n---\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(final_contexts))
+    history_text = "\n".join(f"{t['role']}: {t['content']}" for t in conversation_history)
+    ctx_text = "\n\n---\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(final_contexts))
     prompt = _build_judge_prompt(
         "multi_turn_consistency",
         history=history_text,
@@ -194,7 +182,6 @@ _JUDGE_PROMPTS: dict[str, str] = {
 - "reasoning": 简短中文理由
 
 只输出 JSON，不要其他内容。""",
-
     "context_precision": """你是中文电商 RAG 评测法官。你的任务是判断"检索上下文"中的每个 chunk 是否与用户问题相关。
 
 用户问题:
@@ -209,7 +196,6 @@ _JUDGE_PROMPTS: dict[str, str] = {
 - "reasoning": 简短中文理由
 
 只输出 JSON，不要其他内容。""",
-
     "context_recall": """你是中文电商 RAG 评测法官。你的任务是判断"答案"中需要的信息是否都能在"检索上下文"中找到。
 
 答案:
@@ -224,7 +210,6 @@ _JUDGE_PROMPTS: dict[str, str] = {
 - "reasoning": 简短中文理由
 
 只输出 JSON，不要其他内容。""",
-
     "answer_correctness": """你是中文电商 RAG 评测法官。你的任务是判断"答案"是否准确、有用地回答了用户问题，且没有编造商品、价格、优惠信息。
 
 用户问题:
@@ -242,7 +227,6 @@ _JUDGE_PROMPTS: dict[str, str] = {
 - "reasoning": 简短中文理由
 
 只输出 JSON，不要其他内容。""",
-
     "constraint_satisfaction": """你是中文电商 RAG 评测法官。你的任务是检查"推荐商品"是否满足"用户约束"。
 
 用户约束:
@@ -257,7 +241,6 @@ _JUDGE_PROMPTS: dict[str, str] = {
 - "reasoning": 简短中文理由
 
 只输出 JSON，不要其他内容。""",
-
     "multi_turn_consistency": """你是中文电商 RAG 评测法官。你的任务是判断"最终答案"是否与"对话历史"中已建立的约束保持一致，没有遗忘或矛盾。
 
 对话历史:
@@ -275,7 +258,6 @@ _JUDGE_PROMPTS: dict[str, str] = {
 - "reasoning": 简短中文理由
 
 只输出 JSON，不要其他内容。""",
-
     "ranking_reasonableness": """你是中文电商 RAG 评测法官。你的任务是判断"推荐商品列表"的排序是否合理，即排名靠前的商品是否确实比排名靠后的更符合用户需求。
 
 用户问题:
@@ -327,9 +309,7 @@ def _parse_json(text: str) -> dict[str, Any]:
             return {}
 
 
-def _parse_score_and_count(
-    result: dict[str, Any], score_key: str, count_key: str
-) -> dict[str, float]:
+def _parse_score_and_count(result: dict[str, Any], score_key: str, count_key: str) -> dict[str, float]:
     score = result.get(score_key, 0)
     count = result.get(count_key, 0)
     return {

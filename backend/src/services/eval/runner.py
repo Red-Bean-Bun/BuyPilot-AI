@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import statistics
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from src.repos.eval_samples import list_all
 from src.repos.eval_runs import save_run
@@ -74,35 +77,22 @@ async def run_eval(
         gt = sample.ground_truth
 
         det_metrics = {
-            "intent_accuracy": compute_intent_accuracy(
-                capture.intent_type, gt.get("intent_type", "recommend")
-            ),
+            "intent_accuracy": compute_intent_accuracy(capture.intent_type, gt.get("intent_type", "recommend")),
             "constraint_extraction_accuracy": compute_constraint_extraction_accuracy(
                 capture.extracted_constraints, gt.get("constraints", {})
             ),
             "criteria_coverage": compute_criteria_coverage(
                 capture.criteria_chips, gt.get("expected_criteria_chips", [])
             ),
-            "recall_at_5": compute_recall_at_k(
-                capture.product_ids, gt.get("relevant_product_ids", []), k=5
-            ),
-            "recall_at_10": compute_recall_at_k(
-                capture.product_ids, gt.get("relevant_product_ids", []), k=10
-            ),
-            "evidence_coverage": compute_evidence_coverage(
-                capture.evidence_count, len(capture.products)
-            ),
+            "recall_at_5": compute_recall_at_k(capture.product_ids, gt.get("relevant_product_ids", []), k=5),
+            "recall_at_10": compute_recall_at_k(capture.product_ids, gt.get("relevant_product_ids", []), k=10),
+            "evidence_coverage": compute_evidence_coverage(capture.evidence_count, len(capture.products)),
         }
 
         # Compute constraint satisfaction per product
         if capture.products and gt.get("constraints"):
-            sat_scores = [
-                compute_constraint_satisfaction(p, gt["constraints"])
-                for p in capture.products
-            ]
-            det_metrics["constraint_satisfaction"] = (
-                statistics.mean(sat_scores) if sat_scores else 0.0
-            )
+            sat_scores = [compute_constraint_satisfaction(p, gt["constraints"]) for p in capture.products]
+            det_metrics["constraint_satisfaction"] = statistics.mean(sat_scores) if sat_scores else 0.0
         else:
             det_metrics["constraint_satisfaction"] = 1.0
 
@@ -119,9 +109,7 @@ async def run_eval(
             cr = await evaluate_context_recall(capture.text_full, contexts)
             llm_metrics["context_recall"] = cr["score"]
 
-            corr = await evaluate_answer_correctness(
-                sample.question, capture.text_full, contexts
-            )
+            corr = await evaluate_answer_correctness(sample.question, capture.text_full, contexts)
             llm_metrics["answer_correctness"] = corr["score"]
 
             hallu = await evaluate_hallucination_rate(capture.text_full, contexts)
@@ -138,9 +126,7 @@ async def run_eval(
             )
 
         if capture.products and gt.get("constraints"):
-            cs = await evaluate_constraint_satisfaction(
-                capture.text_full, capture.products, gt["constraints"]
-            )
+            cs = await evaluate_constraint_satisfaction(capture.text_full, capture.products, gt["constraints"])
             llm_metrics["llm_constraint_satisfaction"] = cs["score"]
         else:
             llm_metrics["llm_constraint_satisfaction"] = 1.0
@@ -156,9 +142,7 @@ async def run_eval(
             llm_metrics["multi_turn_consistency"] = 1.0
 
         if len(capture.products) > 1 and gt.get("constraints"):
-            rr = await evaluate_ranking_reasonableness(
-                sample.question, capture.products, gt["constraints"]
-            )
+            rr = await evaluate_ranking_reasonableness(sample.question, capture.products, gt["constraints"])
             llm_metrics["ranking_reasonableness"] = rr["score"]
         else:
             llm_metrics["ranking_reasonableness"] = 1.0
@@ -213,10 +197,12 @@ async def _run_pipeline(
     # Capture intent directly from the intent stage (before full pipeline)
     try:
         from src.runtime.stages.intent import run_intent
+
         intent_result = await run_intent(body)
         capture.intent_type = intent_result.intent
         capture.extracted_constraints = intent_result.extracted_constraints
     except Exception:
+        logger.exception("intent capture failed")
         pass
 
     try:
@@ -279,11 +265,7 @@ def _build_context_texts(capture: PipelineCapture) -> list[str]:
     """Build context chunks from captured products for LLM judge evaluation."""
     texts: list[str] = []
     for p in capture.products:
-        texts.append(
-            f"商品: {p.get('name', '')} | "
-            f"价格: {p.get('price', 'N/A')}元 | "
-            f"品类: {p.get('category', '')}"
-        )
+        texts.append(f"商品: {p.get('name', '')} | 价格: {p.get('price', 'N/A')}元 | 品类: {p.get('category', '')}")
     return texts
 
 
