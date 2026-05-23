@@ -8,8 +8,24 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Mapping
 
-from src.repos.documents import ChunkDocument, evidence_for_chunk, list_embedded_chunks
+from src.config.settings import get_settings
+from src.config.tuning import (
+    FILTER_SCORE_BUDGET,
+    FILTER_SCORE_CATEGORY,
+    FILTER_SCORE_SCENARIO,
+    FILTER_SCORE_SKIN_TYPE,
+    PGVECTOR_RECALL_LIMIT,
+    RETRIEVAL_CANDIDATE_MULTIPLIER,
+)
+from src.repos.documents import (
+    ChunkDocument,
+    evidence_for_chunk,
+    list_embedded_chunks,
+    list_vector_chunks_by_similarity,
+)
 from src.repos.products import get_product, list_products
+from src.services.async_io import run_sync_io
+from src.services.fallbacks import record_fallback
 from src.services.embedding import embed_text
 from src.services.reranker import rerank, rerank_texts
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
@@ -29,9 +45,9 @@ class RetrievalFilters:
     avoid_traits: tuple[str, ...] = ()
 
 
-_RETRIEVAL_EVIDENCE_BY_PRODUCT: ContextVar[dict[str, EvidencePayload]] = ContextVar(
+_RETRIEVAL_EVIDENCE_BY_PRODUCT: ContextVar[dict[str, EvidencePayload] | None] = ContextVar(
     "retrieval_evidence_by_product",
-    default={},
+    default=None,
 )
 
 
@@ -42,14 +58,18 @@ async def retrieve(
 ) -> list[ProductPayload]:
     filters = _retrieval_filters(feedback)
     query_embedding = await embed_text(_query_text(criteria))
-    chunk_hits = _vector_recall_from_db(criteria, query_embedding, filters)
+    chunk_hits = await run_sync_io(_vector_recall_from_db, criteria, query_embedding, filters)
     if chunk_hits:
-        candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * 8, top_n)]
+        candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
         ranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
         _bind_evidence(ranked_hits)
         return [hit.product for hit in ranked_hits]
 
-    hard_task = asyncio.create_task(_hard_filter(criteria, filters))
+    if get_settings().strict_runtime:
+        raise RuntimeError("Strict runtime requires pgvector/DB vector retrieval; fallback retrieval is disabled.")
+
+    record_fallback("retrieval", "non_db_vector_fallback")
+    hard_task = asyncio.create_task(run_sync_io(_hard_filter, criteria, filters))
     vector_task = asyncio.create_task(_vector_recall_fallback(criteria, filters))
     hard_results, vector_results = await asyncio.gather(hard_task, vector_task)
     merged = _merge_dedup(hard_results + vector_results)
@@ -58,10 +78,11 @@ async def retrieve(
 
 
 def cached_evidence_for_product(product_id: str) -> EvidencePayload | None:
-    return _RETRIEVAL_EVIDENCE_BY_PRODUCT.get().get(product_id)
+    evidence_by_product = _RETRIEVAL_EVIDENCE_BY_PRODUCT.get()
+    return evidence_by_product.get(product_id) if evidence_by_product else None
 
 
-async def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
+def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
     products = list_products()
     results: list[ProductPayload] = []
     for product in products:
@@ -73,6 +94,10 @@ async def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> 
 
 async def _vector_recall_fallback(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
     await embed_text(criteria.summary)
+    return await run_sync_io(_vector_recall_fallback_sync, criteria, filters)
+
+
+def _vector_recall_fallback_sync(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
     products = list_products()
     products = [product for product in products if _passes_hard_filters(criteria, product, filters)]
     if not criteria.category:
@@ -85,6 +110,10 @@ def _vector_recall_from_db(
     query_embedding: list[float],
     filters: RetrievalFilters,
 ) -> list[ProductHit]:
+    pgvector_hits = _vector_recall_from_pgvector(criteria, query_embedding, filters)
+    if pgvector_hits:
+        return pgvector_hits
+
     chunks = list_embedded_chunks()
     if not chunks or not query_embedding:
         return []
@@ -107,6 +136,28 @@ def _vector_recall_from_db(
                 product=product,
                 vector_score=vector_score,
                 filter_score=filter_score,
+                chunk=chunk,
+            )
+        )
+    return hits
+
+
+def _vector_recall_from_pgvector(
+    criteria: CriteriaPayload,
+    query_embedding: list[float],
+    filters: RetrievalFilters,
+) -> list[ProductHit]:
+    hits: list[ProductHit] = []
+    for vector_hit in list_vector_chunks_by_similarity(query_embedding, limit=PGVECTOR_RECALL_LIMIT):
+        chunk = vector_hit.document
+        product = get_product(chunk.product_id)
+        if product is None or not _passes_hard_filters(criteria, product, filters):
+            continue
+        hits.append(
+            ProductHit(
+                product=product,
+                vector_score=_distance_to_score(vector_hit.distance),
+                filter_score=_filter_score(criteria, product),
                 chunk=chunk,
             )
         )
@@ -183,7 +234,11 @@ def _passes_hard_filters(criteria: CriteriaPayload, product: ProductPayload, fil
         return False
     if criteria.category and product.category != criteria.category:
         return False
-    if criteria.constraints.budget_max is not None and product.price is not None and product.price > criteria.constraints.budget_max:
+    if (
+        criteria.constraints.budget_max is not None
+        and product.price is not None
+        and product.price > criteria.constraints.budget_max
+    ):
         return False
     avoid_traits = tuple(criteria.constraints.ingredient_avoid) + filters.avoid_traits
     return not any(_matches_avoid_trait(product, token) for token in avoid_traits)
@@ -232,13 +287,21 @@ def _retrieval_filters(feedback: Mapping[str, list[str]] | None) -> RetrievalFil
 def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
     score = 0.0
     if product.category == criteria.category:
-        score += 3.0
+        score += FILTER_SCORE_CATEGORY
     if criteria.constraints.skin_type and criteria.constraints.skin_type in product.skin_type_match:
-        score += 2.0
-    if criteria.constraints.budget_max is not None and product.price is not None and product.price <= criteria.constraints.budget_max:
-        score += 1.0
-    if criteria.constraints.use_scenario and product.use_scenario and criteria.constraints.use_scenario in product.use_scenario:
-        score += 0.5
+        score += FILTER_SCORE_SKIN_TYPE
+    if (
+        criteria.constraints.budget_max is not None
+        and product.price is not None
+        and product.price <= criteria.constraints.budget_max
+    ):
+        score += FILTER_SCORE_BUDGET
+    if (
+        criteria.constraints.use_scenario
+        and product.use_scenario
+        and criteria.constraints.use_scenario in product.use_scenario
+    ):
+        score += FILTER_SCORE_SCENARIO
     return score
 
 
@@ -266,6 +329,10 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return dot / (left_norm * right_norm)
+
+
+def _distance_to_score(distance: float) -> float:
+    return 1.0 / (1.0 + max(distance, 0.0))
 
 
 def _merge_dedup(products: list[ProductPayload]) -> list[ProductPayload]:

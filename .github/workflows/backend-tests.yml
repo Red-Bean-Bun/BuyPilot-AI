@@ -1,0 +1,119 @@
+name: Backend Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+    inputs:
+      run_live_smoke:
+        description: "Run live provider + pgvector smoke"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --locked
+
+      - name: Ruff check
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+
+      - name: Mypy check
+        run: >
+          uv run mypy
+          -p src.config.domain_terms
+          -p src.config.settings
+          -p src.runtime.cancel_registry
+          -p src.runtime.streaming
+          -p src.services.async_io
+          -p src.services.llm_task_payloads
+          -p src.types.schemas
+          -p src.types.sse_events
+
+      - name: Run pytest
+        run: uv run python -m pytest -q
+
+  live-smoke:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_live_smoke == 'true')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: buypilot
+          POSTGRES_PASSWORD: buypilot
+          POSTGRES_DB: buypilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U buypilot -d buypilot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot
+      STRICT_RUNTIME: "1"
+      AUTO_SEED_STRICT_EMBEDDINGS: "1"
+      BAILIAN_BASE_URL: ${{ secrets.BAILIAN_BASE_URL }}
+      BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+      DOUBAO_BASE_URL: ${{ secrets.DOUBAO_BASE_URL }}
+      DOUBAO_API_KEY: ${{ secrets.DOUBAO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --locked
+
+      - name: Skip when live secrets are missing
+        id: live_secrets
+        run: |
+          if [ -z "$BAILIAN_BASE_URL" ] || [ -z "$BAILIAN_API_KEY" ]; then
+            echo "::notice::BAILIAN_BASE_URL/BAILIAN_API_KEY not configured; skipping live smoke."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reindex live embeddings
+        if: steps.live_secrets.outputs.ready == 'true'
+        run: uv run python -m src.scripts.reindex_embeddings --drop-derived-tables
+
+      - name: Run live RAG smoke
+        if: steps.live_secrets.outputs.ready == 'true'
+        run: uv run python -m src.scripts.smoke_live_rag
