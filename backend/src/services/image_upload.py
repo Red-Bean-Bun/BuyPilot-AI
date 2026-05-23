@@ -121,7 +121,9 @@ def _normalize_content_type(content_type: str | None) -> str:
 
 def _stored_file_name(file_name: str, content_type: str) -> str:
     original_suffix = Path(file_name).suffix.lower()
-    suffix = original_suffix if original_suffix in {".jpg", ".jpeg", ".png", ".webp"} else ALLOWED_MIME_TYPES[content_type]
+    suffix = (
+        original_suffix if original_suffix in {".jpg", ".jpeg", ".png", ".webp"} else ALLOWED_MIME_TYPES[content_type]
+    )
     if suffix == ".jpeg":
         suffix = ".jpg"
     return f"upload_{uuid.uuid4().hex}{suffix}"
@@ -149,11 +151,11 @@ def _jpeg_dimensions(data: bytes) -> tuple[int | None, int | None]:
             continue
         if index + 2 > len(data):
             break
-        segment_length = int.from_bytes(data[index:index + 2], "big")
+        segment_length = int.from_bytes(data[index : index + 2], "big")
         if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
             if index + 7 <= len(data):
-                height = int.from_bytes(data[index + 3:index + 5], "big")
-                width = int.from_bytes(data[index + 5:index + 7], "big")
+                height = int.from_bytes(data[index + 3 : index + 5], "big")
+                width = int.from_bytes(data[index + 5 : index + 7], "big")
                 return width, height
         index += max(segment_length, 2)
     return None, None
