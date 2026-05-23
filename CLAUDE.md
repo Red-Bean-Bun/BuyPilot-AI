@@ -65,15 +65,19 @@ doc/
 ```
 
 **编码相关指引**：
-- 编码风格和架构原则 → `doc/prompts/03-AI编码助手系统提示词.md`
+- 编码风格 → CLAUDE.md「编码原则」章节已内联，完整版见 `doc/prompts/03-AI编码助手系统提示词.md`
 - 前端接口契约 → `doc/prd/01-Android前端PRD.md`（SSE 事件类型、Kotlin data class、卡片规范）
 - 前端表格附录 → `doc/prd/01-附录-表格内容.md`（错误码、状态机、渲染策略、测试用例等）
 - 后端接口契约 → `doc/prd/02-后端与AgentPRD.md`（数据库 Schema、管道编排、API 端点）
-- 后端 Prompt 模板 → `backend/prompts/`（运行时 LLM prompt，开发时直接读取使用）
+- 后端 Prompt 模板 → `backend/prompts/`（6 个 .md 文件已写好但运行时**未加载**，改 prompt 需改 `llm_client.py` 硬编码字符串）
 - 产品定义 → `PRODUCT.md`（用户画像、产品目的、设计原则、Anti-references）
 - 设计系统 → `DESIGN.md`（颜色、字体、间距、圆角、组件规范，开发 UI 时必须遵循）
 - 风险清单 → `doc/risk/卡点与风险清单.md`（开发前必读）
-- 设计决策说明 → `design-decisions.md`（每个核心决策3句话：选了什么/为什么/反过来会怎样）
+- 设计决策 → `design-decisions.md`（每个核心决策 3 句话：选了什么/为什么/反过来会怎样）
+- 后端完成状态 → `doc/status/backend-completion.md`（P0/P1/P2 功能完成度，AI 每次开发后更新）
+- 前后端契约 → `contracts/sse-events.schema.json`（SSE 事件 JSON Schema，铁律 1 的 source of truth）
+- 实现差距与踩坑 → `260522-handoff.md`（实现 vs PRD 差距表 + 已知陷阱）
+- 评测模块 → `eval-module-handoff.md`（评测设计决策 + 运行方式）
 
 ---
 
@@ -113,6 +117,40 @@ UI → Runtime → Service → Repo → Config/Types
 - 业务逻辑只能在 Service 层
 - 所有 LLM 调用和数据库查询必须通过 Service 层的 task-oriented interface 执行。禁止在 Runtime 层直接调用 LLM SDK 或在 API 层直接执行 SQL。违反即架构错误。
 - 配置集中管理，禁止 `os.getenv()` 散落在业务代码中
+
+---
+
+## 运营操作
+
+### 环境与启动
+- 包管理器：`uv`（Python 环境在 `backend/` 下）
+- `.env` 加载自**项目根目录**（`BuyPilot-AI/.env`），不是 `backend/.env`
+- 启动 API：`cd backend && uv run uvicorn src.api.app:app --reload --port 8000`
+
+### 数据管道
+- 原始数据加工：`python data/scripts/process_data.py` → 产出 `data/processed/products.json` + `chunks.json`
+- 重建向量索引：`cd backend && uv run -m src.scripts.reindex_embeddings`（需真实 API Key + 运行中的 DB）
+- 端到端检查（需真实 Key + 运行中 DB）：`cd backend && uv run -m src.scripts.smoke_live_rag` — 验证 embedding 服务可用 + 完整 chat_stream 管道产出正确 SSE 事件序列
+
+### 测试须知
+- `conftest.py` 自动 mock 全部外部服务（LLM/embedding/reranker），跑测试**不需要 API Key**
+- mock 通过模块级 monkeypatch 注入（`llm_client._chat_completion`, `embedding._embedding_request`, `reranker._rerank_request`）——改动这些模块的导入路径会导致 mock 静默失效
+- 契约校验：`contracts/sse-events.schema.json` + `contracts/examples/` 下的 golden trace 是测试基准
+
+### 数据库
+- P0 运行时可用内存仓库，PostgreSQL 通过 `create_db_and_tables()` 自动建表
+- Eval 表变更需显式调用 `migrate_eval_tables()`（**会清空数据**）
+
+---
+
+## 已知陷阱
+
+- 百炼 `text-embedding-v3` batch size 最大 10，改回 32 会 400 错误并 fallback
+- `gte_rerank` profile 实际 model 是 `qwen3-rerank`，非 PRD 原写的 `gte-rerank`（官方已临近停用）
+- `data/raw/` 被 gitignore，其他环境必须单独准备官方脱敏数据
+- `ProductPayload.image_url` 仍为 raw 相对路径，Android 不能稳定加载本地图片，需 FastAPI static mount 或 image proxy
+- `backend/prompts/` 下 6 个 .md 文件运行时从未加载，`llm_client.py` 用硬编码字符串
+- Prompt 文件写了但运行时没用，改 prompt 质量需改代码而非改 .md 文件
 
 ---
 
@@ -175,9 +213,9 @@ UI → Runtime → Service → Repo → Config/Types
 
 | 时间节点 | 验收标准 | 否则 |
 |----------|---------|------|
-| 第 7 天 | **评委拿起App能走通完整链路** + 一键启动 | 砍掉所有P1/P2，只追P0到能跑为止 |
-| 第 14 天 | **4条Demo路径全部可演示** + 无幻觉无Bug | 砍掉复杂后台和增强功能 |
-| 第 18 天 | 冻结功能 + design-decisions.md完成 | 只修Bug、打磨体验、准备答辩 |
+| 5/27（第 7 天） | **评委拿起App能走通完整链路** + 一键启动 | 砍掉所有P1/P2，只追P0到能跑为止 |
+| 6/03（第 14 天） | **4条Demo路径全部可演示** + 无幻觉无Bug | 砍掉复杂后台和增强功能 |
+| 6/07（第 18 天） | 冻结功能 + design-decisions.md完成 | 只修Bug、打磨体验、准备答辩 |
 
 ### 减分项防御
 
@@ -264,6 +302,12 @@ Android Compose + LazyColumn 卡片渲染
 - SSE event type 禁止新增。现有的 8+1 个 type（thinking / clarification / criteria_card / text_delta / product_card / cart_action / final_decision / done + error）是全集。新功能无法映射到现有 type 时，先改业务设计，不是加新 type。
 - 每个 event 的 field 变更必须同步更新 `contracts/` 目录的 JSON Schema 和 Android ChatUiNode。单边修改即架构错误。
 
+**SSE 变更流程**（改 event 字段时必走）：
+1. 先改 `contracts/sse-events.schema.json` — 这是 source of truth
+2. 再改 `backend/src/types/sse_events.py` — Python 端实现
+3. 最后改 Android 侧（`AgentPayload.kt` + `SseEventParser.kt` + `ChatUiNode.kt`）
+4. 验证：`cd backend && uv run pytest tests/test_sse_events.py -v`
+
 ### 铁律 2：CriteriaPayload 封闭 DSL
 
 - `Constraints` 使用平铺字段 + `| None`，所有允许的约束维度在 schema 中显式枚举。禁止 `dict[str, Any]`。
@@ -300,6 +344,7 @@ Android Compose + LazyColumn 卡片渲染
 
 当你收到开发任务时：
 
+0. **先看现状**：读 `doc/status/backend-completion.md` 了解当前完成度，CLAUDE.md 的 P0/P1/P2 是计划快照，不是当前状态
 1. **先读文档**：判断任务属于哪个 doc 文件的职责范围
 2. **再读契约**：查看 PRD 中对应的接口/事件/数据模型定义
 3. **思考再动手**：按 Linus 三问过滤过度设计
