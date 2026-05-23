@@ -1,234 +1,289 @@
-# BuyPilot-AI 前后端接口契约 v0.1
+# BuyPilot-AI 前后端接口契约 v0.2
 
-本文档是 Android 前端与 FastAPI 后端的唯一接口真相源。前端联调、SSE 解析、卡片渲染和接口 mock 都以本文为准。
+本文档描述 Android 前端与 FastAPI 后端的全部 HTTP 端点和 SSE 事件协议。以实际代码为准，与 `contracts/sse-events.schema.json`（机器可读 source of truth）和 3 个 golden trace 示例保持一致。
 
-对应后端代码：
+**对应后端代码：**
+- HTTP 请求/响应类型：`backend/src/types/schemas.py`
+- SSE 事件类型：`backend/src/types/sse_events.py`
+- API 路由：`backend/src/api/*.py`
 
-- HTTP request/response: `backend/src/types/schemas.py`
-- SSE event: `backend/src/types/sse_events.py`
-- API router: `backend/src/api/*.py`
+---
 
 ## 1. 基础约定
 
-本地服务默认地址：
+**本地服务地址：** `http://localhost:8000`
 
-```text
-http://localhost:8000
-```
-
-启动：
-
+**启动：**
 ```bash
-cd backend
-.venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 ```
 
-健康检查：
+**健康检查：** `GET /health`
 
-```http
-GET /health
-```
-
-响应：
-
-```json
-{"status":"ok","service":"buypilot-api"}
-```
-
-兼容性规则：
-
-- 后端字段只增不删，event 类型只增不改名。
+**兼容性规则（铁律 1）：**
+- SSE event type 共 9 种（thinking / clarification / criteria_card / text_delta / product_card / cart_action / final_decision / done / error），**禁止新增**。这是全集。
+- 后端字段只增不删，event 类型不改名。
 - 前端必须忽略未知字段。
-- 前端必须用 `event` 字段分发 SSE，不要依赖 JSON 字段顺序。
-- `seq` 只在同一个 `turn_id` 内递增。
-- `event_id` 当前格式为 `{turn_id}:{seq}`。
+- 前端用 `event` 字段分发 SSE，不依赖 JSON 字段顺序。
+- `seq` 在同一 `turn_id` 内递增；`event_id` 格式为 `{turn_id}:{seq}`。
 - `done` 是一次流式响应的结束信号，收到后关闭 loading 状态。
+
+---
 
 ## 2. HTTP API 总览
 
 | Method | Path | 说明 | 状态 |
-|---|---|---|---|
-| GET | `/health` | 健康检查 | 可用 |
-| POST | `/chat/stream` | SSE 流式导购主链路 | 可用 |
-| POST | `/chat/cancel` | 取消指定 turn，当前为 best-effort P0 | 可用 |
-| POST | `/upload/image` | 图片上传占位接口 | 可用 |
-| POST | `/chat/upload/image` | 图片上传兼容路径 | 可用 |
-| POST | `/feedback` | 用户反馈 | 可用 |
-| POST | `/chat/feedback` | 用户反馈兼容路径 | 可用 |
-| GET | `/cart/{session_id}` | 查询购物车 | 可用 |
-| GET | `/chat/cart/{session_id}` | 查询购物车兼容路径 | 可用 |
+|--------|------|------|------|
+| GET | `/health` | 健康检查 | ✅ |
+| POST | `/chat/stream` | SSE 流式导购主链路 | ✅ |
+| POST | `/chat/cancel` | 取消指定 turn（当前为 stub） | ⚠️ |
+| POST | `/upload/image` | 图片上传（multipart + JSON 兼容） | ✅ |
+| POST | `/chat/upload/image` | 图片上传兼容路径（不在 OpenAPI schema 中） | ✅ |
+| POST | `/feedback` | 用户反馈 | ✅ |
+| POST | `/chat/feedback` | 用户反馈兼容路径（不在 OpenAPI schema 中） | ✅ |
+| GET | `/cart/{session_id}` | 查询购物车 | ✅ |
+| GET | `/admin/eval/runs` | 评测运行列表（?limit=20） | ✅ |
+| GET | `/admin/eval/runs/{run_id}` | 单次评测运行详情 | ✅ |
+| GET | `/admin/eval/samples` | 评测样本列表 | ✅ |
+| POST | `/admin/eval/samples/seed` | 从 `data/eval/eval_samples.json` 填充样本表 | ✅ |
 
-## 3. POST /chat/stream
+**静态文件：** `/uploads` 已挂载为 FastAPI StaticFiles，上传的图片可通过 `/uploads/<filename>` 访问。
 
-主链路接口。响应为标准 SSE：
+---
 
-```http
-Content-Type: text/event-stream
-Cache-Control: no-cache
-Connection: keep-alive
-X-Accel-Buffering: no
-```
+## 3. 端点详细说明
 
-请求体 `ChatStreamRequest`：
+### 3.1 `GET /health`
 
+**响应：**
 ```json
 {
-  "message": "推荐适合油皮的洗面奶，200元以内，日常护肤",
-  "session_id": "s1",
-  "history": [
-    {"role": "user", "content": "之前的用户消息"},
-    {"role": "assistant", "content": "之前的助手消息"}
-  ],
-  "image_url": "https://example.com/image.jpg",
-  "criteria_patch": {"budget_max": 150},
-  "skip_stages": [],
-  "client_turn_id": "android-turn-001",
-  "client_trace_id": "trace-001"
+  "status": "ok",
+  "service": "buypilot-api",
+  "strict_runtime": false,
+  "fallback_policy": "demo_visible_degradation",
+  "active_turns": 0
 }
 ```
 
-字段说明：
+- `strict_runtime`：`true` 时关键降级会显性失败（`STRICT_RUNTIME=1` 环境变量控制）
+- `active_turns`：当前活跃的 SSE 流数量
+
+---
+
+### 3.2 `POST /chat/stream` — SSE 流式导购主链路
+
+**请求体 (`ChatStreamRequest`)：**
 
 | 字段 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| `message` | string | 是 | 用户本轮输入 |
-| `session_id` | string/null | 否 | 缺省时后端生成 `sess_{uuid}` |
-| `history` | `MessageLite[]` | 否 | 多轮历史，当前 P0 可接受 |
-| `image_url` | string/null | 否 | 图片理解输入 |
-| `criteria_patch` | object/null | 否 | 前端编辑标准卡后提交的约束 patch |
-| `skip_stages` | string[] | 否 | 预留字段 |
-| `client_turn_id` | string/null | 否 | 客户端 turn id，预留追踪 |
-| `client_trace_id` | string/null | 否 | 客户端 trace id，预留追踪 |
+|------|------|------|------|
+| `message` | string | 是 | 用户输入文本 |
+| `session_id` | string \| null | 否 | 会话 ID，为空时自动生成 `sess_<uuid>` |
+| `history` | MessageLite[] | 否 | 历史消息，每条含 `role` + `content` |
+| `image_url` | string \| null | 否 | 图片 URL（用于多模态分析） |
+| `criteria_patch` | object \| null | 否 | 用户反选/修正的约束 patch |
+| `skip_stages` | string[] | 否 | 跳过的 pipeline stage |
+| `client_turn_id` | string \| null | 否 | 客户端回合 ID |
+| `client_trace_id` | string \| null | 否 | 客户端追踪 ID |
 
-curl 示例：
+**响应：** `Content-Type: text/event-stream`
 
-```bash
-curl -N -X POST http://localhost:8000/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"message":"推荐适合油皮的洗面奶，200元以内，日常护肤","session_id":"s1"}'
+SSE 事件序列格式为：
 ```
-
-SSE block 格式：
-
-```text
-event: thinking
-data: {"schema_version":"2026-05-20","event":"thinking",...}
-
-event: done
-data: {"schema_version":"2026-05-20","event":"done",...}
+event: <event_type>
+data: <JSON>
 
 ```
 
-完整推荐场景的典型顺序：
+具体事件类型和字段见第 4 节。
 
-```text
-thinking(understanding)
-thinking(criteria)
-criteria_card
-thinking(searching)
-product_card x N
-thinking(recommending)
-text_delta
-text_delta
-final_decision
-done
-```
+---
 
-信息不足场景的典型顺序：
+### 3.3 `POST /chat/cancel` — 取消生成
 
-```text
-thinking(understanding)
-clarification
-done
-```
-
-购物车场景：
-
-```text
-thinking(understanding)
-cart_action 或 text_delta
-done
-```
-
-## 4. SSE 公共字段
-
-所有 SSE event 都包含以下公共字段：
-
+**请求体 (`CancelRequest`)：**
 ```json
 {
-  "schema_version": "2026-05-20",
-  "event": "thinking",
-  "session_id": "s1",
-  "turn_id": "turn_xxx",
-  "seq": 1,
-  "event_id": "turn_xxx:1",
-  "node_id": "node_xxx",
-  "deck_id": null,
-  "display_mode": "inline_thinking",
-  "created_at_ms": 1770000000000
+  "session_id": "sess_xxx",
+  "turn_id": "turn_xxx"
 }
 ```
+
+**响应 (`CancelResponse`)：**
+```json
+{
+  "session_id": "sess_xxx",
+  "turn_id": "turn_xxx",
+  "canceled": true
+}
+```
+
+> ⚠️ 当前为 best-effort stub：返回 `canceled: true` 但不真正中断正在执行的 LLM/RAG 任务。
+
+---
+
+### 3.4 `POST /upload/image` — 图片上传
+
+支持两种 Content-Type：
+
+**multipart/form-data（推荐）：**
+```
+POST /upload/image
+Content-Type: multipart/form-data; boundary=...
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="product.jpg"
+Content-Type: image/jpeg
+
+<binary image data>
+--boundary--
+```
+
+**application/json（兼容旧客户端）：**
+```json
+{
+  "file_name": "product.jpg",
+  "content_type": "image/jpeg"
+}
+```
+
+**响应 (`ImageUploadResponse`)：**
+```json
+{
+  "image_url": "/uploads/abc123_product.jpg",
+  "width": 800,
+  "height": 600,
+  "mime_type": "image/jpeg",
+  "ocr_text": null,
+  "analysis": {}
+}
+```
+
+**限制：** 最大文件大小由 `MAX_IMAGE_BYTES` 控制（`services/image_upload.py`），超出返回 `413`。
+
+**错误响应：**
+```json
+{ "detail": { "code": "IMAGE_TOO_LARGE", "message": "Request exceeds N bytes" } }
+```
+
+---
+
+### 3.5 `POST /feedback` — 用户反馈
+
+**请求体 (`FeedbackRequest`)：**
+```json
+{
+  "session_id": "sess_xxx",
+  "feedback_type": "dislike",
+  "action": "avoid_product",
+  "product_id": "p_beauty_018",
+  "reason": "含酒精"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `session_id` | string | 是 | 会话 ID |
+| `feedback_type` | string \| null | 否 | 反馈类型 |
+| `action` | string \| null | 否 | 动作：avoid_product / avoid_trait 等 |
+| `product_id` | string \| null | 否 | 关联商品 ID |
+| `reason` | string \| null | 否 | 反馈原因 |
+
+**响应 (`FeedbackResponse`)：**
+```json
+{
+  "status": "received",
+  "session_id": "sess_xxx",
+  "feedback_type": "dislike",
+  "action": "avoid_product"
+}
+```
+
+反馈会持久化到 `feedbacks` 表，并在同一 session 下一轮推荐中注入 retrieval 硬过滤（avoid_products / avoid_traits）。
+
+---
+
+### 3.6 `GET /cart/{session_id}` — 查询购物车
+
+**路径参数：** `session_id` — 会话 ID
+
+**响应 (`CartResponse`)：**
+```json
+{
+  "items": [
+    {
+      "product_id": "p_beauty_018",
+      "name": "氨基酸洁面乳",
+      "price": 89.0,
+      "quantity": 1,
+      "added_at": "2026-05-24T10:30:00",
+      "product": { ... }
+    }
+  ],
+  "total_items": 1,
+  "total_price": 89.0
+}
+```
+
+> ⚠️ 当前支持 add/view，Remove/Update 未实现。
+
+---
+
+### 3.7 Admin Eval API
+
+**`GET /admin/eval/runs?limit=20`** — 评测运行列表（最新在前）
+
+**`GET /admin/eval/runs/{run_id}`** — 单次运行详情（含 per-sample 指标）
+
+**`GET /admin/eval/samples`** — 所有评测样本（含 ground truth）
+
+**`POST /admin/eval/samples/seed`** — 从 `data/eval/eval_samples.json` 填充样本表
+
+---
+
+## 4. SSE 事件类型（9 种）
+
+所有事件共享基础字段（`SSEEventBase`）：
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
-| `schema_version` | string | 当前为 `2026-05-20` |
-| `event` | string | event 类型，见下文 |
+|------|------|------|
+| `schema_version` | string | 固定 `"2026-05-20"` |
+| `event` | string | 事件类型（9 种之一） |
 | `session_id` | string | 会话 ID |
-| `turn_id` | string | 本轮响应 ID |
-| `seq` | int | 本轮内递增序号 |
-| `event_id` | string | 当前事件 ID |
-| `node_id` | string | UI 节点 ID |
-| `deck_id` | string/null | 商品卡组 ID；`product_card` 必填 |
-| `display_mode` | string/null | 前端渲染模式建议 |
-| `created_at_ms` | int/null | 毫秒时间戳 |
+| `turn_id` | string | 回合 ID |
+| `seq` | int | 回合内递增序号 |
+| `event_id` | string | `{turn_id}:{seq}` |
+| `node_id` | string | 节点标识 |
+| `deck_id` | string \| null | 商品卡所属 deck（product_card 必填） |
+| `display_mode` | string \| null | 前端渲染模式提示 |
+| `created_at_ms` | int \| null | 创建时间戳（毫秒） |
 
-`display_mode` 可选值：
-
-```text
-inline_thinking
-inline_card
-inline_text
-summary_card
-swipe_deck_item
-none
-```
-
-## 5. SSE Event 类型
-
-### thinking
-
-用途：显示阶段状态。
+### 4.1 `thinking` — 处理中状态
 
 ```json
 {
   "event": "thinking",
   "display_mode": "inline_thinking",
-  "stage": "understanding",
-  "message": "正在理解你的需求"
+  "stage": "intent_analysis",
+  "message": "正在理解您的需求..."
 }
 ```
 
-前端建议：同一个 turn 内可更新状态行，也可作为轻量状态节点展示。
+`stage` 取值：`intent_analysis` / `multimodal_analysis` / `criteria_generation` / `retrieval` / `recommendation_generation` / `decision_generation`
 
-### clarification
-
-用途：用户信息不足时追问。
+### 4.2 `clarification` — 澄清追问
 
 ```json
 {
   "event": "clarification",
   "display_mode": "inline_card",
-  "question": "你想买哪个品类？",
-  "required_slots": ["category"],
-  "suggested_options": ["美妆护肤", "数码电子", "服饰运动", "食品生活"]
+  "question": "请问您的肤质是？",
+  "required_slots": ["skin_type"],
+  "suggested_options": ["油性", "干性", "混合性", "敏感性"]
 }
 ```
 
-前端建议：用户点击选项后，把选项文本作为下一轮 `message` 发送，沿用同一个 `session_id`。
-
-### criteria_card
-
-用途：展示和编辑购买标准。
+### 4.3 `criteria_card` — 购买标准卡片
 
 ```json
 {
@@ -236,167 +291,106 @@ none
   "display_mode": "summary_card",
   "editable": true,
   "criteria": {
-    "criteria_id": "criteria_xxx",
+    "criteria_id": "c_auto_001",
     "category": "美妆护肤",
-    "summary": "油性肌肤，预算200元以内，日常护肤",
-    "chips": ["油性", "200元以内", "日常护肤"],
+    "summary": "油皮适用的氨基酸洁面，200元以内",
+    "chips": ["油性肤质", "氨基酸成分", "200元以内"],
     "constraints": {
-      "budget_min": null,
       "budget_max": 200,
-      "use_scenario": "日常护肤",
       "skin_type": "油性",
-      "ingredient_avoid": [],
-      "ingredient_prefer": [],
-      "storage": null,
-      "screen_size": null,
-      "sport_type": null,
-      "season": null,
-      "dietary": []
+      "ingredient_prefer": ["氨基酸"]
     }
   },
   "quick_actions": [
-    {
-      "action_id": "budget_low",
-      "label": "预算压低",
-      "action": "criteria_patch",
-      "criteria_patch": {"budget_max": 150}
-    }
+    { "action_id": "patch_1", "label": "预算太高", "action": "criteria_patch", "criteria_patch": { "budget_max": 150 } }
   ]
 }
 ```
 
-注意：约束字段统一在 `criteria.constraints` 下，不要读取旧文档里扁平的 `skin_type` / `budget_max`。
-
-### text_delta
-
-用途：流式文本输出。
+### 4.4 `text_delta` — 流式文本增量
 
 ```json
 {
   "event": "text_delta",
   "display_mode": "inline_text",
-  "message_id": "msg_ai_xxx",
-  "delta": "我先按油皮、200元以内来筛选。",
+  "message_id": "msg_001",
+  "delta": "根据您的肤质和预算，推荐以下商品：",
   "done": false
 }
 ```
 
-前端建议：
+- `done: true` 表示该消息流结束
+- 同一 `message_id` 的多个 `text_delta` 按 `seq` 拼接
 
-- 按 `message_id` 拼接 `delta`。
-- 不要每个 delta 新建一条消息。
-- `done:true` 表示该文本消息完成，但整个 SSE 流仍以 `done` event 为最终结束。
-
-### product_card
-
-用途：推荐商品卡。
+### 4.5 `product_card` — 商品卡片
 
 ```json
 {
   "event": "product_card",
   "display_mode": "swipe_deck_item",
-  "deck_id": "deck_xxx",
+  "deck_id": "deck_main",
   "rank": 1,
   "product": {
-    "product_id": "p_beauty_011",
-    "name": "珊珂洗颜专科绵润泡沫洁面乳",
-    "price": 52.0,
+    "product_id": "p_beauty_018",
+    "name": "氨基酸洁面乳",
+    "price": 89.0,
     "currency": "CNY",
-    "image_url": "1_美妆护肤/images/p_beauty_011_live.jpg",
+    "image_url": "/uploads/p_beauty_018.jpg",
     "category": "美妆护肤",
     "sub_category": "洁面",
-    "brand": "珊珂",
-    "skin_type_match": ["油性", "混合性"],
-    "ingredient_tags": ["氨基酸", "控油"],
-    "ingredient_avoid": [],
-    "use_scenario": "日常"
+    "brand": "薇诺娜",
+    "skin_type_match": ["油性"],
+    "ingredient_tags": ["氨基酸", "无酒精"],
+    "use_scenario": "日常护肤"
   },
-  "reason": "符合当前预算和使用场景。",
-  "risk_notes": [],
+  "reason": "氨基酸配方温和清洁，适合油性肤质日常使用",
+  "risk_notes": ["含少量香精，极度敏感肌建议先试用"],
   "evidence": [
-    {
-      "source_type": "product_chunk",
-      "snippet": "商品知识片段摘要",
-      "source_id": "chunk_p_beauty_011"
-    }
+    { "source_type": "user_review", "snippet": "油皮用了不紧绷，很舒服", "source_id": "p_beauty_018:1" }
   ],
   "actions": [
-    {
-      "action_id": "dislike_product",
-      "label": "不喜欢这个",
-      "action": "feedback",
-      "feedback_type": "not_interested"
-    }
+    { "action_id": "add_cart_1", "label": "加入购物车", "action": "add_to_cart" },
+    { "action_id": "dislike_1", "label": "不喜欢", "action": "feedback", "feedback_type": "dislike" }
   ]
 }
 ```
 
-注意：
-
-- `product.image_url` 当前是 dataset 相对路径，不是公网 URL。
-- 后续需要 FastAPI 静态文件或图片代理后，前端才能直接远程加载。
-- `deck_id` 对同一组商品卡保持一致。
-
-### cart_action
-
-用途：加购/移除/查看购物车动作反馈。
+### 4.6 `cart_action` — 购物车操作
 
 ```json
 {
   "event": "cart_action",
   "display_mode": "inline_card",
   "action": "add",
-  "product_id": "p_beauty_011",
+  "product_id": "p_beauty_018",
   "quantity": 1,
   "status": "success"
 }
 ```
 
-字段：
+`action` 取值：`add` / `view`。`status` 取值：`success` / `failed`。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `action` | string | `add` / `remove` / `view` 等 |
-| `product_id` | string | 商品 ID |
-| `quantity` | int | 数量 |
-| `status` | string | `success` / `failed` |
-
-### final_decision
-
-用途：总结推荐结论。由 LLM 生成（Qwen-Plus primary / Doubao fallback），winner 从传入商品中选择并经幻觉验证。
+### 4.7 `final_decision` — 最终决策
 
 ```json
 {
   "event": "final_decision",
   "display_mode": "summary_card",
-  "winner_product_id": "p_beauty_011",
-  "summary": "珊珂洗颜专科绵润泡沫洁面乳是符合油性皮肤、200元以内、日常清洁需求的平价洁面产品。",
-  "why": ["价格52元，远低于200元预算上限", "明确标注适配油性皮肤", "泡沫细腻丰富，兼顾清洁力与肤感"],
-  "not_for": ["追求强效祛痘的人群", "需要卸妆功能的用户"],
+  "winner_product_id": "p_beauty_018",
+  "summary": "综合油皮适用、预算和成分安全，推荐薇诺娜氨基酸洁面乳",
+  "why": ["氨基酸配方温和不刺激", "专为油性肤质设计", "200元以内性价比最高"],
+  "not_for": ["极度敏感肌", "偏好泡沫丰富质地"],
   "alternatives": [
-    {"product_id": "p_beauty_018", "name": "The Ordinary烟酰胺10%锌1%精华液"}
+    { "product_id": "p_beauty_005", "name": "水杨酸洁面啫喱" }
   ],
   "next_actions": [
-    {
-      "action_id": "cheaper",
-      "label": "再便宜一点",
-      "action": "criteria_patch",
-      "criteria_patch": {"constraints": {"budget_max": 100}}
-    }
+    { "action_id": "compare", "label": "对比商品", "action": "compare" },
+    { "action_id": "restart", "label": "重新推荐", "action": "feedback", "feedback_type": "restart" }
   ]
 }
 ```
 
-注意：
-
-- `winner_product_id` 由 LLM 从传入商品中选择，经代码验证确保不在传入列表时 fallback 到 products[0]。
-- `alternatives` 为排除 winner 后的前2个商品，由 pipeline 构造。
-- `why` 和 `not_for` 由 LLM 生成具体理由，不是模板文本。
-- LLM 失败时 fallback：winner 取 products[0]，why 为规则生成。
-
-### done
-
-用途：流结束。
+### 4.8 `done` — 流结束信号
 
 ```json
 {
@@ -405,315 +399,67 @@ none
 }
 ```
 
-前端收到后：
+收到 `done` 后前端关闭 loading 状态，本次 SSE 流完整结束。
 
-- 停止 loading。
-- 关闭当前 SSE 解析状态。
-- 不要再等待更多 event。
-
-### error
-
-用途：错误提示。
+### 4.9 `error` — 错误事件
 
 ```json
 {
   "event": "error",
   "display_mode": "inline_card",
   "code": "LLM_TIMEOUT",
-  "message": "后端服务暂时不可用，请稍后重试",
+  "message": "模型响应超时，请重试",
   "retryable": true
 }
 ```
 
-前端建议：
+`retryable: true` 时前端可展示重试按钮。
 
-- `retryable:true` 显示重试入口。
-- `retryable:false` 只显示错误提示。
-- 即使出现 `error`，后端仍应尽量发送 `done` 收尾。
+---
 
-## 6. 数据模型
+## 5. 典型 SSE 流序列
 
-### MessageLite
+### 5.1 正常推荐流程
 
-```json
-{
-  "role": "user",
-  "content": "消息内容"
-}
+```
+thinking (stage=intent_analysis)
+  → thinking (stage=criteria_generation)
+  → thinking (stage=retrieval)
+  → criteria_card
+  → product_card (rank=1)
+  → product_card (rank=2)
+  → ...
+  → thinking (stage=recommendation_generation)
+  → text_delta (流式推荐文案)
+  → thinking (stage=decision_generation)
+  → final_decision
+  → done
 ```
 
-### Constraints
+### 5.2 澄清流程
 
-```json
-{
-  "budget_min": null,
-  "budget_max": 200,
-  "use_scenario": "日常护肤",
-  "skin_type": "油性",
-  "ingredient_avoid": ["酒精"],
-  "ingredient_prefer": ["氨基酸"],
-  "storage": "256GB",
-  "screen_size": "6.3英寸",
-  "sport_type": "跑步",
-  "season": "夏季",
-  "dietary": ["低糖"]
-}
+```
+thinking (stage=intent_analysis)
+  → clarification (缺少关键槽位)
+  → done
 ```
 
-### QuickActionPayload
+### 5.3 加购流程
 
-```json
-{
-  "action_id": "no_alcohol",
-  "label": "不要含酒精",
-  "action": "criteria_patch",
-  "feedback_type": null,
-  "criteria_patch": {"ingredient_avoid": ["酒精"]}
-}
+```
+thinking (stage=intent_analysis)
+  → cart_action (action=add)
+  → done
 ```
 
-当前常见 `action`：
+---
 
-| action | 说明 | 前端行为 |
-|---|---|---|
-| `criteria_patch` | 修改购买标准 | 发送下一轮 `/chat/stream`，带上 `criteria_patch` |
-| `feedback` | 用户反馈 | 调 `/feedback` 或作为下一轮 message |
-| `open_evidence` | 展开证据 | 本地展开 evidence |
-| `compare` | 加入对比 | P1 对比浮层，可先占位 |
-| `add_to_cart` | 加购 | 可发送“把这个加到购物车”或走后续加购 API |
+## 6. 参考资源
 
-### ProductPayload
-
-```json
-{
-  "product_id": "p_beauty_001",
-  "name": "商品标题",
-  "price": 720.0,
-  "currency": "CNY",
-  "image_url": "1_美妆护肤/images/p_beauty_001_live.jpg",
-  "category": "美妆护肤",
-  "sub_category": "精华",
-  "brand": "雅诗兰黛",
-  "skin_type_match": ["敏感"],
-  "ingredient_tags": ["透明质酸", "修护"],
-  "ingredient_avoid": [],
-  "use_scenario": "夜间"
-}
-```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `product_id` | string | dataset 商品 ID |
-| `name` | string | 商品标题 |
-| `price` | number/null | 基础价格 |
-| `currency` | string/null | 当前固定 `CNY` |
-| `image_url` | string/null | 当前为 dataset 相对路径 |
-| `category` | string | 一级品类 |
-| `sub_category` | string/null | 子品类 |
-| `brand` | string/null | 品牌 |
-| `skin_type_match` | string[] | 从商品知识中派生的适用肤质 |
-| `ingredient_tags` | string[] | 从商品知识中派生的成分/功效标签 |
-| `ingredient_avoid` | string[] | 当前多为空，保留字段 |
-| `use_scenario` | string/null | 使用场景 |
-
-## 7. POST /chat/cancel
-
-请求：
-
-```json
-{
-  "session_id": "s1",
-  "turn_id": "turn_xxx"
-}
-```
-
-响应：
-
-```json
-{
-  "session_id": "s1",
-  "turn_id": "turn_xxx",
-  "canceled": true
-}
-```
-
-当前 P0 是 best-effort 响应，不保证已经中止服务端 generator。
-
-## 8. POST /upload/image 和 /chat/upload/image
-
-请求：`multipart/form-data`，字段与 Android `ImageUploadApi` 对齐：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `file` | file | 是 | 图片文件，支持 JPEG/PNG/WebP，最大 5MB |
-| `session_id` | string | 否 | 关联会话 |
-| `purpose` | string | 否 | 默认 `chat_input` |
-
-响应 `ImageUploadResponse`：
-
-```json
-{
-  "image_url": "/uploads/upload_xxx.jpg",
-  "width": 1280,
-  "height": 960,
-  "mime_type": "image/jpeg",
-  "ocr_text": null,
-  "analysis": {"status": "stored"}
-}
-```
-
-兼容说明：旧 JSON 请求体 `{ "file_name": "...", "content_type": "..." }` 仍保留占位响应，供旧测试或临时联调使用；Android 正式链路应使用 multipart。
-
-## 9. POST /feedback 和 /chat/feedback
-
-请求 `FeedbackRequest`：
-
-```json
-{
-  "session_id": "s1",
-  "feedback_type": "not_interested",
-  "action": null,
-  "product_id": "p_beauty_011",
-  "reason": "不喜欢这个品牌"
-}
-```
-
-响应 `FeedbackResponse`：
-
-```json
-{
-  "status": "received",
-  "session_id": "s1",
-  "feedback_type": "not_interested",
-  "action": null
-}
-```
-
-后端当前会写入内存 feedback repository，用于同进程内会话。
-
-## 10. GET /cart/{session_id} 和 /chat/cart/{session_id}
-
-响应 `CartResponse`：
-
-```json
-{
-  "items": [
-    {
-      "product_id": "p_beauty_011",
-      "name": "珊珂洗颜专科绵润泡沫洁面乳",
-      "price": 52.0,
-      "quantity": 1,
-      "added_at": "2026-05-22T01:00:00Z",
-      "product": {
-        "product_id": "p_beauty_011",
-        "name": "珊珂洗颜专科绵润泡沫洁面乳",
-        "price": 52.0,
-        "currency": "CNY",
-        "image_url": "1_美妆护肤/images/p_beauty_011_live.jpg",
-        "category": "美妆护肤",
-        "sub_category": "洁面",
-        "brand": "珊珂",
-        "skin_type_match": ["油性"],
-        "ingredient_tags": ["氨基酸"],
-        "ingredient_avoid": [],
-        "use_scenario": "日常"
-      }
-    }
-  ],
-  "total_items": 1,
-  "total_price": 52.0
-}
-```
-
-当前购物车为内存 repository，服务重启后清空。
-
-## 11. Android SSE 处理建议
-
-前端最小落地清单：
-
-- 建立 `ChatStreamRequest`、`MessageLite`、`Constraints`、`CriteriaPayload`、`ProductPayload`、`QuickActionPayload`、`CartResponse` 等 data class。
-- 建立 SSE sealed class，至少覆盖 `thinking`、`clarification`、`criteria_card`、`text_delta`、`product_card`、`cart_action`、`final_decision`、`done`、`error`。
-- 用 `event` 字段做分发，未知 event 忽略并记录日志。
-- UI 层按 `node_id` / `message_id` / `deck_id` 合并节点，避免 delta 和商品卡重复插入。
-- 所有接口异常都能落到错误气泡或 toast，不阻塞下一轮输入。
-
-解析策略：
-
-1. 按空行分割 SSE block。
-2. 读取 `event:` 行作为事件名。
-3. 读取 `data:` 行作为 JSON。
-4. 反序列化时先读 JSON 的 `event` 字段，再分发到具体 data class。
-5. 未知 event 显示为 no-op，并记录日志。
-6. 同一个 `message_id` 的 `text_delta` 合并为一条 AI 文本消息。
-7. 同一个 `deck_id` 的 `product_card` 合并为一组可滑动商品卡。
-8. 收到 `done` 后结束本轮 loading。
-
-最小状态机：
-
-```text
-Idle
- -> Streaming
- -> WaitingForUserClarification  当收到 clarification + done
- -> Completed                    当收到 done
- -> Failed                       当收到 error + done
-```
-
-Golden trace 示例：
-
-| 文件 | 场景 | 用途 |
-|---|---|---|
-| `contracts/examples/demo_budget_beauty.sse` | 完整推荐链路 | UI 主路径验收 |
-| `contracts/examples/demo_clarification.sse` | 信息不足追问 | 追问卡片验收 |
-| `contracts/examples/demo_error.sse` | 错误响应 | 错误态验收 |
-
-Demo 输入建议：
-
-| 输入 | 预期 |
-|---|---|
-| `推荐适合油皮的洗面奶，200元以内，日常护肤` | 标准卡、商品卡、最终决策 |
-| `随便看看` | 追问卡片 |
-| `把这个加到购物车` | 购物车动作或购物车相关文本 |
-| `查看购物车` | 购物车摘要 |
-
-## 12. 前端验收标准
-
-前端拿到本文后，至少应能完成以下联调验收：
-
-- `GET /health` 显示服务可用。
-- `POST /chat/stream` 能持续读取 SSE，而不是等待整个响应结束。
-- `thinking` 能显示阶段状态。
-- `criteria_card` 能渲染购买标准和快捷操作。
-- `text_delta` 能按 `message_id` 拼接为同一条 AI 文本。
-- `product_card` 能按 `deck_id` 聚合为一组商品卡，展示价格、品牌、品类、证据和操作。
-- `clarification` 能展示问题和选项，点击选项后沿用 `session_id` 发起下一轮。
-- `final_decision` 能展示推荐结论、原因、排除项和下一步操作。
-- `done` 能正确结束 loading。
-- `error` 能显示错误态，并按 `retryable` 控制是否展示重试。
-
-## 13. 当前限制
-
-- LLM decision、criteria、recommendation 已接真实模型（Qwen-Plus primary / Doubao fallback），仍有 deterministic fallback兜底。
-- embedding、rerank 已接真实百炼调用，仍有 deterministic fallback兜底。
-- 商品 runtime 来源已切到 `data/raw/ecommerce_agent_dataset`，但图片仍是 dataset 相对路径。
-- 购物车、反馈、会话上下文当前是内存实现，服务重启会丢失。
-- `/upload/image` 当前不是实际文件上传。
-- `/chat/cancel` 当前不保证中止已经开始的 SSE generator。
-- feedback 注入了 criteria prompt 但未注入 retrieval 硬过滤。
-
-## 14. 契约验证命令
-
-```bash
-cd backend
-.venv/bin/pytest tests/test_chat_api.py tests/test_pipeline.py tests/test_api_contracts.py tests/test_product_dataset.py -q
-```
-
-全量基线：
-
-```bash
-cd backend
-.venv/bin/pytest tests -q
-```
-
-当前已验证基线：`62 passed`。
+- **SSE JSON Schema（机器可读 source of truth）：** `contracts/sse-events.schema.json`
+- **Golden trace 示例：** `contracts/examples/`（demo_budget_beauty.sse / demo_clarification.sse / demo_error.sse）
+- **后端 PRD：** `doc/prd/02-后端与AgentPRD.md`
+- **前端 PRD：** `doc/prd/01-Android前端PRD.md`
+- **后端完成状态：** `doc/status/backend-completion.md`
+- **SSE 事件 Python 定义：** `backend/src/types/sse_events.py`
+- **HTTP 请求/响应类型：** `backend/src/types/schemas.py`

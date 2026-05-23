@@ -76,7 +76,7 @@ doc/
 - 设计决策 → `design-decisions.md`（每个核心决策 3 句话：选了什么/为什么/反过来会怎样）
 - 后端完成状态 → `doc/status/backend-completion.md`（P0/P1/P2 功能完成度，AI 每次开发后更新）
 - 前后端契约 → `contracts/sse-events.schema.json`（SSE 事件 JSON Schema，铁律 1 的 source of truth）
-- 实现差距与踩坑 → `260522-handoff.md`（实现 vs PRD 差距表 + 已知陷阱）
+- 实现差距与踩坑 → `260524-handoff.md`（实现 vs PRD 差距表 + 已知陷阱）
 - 评测模块 → `eval-module-handoff.md`（评测设计决策 + 运行方式）
 
 ---
@@ -106,6 +106,16 @@ doc/
 - **精准修改**：仅触碰必须修改之处，不擅自"优化"相邻代码
 - **目标导向**：将任务转化为可验证目标，循环迭代直至通过验证
 - **业务/实现分离**：先明确业务模型，再讨论实现模型
+
+### 测试原则
+
+写测试之前先问：**"如果源码这行逻辑写错了，这个 assert 会失败吗？"** 不会失败的测试 = 不存在的测试。
+
+1. **禁止把"测试通过"等同于"测试有价值"。** 同义反复测试 100% 通过，但通过的原因是源码没被测试到。例：mock 返回 `{"category": "美妆护肤"}`，断言 `result.category == "美妆护肤"` —— 无论源码怎么改，只要 mock 不变，测试永远通过。
+
+2. **mock 是隔离手段，不是控制变量的捷径。** mock 的正确用途是消除对不可控外部系统的依赖（网络、API Key、时钟）。如果你 mock 了一个函数的输入再断言输出等于 mock 的返回值，你不是在测试代码，你是在测试 mock 框架。
+
+3. **纯函数直接测，不要绕远路。** 如果目标函数是纯函数（输入确定 → 输出确定），直接构造输入调用它。不要通过调用上层 pipeline 来间接测试 —— 那样测的不是目标函数的逻辑，而是整条链路的组合行为。例：想测 `check_required_slots`，就直接构造 `IntentResult` 传入，不要先跑 `analyze_intent` 再传给 `check_required_slots`。
 
 ### AGENTS.md 分层架构
 
@@ -147,10 +157,8 @@ UI → Runtime → Service → Repo → Config/Types
 
 - 百炼 `text-embedding-v3` batch size 最大 10，改回 32 会 400 错误并 fallback
 - `gte_rerank` profile 实际 model 是 `qwen3-rerank`，非 PRD 原写的 `gte-rerank`（官方已临近停用）
-- `data/raw/` 被 gitignore，其他环境必须单独准备官方脱敏数据
 - `ProductPayload.image_url` 仍为 raw 相对路径，Android 不能稳定加载本地图片，需 FastAPI static mount 或 image proxy
-- `backend/prompts/` 下 6 个 .md 文件运行时从未加载，`llm_client.py` 用硬编码字符串
-- Prompt 文件写了但运行时没用，改 prompt 质量需改代码而非改 .md 文件
+- `backend/prompts/` 下 7 个 .md 已通过 `services/prompts.py` 的 `PromptStore` 运行时加载，硬编码字符串在 `llm_task_payloads.py` 中作为 fallback；改 prompt 可以直接改 .md 文件
 
 ---
 
@@ -324,6 +332,13 @@ Android Compose + LazyColumn 卡片渲染
 - LLM 调用必须是 task-oriented interface（analyze_intent / generate_criteria / generate_recommendation / analyze_image），每个接口返回结构化的 Pydantic model，禁止返回 raw str 让调用方自己解析。
 - 所有 LLM 调用和数据库查询必须通过 Service 层的 task-oriented interface 执行。禁止在 Runtime 层直接调用 LLM SDK 或在 API 层直接执行 SQL。
 
+### 铁律 5：测试必须验证源码行为
+
+- **禁止同义反复测试。** 断言的期望值不得从 mock 的返回值复制。期望值必须从业务规则、输入数据的变换、或手动计算中独立推导。如果源码逻辑写错了测试仍会通过，这个测试就是装饰品。
+- **禁止 Pydantic 存取测试。** 禁止断言 model 的字段值等于构造时传入的值。Pydantic model 只能测三件事：(1) 非法输入是否抛 `ValidationError`；(2) `model_dump()` / `model_dump_json()` 的输出结构；(3) 与 JSON Schema 契约的对齐。
+- **mock 只能打在 I/O 边界。** LLM / embedding / rerank 测试 mock `httpx.AsyncClient.post`，数据库测试用内存 SQLite，文件测试用 `tmp_path`。禁止 mock `_chat_completion`、`_embedding_request`、`_rerank_request` 等内部函数。pipeline 编排测试允许 mock stage 入口（`run_criteria` / `run_retrieval` 等），但必须在 `MOCK_ALLOWED_INTERNAL` 白名单中显式声明。`test_architecture_layers.py` 中的 AST 守卫会自动检查违规。
+- **纯函数必须有直接测试。** 每个包含复杂逻辑的纯函数（如 `_passes_hard_filters`、`_normalize_intent_payload`、`_deterministic_rerank`、`_has_negation_prefix`），必须至少有 3 个直接测试用例（正常路径 + 2 个边界），不得通过调用上层 pipeline 间接测试。
+
 ---
 
 ## 熵增 Kill Switch
@@ -337,6 +352,8 @@ Android Compose + LazyColumn 卡片渲染
 | 单个 prompt 超 300 行 | 可量化红线 | prompt 里堆叠了多种业务规则和特殊情况 |
 | 无法画出清晰数据流 | 架构崩坏的核心信号 | 某个功能的数据来源和去向说不清楚 |
 | 单品类 constraints 超 8 个 `| None` 字段 | 封闭 DSL 的健康指标 | DSL 设计过于膨胀，需要重新审视品类约束维度 |
+| 含复杂逻辑的纯函数缺少直接测试 | 测试覆盖的核心信号 | `_passes_hard_filters`、`_deterministic_rerank` 等函数没有 ≥3 个直接用例 |
+| mock 目标不在 I/O 边界白名单 | 同义反复测试的根因 | `monkeypatch.setattr` 打在 `_chat_completion` 而非 `httpx.AsyncClient.post` |
 
 ---
 
