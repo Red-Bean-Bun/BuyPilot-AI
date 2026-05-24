@@ -110,7 +110,7 @@ def _find_mock_violations(roots: list[Path]) -> list[str]:
                     continue
                 if _is_mock_allowed(target):
                     continue
-                rel = path.relative_to(root.parent)
+                rel = str(path.relative_to(root.parent)).replace("\\", "/")
                 violations.append(f"{rel}::{current_fn} -> {target}")
     return violations
 
