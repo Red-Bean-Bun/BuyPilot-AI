@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config.settings import get_settings
-from src.repos.conversations import get_last_criteria, get_last_product_ids, save_turn
+from src.repos.conversations import get_last_criteria, get_last_product_ids, list_recent_turns, save_turn
 from src.services.fallbacks import record_fallback
 from src.types.sse_events import CriteriaPayload
 
@@ -73,6 +73,34 @@ def get_previous_product_ids(session_id: str) -> list[str]:
             raise
         record_fallback("conversation_state", "memory_fallback", operation="get_product_ids")
     return list(_LAST_PRODUCT_IDS.get(session_id, []))
+
+
+def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
+    """Build a compact summary of recent conversation turns for LLM context.
+
+    Returns an empty string when there is no history (first turn), so the
+    prompt template variable renders as a no-op for single-turn use.
+    """
+    try:
+        turns = list_recent_turns(session_id, max_turns)
+    except SQLAlchemyError:
+        logger.exception("list_recent_turns DB read failed")
+        record_fallback("conversation_state", "memory_fallback", operation="list_turns")
+        return ""
+    if not turns:
+        return ""
+    lines: list[str] = []
+    for i, turn in enumerate(turns, 1):
+        user = str(turn["user_message"])[:80]
+        summary = str(turn.get("summary", ""))
+        product_ids = list(turn.get("product_ids", []))  # type: ignore[arg-type]
+        ids_str = "、".join(str(pid) for pid in product_ids[:3])
+        lines.append(
+            f"第{i}轮: 用户'{user}', "
+            f"购买标准'{summary}', "
+            f"推荐了{len(product_ids)}个商品({ids_str})."
+        )
+    return "\n".join(lines)
 
 
 def _cache_turn(session_id: str, criteria: CriteriaPayload | None, product_ids: list[str]) -> None:

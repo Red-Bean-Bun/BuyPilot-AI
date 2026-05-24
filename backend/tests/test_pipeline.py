@@ -133,7 +133,7 @@ async def test_pipeline_honors_client_turn_cancellation():
 
 @pytest.mark.asyncio
 async def test_pipeline_error_message_is_sanitized(monkeypatch):
-    async def exploding_intent(body):
+    async def exploding_intent(session_id, body):
         raise RuntimeError("database password leaked")
 
     monkeypatch.setattr(pipeline_module, "run_intent", exploding_intent)

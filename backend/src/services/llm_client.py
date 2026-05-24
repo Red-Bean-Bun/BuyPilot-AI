@@ -62,11 +62,14 @@ __all__ = [
 
 
 async def analyze_intent(
-    message: str, history: list[dict[str, Any]] | None = None, image_url: str | None = None
+    message: str,
+    history: list[dict[str, Any]] | None = None,
+    image_url: str | None = None,
+    conversation_context: str = "",
 ) -> IntentResult:
     live = await _call_chat_task(
         "analyze_intent",
-        intent_messages(message, history, image_url),
+        intent_messages(message, history, image_url, conversation_context),
         json_object=True,
     )
     if live:
@@ -116,10 +119,14 @@ async def generate_criteria(
     intent: IntentResult,
     feedback: dict[str, list[str]] | None = None,
     existing: CriteriaPayload | None = None,
+    conversation_context: str = "",
 ) -> CriteriaPayload:
     live = await _call_chat_task(
         "generate_criteria",
-        criteria_messages(message, intent.model_dump(), feedback, existing.model_dump() if existing else None),
+        criteria_messages(
+            message, intent.model_dump(), feedback,
+            existing.model_dump() if existing else None, conversation_context,
+        ),
         json_object=True,
     )
     if live:

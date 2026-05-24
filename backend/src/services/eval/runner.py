@@ -198,7 +198,7 @@ async def _run_pipeline(
     try:
         from src.runtime.stages.intent import run_intent
 
-        intent_result = await run_intent(body)
+        intent_result = await run_intent(session_id, body)
         capture.intent_type = intent_result.intent
         capture.extracted_constraints = intent_result.extracted_constraints
     except Exception:

@@ -54,6 +54,29 @@ def get_last_criteria(session_id: str) -> CriteriaPayload | None:
     return None
 
 
+def list_recent_turns(session_id: str, limit: int = 3) -> list[dict[str, object]]:
+    """Return recent conversation turns (oldest first) for LLM context injection."""
+    create_db_and_tables()
+    with Session(get_engine()) as session:
+        rows = session.exec(
+            select(Conversation)
+            .where(Conversation.session_id == session_id)
+            .order_by(Conversation.created_at.desc())
+            .limit(limit)
+        ).all()
+    turns: list[dict[str, object]] = []
+    for row in reversed(rows):
+        summary = ""
+        if row.criteria_json:
+            summary = row.criteria_json.get("summary", "")
+        turns.append({
+            "user_message": row.user_message,
+            "summary": summary,
+            "product_ids": list(row.product_ids) if row.product_ids else [],
+        })
+    return turns
+
+
 def get_last_product_ids(session_id: str) -> list[str]:
     create_db_and_tables()
     with Session(get_engine()) as session:

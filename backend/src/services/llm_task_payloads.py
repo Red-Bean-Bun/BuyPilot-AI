@@ -43,6 +43,7 @@ def intent_messages(
     message: str,
     history: list[dict[str, Any]] | None,
     image_url: str | None,
+    conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -50,7 +51,11 @@ def intent_messages(
             "content": _prompt_content(
                 "intent_analysis",
                 INTENT_SYSTEM_FALLBACK,
-                {"user_message": message, "history": history or []},
+                {
+                    "user_message": message,
+                    "history": history or [],
+                    "conversation_context": conversation_context,
+                },
                 INTENT_SYSTEM_FALLBACK,
             ),
         },
@@ -63,6 +68,7 @@ def criteria_messages(
     intent_dump: dict[str, Any],
     feedback: dict[str, list[str]] | None,
     existing_dump: dict[str, Any] | None,
+    conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     payload = {
         "message": message,
@@ -81,6 +87,7 @@ def criteria_messages(
                     "intent_result": intent_dump,
                     "history": [],
                     "feedback_constraints": feedback or {},
+                    "conversation_context": conversation_context,
                 },
                 CRITERIA_SYSTEM_FALLBACK,
             ),

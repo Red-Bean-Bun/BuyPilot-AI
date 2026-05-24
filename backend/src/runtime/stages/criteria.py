@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX
-from src.services.conversation_state import get_previous_criteria
+from src.services.conversation_state import get_conversation_summary, get_previous_criteria
 from src.services.feedback import get_feedback_context
 from src.services.llm_client import generate_criteria
 from src.types.schemas import ChatStreamRequest, IntentResult
@@ -17,7 +17,9 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
     if body.criteria_patch:
         return apply_criteria_patch(existing or CriteriaPayload(criteria_id="c_auto_001"), body.criteria_patch)
     feedback = get_feedback_context(session_id)
-    return await generate_criteria(body.message, intent, feedback=feedback, existing=existing)
+    ctx_summary = get_conversation_summary(session_id)
+    return await generate_criteria(body.message, intent, feedback=feedback, existing=existing,
+                                    conversation_context=ctx_summary)
 
 
 def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> CriteriaPayload:

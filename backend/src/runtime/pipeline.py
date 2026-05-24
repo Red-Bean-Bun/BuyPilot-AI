@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class PipelineStages:
     run_multimodal: Callable[[str | None], Awaitable[dict[str, Any] | None]]
-    run_intent: Callable[[ChatStreamRequest], Awaitable[Any]]
+    run_intent: Callable[[str, ChatStreamRequest], Awaitable[Any]]
     run_criteria: Callable[..., Awaitable[Any]]
     run_retrieval: Callable[..., Awaitable[Any]]
     run_recommendation_text: Callable[..., Awaitable[Any]]
@@ -100,7 +100,7 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
     ctx.ensure_active()
     async for item in run_with_heartbeat(
         ctx,
-        ctx.stages.run_intent(pipeline_body),
+        ctx.stages.run_intent(ctx.session_id, pipeline_body),
         "understanding",
         "正在理解您的需求...",
         timing_key="intent",
