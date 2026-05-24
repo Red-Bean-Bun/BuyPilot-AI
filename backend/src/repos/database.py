@@ -13,6 +13,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlmodel import Session, SQLModel, create_engine
 
 from src.config.settings import get_settings
+from src.repos import models as _models  # noqa: F401  # register SQLModel tables
 
 _CREATE_TABLES_LOCK = threading.Lock()
 _CREATED_DATABASE_URLS: set[str] = set()
@@ -41,6 +42,7 @@ def create_db_and_tables() -> None:
         if is_postgres_engine(engine):
             ensure_pgvector_extension(engine)
         SQLModel.metadata.create_all(engine)
+        ensure_model_columns(engine)
         if is_postgres_engine(engine):
             ensure_pgvector_indexes(engine)
         _CREATED_DATABASE_URLS.add(database_url)
@@ -127,12 +129,23 @@ def migrate_eval_runs_table() -> None:
 
 
 def ensure_eval_schema() -> None:
-    """Create eval tables and add missing nullable columns from older dev DBs."""
+    """Create eval tables, add current columns, and remove legacy sample columns."""
 
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
     for table_name in ("eval_runs", "eval_samples"):
         _add_missing_columns(engine, table_name)
+    _drop_legacy_eval_sample_columns(engine)
+
+
+def ensure_model_columns(engine: Engine) -> None:
+    """Add nullable columns introduced after an existing dev DB was created."""
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table_name in SQLModel.metadata.tables:
+        if table_name in existing_tables:
+            _add_missing_columns(engine, table_name)
 
 
 def _add_missing_columns(engine: Engine, table_name: str) -> None:
@@ -149,4 +162,25 @@ def _add_missing_columns(engine: Engine, table_name: str) -> None:
             column_type = column.type.compile(dialect=engine.dialect)
             conn.execute(
                 text(f"ALTER TABLE {preparer.quote(table_name)} ADD COLUMN {preparer.quote(column.name)} {column_type}")
+            )
+
+
+def _drop_legacy_eval_sample_columns(engine: Engine) -> None:
+    legacy_columns = {"must_have", "preferred", "forbidden"}
+    inspector = inspect(engine)
+    if "eval_samples" not in set(inspector.get_table_names()):
+        return
+    existing = {column["name"] for column in inspector.get_columns("eval_samples")}
+    to_drop = sorted(legacy_columns & existing)
+    if not to_drop:
+        return
+
+    preparer = engine.dialect.identifier_preparer
+    with engine.begin() as conn:
+        for column_name in to_drop:
+            conn.execute(
+                text(
+                    f"ALTER TABLE {preparer.quote('eval_samples')} "
+                    f"DROP COLUMN {preparer.quote(column_name)}"
+                )
             )

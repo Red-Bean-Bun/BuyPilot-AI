@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from src.config.domain_terms import avoid_trait_matches_text
@@ -31,6 +31,8 @@ from src.services.retrieval_features import criteria_query_text, product_documen
 from src.services.reranker import rerank, rerank_texts
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
+TRACE_VECTOR_TOP_K_LIMIT = 50
+
 
 @dataclass(frozen=True)
 class ProductHit:
@@ -50,6 +52,7 @@ class RetrievalFilters:
 class RetrievalOutput:
     products: list[ProductPayload]
     evidence_by_product: dict[str, list[EvidencePayload]]
+    trace_details: dict[str, object] = field(default_factory=dict)
 
 
 async def retrieve(
@@ -74,6 +77,11 @@ async def retrieve_with_evidence(
         return RetrievalOutput(
             products=[hit.product for hit in ranked_hits],
             evidence_by_product=_evidence_by_product(ranked_hits),
+            trace_details=_trace_details_for_chunk_retrieval(
+                chunk_hits=chunk_hits,
+                candidate_hits=candidate_hits,
+                ranked_hits=ranked_hits,
+            ),
         )
 
     if get_settings().strict_runtime:
@@ -84,7 +92,16 @@ async def retrieve_with_evidence(
     vector_task = asyncio.create_task(_vector_recall_fallback(criteria, filters))
     hard_results, vector_results = await asyncio.gather(hard_task, vector_task)
     merged = _merge_dedup(hard_results + vector_results)
-    return RetrievalOutput(products=await rerank(criteria, merged, top_n=top_n), evidence_by_product={})
+    ranked_products = await rerank(criteria, merged, top_n=top_n)
+    return RetrievalOutput(
+        products=ranked_products,
+        evidence_by_product={},
+        trace_details=_trace_details_for_fallback(
+            hard_results=hard_results,
+            vector_results=vector_results,
+            ranked_products=ranked_products,
+        ),
+    )
 
 
 def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
@@ -187,6 +204,79 @@ def _evidence_by_product(hits: list[ProductHit]) -> dict[str, list[EvidencePaylo
         if hit.chunk is not None:
             evidence_by_product[hit.product.product_id] = [evidence_for_chunk(hit.chunk)]
     return evidence_by_product
+
+
+def _trace_details_for_chunk_retrieval(
+    chunk_hits: list[ProductHit],
+    candidate_hits: list[ProductHit],
+    ranked_hits: list[ProductHit],
+) -> dict[str, object]:
+    vector_hits = sorted(chunk_hits, key=lambda hit: hit.vector_score, reverse=True)[:TRACE_VECTOR_TOP_K_LIMIT]
+    return {
+        "filters_applied": {
+            "_candidate_product_ids": _unique_product_ids(candidate_hits),
+        },
+        "vector_top_k": [_trace_hit_payload(hit, rank) for rank, hit in enumerate(vector_hits, start=1)],
+        "rerank_top_n": [_trace_hit_payload(hit, rank) for rank, hit in enumerate(ranked_hits, start=1)],
+        "selected_ids": [hit.product.product_id for hit in ranked_hits],
+        "hit_count": len(ranked_hits),
+        "vector_count": len(chunk_hits),
+    }
+
+
+def _trace_details_for_fallback(
+    hard_results: list[ProductPayload],
+    vector_results: list[ProductPayload],
+    ranked_products: list[ProductPayload],
+) -> dict[str, object]:
+    return {
+        "filters_applied": {
+            "_hard_filter_candidate_ids": [product.product_id for product in hard_results],
+            "_fallback_vector_candidate_ids": [product.product_id for product in vector_results],
+        },
+        "vector_top_k": [
+            {"rank": index + 1, "product_id": product.product_id, "source": "fallback_vector"}
+            for index, product in enumerate(vector_results[:TRACE_VECTOR_TOP_K_LIMIT])
+        ],
+        "rerank_top_n": [
+            {"rank": index + 1, "product_id": product.product_id, "source": "fallback_rerank"}
+            for index, product in enumerate(ranked_products)
+        ],
+        "selected_ids": [product.product_id for product in ranked_products],
+        "hit_count": len(ranked_products),
+        "vector_count": len(vector_results),
+    }
+
+
+def _trace_hit_payload(hit: ProductHit, rank: int) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "rank": rank,
+        "product_id": hit.product.product_id,
+        "vector_score": round(hit.vector_score, 6),
+        "filter_score": round(hit.filter_score, 6),
+    }
+    if hit.chunk is not None:
+        payload.update(
+            {
+                "chunk_id": hit.chunk.id,
+                "chunk_index": hit.chunk.chunk_index,
+                "chunk_type": hit.chunk.metadata.get("chunk_type"),
+                "retrieval_role": hit.chunk.metadata.get("retrieval_role"),
+            }
+        )
+    return payload
+
+
+def _unique_product_ids(hits: list[ProductHit]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for hit in hits:
+        product_id = hit.product.product_id
+        if product_id in seen:
+            continue
+        seen.add(product_id)
+        result.append(product_id)
+    return result
 
 
 async def _rerank_chunk_hits(criteria: CriteriaPayload, hits: list[ProductHit], top_n: int) -> list[ProductHit]:

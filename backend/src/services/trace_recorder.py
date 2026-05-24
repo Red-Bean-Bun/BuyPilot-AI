@@ -15,6 +15,7 @@ def record_retrieval_trace(
     conversation_id: str | None = None,
     stage_timings_ms: dict[str, float] | None = None,
     fallback_events: list[dict[str, Any]] | None = None,
+    trace_details: dict[str, Any] | None = None,
 ) -> str | None:
     return write_retrieval_trace(
         criteria,
@@ -23,6 +24,7 @@ def record_retrieval_trace(
         conversation_id=conversation_id,
         stage_timings_ms=stage_timings_ms,
         fallback_events=fallback_events,
+        trace_details=trace_details,
     )
 
 

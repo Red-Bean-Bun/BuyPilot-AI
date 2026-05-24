@@ -130,6 +130,8 @@ class EvidenceLink(SQLModel, table=True):
     conversation_id: str | None = Field(default=None, foreign_key="conversations.id")
     product_id: str = Field(foreign_key="products.id")
     chunk_id: str | None = Field(default=None, foreign_key="product_chunks.id")
+    source_id_raw: str | None = None
+    snippet: str | None = None
     evidence_type: str | None = None
     relevance_score: float | None = None
     cited_in: str | None = None

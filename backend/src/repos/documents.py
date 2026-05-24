@@ -124,6 +124,10 @@ def evidence_for_chunk(chunk: ChunkDocument, max_chars: int = 180) -> EvidencePa
 
 
 def evidence_for_product(product: ProductPayload) -> EvidencePayload:
+    chunk = _primary_evidence_chunk(product.product_id)
+    if chunk is not None:
+        return evidence_for_chunk(chunk)
+
     dataset_snippet = evidence_snippet(product.product_id)
     if dataset_snippet:
         return EvidencePayload(
@@ -144,4 +148,30 @@ def evidence_for_product(product: ProductPayload) -> EvidencePayload:
         source_type="product_chunk",
         snippet=snippet,
         source_id=f"chunk_{product.product_id}",
+    )
+
+
+def _primary_evidence_chunk(product_id: str) -> ChunkDocument | None:
+    try:
+        with Session(get_engine()) as session:
+            rows = session.exec(
+                select(ProductChunk).where(ProductChunk.product_id == product_id).order_by(ProductChunk.chunk_index)
+            ).all()
+    except SQLAlchemyError:
+        logger.exception("primary evidence chunk lookup failed")
+        if get_settings().strict_runtime:
+            raise
+        return None
+
+    if not rows:
+        return None
+    preferred = [row for row in rows if (row.chunk_metadata or {}).get("retrieval_role") != "risk"]
+    row = (preferred or rows)[0]
+    return ChunkDocument(
+        id=row.id,
+        product_id=row.product_id,
+        chunk_text=row.chunk_text,
+        chunk_index=row.chunk_index,
+        embedding=row.embedding,
+        metadata=row.chunk_metadata,
     )

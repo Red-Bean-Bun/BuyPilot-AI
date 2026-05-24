@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from src.services.llm_client import generate_recommendation
@@ -15,6 +15,7 @@ from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayloa
 class RetrievalResult:
     products: list[ProductPayload]
     evidence_by_product: dict[str, list[EvidencePayload]]
+    trace_details: dict = field(default_factory=dict)
 
 
 async def run_retrieval(
@@ -26,6 +27,7 @@ async def run_retrieval(
     return RetrievalResult(
         products=retrieval.products,
         evidence_by_product=retrieval.evidence_by_product,
+        trace_details=retrieval.trace_details,
     )
 
 

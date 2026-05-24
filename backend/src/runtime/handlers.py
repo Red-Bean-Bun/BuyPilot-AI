@@ -228,7 +228,7 @@ async def handle_recommendation(
 
     yield _final_decision_event(ctx, criteria, products, decision)
 
-    await _persist_recommendation(ctx, body, criteria, products, evidences_by_product)
+    await _persist_recommendation(ctx, body, criteria, retrieval)
     yield ctx.done()
 
 
@@ -376,9 +376,10 @@ async def _persist_recommendation(
     ctx: StreamContext,
     body: ChatStreamRequest,
     criteria: CriteriaPayload,
-    products: list[ProductPayload],
-    evidences_by_product: dict[str, list[EvidencePayload]],
+    retrieval: RetrievalResult,
 ) -> None:
+    products = retrieval.products
+    evidences_by_product = retrieval.evidence_by_product
     conversation_id = await run_sync_io(
         save_recommendation_turn,
         ctx.session_id,
@@ -394,6 +395,7 @@ async def _persist_recommendation(
         conversation_id=conversation_id,
         stage_timings_ms=ctx.stage_timings_ms,
         fallback_events=get_fallback_events(),
+        trace_details=retrieval.trace_details,
     )
     await run_sync_io(record_evidence_links, products, evidences_by_product, conversation_id=conversation_id)
     await run_sync_io(

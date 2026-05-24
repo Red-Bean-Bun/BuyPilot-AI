@@ -45,5 +45,6 @@ def test_eval_list_queries_upgrade_old_empty_tables(monkeypatch, tmp_path):
 
     assert {"prompt_version", "git_commit", "samples_detail"} <= run_columns
     assert {"image_path", "context", "ground_truth", "tags", "created_at"} <= sample_columns
+    assert {"must_have", "preferred", "forbidden"}.isdisjoint(sample_columns)
 
     settings_module._settings = None
