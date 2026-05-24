@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from src.services.llm_client import generate_recommendation
-from src.services.retriever import cached_evidence_for_product, retrieve
+from src.services.retriever import retrieve_with_evidence
 from src.types.schemas import RecommendationResult
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
@@ -22,10 +22,10 @@ async def run_retrieval(
     top_n: int = 5,
     feedback: Mapping[str, list[str]] | None = None,
 ) -> RetrievalResult:
-    products = await retrieve(criteria, top_n=top_n, feedback=feedback)
+    retrieval = await retrieve_with_evidence(criteria, top_n=top_n, feedback=feedback)
     return RetrievalResult(
-        products=products,
-        evidence_by_product=_cached_evidence_for_products(products),
+        products=retrieval.products,
+        evidence_by_product=retrieval.evidence_by_product,
     )
 
 
@@ -41,11 +41,3 @@ async def run_recommendation(
     retrieval = await run_retrieval(criteria, feedback=feedback)
     result = await run_recommendation_text(criteria, retrieval.products)
     return result.model_copy(update={"evidence_by_product": retrieval.evidence_by_product})
-
-
-def _cached_evidence_for_products(products: list[ProductPayload]) -> dict[str, list[EvidencePayload]]:
-    return {
-        product.product_id: [evidence]
-        for product in products
-        if (evidence := cached_evidence_for_product(product.product_id)) is not None
-    }

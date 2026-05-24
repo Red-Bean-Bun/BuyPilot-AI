@@ -82,6 +82,28 @@ AVOIDABLE_TRAIT_TERMS = (
     "小零件",
 )
 
+FEEDBACK_AVOID_TRAIT_TERMS = (
+    *AVOIDABLE_TRAIT_TERMS,
+    "耐克",
+    "Nike",
+    "日系品牌",
+    "日系",
+    "日本品牌",
+    "日本",
+)
+
+NEGATIVE_FEEDBACK_ACTIONS = {"not_interested", "dislike", "avoid", "negative"}
+NEGATIVE_FEEDBACK_MARKERS = ("不要", "不含", "避免", "除了", "不喜欢", "别再", "不要再")
+
+AVOID_TRAIT_MATCH_TERMS: dict[str, tuple[str, ...]] = {
+    "日系": ("SK-II", "资生堂", "安热沙", "珊珂", "芳珂", "优衣库"),
+    "日系品牌": ("SK-II", "资生堂", "安热沙", "珊珂", "芳珂", "优衣库"),
+    "日本": ("SK-II", "资生堂", "安热沙", "珊珂", "芳珂", "优衣库"),
+    "日本品牌": ("SK-II", "资生堂", "安热沙", "珊珂", "芳珂", "优衣库"),
+    "nike": ("Nike", "耐克"),
+    "耐克": ("Nike", "耐克"),
+}
+
 WARNING_MARKERS = (
     "不适合",
     "慎用",
@@ -149,6 +171,11 @@ def contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
 
 
+def contains_any_casefold(text: str, terms: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(term.lower() in lowered for term in terms)
+
+
 def category_from_text(text: str) -> str | None:
     for category, terms in CATEGORY_TERMS.items():
         if contains_any(text, terms):
@@ -174,3 +201,31 @@ def scenario_from_text(text: str, category: str | None = None) -> str | None:
 
 def extract_avoided_traits(text: str, terms: tuple[str, ...] = AVOIDABLE_TRAIT_TERMS) -> list[str]:
     return [term for term in terms if term in text and has_negation_prefix(text, term)]
+
+
+def is_negative_feedback(action: str, reason: str | None = None) -> bool:
+    return action in NEGATIVE_FEEDBACK_ACTIONS or bool(reason and contains_any(reason, NEGATIVE_FEEDBACK_MARKERS))
+
+
+def extract_feedback_avoid_terms(reason: str) -> list[str]:
+    terms = [term for term in FEEDBACK_AVOID_TRAIT_TERMS if term in reason]
+    if terms:
+        return [term for term in terms if not any(term != other and term in other for other in terms)]
+
+    cleaned = reason
+    for marker in NEGATIVE_FEEDBACK_MARKERS:
+        cleaned = cleaned.replace(marker, "")
+    for filler in ("的", "这个", "这款", "商品", "产品", "品牌", "牌子", "还有什么", "还有吗"):
+        cleaned = cleaned.replace(filler, "")
+    cleaned = cleaned.strip(" ，。,.！!？?")
+    return [cleaned] if cleaned else [reason]
+
+
+def avoid_trait_matches_text(token: str, text: str) -> bool:
+    normalized = token.strip()
+    if not normalized:
+        return False
+    aliases = AVOID_TRAIT_MATCH_TERMS.get(normalized.lower()) or AVOID_TRAIT_MATCH_TERMS.get(normalized)
+    if aliases:
+        return contains_any_casefold(text, aliases)
+    return normalized.lower() in text.lower()

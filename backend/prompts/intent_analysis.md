@@ -23,17 +23,16 @@
 
 ```json
 {
-  "intent_type": "recommend | filter | clarify | add_to_cart | compare | chitchat | unclear",
-  "is_shopping_related": true,
+  "intent": "recommend | clarify | feedback | add_to_cart | view_cart | chitchat",
+  "confidence": 0.9,
   "category": "美妆护肤 | 数码电子 | 服饰运动 | 食品生活 | null",
   "extracted_constraints": {
     "budget_max": null,
     "budget_min": null,
-    "brand_preference": null,
     "use_scenario": null
   },
-  "user_intent_summary": "一句话总结用户想要什么",
-  "confidence": 0.9
+  "soft_preferences": ["一句话总结用户想要什么"],
+  "target_product_id": null
 }
 ```
 
@@ -42,24 +41,27 @@
 | 品类 | 可提取字段 |
 |------|-----------|
 | 美妆护肤 | skin_type(油性/干性/混合/敏感/通用), ingredient_avoid(成分列表), ingredient_prefer(成分列表), use_scenario(日常/夜间/户外/敏感肌专用) |
-| 数码电子 | storage_requirement, screen_size_preference, use_scenario(日常/商务/游戏/创作) |
-| 服饰运动 | sport_type(跑步/篮球/徒步/瑜伽), season(春夏/秋冬/四季), material_preference(棉/速干/羊毛) |
-| 食品生活 | dietary(无糖/低糖/含咖啡因/含乳/素食), taste_preference, use_scenario(早餐/下午茶/运动补给) |
+| 数码电子 | storage, screen_size, use_scenario(日常/商务/游戏/创作) |
+| 服饰运动 | sport_type(跑步/篮球/徒步/瑜伽), season(春夏/秋冬/四季) |
+| 食品生活 | dietary(无糖/低糖/含咖啡因/含乳/素食), use_scenario(早餐/下午茶/运动补给) |
 
-未识别品类时 constraints 只保留通用字段(budget/brand/use_scenario)。
+未识别品类时 `category` 输出 null，`extracted_constraints` 只保留通用字段（budget/use_scenario）。
 
 ## Rules
 
 1. budget 提取为数字，注意货币单位（"200元" -> 200，"$30" -> 30）
 2. 品类判断优先看关键词：护肤/洗面奶/防晒 -> 美妆护肤，手机/耳机/笔记本 -> 数码电子，跑鞋/瑜伽裤 -> 服饰运动，零食/咖啡/麦片 -> 食品生活
-3. intent_type 定义：
+3. intent 定义：
    - recommend: 用户请求推荐商品
-   - filter: 用户追加筛选/排除条件（如"不要含酒精的"）
-   - clarify: 用户在澄清需求或回答追问
+   - clarify: 用户在澄清需求、回答追问，或信息不足需要追问
+   - feedback: 用户表达不喜欢、排除某商品/品牌/特征等反馈
    - add_to_cart: 用户要加购物车
-   - compare: 用户要对比多个商品
+   - view_cart: 用户要查看购物车
+   - chitchat: 非购物咨询
 4. 不要猜测用户没有明确表达的约束，未提及的字段保持 null 或空数组
-5. confidence 表示意图判断确信度（0-1）
+5. confidence 必须是 0-1 的数字，不要输出 "high"/"medium"/"low"
+6. soft_preferences 必须是字符串数组；没有偏好时输出 []
+7. target_product_id 没有明确商品 ID 时输出 null
 
 ## Examples
 
@@ -67,20 +69,19 @@ Input: "推荐适合油皮的洗面奶，200元以内"
 Output:
 ```json
 {
-  "intent_type": "recommend",
-  "is_shopping_related": true,
+  "intent": "recommend",
+  "confidence": 0.95,
   "category": "美妆护肤",
   "extracted_constraints": {
     "skin_type": "油性",
     "budget_max": 200,
     "budget_min": null,
-    "brand_preference": null,
     "use_scenario": null,
     "ingredient_avoid": [],
     "ingredient_prefer": []
   },
-  "user_intent_summary": "寻找适合油性肌肤的洗面奶，预算200元以内",
-  "confidence": 0.95
+  "soft_preferences": ["寻找适合油性肌肤的洗面奶，预算200元以内"],
+  "target_product_id": null
 }
 ```
 
@@ -88,19 +89,18 @@ Input: "要一个256G的手机，主要打游戏"
 Output:
 ```json
 {
-  "intent_type": "recommend",
-  "is_shopping_related": true,
+  "intent": "recommend",
+  "confidence": 0.9,
   "category": "数码电子",
   "extracted_constraints": {
-    "storage_requirement": "256G",
+    "storage": "256G",
     "use_scenario": "游戏",
     "budget_max": null,
     "budget_min": null,
-    "brand_preference": null,
-    "screen_size_preference": null
+    "screen_size": null
   },
-  "user_intent_summary": "寻找256G存储的游戏手机",
-  "confidence": 0.9
+  "soft_preferences": ["寻找256G存储的游戏手机"],
+  "target_product_id": null
 }
 ```
 
@@ -108,11 +108,11 @@ Input: "今天天气怎么样"
 Output:
 ```json
 {
-  "intent_type": "chitchat",
-  "is_shopping_related": false,
+  "intent": "chitchat",
+  "confidence": 0.99,
   "category": null,
   "extracted_constraints": {},
-  "user_intent_summary": "用户在闲聊，非购物咨询",
-  "confidence": 0.99
+  "soft_preferences": ["用户在闲聊，非购物咨询"],
+  "target_product_id": null
 }
 ```

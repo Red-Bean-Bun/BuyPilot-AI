@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from src.repos.database import create_db_and_tables, get_engine
+from src.repos.database import ensure_eval_schema, get_engine
 from src.repos.models import EvalRun
 
 
@@ -20,7 +20,7 @@ def save_run(
     git_commit: str | None = None,
 ) -> EvalRun:
     """Persist a completed eval run to the database."""
-    create_db_and_tables()
+    ensure_eval_schema()
     run = EvalRun(
         run_name=run_name,
         strategy_tag=strategy_tag,
@@ -39,13 +39,13 @@ def save_run(
 
 def list_all(limit: int = 50) -> list[EvalRun]:
     """Return recent eval runs, newest first."""
-    create_db_and_tables()
+    ensure_eval_schema()
     with Session(get_engine()) as session:
         return list(session.exec(select(EvalRun).order_by(EvalRun.created_at.desc()).limit(limit)).all())
 
 
 def get_by_id(run_id: str) -> EvalRun | None:
     """Get a single eval run by its id."""
-    create_db_and_tables()
+    ensure_eval_schema()
     with Session(get_engine()) as session:
         return session.get(EvalRun, run_id)

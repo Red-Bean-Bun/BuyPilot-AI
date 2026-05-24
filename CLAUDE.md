@@ -157,7 +157,7 @@ UI → Runtime → Service → Repo → Config/Types
 
 - 百炼 `text-embedding-v3` batch size 最大 10，改回 32 会 400 错误并 fallback
 - `gte_rerank` profile 实际 model 是 `qwen3-rerank`，非 PRD 原写的 `gte-rerank`（官方已临近停用）
-- `ProductPayload.image_url` 仍为 raw 相对路径，Android 不能稳定加载本地图片，需 FastAPI static mount 或 image proxy
+- `ProductPayload.image_url` 已转为 `/assets/products/{raw_image_path}`，FastAPI 挂载官方数据目录供 Android 加载商品图
 - `backend/prompts/` 下 7 个 .md 已通过 `services/prompts.py` 的 `PromptStore` 运行时加载，硬编码字符串在 `llm_task_payloads.py` 中作为 fallback；改 prompt 可以直接改 .md 文件
 
 ---

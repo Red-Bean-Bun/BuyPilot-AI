@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from src.services.async_io import run_sync_io
+from src.services.audit import record_audit_event
 from src.services.image_upload import (
     MAX_IMAGE_BYTES,
     ImageUploadError,
@@ -38,9 +40,32 @@ async def handle_upload_image(request: Request) -> ImageUploadResponse:
     try:
         if content_type.startswith("multipart/form-data"):
             parsed = parse_multipart_image(await request.body(), content_type)
-            return save_uploaded_image(parsed.file_name, parsed.content_type, parsed.data)
+            response = save_uploaded_image(parsed.file_name, parsed.content_type, parsed.data)
+            await run_sync_io(
+                record_audit_event,
+                "image.uploaded",
+                resource_type="image",
+                resource_id=response.image_url,
+                metadata={
+                    "file_name": parsed.file_name,
+                    "mime_type": response.mime_type,
+                    "bytes": len(parsed.data),
+                    "width": response.width,
+                    "height": response.height,
+                },
+            )
+            return response
 
         body = ImageUploadRequest.model_validate(await request.json())
-        return legacy_upload_response(body.file_name, body.content_type)
+        response = legacy_upload_response(body.file_name, body.content_type)
+        await run_sync_io(
+            record_audit_event,
+            "image.upload_placeholder",
+            resource_type="image",
+            resource_id=response.image_url,
+            side_effect=False,
+            metadata={"file_name": body.file_name, "mime_type": response.mime_type},
+        )
+        return response
     except ImageUploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc

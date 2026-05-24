@@ -69,11 +69,13 @@ def list_recent_turns(session_id: str, limit: int = 3) -> list[dict[str, object]
         summary = ""
         if row.criteria_json:
             summary = row.criteria_json.get("summary", "")
-        turns.append({
-            "user_message": row.user_message,
-            "summary": summary,
-            "product_ids": list(row.product_ids) if row.product_ids else [],
-        })
+        turns.append(
+            {
+                "user_message": row.user_message,
+                "summary": summary,
+                "product_ids": list(row.product_ids) if row.product_ids else [],
+            }
+        )
     return turns
 
 

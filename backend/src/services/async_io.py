@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import queue
 import threading
 from collections.abc import Callable
@@ -21,10 +22,11 @@ async def run_sync_io(fn: Callable[..., T], *args, poll_seconds: float = 0.01, *
     """
 
     result_queue: queue.Queue[tuple[bool, T | BaseException]] = queue.Queue(maxsize=1)
+    context = contextvars.copy_context()
 
     def worker() -> None:
         try:
-            result_queue.put((True, fn(*args, **kwargs)))
+            result_queue.put((True, context.run(fn, *args, **kwargs)))
         except BaseException as exc:  # pragma: no cover - re-raised in caller
             result_queue.put((False, exc))
 

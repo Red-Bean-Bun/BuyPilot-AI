@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from src.config.settings import get_settings
 from src.repos.database import create_db_and_tables, get_engine
@@ -96,3 +96,9 @@ def write_evidence_links(
             raise
         return 0
     return count
+
+
+def list_recent_retrieval_traces(limit: int = 50) -> list[RetrievalTrace]:
+    create_db_and_tables()
+    with Session(get_engine()) as session:
+        return list(session.exec(select(RetrievalTrace).order_by(RetrievalTrace.created_at.desc()).limit(limit)).all())

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import math
-from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Mapping
 
+from src.config.domain_terms import avoid_trait_matches_text
 from src.config.settings import get_settings
 from src.config.tuning import (
     FILTER_SCORE_BUDGET,
@@ -27,6 +27,7 @@ from src.repos.products import get_product, list_products
 from src.services.async_io import run_sync_io
 from src.services.fallbacks import record_fallback
 from src.services.embedding import embed_text
+from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
 from src.services.reranker import rerank, rerank_texts
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
@@ -45,10 +46,10 @@ class RetrievalFilters:
     avoid_traits: tuple[str, ...] = ()
 
 
-_RETRIEVAL_EVIDENCE_BY_PRODUCT: ContextVar[dict[str, EvidencePayload] | None] = ContextVar(
-    "retrieval_evidence_by_product",
-    default=None,
-)
+@dataclass(frozen=True)
+class RetrievalOutput:
+    products: list[ProductPayload]
+    evidence_by_product: dict[str, list[EvidencePayload]]
 
 
 async def retrieve(
@@ -56,14 +57,24 @@ async def retrieve(
     top_n: int = 5,
     feedback: Mapping[str, list[str]] | None = None,
 ) -> list[ProductPayload]:
+    return (await retrieve_with_evidence(criteria, top_n=top_n, feedback=feedback)).products
+
+
+async def retrieve_with_evidence(
+    criteria: CriteriaPayload,
+    top_n: int = 5,
+    feedback: Mapping[str, list[str]] | None = None,
+) -> RetrievalOutput:
     filters = _retrieval_filters(feedback)
-    query_embedding = await embed_text(_query_text(criteria))
+    query_embedding = await embed_text(criteria_query_text(criteria))
     chunk_hits = await run_sync_io(_vector_recall_from_db, criteria, query_embedding, filters)
     if chunk_hits:
         candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
         ranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
-        _bind_evidence(ranked_hits)
-        return [hit.product for hit in ranked_hits]
+        return RetrievalOutput(
+            products=[hit.product for hit in ranked_hits],
+            evidence_by_product=_evidence_by_product(ranked_hits),
+        )
 
     if get_settings().strict_runtime:
         raise RuntimeError("Strict runtime requires pgvector/DB vector retrieval; fallback retrieval is disabled.")
@@ -73,13 +84,7 @@ async def retrieve(
     vector_task = asyncio.create_task(_vector_recall_fallback(criteria, filters))
     hard_results, vector_results = await asyncio.gather(hard_task, vector_task)
     merged = _merge_dedup(hard_results + vector_results)
-    _RETRIEVAL_EVIDENCE_BY_PRODUCT.set({})
-    return await rerank(criteria, merged, top_n=top_n)
-
-
-def cached_evidence_for_product(product_id: str) -> EvidencePayload | None:
-    evidence_by_product = _RETRIEVAL_EVIDENCE_BY_PRODUCT.get()
-    return evidence_by_product.get(product_id) if evidence_by_product else None
+    return RetrievalOutput(products=await rerank(criteria, merged, top_n=top_n), evidence_by_product={})
 
 
 def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
@@ -176,12 +181,12 @@ def _rank_hits(criteria: CriteriaPayload, hits: list[ProductHit]) -> list[Produc
     )
 
 
-def _bind_evidence(hits: list[ProductHit]) -> None:
-    evidence_by_product: dict[str, EvidencePayload] = {}
+def _evidence_by_product(hits: list[ProductHit]) -> dict[str, list[EvidencePayload]]:
+    evidence_by_product: dict[str, list[EvidencePayload]] = {}
     for hit in hits:
         if hit.chunk is not None:
-            evidence_by_product[hit.product.product_id] = evidence_for_chunk(hit.chunk)
-    _RETRIEVAL_EVIDENCE_BY_PRODUCT.set(evidence_by_product)
+            evidence_by_product[hit.product.product_id] = [evidence_for_chunk(hit.chunk)]
+    return evidence_by_product
 
 
 async def _rerank_chunk_hits(criteria: CriteriaPayload, hits: list[ProductHit], top_n: int) -> list[ProductHit]:
@@ -213,16 +218,7 @@ async def _rerank_chunk_hits(criteria: CriteriaPayload, hits: list[ProductHit], 
 
 def _chunk_document_text(hit: ProductHit) -> str:
     chunk_text = hit.chunk.chunk_text if hit.chunk is not None else ""
-    product = hit.product
-    parts = [
-        product.name,
-        product.brand or "",
-        product.category,
-        product.sub_category or "",
-        f"{product.price:g}元" if product.price is not None else "",
-        chunk_text,
-    ]
-    return " | ".join(part for part in parts if part)
+    return product_document_text(hit.product, extra_text=chunk_text)
 
 
 def _eligible_for_primary_recall(chunk: ChunkDocument) -> bool:
@@ -245,15 +241,7 @@ def _passes_hard_filters(criteria: CriteriaPayload, product: ProductPayload, fil
 
 
 def _matches_avoid_trait(product: ProductPayload, token: str) -> bool:
-    normalized = token.strip()
-    if not normalized:
-        return False
-    lowered = normalized.lower()
-    if lowered in {"日系", "日系品牌", "日本", "日本品牌"}:
-        return (product.brand or "") in {"SK-II", "资生堂", "安热沙", "珊珂", "芳珂", "优衣库"}
-    if lowered in {"nike", "耐克"}:
-        return _contains_any(_product_haystack(product), ("nike", "耐克"))
-    return lowered in _product_haystack(product).lower()
+    return avoid_trait_matches_text(token, _product_haystack(product))
 
 
 def _product_haystack(product: ProductPayload) -> str:
@@ -270,11 +258,6 @@ def _product_haystack(product: ProductPayload) -> str:
     return " ".join(part for part in parts if part)
 
 
-def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
-    lowered = text.lower()
-    return any(token.lower() in lowered for token in tokens)
-
-
 def _retrieval_filters(feedback: Mapping[str, list[str]] | None) -> RetrievalFilters:
     if not feedback:
         return RetrievalFilters()
@@ -285,38 +268,14 @@ def _retrieval_filters(feedback: Mapping[str, list[str]] | None) -> RetrievalFil
 
 
 def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
-    score = 0.0
-    if product.category == criteria.category:
-        score += FILTER_SCORE_CATEGORY
-    if criteria.constraints.skin_type and criteria.constraints.skin_type in product.skin_type_match:
-        score += FILTER_SCORE_SKIN_TYPE
-    if (
-        criteria.constraints.budget_max is not None
-        and product.price is not None
-        and product.price <= criteria.constraints.budget_max
-    ):
-        score += FILTER_SCORE_BUDGET
-    if (
-        criteria.constraints.use_scenario
-        and product.use_scenario
-        and criteria.constraints.use_scenario in product.use_scenario
-    ):
-        score += FILTER_SCORE_SCENARIO
-    return score
-
-
-def _query_text(criteria: CriteriaPayload) -> str:
-    constraints = criteria.constraints
-    parts = [
-        criteria.category,
-        criteria.summary,
-        constraints.skin_type or "",
-        constraints.use_scenario or "",
-        " ".join(constraints.ingredient_prefer),
-        " ".join(f"不要{item}" for item in constraints.ingredient_avoid),
-        f"{constraints.budget_max:g}元内" if constraints.budget_max is not None else "",
-    ]
-    return " ".join(part for part in parts if part)
+    return product_match_score(
+        criteria,
+        product,
+        category_weight=FILTER_SCORE_CATEGORY,
+        skin_type_weight=FILTER_SCORE_SKIN_TYPE,
+        budget_weight=FILTER_SCORE_BUDGET,
+        scenario_weight=FILTER_SCORE_SCENARIO,
+    )
 
 
 def _cosine_similarity(left: list[float], right: list[float]) -> float:

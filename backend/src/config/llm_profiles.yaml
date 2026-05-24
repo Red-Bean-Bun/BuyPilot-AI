@@ -45,6 +45,7 @@ profiles:
   gte_rerank:
     provider: bailian
     model: qwen3-rerank
-    base_url_env: BAILIAN_BASE_URL
+    base_url: https://dashscope.aliyuncs.com/compatible-api/v1
+    endpoint_path: /reranks
     api_key_env: BAILIAN_API_KEY
     timeout_seconds: 20

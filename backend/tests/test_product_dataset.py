@@ -2,7 +2,7 @@ from sqlmodel import Session, select
 
 from src.services.product_ingest import seed_products, seed_products_if_needed
 from src.repos.models import Product, ProductChunk
-from src.repos.products import get_raw_product, list_products, list_raw_products
+from src.repos.products import PRODUCT_ASSET_URL_PREFIX, get_raw_product, list_products, list_raw_products
 
 
 def test_dataset_is_runtime_product_source():
@@ -13,6 +13,14 @@ def test_dataset_is_runtime_product_source():
     assert len(products) == 100
     assert products[0].product_id == raw_products[0]["product_id"]
     assert get_raw_product(products[0].product_id) is not None
+
+
+def test_product_image_urls_are_frontend_loadable():
+    product = list_products()[0]
+
+    assert product.image_url
+    assert product.image_url.startswith(f"{PRODUCT_ASSET_URL_PREFIX}/")
+    assert "/images/" in product.image_url
 
 
 def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):

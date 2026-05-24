@@ -13,7 +13,7 @@ from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayloa
 
 
 class MessageLite(BaseModel):
-    role: Literal["user", "assistant", "system"] | str
+    role: Literal["user", "assistant", "system"]
     content: str
 
 

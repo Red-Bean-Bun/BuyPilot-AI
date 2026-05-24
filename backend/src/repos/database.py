@@ -6,30 +6,44 @@ entrypoint ready for PostgreSQL/pgvector wiring.
 
 from __future__ import annotations
 
-from sqlalchemy import text
+import threading
+
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine, make_url
 from sqlmodel import Session, SQLModel, create_engine
 
 from src.config.settings import get_settings
 
+_CREATE_TABLES_LOCK = threading.Lock()
+_CREATED_DATABASE_URLS: set[str] = set()
+_ENGINE_CACHE: tuple[str, Engine] | None = None
 
-def get_engine():
+
+def get_engine() -> Engine:
+    global _ENGINE_CACHE
     database_url = get_settings().database_url
-    cached = getattr(get_engine, "_cache", None)
+    cached = _ENGINE_CACHE
     if cached is None or cached[0] != database_url:
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
         cached = (database_url, create_engine(database_url, connect_args=connect_args))
-        setattr(get_engine, "_cache", cached)
+        _ENGINE_CACHE = cached
     return cached[1]
 
 
 def create_db_and_tables() -> None:
-    engine = get_engine()
-    if is_postgres_engine(engine):
-        ensure_pgvector_extension(engine)
-    SQLModel.metadata.create_all(engine)
-    if is_postgres_engine(engine):
-        ensure_pgvector_indexes(engine)
+    database_url = get_settings().database_url
+    if database_url in _CREATED_DATABASE_URLS:
+        return
+    with _CREATE_TABLES_LOCK:
+        if database_url in _CREATED_DATABASE_URLS:
+            return
+        engine = get_engine()
+        if is_postgres_engine(engine):
+            ensure_pgvector_extension(engine)
+        SQLModel.metadata.create_all(engine)
+        if is_postgres_engine(engine):
+            ensure_pgvector_indexes(engine)
+        _CREATED_DATABASE_URLS.add(database_url)
 
 
 def is_postgres_database_url(database_url: str | None = None) -> bool:
@@ -110,3 +124,29 @@ def migrate_eval_runs_table() -> None:
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS eval_runs"))
     SQLModel.metadata.create_all(engine)
+
+
+def ensure_eval_schema() -> None:
+    """Create eval tables and add missing nullable columns from older dev DBs."""
+
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    for table_name in ("eval_runs", "eval_samples"):
+        _add_missing_columns(engine, table_name)
+
+
+def _add_missing_columns(engine: Engine, table_name: str) -> None:
+    table = SQLModel.metadata.tables[table_name]
+    inspector = inspect(engine)
+    existing = {column["name"] for column in inspector.get_columns(table_name)}
+    preparer = engine.dialect.identifier_preparer
+    missing = [column for column in table.columns if column.name not in existing and not column.primary_key]
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for column in missing:
+            column_type = column.type.compile(dialect=engine.dialect)
+            conn.execute(
+                text(f"ALTER TABLE {preparer.quote(table_name)} ADD COLUMN {preparer.quote(column.name)} {column_type}")
+            )

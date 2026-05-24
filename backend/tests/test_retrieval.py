@@ -5,8 +5,7 @@ import pytest
 from src.services.product_ingest import seed_products
 from src.repos.documents import ChunkDocument, VectorChunkHit
 from src.repos.products import list_products
-from src.services.evidence import get_evidence
-from src.services.retriever import retrieve
+from src.services.retriever import retrieve, retrieve_with_evidence
 from src.types.sse_events import Constraints, CriteriaPayload
 
 
@@ -80,9 +79,9 @@ def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, tmp_pa
     )
 
     async def run_retrieval_with_evidence():
-        retrieved = await retrieve(criteria, top_n=3)
-        bound_evidence = await get_evidence(retrieved[0])
-        return retrieved, bound_evidence
+        retrieval = await retrieve_with_evidence(criteria, top_n=3)
+        first_product = retrieval.products[0]
+        return retrieval.products, retrieval.evidence_by_product[first_product.product_id]
 
     products, evidence = asyncio.run(run_retrieval_with_evidence())
 

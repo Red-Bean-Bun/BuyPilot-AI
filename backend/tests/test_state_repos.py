@@ -1,7 +1,8 @@
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 import src.config.settings as settings_module
-from src.services import conversation_state
+from src.services import cart, conversation_state
 from src.repos import cart_items, conversations, feedbacks
 from src.runtime.pipeline import chat_stream
 from src.types.schemas import ChatStreamRequest
@@ -44,6 +45,31 @@ def test_cart_repo_persists_add_and_view(temp_database):
     assert len(cart.items) == 1
     assert cart.items[0].product_id == "p_beauty_011"
     assert cart.items[0].quantity == 3
+
+
+def test_cart_memory_fallback_requires_explicit_dev_flag(monkeypatch, tmp_path):
+    monkeypatch.delenv("ALLOW_MEMORY_STATE_FALLBACK", raising=False)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'missing' / 'cart.db'}")
+    settings_module._settings = None
+
+    with pytest.raises(SQLAlchemyError):
+        cart.add_product_to_cart("sess_cart_fallback_disabled", "p_beauty_011")
+
+    settings_module._settings = None
+
+
+def test_cart_memory_fallback_can_be_explicitly_enabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("ALLOW_MEMORY_STATE_FALLBACK", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'missing' / 'cart.db'}")
+    settings_module._settings = None
+    cart._MEMORY_CARTS.clear()
+
+    item = cart.add_product_to_cart("sess_cart_fallback_enabled", "p_beauty_011")
+
+    assert item.product_id == "p_beauty_011"
+    assert cart.get_session_cart("sess_cart_fallback_enabled").total_items == 1
+    settings_module._settings = None
+    cart._MEMORY_CARTS.clear()
 
 
 @pytest.mark.asyncio

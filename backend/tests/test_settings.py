@@ -35,3 +35,20 @@ def test_strict_runtime_flag(monkeypatch):
 
     assert settings.strict_runtime is True
     settings_module._settings = None
+
+
+def test_memory_state_fallback_is_explicit(monkeypatch):
+    monkeypatch.delenv("ALLOW_MEMORY_STATE_FALLBACK", raising=False)
+    settings_module._settings = None
+
+    settings = get_settings()
+
+    assert settings.allow_memory_state_fallback is False
+
+    monkeypatch.setenv("ALLOW_MEMORY_STATE_FALLBACK", "1")
+    settings_module._settings = None
+
+    settings = get_settings()
+
+    assert settings.allow_memory_state_fallback is True
+    settings_module._settings = None

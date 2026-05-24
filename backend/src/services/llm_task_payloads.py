@@ -181,18 +181,135 @@ def parse_json_object(text: str) -> dict[str, Any] | None:
 
 def normalize_intent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
-    if "intent" not in normalized and isinstance(normalized.get("intent_type"), str):
-        intent_type = normalized["intent_type"]
-        normalized["intent"] = {
+    normalized["intent"] = _normalize_intent(
+        normalized.get("intent") if normalized.get("intent") is not None else normalized.get("intent_type"),
+        normalized.get("is_shopping_related"),
+    )
+    normalized["confidence"] = _normalize_confidence(normalized.get("confidence"))
+    normalized["category"] = _normalize_nullable_string(normalized.get("category"))
+
+    constraints = normalized.get("extracted_constraints")
+    if constraints is None and isinstance(normalized.get("constraints"), dict):
+        constraints = normalized["constraints"]
+    normalized["extracted_constraints"] = constraints if isinstance(constraints, dict) else {}
+
+    preferences = normalized.get("soft_preferences")
+    if preferences is None and isinstance(normalized.get("user_intent_summary"), str):
+        preferences = normalized["user_intent_summary"]
+    normalized["soft_preferences"] = _normalize_string_list(preferences)
+
+    target_product_id = normalized.get("target_product_id")
+    if target_product_id is None:
+        target_product_id = normalized.get("product_id") or normalized.get("target_product")
+    normalized["target_product_id"] = _normalize_nullable_string(target_product_id)
+    return normalized
+
+
+def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
+    if isinstance(value, str):
+        key = value.strip().lower()
+        normalized = {
+            "recommend": "recommend",
+            "recommendation": "recommend",
+            "recommend_product": "recommend",
+            "shopping": "recommend",
             "filter": "recommend",
             "compare": "recommend",
+            "clarify": "clarify",
             "unclear": "clarify",
-        }.get(intent_type, intent_type)
-    if normalized.get("intent") not in {"recommend", "clarify", "feedback", "add_to_cart", "view_cart", "chitchat"}:
-        normalized["intent"] = "recommend" if normalized.get("is_shopping_related", True) else "chitchat"
-    if "soft_preferences" not in normalized and isinstance(normalized.get("user_intent_summary"), str):
-        normalized["soft_preferences"] = [normalized["user_intent_summary"]]
-    return normalized
+            "question": "clarify",
+            "add_to_cart": "add_to_cart",
+            "add_cart": "add_to_cart",
+            "cart_add": "add_to_cart",
+            "view_cart": "view_cart",
+            "cart_view": "view_cart",
+            "feedback": "feedback",
+            "dislike": "feedback",
+            "not_interested": "feedback",
+            "chitchat": "chitchat",
+            "chat": "chitchat",
+            "non_shopping": "chitchat",
+            "推荐": "recommend",
+            "筛选": "recommend",
+            "过滤": "recommend",
+            "对比": "recommend",
+            "澄清": "clarify",
+            "追问": "clarify",
+            "加购": "add_to_cart",
+            "加入购物车": "add_to_cart",
+            "查看购物车": "view_cart",
+            "反馈": "feedback",
+            "不喜欢": "feedback",
+            "闲聊": "chitchat",
+        }.get(key)
+        if normalized:
+            return normalized
+    return "recommend" if _normalize_bool(is_shopping_related, default=True) else "chitchat"
+
+
+def _normalize_confidence(value: Any) -> float:
+    if value is None:
+        return 1.0
+    if isinstance(value, bool):
+        return 1.0
+    if isinstance(value, int | float):
+        confidence = float(value)
+    elif isinstance(value, str):
+        key = value.strip().lower()
+        if key.endswith("%"):
+            key = key[:-1].strip()
+            try:
+                confidence = float(key) / 100
+            except ValueError:
+                confidence = 1.0
+        else:
+            confidence = {"high": 0.9, "medium": 0.7, "low": 0.5, "高": 0.9, "中": 0.7, "低": 0.5}.get(key, 1.0)
+            if confidence == 1.0:
+                try:
+                    confidence = float(key)
+                except ValueError:
+                    confidence = 1.0
+    else:
+        confidence = 1.0
+    if confidence > 1 and confidence <= 100:
+        confidence = confidence / 100
+    return max(0.0, min(1.0, confidence))
+
+
+def _normalize_nullable_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        return str(value)
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped or stripped.lower() in {"null", "none", "nil", "n/a", "unknown", "未识别", "无"}:
+        return None
+    return stripped
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, list):
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return []
+
+
+def _normalize_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in {"true", "yes", "y", "1", "是", "购物", "相关"}:
+            return True
+        if key in {"false", "no", "n", "0", "否", "非购物", "不相关"}:
+            return False
+    return default
 
 
 def criteria_from_live_payload(

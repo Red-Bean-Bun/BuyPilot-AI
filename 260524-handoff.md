@@ -15,7 +15,7 @@
 | 反馈闭环：feedbacks 表影响同一 session 下一轮 criteria + retrieval | ✅ 已完成。`feedbacks.py` 和 `/feedback` 已持久化；avoid_products/avoid_traits 已进入 retrieval 硬过滤；内存兜底上移到 Service | 覆盖"不喜欢这个/除了耐克/不要含酒精" | Done |
 | `/chat/cancel` 真取消，断开 SSE 中断后续 LLM/RAG | 有 `cancel.py` stub，返回 `{"canceled": true}` | 没有任务注册表/取消令牌；不能真正中断后端任务 | P2 |
 | `/upload/image` 多模态解析 Qwen-VL | ✅ 已完成。multipart 上传、静态 `/uploads`、本地图片 data URL 转 VL、multimodal analysis 注入 criteria | 旧 JSON 占位请求仍兼容 | Done |
-| 图片可访问 URL | `ProductPayload.image_url` 仍多为 raw 相对路径 | Android/前端不能稳定加载本地 raw 图片；需要 FastAPI static mount 或 image proxy | P1 |
+| 图片可访问 URL | ✅ 已完成。`ProductPayload.image_url` 统一输出 `/assets/products/{raw_image_path}`，FastAPI 挂载官方数据目录 | Android/前端可直接加载商品图；上传图片仍走 `/uploads` | Done |
 | 9 张表 + trace/evidence/eval/cart | `models.py` 已有 Product/ProductChunk/Conversation/Feedback/CartItem/EvalRun/RetrievalTrace/EvidenceLink/EvalSample | conversation trace 未完整 FK 串联 | P2 |
 | 后台写 trace/evidence，不阻塞流式 | pipeline 在推荐后同步写 `retrieval_traces/evidence_links` | 简单可用，但不是后台任务；慢 DB 会阻塞 done 前收尾 | P2 |
 | Admin API、RAGAS eval、baseline eval | ✅ 已完成。15 指标（7 确定性 + 8 LLM Judge），15 条样本，CLI + API + Streamlit 看板 | 见 `eval-module-handoff.md` | Done |
@@ -45,7 +45,6 @@
 
 下一阶段完成标准建议：
 
-- 补齐图片静态路径（FastAPI static mount 或 image proxy），让前端能加载商品图片。
 - 实现真正的 cancel 机制（任务注册表 + 取消令牌）。
 - 决定日常开发是否默认切 PostgreSQL + pgvector，减少 SQLite/Postgres 双轨维护成本。
 
@@ -175,15 +174,7 @@ uv run -m src.scripts.demo_smoke                    # 6/6 场景通过（需 Pos
 
 按优先级排序：
 
-1. **图片服务化**
-   - 当前 product `image_url` 多是 raw 相对路径。
-   - 需要 FastAPI static mount 或 `/assets/products/...` 映射，让前端能直接加载图片。
-
-2. **取消机制**
-   - `/chat/cancel` 当前是 best-effort stub。
-   - 没有中断正在跑的 LLM/RAG task。
-
-3. **trace/evidence 后台化和 conversation FK 串联**
+1. **trace/evidence 后台化和 conversation FK 串联**
    - 当前同步写 trace/evidence，`conversation_id` 关联不完整。
    - PRD 期望后台写入，不影响 SSE。
 
@@ -226,11 +217,9 @@ uv run -m src.scripts.smoke_live_rag
 
 推荐下一步动作：
 
-1. 做图片静态路径，因为这是前端立刻需要的体验断点。
-2. 做 cancel 真取消。
-3. 做购物车 Remove/Update。
-4. 做 trace/evidence 后台化。
-5. 日常开发默认切 Postgres/pgvector。
+1. 做购物车 Remove/Update。
+2. 做 trace/evidence 后台化。
+3. 日常开发默认切 Postgres/pgvector。
 
 ## 7. 风险与注意事项
 
@@ -262,4 +251,4 @@ uv run pytest -q
 uv run -m src.scripts.smoke_live_rag
 ```
 
-确认之后，先读 `backend/README.md` 获取全景地图，然后按 handoff 优先级推进下一个任务（图片服务化）。
+确认之后，先读 `backend/README.md` 获取全景地图，然后按 handoff 优先级推进下一个任务。

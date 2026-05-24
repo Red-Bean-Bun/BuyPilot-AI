@@ -5,20 +5,65 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Awaitable
+from typing import Any, AsyncGenerator, Awaitable, Callable, Generic, Mapping, Protocol, TypeVar
 
 from src.runtime.cancel_registry import CancellationToken
-from src.types.sse_events import DoneEvent, EventSeq, SSEEventBase, ThinkingEvent, now_ms
+from src.runtime.stages.recommendation import RetrievalResult
+from src.services.async_io import run_sync_io
+from src.services.cancellation import is_chat_turn_cancellation_requested
+from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
+from src.types.sse_events import (
+    CriteriaPayload,
+    DoneEvent,
+    EventSeq,
+    ProductPayload,
+    SSEEventBase,
+    ThinkingEvent,
+    now_ms,
+)
+
+T = TypeVar("T")
+
+
+class RunRetrieval(Protocol):
+    def __call__(
+        self,
+        criteria: CriteriaPayload,
+        top_n: int = 5,
+        feedback: Mapping[str, list[str]] | None = None,
+    ) -> Awaitable[RetrievalResult]: ...
+
+
+class StageBundle(Protocol):
+    @property
+    def run_multimodal(self) -> Callable[[str | None], Awaitable[dict[str, Any] | None]]: ...
+
+    @property
+    def run_intent(self) -> Callable[[ChatStreamRequest], Awaitable[IntentResult]]: ...
+
+    @property
+    def run_criteria(self) -> Callable[[str, ChatStreamRequest, IntentResult], Awaitable[CriteriaPayload]]: ...
+
+    @property
+    def run_retrieval(self) -> RunRetrieval: ...
+
+    @property
+    def run_recommendation_text(
+        self,
+    ) -> Callable[[CriteriaPayload, list[ProductPayload]], Awaitable[RecommendationResult]]: ...
+
+    @property
+    def run_decision(self) -> Callable[[CriteriaPayload, list[ProductPayload]], Awaitable[DecisionResult]]: ...
 
 
 @dataclass(frozen=True)
-class StageResult:
-    value: Any
+class StageResult(Generic[T]):
+    value: T
 
 
 @dataclass(frozen=True)
-class TimedTask:
-    task: asyncio.Future[Any]
+class TimedTask(Generic[T]):
+    task: asyncio.Future[T]
     started_at: float
 
 
@@ -29,10 +74,10 @@ class StreamContext:
     deck_id: str
     seq: EventSeq
     cancel_token: CancellationToken
-    stages: Any
+    stages: StageBundle
     heartbeat_interval_seconds: float
     stage_timings_ms: dict[str, float] = field(default_factory=dict)
-    background_tasks: list[TimedTask] = field(default_factory=list)
+    background_tasks: list[TimedTask[Any]] = field(default_factory=list)
 
     def ensure_active(self) -> None:
         self.cancel_token.raise_if_cancelled()
@@ -63,10 +108,10 @@ class StreamContext:
 
 def start_stage_task(
     ctx: StreamContext,
-    awaitable: Awaitable[Any],
+    awaitable: Awaitable[T],
     timing_key: str | None = None,
     background: bool = False,
-) -> TimedTask:
+) -> TimedTask[T]:
     ctx.ensure_active()
     started_at = time.perf_counter()
     task = asyncio.ensure_future(awaitable)
@@ -80,11 +125,11 @@ def start_stage_task(
 
 async def run_with_heartbeat(
     ctx: StreamContext,
-    awaitable: Awaitable[Any],
+    awaitable: Awaitable[T],
     stage: str,
     message: str,
     timing_key: str | None = None,
-) -> AsyncGenerator[SSEEventBase | StageResult, None]:
+) -> AsyncGenerator[SSEEventBase | StageResult[T], None]:
     timed_task = start_stage_task(ctx, awaitable, timing_key=timing_key)
     async for item in run_timed_task_with_heartbeat(
         ctx,
@@ -98,17 +143,17 @@ async def run_with_heartbeat(
 
 async def run_timed_task_with_heartbeat(
     ctx: StreamContext,
-    timed_task: TimedTask,
+    timed_task: TimedTask[T],
     stage: str,
     message: str,
     timing_key: str | None = None,
-) -> AsyncGenerator[SSEEventBase | StageResult, None]:
+) -> AsyncGenerator[SSEEventBase | StageResult[T], None]:
     task = timed_task.task
     try:
         while True:
-            ctx.ensure_active()
+            await ensure_active(ctx)
             done, _ = await asyncio.wait({task}, timeout=ctx.heartbeat_interval_seconds)
-            ctx.ensure_active()
+            await ensure_active(ctx)
             if task in done:
                 if timing_key:
                     _record_stage_timing(ctx.stage_timings_ms, timing_key, timed_task.started_at)
@@ -121,10 +166,17 @@ async def run_timed_task_with_heartbeat(
         raise
 
 
-def cancel_background_tasks(timed_tasks: list[TimedTask]) -> None:
+def cancel_background_tasks(timed_tasks: list[TimedTask[Any]]) -> None:
     for timed_task in timed_tasks:
         if not timed_task.task.done():
             timed_task.task.cancel()
+
+
+async def ensure_active(ctx: StreamContext) -> None:
+    ctx.ensure_active()
+    if await run_sync_io(is_chat_turn_cancellation_requested, ctx.session_id, ctx.turn_id):
+        ctx.cancel_token.cancel()
+    ctx.ensure_active()
 
 
 def _record_stage_timing(stage_timings_ms: dict[str, float], timing_key: str, started_at: float) -> None:

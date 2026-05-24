@@ -31,13 +31,14 @@ def record_feedback(
     record = FeedbackRecord(session_id=session_id, action=action, product_id=product_id, reason=reason)
     try:
         add_feedback(session_id, action=action, product_id=product_id, reason=reason)
-        _FEEDBACKS.append(record)
+        if _memory_state_fallback_enabled():
+            _FEEDBACKS.append(record)
     except SQLAlchemyError:
         logger.exception("add_feedback DB write failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
         _FEEDBACKS.append(record)
-        record_fallback("feedback", "memory_fallback", operation="add")
+        record_fallback("feedback", "explicit_dev_memory_fallback", operation="add")
 
 
 def get_feedback_context(session_id: str) -> dict[str, list[str]]:
@@ -45,7 +46,12 @@ def get_feedback_context(session_id: str) -> dict[str, list[str]]:
         return extract_feedback_from_session(session_id)
     except SQLAlchemyError:
         logger.exception("get_session_feedbacks DB read failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
-        record_fallback("feedback", "memory_fallback", operation="get")
+        record_fallback("feedback", "explicit_dev_memory_fallback", operation="get")
         return extract_feedback_context([item for item in _FEEDBACKS if item.session_id == session_id])
+
+
+def _memory_state_fallback_enabled() -> bool:
+    settings = get_settings()
+    return settings.allow_memory_state_fallback and not settings.strict_runtime

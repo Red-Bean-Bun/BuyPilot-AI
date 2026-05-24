@@ -41,7 +41,7 @@ target-version = "py312"
 exclude = ["tests/fixtures"]
 
 [tool.ruff.lint]
-select = ["E9", "F821", "F822", "F823"]
+select = ["E9", "F", "B010"]
 
 [tool.mypy]
 python_version = "3.12"

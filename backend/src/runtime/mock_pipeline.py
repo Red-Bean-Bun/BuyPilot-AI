@@ -93,7 +93,7 @@ async def mock_pipeline(session_id: str, user_input: str) -> AsyncGenerator[SSEE
         turn_id=turn_id,
         seq=seq.next(),
         event_id=seq.event_id(),
-        node_id=f"criteria_c_demo_001",
+        node_id="criteria_c_demo_001",
         created_at_ms=now_ms(),
         editable=True,
         criteria=CriteriaPayload(

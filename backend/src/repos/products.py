@@ -24,6 +24,7 @@ from src.types.sse_events import ProductPayload
 
 
 SKIN_TYPES = list(SKIN_TERMS)
+PRODUCT_ASSET_URL_PREFIX = "/assets/products"
 
 
 def dataset_dir() -> Path:
@@ -99,7 +100,7 @@ def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
         name=str(raw["title"]),
         price=float(raw["base_price"]) if raw.get("base_price") is not None else None,
         currency="CNY",
-        image_url=str(raw.get("image_path") or ""),
+        image_url=public_product_image_url(raw.get("image_path")),
         category=str(raw.get("category") or ""),
         sub_category=raw.get("sub_category"),
         brand=raw.get("brand"),
@@ -108,6 +109,13 @@ def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
         ingredient_avoid=[],
         use_scenario=_extract_scenario(text),
     )
+
+
+def public_product_image_url(image_path: Any) -> str | None:
+    path = str(image_path or "").strip().lstrip("/")
+    if not path:
+        return None
+    return f"{PRODUCT_ASSET_URL_PREFIX}/{path}"
 
 
 @lru_cache(maxsize=1)
@@ -120,7 +128,7 @@ def _product_index() -> dict[str, ProductPayload]:
     return {product.product_id: product for product in _product_payloads()}
 
 
-def _extract_terms(text: str, terms: list[str]) -> list[str]:
+def _extract_terms(text: str, terms: list[str] | tuple[str, ...]) -> list[str]:
     return extract_terms(text, terms)
 
 

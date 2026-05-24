@@ -1,4 +1,3 @@
-import pytest
 from sqlmodel import Session, select
 
 from src.services.product_ingest import seed_products

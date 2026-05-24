@@ -1,5 +1,3 @@
-import pytest
-
 from src.runtime.stages.slot_checker import build_clarification_question, check_required_slots
 from src.types.schemas import IntentResult
 

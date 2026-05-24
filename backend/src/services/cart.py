@@ -25,28 +25,35 @@ _MEMORY_CARTS: dict[str, dict[str, CartItemPayload]] = {}
 def add_product_to_cart(session_id: str, product_id: str, quantity: int = 1) -> CartItemPayload:
     try:
         item = add_to_cart(session_id, product_id, quantity=quantity)
-        _cache_item(session_id, item)
+        if _memory_state_fallback_enabled():
+            _cache_item(session_id, item)
         return item
     except SQLAlchemyError:
         logger.exception("add_to_cart DB write failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
-        record_fallback("cart", "memory_fallback", operation="add")
+        record_fallback("cart", "explicit_dev_memory_fallback", operation="add")
         return _add_to_memory_cart(session_id, product_id, quantity)
 
 
 def get_session_cart(session_id: str) -> CartResponse:
     try:
         cart = get_cart(session_id)
-        for item in cart.items:
-            _cache_item(session_id, item)
+        if _memory_state_fallback_enabled():
+            for item in cart.items:
+                _cache_item(session_id, item)
         return cart
     except SQLAlchemyError:
         logger.exception("get_cart DB read failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
-        record_fallback("cart", "memory_fallback", operation="get")
+        record_fallback("cart", "explicit_dev_memory_fallback", operation="get")
         return _cart_response(list(_MEMORY_CARTS.get(session_id, {}).values()))
+
+
+def _memory_state_fallback_enabled() -> bool:
+    settings = get_settings()
+    return settings.allow_memory_state_fallback and not settings.strict_runtime
 
 
 def _add_to_memory_cart(session_id: str, product_id: str, quantity: int) -> CartItemPayload:

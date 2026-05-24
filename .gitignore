@@ -54,3 +54,4 @@ skills-lock.json
 actionlint
 doc/BuyPilot-AI-linus-code-review.md
 backend/tests/Linux_review.md
+*.log

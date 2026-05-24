@@ -6,6 +6,7 @@ names or call provider SDKs directly.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -24,12 +25,8 @@ from src.services.llm_fallbacks import (
     skin_type_from_text as _skin_type_from_text,
 )
 from src.services.llm_gateway import (
-    ChatProfile,
     LiveLLMUnavailable,
     _call_chat_task,
-    _chat_completion,
-    _resolve_chat_profile,
-    _task_profile_names,
 )
 from src.services.llm_task_payloads import (
     criteria_from_live_payload as _criteria_from_live_payload,
@@ -45,19 +42,15 @@ from src.types.schemas import DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import Constraints, CriteriaPayload, ProductPayload
 
 logger = logging.getLogger(__name__)
+_LOG_PAYLOAD_PREVIEW_CHARS = 2000
 
 __all__ = [
-    "ChatProfile",
     "LiveLLMUnavailable",
     "analyze_image",
     "analyze_intent",
     "generate_criteria",
     "generate_decision",
     "generate_recommendation",
-    "_call_chat_task",
-    "_chat_completion",
-    "_resolve_chat_profile",
-    "_task_profile_names",
 ]
 
 
@@ -77,9 +70,18 @@ async def analyze_intent(
         if parsed:
             try:
                 return IntentResult.model_validate(_normalize_intent_payload(parsed))
-            except ValidationError:
-                record_fallback("llm.analyze_intent", "invalid_json_schema")
-                logger.warning("Live intent payload failed schema validation; using deterministic fallback")
+            except ValidationError as exc:
+                record_fallback(
+                    "llm.analyze_intent",
+                    "invalid_json_schema",
+                    error_fields=_validation_error_fields(exc),
+                )
+                logger.warning(
+                    "Live intent payload failed schema validation; using deterministic fallback. "
+                    "validation_errors=%s payload_preview=%s",
+                    _json_preview(exc.errors()),
+                    _json_preview(parsed),
+                )
                 _raise_if_strict("Live intent payload failed schema validation.")
         else:
             _raise_if_strict("Live intent response was not a JSON object.")
@@ -124,8 +126,11 @@ async def generate_criteria(
     live = await _call_chat_task(
         "generate_criteria",
         criteria_messages(
-            message, intent.model_dump(), feedback,
-            existing.model_dump() if existing else None, conversation_context,
+            message,
+            intent.model_dump(),
+            feedback,
+            existing.model_dump() if existing else None,
+            conversation_context,
         ),
         json_object=True,
     )
@@ -246,3 +251,24 @@ async def generate_decision(criteria: CriteriaPayload, products: list[ProductPay
 def _raise_if_strict(message: str) -> None:
     if get_settings().strict_runtime:
         raise RuntimeError(message)
+
+
+def _json_preview(value: Any) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+    except TypeError:
+        text = str(value)
+    if len(text) <= _LOG_PAYLOAD_PREVIEW_CHARS:
+        return text
+    return f"{text[:_LOG_PAYLOAD_PREVIEW_CHARS]}...<truncated>"
+
+
+def _validation_error_fields(exc: ValidationError) -> list[str]:
+    fields: list[str] = []
+    for error in exc.errors()[:8]:
+        loc = error.get("loc", ())
+        if isinstance(loc, tuple):
+            fields.append(".".join(str(part) for part in loc))
+        else:
+            fields.append(str(loc))
+    return fields

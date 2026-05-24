@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
 from src.config.settings import get_settings
 from src.services.fallbacks import record_fallback
+from src.services.http_client import get_http_client
+from src.services.llm_profiles import task_profile_names
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ async def embed_text(text: str) -> list[float]:
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    for profile_name in _task_profile_names("embedding"):
+    for profile_name in task_profile_names("embedding"):
         try:
             profile = _resolve_embedding_profile(profile_name)
             vectors = await _embedding_request(profile, texts)
@@ -74,11 +74,6 @@ def _deterministic_vector(text: str) -> list[float]:
     return values + [0.0] * (16 - len(values))
 
 
-def _task_profile_names(task: str) -> list[str]:
-    mapping = get_settings().task_model_map[task]
-    return [name for name in (mapping.get("primary"), mapping.get("fallback")) if name]
-
-
 def _resolve_embedding_profile(profile_name: str) -> EmbeddingProfile:
     settings = get_settings()
     raw = settings.llm_profiles.get("profiles", {}).get(profile_name)
@@ -112,9 +107,9 @@ async def _embedding_request(profile: EmbeddingProfile, texts: list[str]) -> lis
         "Authorization": f"Bearer {profile.api_key}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=profile.timeout_seconds) as client:
-        response = await client.post(endpoint, headers=headers, json=payload)
-        response.raise_for_status()
+    client = get_http_client()
+    response = await client.post(endpoint, headers=headers, json=payload, timeout=profile.timeout_seconds)
+    response.raise_for_status()
     data = response.json()
     rows = data.get("data") if isinstance(data, dict) else None
     if not isinstance(rows, list):

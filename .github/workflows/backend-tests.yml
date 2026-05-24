@@ -51,7 +51,10 @@ jobs:
           -p src.runtime.cancel_registry
           -p src.runtime.streaming
           -p src.services.async_io
+          -p src.services.http_client
+          -p src.services.llm_profiles
           -p src.services.llm_task_payloads
+          -p src.services.retrieval_features
           -p src.types.schemas
           -p src.types.sse_events
 

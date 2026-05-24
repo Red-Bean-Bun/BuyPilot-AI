@@ -35,14 +35,15 @@ def save_recommendation_turn(
             user_message=user_message,
             ai_response=ai_response,
         )
-        _cache_turn(session_id, criteria, product_ids)
+        if _memory_state_fallback_enabled():
+            _cache_turn(session_id, criteria, product_ids)
         return conversation_id
     except SQLAlchemyError:
         logger.exception("save_turn DB write failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
         _cache_turn(session_id, criteria, product_ids)
-        record_fallback("conversation_state", "memory_fallback", operation="save")
+        record_fallback("conversation_state", "explicit_dev_memory_fallback", operation="save")
         return None
 
 
@@ -50,29 +51,38 @@ def get_previous_criteria(session_id: str) -> CriteriaPayload | None:
     try:
         criteria = get_last_criteria(session_id)
         if criteria is not None:
-            _LAST_CRITERIA[session_id] = criteria.model_copy(deep=True)
+            if _memory_state_fallback_enabled():
+                _LAST_CRITERIA[session_id] = criteria.model_copy(deep=True)
             return criteria
     except (SQLAlchemyError, ValidationError):
         logger.exception("get_last_criteria DB read failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
-        record_fallback("conversation_state", "memory_fallback", operation="get_criteria")
-    cached = _LAST_CRITERIA.get(session_id)
-    return cached.model_copy(deep=True) if cached else None
+        record_fallback("conversation_state", "explicit_dev_memory_fallback", operation="get_criteria")
+        cached = _LAST_CRITERIA.get(session_id)
+        return cached.model_copy(deep=True) if cached else None
+    return None
 
 
 def get_previous_product_ids(session_id: str) -> list[str]:
     try:
         product_ids = get_last_product_ids(session_id)
         if product_ids:
-            _LAST_PRODUCT_IDS[session_id] = list(product_ids)
+            if _memory_state_fallback_enabled():
+                _LAST_PRODUCT_IDS[session_id] = list(product_ids)
             return product_ids
     except SQLAlchemyError:
         logger.exception("get_last_product_ids DB read failed")
-        if get_settings().strict_runtime:
+        if not _memory_state_fallback_enabled():
             raise
-        record_fallback("conversation_state", "memory_fallback", operation="get_product_ids")
-    return list(_LAST_PRODUCT_IDS.get(session_id, []))
+        record_fallback("conversation_state", "explicit_dev_memory_fallback", operation="get_product_ids")
+        return list(_LAST_PRODUCT_IDS.get(session_id, []))
+    return []
+
+
+def _memory_state_fallback_enabled() -> bool:
+    settings = get_settings()
+    return settings.allow_memory_state_fallback and not settings.strict_runtime
 
 
 def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
@@ -95,11 +105,7 @@ def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
         summary = str(turn.get("summary", ""))
         product_ids = list(turn.get("product_ids", []))  # type: ignore[arg-type]
         ids_str = "、".join(str(pid) for pid in product_ids[:3])
-        lines.append(
-            f"第{i}轮: 用户'{user}', "
-            f"购买标准'{summary}', "
-            f"推荐了{len(product_ids)}个商品({ids_str})."
-        )
+        lines.append(f"第{i}轮: 用户'{user}', 购买标准'{summary}', 推荐了{len(product_ids)}个商品({ids_str}).")
     return "\n".join(lines)
 
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable
-from typing import Any
+from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 from src.config.tuning import (
     CHEAPER_BUDGET_FALLBACK_MAX,
@@ -12,6 +13,7 @@ from src.config.tuning import (
     DEFAULT_CART_PRODUCT_ID,
 )
 from src.runtime.stages.criteria import criteria_quick_actions
+from src.runtime.stages.recommendation import RetrievalResult
 from src.runtime.stages.slot_checker import build_clarification_question
 from src.runtime.streaming import (
     StageResult,
@@ -21,20 +23,24 @@ from src.runtime.streaming import (
     start_stage_task,
 )
 from src.services.async_io import run_sync_io
+from src.services.audit import record_audit_event
 from src.services.cart import add_product_to_cart
 from src.services.conversation_state import get_previous_product_ids, save_recommendation_turn
 from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events
 from src.services.feedback import get_feedback_context, record_feedback
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
-from src.types.schemas import ChatStreamRequest, IntentResult
+from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
     AlternativePayload,
     CartActionEvent,
     ClarificationEvent,
     CriteriaCardEvent,
+    CriteriaPayload,
+    EvidencePayload,
     FinalDecisionEvent,
     ProductCardEvent,
+    ProductPayload,
     QuickActionPayload,
     SSEEventBase,
     TextDeltaEvent,
@@ -42,6 +48,17 @@ from src.types.sse_events import (
 )
 
 IntentHandler = Callable[[StreamContext, ChatStreamRequest, IntentResult], AsyncGenerator[SSEEventBase, None]]
+T = TypeVar("T")
+
+
+@dataclass
+class CapturedStage(Generic[T]):
+    value: T | None = None
+
+    def require(self, stage: str) -> T:
+        if self.value is None:
+            raise RuntimeError(f"{stage} stage completed without a result.")
+        return self.value
 
 
 async def handle_view_cart(
@@ -68,8 +85,21 @@ async def handle_add_to_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body
-    product_id = intent.target_product_id or await run_sync_io(_last_or_default_product, ctx.session_id)
+    product_id = (
+        intent.target_product_id
+        if intent.target_product_id
+        else await run_sync_io(_last_or_default_product, ctx.session_id)
+    )
     await run_sync_io(add_product_to_cart, ctx.session_id, product_id)
+    await run_sync_io(
+        record_audit_event,
+        "cart.item_added",
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        resource_type="cart_item",
+        resource_id=product_id,
+        metadata={"quantity": 1, "source": "chat_intent"},
+    )
     ctx.ensure_active()
     yield CartActionEvent(
         session_id=ctx.session_id,
@@ -107,54 +137,42 @@ async def handle_recommendation(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     if intent.intent == "feedback":
-        await run_sync_io(
-            record_feedback,
-            ctx.session_id,
-            action="feedback",
-            reason=intent.extracted_constraints.get("feedback_text", "feedback"),
-        )
+        await _record_feedback_intent(ctx, intent)
 
     yield ctx.thinking("criteria", "正在生成购买标准...")
-    criteria = None
+    criteria_capture: CapturedStage[CriteriaPayload] = CapturedStage()
     ctx.ensure_active()
-    async for item in run_with_heartbeat(
-        ctx,
-        ctx.stages.run_criteria(ctx.session_id, body, intent),
-        "criteria",
-        "正在生成购买标准...",
-        timing_key="criteria",
+    async for event in _capture_stage_result(
+        criteria_capture,
+        run_with_heartbeat(
+            ctx,
+            ctx.stages.run_criteria(ctx.session_id, body, intent),
+            "criteria",
+            "正在生成购买标准...",
+            timing_key="criteria",
+        ),
     ):
-        if isinstance(item, StageResult):
-            criteria = item.value
-        else:
-            yield item
+        yield event
+    criteria = criteria_capture.require("criteria")
 
-    yield CriteriaCardEvent(
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"criteria_{criteria.criteria_id}",
-        created_at_ms=now_ms(),
-        criteria=criteria,
-        quick_actions=criteria_quick_actions(),
-    )
+    yield _criteria_card_event(ctx, criteria)
 
     feedback = await run_sync_io(get_feedback_context, ctx.session_id)
     yield ctx.thinking("searching", "正在检索匹配商品...")
-    retrieval = None
+    retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
     ctx.ensure_active()
-    async for item in run_with_heartbeat(
-        ctx,
-        ctx.stages.run_retrieval(criteria, feedback=feedback),
-        "searching",
-        "正在检索匹配商品...",
-        timing_key="retrieve",
+    async for event in _capture_stage_result(
+        retrieval_capture,
+        run_with_heartbeat(
+            ctx,
+            ctx.stages.run_retrieval(criteria, feedback=feedback),
+            "searching",
+            "正在检索匹配商品...",
+            timing_key="retrieve",
+        ),
     ):
-        if isinstance(item, StageResult):
-            retrieval = item.value
-        else:
-            yield item
+        yield event
+    retrieval = retrieval_capture.require("retrieval")
 
     products = retrieval.products
     evidences_by_product = dict(retrieval.evidence_by_product)
@@ -173,6 +191,94 @@ async def handle_recommendation(
     )
 
     yield ctx.thinking("searching", f"找到{len(products)}个匹配商品...")
+    async for event in _product_card_events(ctx, products, evidences_by_product):
+        yield event
+
+    recommendation_capture: CapturedStage[RecommendationResult] = CapturedStage()
+    async for event in _capture_stage_result(
+        recommendation_capture,
+        run_timed_task_with_heartbeat(
+            ctx,
+            recommendation_task,
+            "recommending",
+            "正在生成推荐解释...",
+            timing_key="recommendation",
+        ),
+    ):
+        yield event
+    recommendation = recommendation_capture.require("recommendation")
+
+    for event in _text_delta_events(ctx, recommendation):
+        yield event
+
+    decision_capture: CapturedStage[DecisionResult] = CapturedStage()
+    async for event in _capture_stage_result(
+        decision_capture,
+        run_timed_task_with_heartbeat(
+            ctx,
+            decision_task,
+            "decision",
+            "正在生成最终决策...",
+            timing_key="decision",
+        ),
+    ):
+        yield event
+    decision = decision_capture.require("decision")
+    _drop_completed_background_tasks(ctx)
+
+    yield _final_decision_event(ctx, criteria, products, decision)
+
+    await _persist_recommendation(ctx, body, criteria, products, evidences_by_product)
+    yield ctx.done()
+
+
+async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult) -> None:
+    reason = intent.extracted_constraints.get("feedback_text", "feedback")
+    await run_sync_io(
+        record_feedback,
+        ctx.session_id,
+        action="feedback",
+        reason=reason,
+    )
+    await run_sync_io(
+        record_audit_event,
+        "feedback.created",
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        resource_type="feedback",
+        metadata={"source": "chat_intent", "reason": reason},
+    )
+
+
+async def _capture_stage_result(
+    captured: CapturedStage[T],
+    items: AsyncGenerator[SSEEventBase | StageResult[T], None],
+) -> AsyncGenerator[SSEEventBase, None]:
+    async for item in items:
+        if isinstance(item, StageResult):
+            captured.value = item.value
+        else:
+            yield item
+
+
+def _criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> CriteriaCardEvent:
+    return CriteriaCardEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"criteria_{criteria.criteria_id}",
+        created_at_ms=now_ms(),
+        criteria=criteria,
+        quick_actions=criteria_quick_actions(),
+    )
+
+
+async def _product_card_events(
+    ctx: StreamContext,
+    products: list[ProductPayload],
+    evidences_by_product: dict[str, list[EvidencePayload]],
+) -> AsyncGenerator[ProductCardEvent, None]:
     for rank, product in enumerate(products, start=1):
         ctx.ensure_active()
         evidence = evidences_by_product.get(product.product_id)
@@ -204,55 +310,45 @@ async def handle_recommendation(
             ],
         )
 
-    recommendation = None
-    async for item in run_timed_task_with_heartbeat(
-        ctx,
-        recommendation_task,
-        "recommending",
-        "正在生成推荐解释...",
-        timing_key="recommendation",
-    ):
-        if isinstance(item, StageResult):
-            recommendation = item.value
-        else:
-            yield item
 
+def _text_delta_events(ctx: StreamContext, recommendation: RecommendationResult) -> list[TextDeltaEvent]:
     message_id = f"msg_{ctx.turn_id}"
     text_chunks = recommendation.text_chunks or ["我先把匹配商品列出来，方便你快速比较。"]
+    events: list[TextDeltaEvent] = []
     for index, chunk in enumerate(text_chunks):
         ctx.ensure_active()
-        yield TextDeltaEvent(
-            session_id=ctx.session_id,
-            turn_id=ctx.turn_id,
-            seq=ctx.seq.next(),
-            event_id=ctx.seq.event_id(),
-            node_id=f"ai_text_{ctx.turn_id}",
-            created_at_ms=now_ms(),
-            message_id=message_id,
-            delta=chunk,
-            done=index == len(text_chunks) - 1,
+        events.append(
+            TextDeltaEvent(
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
+                seq=ctx.seq.next(),
+                event_id=ctx.seq.event_id(),
+                node_id=f"ai_text_{ctx.turn_id}",
+                created_at_ms=now_ms(),
+                message_id=message_id,
+                delta=chunk,
+                done=index == len(text_chunks) - 1,
+            )
         )
+    return events
 
-    decision = None
-    async for item in run_timed_task_with_heartbeat(
-        ctx,
-        decision_task,
-        "decision",
-        "正在生成最终决策...",
-        timing_key="decision",
-    ):
-        if isinstance(item, StageResult):
-            decision = item.value
-        else:
-            yield item
-    ctx.background_tasks.clear()
 
+def _drop_completed_background_tasks(ctx: StreamContext) -> None:
+    ctx.background_tasks[:] = [timed_task for timed_task in ctx.background_tasks if not timed_task.task.done()]
+
+
+def _final_decision_event(
+    ctx: StreamContext,
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    decision: DecisionResult,
+) -> FinalDecisionEvent:
     alternatives = [
         AlternativePayload(product_id=p.product_id, name=p.name)
         for p in products
         if p.product_id != decision.winner_product_id
     ][:2]
-    yield FinalDecisionEvent(
+    return FinalDecisionEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
         seq=ctx.seq.next(),
@@ -275,7 +371,15 @@ async def handle_recommendation(
         ],
     )
 
-    await run_sync_io(
+
+async def _persist_recommendation(
+    ctx: StreamContext,
+    body: ChatStreamRequest,
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidences_by_product: dict[str, list[EvidencePayload]],
+) -> None:
+    conversation_id = await run_sync_io(
         save_recommendation_turn,
         ctx.session_id,
         criteria,
@@ -287,11 +391,24 @@ async def handle_recommendation(
         criteria,
         products,
         evidences_by_product,
+        conversation_id=conversation_id,
         stage_timings_ms=ctx.stage_timings_ms,
         fallback_events=get_fallback_events(),
     )
-    await run_sync_io(record_evidence_links, products, evidences_by_product)
-    yield ctx.done()
+    await run_sync_io(record_evidence_links, products, evidences_by_product, conversation_id=conversation_id)
+    await run_sync_io(
+        record_audit_event,
+        "chat.recommendation_persisted",
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        resource_type="conversation",
+        resource_id=conversation_id,
+        metadata={
+            "criteria_id": criteria.criteria_id,
+            "selected_ids": [product.product_id for product in products],
+            "fallbacks": get_fallback_events(),
+        },
+    )
 
 
 INTENT_HANDLERS: dict[str, IntentHandler] = {
@@ -300,7 +417,7 @@ INTENT_HANDLERS: dict[str, IntentHandler] = {
 }
 
 
-def _reason_for_product(product: Any) -> str:
+def _reason_for_product(product: ProductPayload) -> str:
     if product.skin_type_match:
         return f"{product.skin_type_match[0]}适用，{product.sub_category or product.category}匹配。"
     return f"{product.category}下综合匹配度较高。"
@@ -311,7 +428,7 @@ def _last_or_default_product(session_id: str) -> str:
     return last_ids[0] if last_ids else DEFAULT_CART_PRODUCT_ID
 
 
-def _cheaper_budget_max(criteria: Any) -> float:
+def _cheaper_budget_max(criteria: CriteriaPayload) -> float:
     current = criteria.constraints.budget_max
     if current is None:
         return CHEAPER_BUDGET_FALLBACK_MAX

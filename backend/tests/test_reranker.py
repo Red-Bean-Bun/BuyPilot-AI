@@ -38,3 +38,14 @@ async def test_rerank_strict_mode_raises_when_config_missing(monkeypatch):
     with pytest.raises(reranker.RerankUnavailable):
         await rerank(CriteriaPayload(category="美妆护肤"), products, top_n=1)
     _reset_settings()
+
+
+def test_qwen3_rerank_uses_compatible_api_endpoint(monkeypatch):
+    monkeypatch.setenv("BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setenv("BAILIAN_API_KEY", "test-key")
+    _reset_settings()
+
+    profile = reranker._resolve_rerank_profile("gte_rerank")
+
+    assert reranker._rerank_endpoint(profile) == "https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+    _reset_settings()

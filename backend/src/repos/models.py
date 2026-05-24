@@ -75,6 +75,25 @@ class CartItem(SQLModel, table=True):
     added_at: datetime = Field(default_factory=utc_now)
 
 
+class ActiveChatTurn(SQLModel, table=True):
+    __tablename__ = "active_chat_turns"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    session_id: str = Field(index=True)
+    turn_id: str = Field(index=True)
+    trace_id: str | None = Field(default=None, index=True)
+    started_at: datetime = Field(default_factory=utc_now)
+
+
+class ChatTurnCancellation(SQLModel, table=True):
+    __tablename__ = "chat_turn_cancellations"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    session_id: str = Field(index=True)
+    turn_id: str = Field(index=True)
+    requested_at: datetime = Field(default_factory=utc_now)
+
+
 class EvalRun(SQLModel, table=True):
     __tablename__ = "eval_runs"
 
@@ -127,4 +146,42 @@ class EvalSample(SQLModel, table=True):
     difficulty: str | None = None
     ground_truth: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ApiRequestLog(SQLModel, table=True):
+    __tablename__ = "api_request_logs"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    request_id: str = Field(index=True)
+    trace_id: str | None = Field(default=None, index=True)
+    session_id: str | None = Field(default=None, index=True)
+    turn_id: str | None = Field(default=None, index=True)
+    method: str
+    path: str
+    status_code: int
+    duration_ms: float
+    client_ip: str | None = None
+    user_agent: str | None = None
+    error_code: str | None = None
+    error_type: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AuditEvent(SQLModel, table=True):
+    __tablename__ = "audit_events"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    request_id: str | None = Field(default=None, index=True)
+    trace_id: str | None = Field(default=None, index=True)
+    session_id: str | None = Field(default=None, index=True)
+    turn_id: str | None = Field(default=None, index=True)
+    actor_type: str = "anonymous"
+    action: str = Field(index=True)
+    resource_type: str | None = None
+    resource_id: str | None = None
+    side_effect: bool = True
+    before_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    after_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    audit_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column("metadata", JSON))
     created_at: datetime = Field(default_factory=utc_now)

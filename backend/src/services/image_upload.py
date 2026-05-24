@@ -51,9 +51,11 @@ def parse_multipart_image(body: bytes, content_type: str) -> ParsedUpload:
         disposition = part.get_content_disposition()
         if disposition != "form-data":
             continue
-        name = part.get_param("name", header="content-disposition")
+        raw_name = part.get_param("name", header="content-disposition")
+        name = raw_name if isinstance(raw_name, str) else None
         filename = part.get_filename()
-        payload = part.get_payload(decode=True) or b""
+        raw_payload = part.get_payload(decode=True)
+        payload = raw_payload if isinstance(raw_payload, bytes) else b""
         if filename:
             file_name = filename
             file_content_type = part.get_content_type()

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from src.services.async_io import run_sync_io
+from src.services.audit import record_audit_event
 from src.services.eval.admin import get_eval_run, list_eval_runs, list_eval_samples, seed_eval_samples
 
 admin_eval_router = APIRouter(tags=["admin_eval"], prefix="/admin/eval")
@@ -31,4 +32,12 @@ async def list_samples():
 @admin_eval_router.post("/samples/seed")
 async def seed_samples():
     """Seed eval_samples table from data/eval/eval_samples.json."""
-    return await run_sync_io(seed_eval_samples)
+    result = await run_sync_io(seed_eval_samples)
+    await run_sync_io(
+        record_audit_event,
+        "eval.samples_seeded",
+        resource_type="eval_samples",
+        side_effect=True,
+        metadata=result,
+    )
+    return result

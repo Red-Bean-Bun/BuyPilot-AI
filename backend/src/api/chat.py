@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from src.runtime.pipeline import chat_stream
+from src.services.request_context import set_request_context, update_request_context
 from src.types.schemas import ChatStreamRequest
 from src.types.sse_events import format_sse
 
@@ -13,8 +14,14 @@ chat_router = APIRouter(tags=["chat"])
 @chat_router.post("/stream")
 async def stream_chat(body: ChatStreamRequest):
     sid = body.session_id or f"sess_{uuid.uuid4().hex}"
+    stream_context = update_request_context(
+        trace_id=body.client_trace_id,
+        session_id=sid,
+        turn_id=body.client_turn_id,
+    )
 
     async def event_generator():
+        set_request_context(stream_context)
         async for event in chat_stream(sid, body):
             yield format_sse(event)
 
@@ -25,5 +32,7 @@ async def stream_chat(body: ChatStreamRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "X-Request-ID": stream_context.request_id,
+            "X-Trace-ID": stream_context.trace_id or "",
         },
     )

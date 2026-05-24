@@ -2,7 +2,7 @@
 
 FastAPI 后端，负责 SSE 对话管道、RAG 检索、pgvector 索引、模型调用、评测与最小购物车闭环。
 
-最后本地验证：2026-05-24，`108 passed`。
+最后本地验证：2026-05-24，`90 passed`。
 
 ## Quick Start
 
@@ -31,6 +31,7 @@ uv sync --extra dev
 ## Environment
 
 `.env` 从项目根目录加载：`BuyPilot-AI/.env`，不是 `backend/.env`。
+模板见项目根目录 `.env.example`，真实 Key 只放本地 `.env`。
 
 关键变量：
 
@@ -39,6 +40,8 @@ uv sync --extra dev
 - `AUTO_SEED_ON_STARTUP=1`：启动时自动入库。
 - `AUTO_SEED_STRICT_EMBEDDINGS=1`：启动入库时要求 embedding 维度匹配 1024。
 - `STRICT_RUNTIME=1`：关闭 demo 级静默降级；LLM、embedding、rerank、DB/pgvector 失败会显性失败。
+- `ALLOW_MEMORY_STATE_FALLBACK=1`：仅开发调试用。显式开启后，cart/feedback/conversation 在 DB 异常时可退到进程内内存状态；默认关闭。
+- 商品图片通过 `/assets/products/{raw_image_path}` 暴露给 Android；上传图片仍通过 `/uploads/{file}` 暴露。
 
 ## Architecture
 
@@ -88,4 +91,5 @@ CI 直接跑全量 pytest（`data/raw/` 已入 git）。
 
 - 单元测试通过不代表 live provider 可用；真实链路要跑 `smoke_live_rag` 或 `demo_smoke`。
 - `STRICT_RUNTIME=1` 用于演示前验真，不适合默认开发体验。
+- `/chat/cancel` 同时使用本进程 token 和数据库 cancel request；多实例共用同一个数据库时可以跨进程取消。
 - Android 由客户端同学负责；本目录只维护后端契约和实现。
