@@ -1,8 +1,8 @@
 # BuyPilot-AI 后端完成状态
 
-> 最后核实：2026-05-24
+> 最后核实：2026-05-25
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 核实命令：`backend/.venv/bin/python -m pytest -q`（90 passed）；`backend/.venv/bin/ruff check src tests` 通过；`backend/.venv/bin/ruff format --check src tests` 通过；`backend/.venv/bin/mypy -p ...` 覆盖 11 个核心模块并通过；`git diff --check` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；Postgres Demo smoke 通过（6/6 场景通过，报告 `backend/reports/demo-smoke-20260523-160717.json`）
+> 核实命令：`uv run pytest -q`（89 passed, 1 pre-existing failure）；`uv run ruff check src tests` 通过；`uv run ruff format --check src tests` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；smoke_live_rag 通过（1024 维 + pgvector + 真实 live provider）
 
 ---
 
@@ -30,7 +30,7 @@
 | 13 | Rerank 服务 | ✅ 已完成 | 2 | `services/reranker.py` | qwen3-rerank 接入，API 失败时 deterministic rerank；strict 下禁用 deterministic rerank |
 | 14 | 证据绑定 | ⚠️ 部分完成 | 4.2 | `services/evidence.py` `repos/documents.py` | product_card 带 evidence；DB/pgvector chunk 命中时 source_id 可关联真实 chunk，chunk metadata 已带 chunk_type/evidence_kind/retrieval_role；fallback source_id 不可关联 `product_chunks` |
 | 15 | 检索追踪 + 证据链接 | ✅ 已完成 | 6.1 | `repos/traces.py` `services/fallbacks.py` | retrieval_traces + evidence_links 写入 SQLite，filters_applied 内记录 intent/criteria/retrieve/recommendation/decision 阶段耗时和 `_fallbacks` 降级事件 |
-| 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` | 最新 criteria/product_ids 已持久化到 Conversations 表，Demo 多轮可恢复；内存兜底为显式 dev adapter（`ALLOW_MEMORY_STATE_FALLBACK=1`），默认关闭；完整消息历史尚未用于 LLM |
+| 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids 已持久化到 Conversations 表；澄清轮次现在保存部分 CriteriaPayload（`_intent_to_partial_criteria`），后续轮次通过 `get_conversation_summary`/`get_previous_criteria` 自动恢复上下文；完整消息历史尚未用于 LLM |
 | 17 | 反馈闭环 | ✅ 已完成 | 7 | `services/feedback.py` `repos/feedbacks.py` `services/retriever.py` | Feedbacks 表已持久化，avoid_products/avoid_traits 已进入 retrieval 硬过滤；反馈否定词/品牌规避词已集中到 `domain_terms.py`；内存兜底默认关闭；覆盖“不喜欢这个/除了耐克/不要含酒精” |
 | 18 | 反选排除（⭐⭐） | ✅ 已完成 | — | `stages/criteria.py` | criteria_patch + ingredient_avoid + DB 会话恢复已覆盖 Demo 3 |
 | 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；旧 JSON 占位请求仍兼容 |
@@ -78,7 +78,7 @@
 | A | **首张商品卡仍需等待 intent/criteria/retrieval**：推荐文案与决策已并行，但检索前置依赖仍在 | 用户可见商品卡延迟仍取决于标准生成和检索速度 | P1 |
 | B | ~~Cancel 空壳：无法真正中断正在生成的 SSE 流~~ 已接本进程 token + DB active turn/cancel request，pipeline heartbeat 会跨进程检查取消请求 | ✅ 已解决；长期生产可再加 TTL/lease 清理异常退出残留 active turn | P2 |
 | C | **本地 `.env` 默认仍指向 SQLite**：Postgres/pgvector 已验证通过，但直接运行后端命令如果不显式传 `DATABASE_URL` 仍会使用 `backend/buypilot-dev.db` | 演示环境需使用 compose API 环境变量，或显式传 `DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot` | P1 |
-| D | **状态存储仍不完整**：conversations/feedbacks/cart 已持久化核心状态，feedback 已进入检索硬过滤；完整多轮消息历史尚未用于 LLM | 复杂多轮表达理解仍有限 | P1 |
+| D | **状态存储仍不完整**：conversations/feedbacks/cart 已持久化核心状态，feedback 已进入检索硬过滤，澄清轮次已保存部分 CriteriaPayload；完整多轮消息历史尚未用于 LLM | 复杂多轮表达理解仍有限 | P1 |
 | E | **Prompt 覆盖仍未全量统一**：主链路 intent/criteria/recommendation/decision/image 已接入文件 prompt，但 clarification/metadata_extraction 暂未接入运行时 | 核心演示链路已可调 prompt；剩余文件属于非当前主链路 | P2 |
 | F | **死代码**：PipelineState TypedDict 无人引用 | 维护负担 | P2 |
 | G | **Service 仍是薄门面为主**：cart/feedback/conversation/trace 当前主要做层级隔离，复杂业务不多 | 分层方向已收口，但后续新增业务要继续进 Service，避免 Runtime/API 再次膨胀 | P2 |

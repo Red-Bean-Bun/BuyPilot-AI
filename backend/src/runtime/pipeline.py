@@ -20,10 +20,11 @@ from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, canc
 from src.services.audit import record_audit_event
 from src.services.async_io import run_sync_io
 from src.services.cancellation import clear_chat_turn, register_chat_turn
+from src.services.conversation_state import save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
-from src.types.sse_events import CriteriaPayload, ErrorEvent, EventSeq, ProductPayload, SSEEventBase, now_ms
+from src.types.sse_events import Constraints, CriteriaPayload, ErrorEvent, EventSeq, ProductPayload, SSEEventBase, now_ms
 
 HEARTBEAT_INTERVAL_SECONDS = 0.8
 PUBLIC_PIPELINE_ERROR_MESSAGE = "本轮导购处理失败，请稍后重试。"
@@ -163,6 +164,8 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
     if missing_slots:
         async for event in handle_clarification(ctx, missing_slots):
             yield event
+        partial = _intent_to_partial_criteria(intent, pipeline_body.message)
+        await run_sync_io(save_recommendation_turn, ctx.session_id, partial, [], user_message=pipeline_body.message)
         return
 
     handler = INTENT_HANDLERS.get(intent.intent, handle_recommendation)
@@ -195,3 +198,31 @@ def _message_with_image_context(message: str, image_analysis: dict[str, Any] | N
     if isinstance(visible_traits, list) and visible_traits:
         parts.append("可见特征=" + "，".join(str(item) for item in visible_traits))
     return f"{message}\n图片分析：" + "；".join(parts) if parts else message
+
+
+def _intent_to_partial_criteria(intent: IntentResult, message: str) -> CriteriaPayload:
+    """Construct a partial CriteriaPayload from intent for multi-turn clarification continuity.
+
+    The resulting payload captures the category and any constraints already extracted
+    from the user's message. It reuses the existing conversation state machinery —
+    get_conversation_summary and get_previous_criteria both pick it up automatically.
+    """
+    allowed = set(Constraints.model_fields)
+    constraint_kwargs: dict[str, Any] = {}
+    for key, value in (intent.extracted_constraints or {}).items():
+        if key in allowed and value is not None:
+            constraint_kwargs[key] = value
+    constraints = Constraints(**constraint_kwargs)
+    category = intent.category or ""
+    chips = [category] if category else []
+    if constraints.budget_max is not None:
+        chips.append(f"{constraints.budget_max:g}元内")
+    if constraints.use_scenario:
+        chips.append(constraints.use_scenario)
+    return CriteriaPayload(
+        criteria_id=f"pending_{uuid.uuid4().hex[:8]}",
+        category=category,
+        summary="，".join(chips) if chips else "",
+        chips=chips,
+        constraints=constraints,
+    )
