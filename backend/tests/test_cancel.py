@@ -22,7 +22,7 @@ async def test_cancel_endpoint_sets_active_turn_token(test_client, cancellation_
     del cancellation_database
     token = register_turn("s_cancel_api", "turn_cancel_api")
     try:
-        register_chat_turn("s_cancel_api", "turn_cancel_api")
+        await register_chat_turn("s_cancel_api", "turn_cancel_api")
         async with test_client as client:
             response = await client.post(
                 "/chat/cancel",
@@ -31,9 +31,9 @@ async def test_cancel_endpoint_sets_active_turn_token(test_client, cancellation_
         assert response.status_code == 200
         assert response.json()["canceled"] is True
         assert token.cancelled is True
-        assert is_chat_turn_cancellation_requested("s_cancel_api", "turn_cancel_api")
+        assert await is_chat_turn_cancellation_requested("s_cancel_api", "turn_cancel_api")
     finally:
-        clear_chat_turn("s_cancel_api", "turn_cancel_api")
+        await clear_chat_turn("s_cancel_api", "turn_cancel_api")
         unregister_turn("s_cancel_api", "turn_cancel_api")
 
 
@@ -52,7 +52,7 @@ async def test_cancel_endpoint_reports_missing_turn(test_client, cancellation_da
 @pytest.mark.asyncio
 async def test_cancel_endpoint_records_remote_active_turn(test_client, cancellation_database):
     del cancellation_database
-    register_chat_turn("s_remote_cancel", "turn_remote_cancel")
+    await register_chat_turn("s_remote_cancel", "turn_remote_cancel")
     try:
         async with test_client as client:
             response = await client.post(
@@ -61,6 +61,6 @@ async def test_cancel_endpoint_records_remote_active_turn(test_client, cancellat
             )
         assert response.status_code == 200
         assert response.json()["canceled"] is True
-        assert is_chat_turn_cancellation_requested("s_remote_cancel", "turn_remote_cancel")
+        assert await is_chat_turn_cancellation_requested("s_remote_cancel", "turn_remote_cancel")
     finally:
-        clear_chat_turn("s_remote_cancel", "turn_remote_cancel")
+        await clear_chat_turn("s_remote_cancel", "turn_remote_cancel")

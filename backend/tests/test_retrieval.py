@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from src.services.product_ingest import seed_products
@@ -63,14 +61,15 @@ async def test_retrieve_filters_feedback_avoid_brand_traits():
     )
 
 
-def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, tmp_path):
     database_url = f"sqlite:///{tmp_path / 'retrieval.db'}"
     monkeypatch.setenv("DATABASE_URL", database_url)
 
     from src.config import settings as settings_module
 
     settings_module._settings = None
-    seed_products()
+    await seed_products()
 
     criteria = CriteriaPayload(
         category="美妆护肤",
@@ -78,12 +77,9 @@ def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, tmp_pa
         constraints=Constraints(skin_type="油性", budget_max=200),
     )
 
-    async def run_retrieval_with_evidence():
-        retrieval = await retrieve_with_evidence(criteria, top_n=3)
-        first_product = retrieval.products[0]
-        return retrieval.products, retrieval.evidence_by_product[first_product.product_id]
-
-    products, evidence = asyncio.run(run_retrieval_with_evidence())
+    retrieval = await retrieve_with_evidence(criteria, top_n=3)
+    products = retrieval.products
+    evidence = retrieval.evidence_by_product[products[0].product_id]
 
     assert products
     assert all(product.category == "美妆护肤" for product in products)
@@ -98,7 +94,7 @@ def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, tmp_pa
 async def test_retrieve_prefers_pgvector_hits(monkeypatch):
     product = list_products()[0]
 
-    def fake_pgvector_hits(query_embedding, limit):
+    async def fake_pgvector_hits(query_embedding, limit):
         assert query_embedding
         assert limit == 200
         return [
@@ -115,7 +111,7 @@ async def test_retrieve_prefers_pgvector_hits(monkeypatch):
             )
         ]
 
-    def fail_sqlite_scan():
+    async def fail_sqlite_scan():
         raise AssertionError("SQLite chunk scan should not run when pgvector returns hits")
 
     monkeypatch.setattr("src.services.retriever.list_vector_chunks_by_similarity", fake_pgvector_hits)

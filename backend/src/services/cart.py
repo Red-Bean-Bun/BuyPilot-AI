@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 _MEMORY_CARTS: dict[str, dict[str, CartItemPayload]] = {}
 
 
-def add_product_to_cart(session_id: str, product_id: str, quantity: int = 1) -> CartItemPayload:
+async def add_product_to_cart(session_id: str, product_id: str, quantity: int = 1) -> CartItemPayload:
     try:
-        item = add_to_cart(session_id, product_id, quantity=quantity)
+        item = await add_to_cart(session_id, product_id, quantity=quantity)
         if _memory_state_fallback_enabled():
             _cache_item(session_id, item)
         return item
@@ -36,9 +36,9 @@ def add_product_to_cart(session_id: str, product_id: str, quantity: int = 1) -> 
         return _add_to_memory_cart(session_id, product_id, quantity)
 
 
-def get_session_cart(session_id: str) -> CartResponse:
+async def get_session_cart(session_id: str) -> CartResponse:
     try:
-        cart = get_cart(session_id)
+        cart = await get_cart(session_id)
         if _memory_state_fallback_enabled():
             for item in cart.items:
                 _cache_item(session_id, item)

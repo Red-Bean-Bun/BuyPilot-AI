@@ -1,39 +1,37 @@
-from sqlmodel import Session, select
+import pytest
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.services.product_ingest import seed_products
 from src.repos.models import EvidenceLink, RetrievalTrace
 from src.runtime.pipeline import chat_stream
+from src.services.product_ingest import seed_products
 from src.types.schemas import ChatStreamRequest
 
 
-def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch, tmp_path):
     database_url = f"sqlite:///{tmp_path / 'trace.db'}"
     monkeypatch.setenv("DATABASE_URL", database_url)
 
     from src.config import settings as settings_module
 
     settings_module._settings = None
-    seed_products()
+    await seed_products()
 
-    async def run_pipeline():
-        return [
-            event
-            async for event in chat_stream(
-                "sess_trace",
-                ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤"),
-            )
-        ]
-
-    import asyncio
-
-    events = asyncio.run(run_pipeline())
+    events = [
+        event
+        async for event in chat_stream(
+            "sess_trace",
+            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤"),
+        )
+    ]
     assert events[-1].event == "done"
 
-    from src.repos.database import get_engine
+    from src.repos.database import get_async_engine
 
-    with Session(get_engine()) as session:
-        traces = session.exec(select(RetrievalTrace)).all()
-        links = session.exec(select(EvidenceLink)).all()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        traces = (await session.exec(select(RetrievalTrace))).all()
+        links = (await session.exec(select(EvidenceLink))).all()
 
     assert traces
     assert traces[0].selected_ids

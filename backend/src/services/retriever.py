@@ -24,7 +24,6 @@ from src.repos.documents import (
     list_vector_chunks_by_similarity,
 )
 from src.repos.products import get_product, list_products
-from src.services.async_io import run_sync_io
 from src.services.fallbacks import record_fallback
 from src.services.embedding import embed_text
 from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
@@ -70,13 +69,13 @@ async def retrieve_with_evidence(
 ) -> RetrievalOutput:
     filters = _retrieval_filters(feedback)
     query_embedding = await embed_text(criteria_query_text(criteria))
-    chunk_hits = await run_sync_io(_vector_recall_from_db, criteria, query_embedding, filters)
+    chunk_hits = await _vector_recall_from_db(criteria, query_embedding, filters)
     if chunk_hits:
         candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
-        ranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
+        ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
         return RetrievalOutput(
             products=[hit.product for hit in ranked_hits],
-            evidence_by_product=_evidence_by_product(ranked_hits),
+            evidence_by_product=_evidence_by_product(ranked_hits, all_reranked_hits),
             trace_details=_trace_details_for_chunk_retrieval(
                 chunk_hits=chunk_hits,
                 candidate_hits=candidate_hits,
@@ -88,7 +87,7 @@ async def retrieve_with_evidence(
         raise RuntimeError("Strict runtime requires pgvector/DB vector retrieval; fallback retrieval is disabled.")
 
     record_fallback("retrieval", "non_db_vector_fallback")
-    hard_task = asyncio.create_task(run_sync_io(_hard_filter, criteria, filters))
+    hard_task = asyncio.create_task(asyncio.to_thread(_hard_filter, criteria, filters))
     vector_task = asyncio.create_task(_vector_recall_fallback(criteria, filters))
     hard_results, vector_results = await asyncio.gather(hard_task, vector_task)
     merged = _merge_dedup(hard_results + vector_results)
@@ -116,7 +115,7 @@ def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[P
 
 async def _vector_recall_fallback(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
     await embed_text(criteria.summary)
-    return await run_sync_io(_vector_recall_fallback_sync, criteria, filters)
+    return await asyncio.to_thread(_vector_recall_fallback_sync, criteria, filters)
 
 
 def _vector_recall_fallback_sync(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
@@ -127,16 +126,16 @@ def _vector_recall_fallback_sync(criteria: CriteriaPayload, filters: RetrievalFi
     return [product for product in products if product.category == criteria.category] or products
 
 
-def _vector_recall_from_db(
+async def _vector_recall_from_db(
     criteria: CriteriaPayload,
     query_embedding: list[float],
     filters: RetrievalFilters,
 ) -> list[ProductHit]:
-    pgvector_hits = _vector_recall_from_pgvector(criteria, query_embedding, filters)
+    pgvector_hits = await _vector_recall_from_pgvector(criteria, query_embedding, filters)
     if pgvector_hits:
         return pgvector_hits
 
-    chunks = list_embedded_chunks()
+    chunks = await list_embedded_chunks()
     if not chunks or not query_embedding:
         return []
 
@@ -164,13 +163,13 @@ def _vector_recall_from_db(
     return hits
 
 
-def _vector_recall_from_pgvector(
+async def _vector_recall_from_pgvector(
     criteria: CriteriaPayload,
     query_embedding: list[float],
     filters: RetrievalFilters,
 ) -> list[ProductHit]:
     hits: list[ProductHit] = []
-    for vector_hit in list_vector_chunks_by_similarity(query_embedding, limit=PGVECTOR_RECALL_LIMIT):
+    for vector_hit in await list_vector_chunks_by_similarity(query_embedding, limit=PGVECTOR_RECALL_LIMIT):
         chunk = vector_hit.document
         product = get_product(chunk.product_id)
         if product is None or not _passes_hard_filters(criteria, product, filters):
@@ -198,11 +197,29 @@ def _rank_hits(criteria: CriteriaPayload, hits: list[ProductHit]) -> list[Produc
     )
 
 
-def _evidence_by_product(hits: list[ProductHit]) -> dict[str, list[EvidencePayload]]:
+_EVIDENCE_KIND_PRIORITY = ("why_buy", "faq", "risk", "compare")
+
+
+def _evidence_by_product(
+    ranked_hits: list[ProductHit], all_reranked_hits: list[ProductHit]
+) -> dict[str, list[EvidencePayload]]:
     evidence_by_product: dict[str, list[EvidencePayload]] = {}
-    for hit in hits:
-        if hit.chunk is not None:
-            evidence_by_product[hit.product.product_id] = [evidence_for_chunk(hit.chunk)]
+    for hit in ranked_hits:
+        product_id = hit.product.product_id
+        groups: dict[str, ChunkDocument] = {}
+        seen_chunk_ids: set[str] = set()
+        for candidate in all_reranked_hits:
+            if candidate.product.product_id != product_id or candidate.chunk is None:
+                continue
+            if candidate.chunk.id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(candidate.chunk.id)
+            kind = candidate.chunk.metadata.get("evidence_kind") or "other"
+            if kind not in groups:
+                groups[kind] = candidate.chunk
+        evidence_by_product[product_id] = [
+            evidence_for_chunk(groups[kind]) for kind in _EVIDENCE_KIND_PRIORITY if kind in groups
+        ]
     return evidence_by_product
 
 
@@ -279,16 +296,18 @@ def _unique_product_ids(hits: list[ProductHit]) -> list[str]:
     return result
 
 
-async def _rerank_chunk_hits(criteria: CriteriaPayload, hits: list[ProductHit], top_n: int) -> list[ProductHit]:
+async def _rerank_chunk_hits(
+    criteria: CriteriaPayload, hits: list[ProductHit], top_n: int
+) -> tuple[list[ProductHit], list[ProductHit]]:
     documents = [_chunk_document_text(hit) for hit in hits]
     reranked_indexes = await rerank_texts(criteria, documents, top_n=len(hits))
     index_order = reranked_indexes or list(range(len(hits)))
+
+    all_reranked_hits = [hits[index] for index in index_order if 0 <= index < len(hits)]
+
     selected: list[ProductHit] = []
     seen_products: set[str] = set()
-    for index in index_order:
-        if not 0 <= index < len(hits):
-            continue
-        hit = hits[index]
+    for hit in all_reranked_hits:
         if hit.product.product_id in seen_products:
             continue
         seen_products.add(hit.product.product_id)
@@ -303,7 +322,7 @@ async def _rerank_chunk_hits(criteria: CriteriaPayload, hits: list[ProductHit], 
             selected.append(hit)
             if len(selected) >= top_n:
                 break
-    return selected
+    return selected, all_reranked_hits
 
 
 def _chunk_document_text(hit: ProductHit) -> str:

@@ -21,7 +21,6 @@ from src.runtime.streaming import (
     run_with_heartbeat,
     start_stage_task,
 )
-from src.services.async_io import run_sync_io
 from src.services.audit import record_audit_event
 from src.services.cart import add_product_to_cart
 from src.services.conversation_state import get_previous_product_ids, save_recommendation_turn
@@ -84,11 +83,7 @@ async def handle_add_to_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body
-    product_id = (
-        intent.target_product_id
-        if intent.target_product_id
-        else await run_sync_io(_last_product_id, ctx.session_id)
-    )
+    product_id = intent.target_product_id if intent.target_product_id else await _last_product_id(ctx.session_id)
     if product_id is None:
         yield ctx.thinking("clarifying", "需要确认要加购的商品。")
         yield ClarificationEvent(
@@ -104,9 +99,8 @@ async def handle_add_to_cart(
         )
         yield ctx.done()
         return
-    await run_sync_io(add_product_to_cart, ctx.session_id, product_id)
-    await run_sync_io(
-        record_audit_event,
+    await add_product_to_cart(ctx.session_id, product_id)
+    await record_audit_event(
         "cart.item_added",
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -171,7 +165,7 @@ async def handle_recommendation(
 
     yield _criteria_card_event(ctx, criteria)
 
-    feedback = await run_sync_io(get_feedback_context, ctx.session_id)
+    feedback = await get_feedback_context(ctx.session_id)
     yield ctx.thinking("searching", "正在检索匹配商品...")
     retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
     ctx.ensure_active()
@@ -248,14 +242,12 @@ async def handle_recommendation(
 
 async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult) -> None:
     reason = intent.extracted_constraints.get("feedback_text", "feedback")
-    await run_sync_io(
-        record_feedback,
+    await record_feedback(
         ctx.session_id,
         action="feedback",
         reason=reason,
     )
-    await run_sync_io(
-        record_audit_event,
+    await record_audit_event(
         "feedback.created",
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -394,15 +386,13 @@ async def _persist_recommendation(
 ) -> None:
     products = retrieval.products
     evidences_by_product = retrieval.evidence_by_product
-    conversation_id = await run_sync_io(
-        save_recommendation_turn,
+    conversation_id = await save_recommendation_turn(
         ctx.session_id,
         criteria,
         [product.product_id for product in products],
         user_message=body.message,
     )
-    await run_sync_io(
-        record_retrieval_trace,
+    await record_retrieval_trace(
         criteria,
         products,
         evidences_by_product,
@@ -411,9 +401,8 @@ async def _persist_recommendation(
         fallback_events=get_fallback_events(),
         trace_details=retrieval.trace_details,
     )
-    await run_sync_io(record_evidence_links, products, evidences_by_product, conversation_id=conversation_id)
-    await run_sync_io(
-        record_audit_event,
+    await record_evidence_links(products, evidences_by_product, conversation_id=conversation_id)
+    await record_audit_event(
         "chat.recommendation_persisted",
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -439,8 +428,8 @@ def _reason_for_product(product: ProductPayload) -> str:
     return f"{product.category}下综合匹配度较高。"
 
 
-def _last_product_id(session_id: str) -> str | None:
-    last_ids = get_previous_product_ids(session_id)
+async def _last_product_id(session_id: str) -> str | None:
+    last_ids = await get_previous_product_ids(session_id)
     return last_ids[0] if last_ids else None
 
 

@@ -100,7 +100,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
         )
     )
 
-    cart = get_cart(session_id)
+    cart = await get_cart(session_id)
     report = {
         "check": "demo_smoke",
         "ok": all(item["ok"] for item in scenarios) and cart.total_items >= 1,

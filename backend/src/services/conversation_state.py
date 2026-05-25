@@ -18,7 +18,7 @@ _LAST_CRITERIA: dict[str, CriteriaPayload] = {}
 _LAST_PRODUCT_IDS: dict[str, list[str]] = {}
 
 
-def save_recommendation_turn(
+async def save_recommendation_turn(
     session_id: str,
     criteria: CriteriaPayload | None,
     product_ids: list[str],
@@ -27,7 +27,7 @@ def save_recommendation_turn(
     ai_response: str | None = None,
 ) -> str | None:
     try:
-        conversation_id = save_turn(
+        conversation_id = await save_turn(
             session_id,
             criteria,
             product_ids,
@@ -47,9 +47,9 @@ def save_recommendation_turn(
         return None
 
 
-def get_previous_criteria(session_id: str) -> CriteriaPayload | None:
+async def get_previous_criteria(session_id: str) -> CriteriaPayload | None:
     try:
-        criteria = get_last_criteria(session_id)
+        criteria = await get_last_criteria(session_id)
         if criteria is not None:
             if _memory_state_fallback_enabled():
                 _LAST_CRITERIA[session_id] = criteria.model_copy(deep=True)
@@ -64,9 +64,9 @@ def get_previous_criteria(session_id: str) -> CriteriaPayload | None:
     return None
 
 
-def get_previous_product_ids(session_id: str) -> list[str]:
+async def get_previous_product_ids(session_id: str) -> list[str]:
     try:
-        product_ids = get_last_product_ids(session_id)
+        product_ids = await get_last_product_ids(session_id)
         if product_ids:
             if _memory_state_fallback_enabled():
                 _LAST_PRODUCT_IDS[session_id] = list(product_ids)
@@ -85,14 +85,14 @@ def _memory_state_fallback_enabled() -> bool:
     return settings.allow_memory_state_fallback and not settings.strict_runtime
 
 
-def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
+async def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
     """Build a compact summary of recent conversation turns for LLM context.
 
     Returns an empty string when there is no history (first turn), so the
     prompt template variable renders as a no-op for single-turn use.
     """
     try:
-        turns = list_recent_turns(session_id, max_turns)
+        turns = await list_recent_turns(session_id, max_turns)
     except SQLAlchemyError:
         logger.exception("list_recent_turns DB read failed")
         record_fallback("conversation_state", "memory_fallback", operation="list_turns")

@@ -1,51 +1,64 @@
-"""Database engine helpers.
-
-The P0 runtime can use in-memory repositories, but these helpers keep the SQL
-entrypoint ready for PostgreSQL/pgvector wiring.
-"""
+"""Async database engine helpers."""
 
 from __future__ import annotations
 
 import threading
 
 from sqlalchemy import inspect, text
-from sqlalchemy.engine import Engine, make_url
-from sqlmodel import Session, SQLModel, create_engine
+from sqlalchemy.engine import Connection, make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.settings import get_settings
 from src.repos import models as _models  # noqa: F401  # register SQLModel tables
 
 _CREATE_TABLES_LOCK = threading.Lock()
 _CREATED_DATABASE_URLS: set[str] = set()
-_ENGINE_CACHE: tuple[str, Engine] | None = None
+_ASYNC_ENGINE_CACHE: tuple[str, AsyncEngine] | None = None
 
 
-def get_engine() -> Engine:
-    global _ENGINE_CACHE
+def get_async_engine() -> AsyncEngine:
+    global _ASYNC_ENGINE_CACHE
     database_url = get_settings().database_url
-    cached = _ENGINE_CACHE
+    cached = _ASYNC_ENGINE_CACHE
     if cached is None or cached[0] != database_url:
-        connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-        cached = (database_url, create_engine(database_url, connect_args=connect_args))
-        _ENGINE_CACHE = cached
+        async_url = async_database_url(database_url)
+        engine_kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": NullPool}
+        if not async_url.startswith("sqlite"):
+            engine_kwargs = {}
+        cached = (database_url, create_async_engine(async_url, **engine_kwargs))
+        _ASYNC_ENGINE_CACHE = cached
     return cached[1]
 
 
-def create_db_and_tables() -> None:
+async def create_db_and_tables() -> None:
     database_url = get_settings().database_url
     if database_url in _CREATED_DATABASE_URLS:
         return
     with _CREATE_TABLES_LOCK:
         if database_url in _CREATED_DATABASE_URLS:
             return
-        engine = get_engine()
-        if is_postgres_engine(engine):
-            ensure_pgvector_extension(engine)
-        SQLModel.metadata.create_all(engine)
-        ensure_model_columns(engine)
-        if is_postgres_engine(engine):
-            ensure_pgvector_indexes(engine)
+    engine = get_async_engine()
+    if is_postgres_engine(engine):
+        await ensure_pgvector_extension(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(_ensure_model_columns_sync)
+    if is_postgres_engine(engine):
+        await ensure_pgvector_indexes(engine)
+    with _CREATE_TABLES_LOCK:
         _CREATED_DATABASE_URLS.add(database_url)
+
+
+def async_database_url(database_url: str) -> str:
+    url = make_url(database_url)
+    backend = url.get_backend_name()
+    driver = url.get_driver_name()
+    if backend == "sqlite" and driver != "aiosqlite":
+        return database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+    return database_url
 
 
 def is_postgres_database_url(database_url: str | None = None) -> bool:
@@ -53,48 +66,50 @@ def is_postgres_database_url(database_url: str | None = None) -> bool:
     return url.get_backend_name() == "postgresql"
 
 
-def is_postgres_engine(engine: Engine) -> bool:
+def is_postgres_engine(engine: AsyncEngine) -> bool:
     return engine.dialect.name == "postgresql"
 
 
-def ensure_pgvector_extension(engine: Engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+async def ensure_pgvector_extension(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
-def drop_stale_pgvector_tables(engine: Engine | None = None) -> bool:
+async def drop_stale_pgvector_tables(engine: AsyncEngine | None = None) -> bool:
     """Drop derived chunk/evidence tables when an old JSON embedding column exists."""
 
-    engine = engine or get_engine()
+    engine = engine or get_async_engine()
     if not is_postgres_engine(engine):
         return False
 
-    with engine.begin() as conn:
+    async with engine.begin() as conn:
         row = (
-            conn.execute(
-                text(
-                    """
+            (
+                await conn.execute(
+                    text(
+                        """
                 SELECT udt_name
                 FROM information_schema.columns
                 WHERE table_schema = current_schema()
                   AND table_name = 'product_chunks'
                   AND column_name = 'embedding'
                 """
+                    )
                 )
             )
             .mappings()
             .first()
         )
         if row is not None and row["udt_name"] != "vector":
-            conn.execute(text("DROP TABLE IF EXISTS evidence_links"))
-            conn.execute(text("DROP TABLE IF EXISTS product_chunks"))
+            await conn.execute(text("DROP TABLE IF EXISTS evidence_links"))
+            await conn.execute(text("DROP TABLE IF EXISTS product_chunks"))
             return True
     return False
 
 
-def ensure_pgvector_indexes(engine: Engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(
+async def ensure_pgvector_indexes(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_product_chunks_embedding_hnsw "
                 "ON product_chunks USING hnsw (embedding vector_cosine_ops)"
@@ -102,72 +117,68 @@ def ensure_pgvector_indexes(engine: Engine) -> None:
         )
 
 
-def get_session():
-    with Session(get_engine()) as session:
+async def get_session():
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         yield session
 
 
-def migrate_eval_tables() -> None:
-    """Drop and recreate eval_runs and eval_samples tables.
+async def migrate_eval_tables() -> None:
+    """Drop and recreate eval_runs and eval_samples tables."""
 
-    Warning: This drops ALL existing eval data. Only call during schema changes
-    when tables are empty or data is expendable.
-    """
-    engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS eval_runs"))
-        conn.execute(text("DROP TABLE IF EXISTS eval_samples"))
-    SQLModel.metadata.create_all(engine)
+    engine = get_async_engine()
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP TABLE IF EXISTS eval_runs"))
+        await conn.execute(text("DROP TABLE IF EXISTS eval_samples"))
+        await conn.run_sync(SQLModel.metadata.create_all)
 
 
-def migrate_eval_runs_table() -> None:
+async def migrate_eval_runs_table() -> None:
     """Drop and recreate only the eval_runs table (preserves eval_samples)."""
-    engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS eval_runs"))
-    SQLModel.metadata.create_all(engine)
+
+    engine = get_async_engine()
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP TABLE IF EXISTS eval_runs"))
+        await conn.run_sync(SQLModel.metadata.create_all)
 
 
-def ensure_eval_schema() -> None:
+async def ensure_eval_schema() -> None:
     """Create eval tables, add current columns, and remove legacy sample columns."""
 
-    engine = get_engine()
-    SQLModel.metadata.create_all(engine)
-    for table_name in ("eval_runs", "eval_samples"):
-        _add_missing_columns(engine, table_name)
-    _drop_legacy_eval_sample_columns(engine)
+    engine = get_async_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+        for table_name in ("eval_runs", "eval_samples"):
+            await conn.run_sync(_add_missing_columns_sync, table_name)
+        await conn.run_sync(_drop_legacy_eval_sample_columns_sync)
 
 
-def ensure_model_columns(engine: Engine) -> None:
-    """Add nullable columns introduced after an existing dev DB was created."""
-
-    inspector = inspect(engine)
+def _ensure_model_columns_sync(conn: Connection) -> None:
+    inspector = inspect(conn)
     existing_tables = set(inspector.get_table_names())
     for table_name in SQLModel.metadata.tables:
         if table_name in existing_tables:
-            _add_missing_columns(engine, table_name)
+            _add_missing_columns_sync(conn, table_name)
 
 
-def _add_missing_columns(engine: Engine, table_name: str) -> None:
+def _add_missing_columns_sync(conn: Connection, table_name: str) -> None:
     table = SQLModel.metadata.tables[table_name]
-    inspector = inspect(engine)
+    inspector = inspect(conn)
     existing = {column["name"] for column in inspector.get_columns(table_name)}
-    preparer = engine.dialect.identifier_preparer
+    preparer = conn.dialect.identifier_preparer
     missing = [column for column in table.columns if column.name not in existing and not column.primary_key]
     if not missing:
         return
 
-    with engine.begin() as conn:
-        for column in missing:
-            column_type = column.type.compile(dialect=engine.dialect)
-            conn.execute(
-                text(f"ALTER TABLE {preparer.quote(table_name)} ADD COLUMN {preparer.quote(column.name)} {column_type}")
-            )
+    for column in missing:
+        column_type = column.type.compile(dialect=conn.dialect)
+        conn.execute(
+            text(f"ALTER TABLE {preparer.quote(table_name)} ADD COLUMN {preparer.quote(column.name)} {column_type}")
+        )
 
 
-def _drop_legacy_eval_sample_columns(engine: Engine) -> None:
+def _drop_legacy_eval_sample_columns_sync(conn: Connection) -> None:
     legacy_columns = {"must_have", "preferred", "forbidden"}
-    inspector = inspect(engine)
+    inspector = inspect(conn)
     if "eval_samples" not in set(inspector.get_table_names()):
         return
     existing = {column["name"] for column in inspector.get_columns("eval_samples")}
@@ -175,12 +186,6 @@ def _drop_legacy_eval_sample_columns(engine: Engine) -> None:
     if not to_drop:
         return
 
-    preparer = engine.dialect.identifier_preparer
-    with engine.begin() as conn:
-        for column_name in to_drop:
-            conn.execute(
-                text(
-                    f"ALTER TABLE {preparer.quote('eval_samples')} "
-                    f"DROP COLUMN {preparer.quote(column_name)}"
-                )
-            )
+    preparer = conn.dialect.identifier_preparer
+    for column_name in to_drop:
+        conn.execute(text(f"ALTER TABLE {preparer.quote('eval_samples')} DROP COLUMN {preparer.quote(column_name)}"))

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.settings import get_settings
-from src.repos.database import get_engine, is_postgres_engine
+from src.repos.database import get_async_engine, is_postgres_engine
 from src.repos.models import ProductChunk
 from src.repos.products import evidence_snippet
 from src.repos.vector import coerce_vector, vector_to_pg_literal
@@ -35,10 +37,10 @@ class VectorChunkHit:
     distance: float
 
 
-def list_embedded_chunks() -> list[ChunkDocument]:
+async def list_embedded_chunks() -> list[ChunkDocument]:
     try:
-        with Session(get_engine()) as session:
-            rows = session.exec(select(ProductChunk)).all()
+        async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+            rows = (await session.exec(select(ProductChunk))).all()
     except SQLAlchemyError:
         logger.exception("list_embedded_chunks failed")
         if get_settings().strict_runtime:
@@ -58,19 +60,20 @@ def list_embedded_chunks() -> list[ChunkDocument]:
     ]
 
 
-def list_vector_chunks_by_similarity(query_embedding: list[float], limit: int) -> list[VectorChunkHit]:
-    engine = get_engine()
+async def list_vector_chunks_by_similarity(query_embedding: list[float], limit: int) -> list[VectorChunkHit]:
+    engine = get_async_engine()
     if not is_postgres_engine(engine) or not query_embedding:
         if get_settings().strict_runtime:
             raise RuntimeError("Strict runtime requires PostgreSQL/pgvector for similarity search.")
         return []
 
     try:
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             rows = (
-                conn.execute(
-                    text(
-                        """
+                (
+                    await conn.execute(
+                        text(
+                            """
                     SELECT
                         id,
                         product_id,
@@ -85,8 +88,9 @@ def list_vector_chunks_by_similarity(query_embedding: list[float], limit: int) -
                     ORDER BY embedding <=> CAST(:query_embedding AS vector)
                     LIMIT :limit
                     """
-                    ),
-                    {"query_embedding": vector_to_pg_literal(query_embedding), "limit": limit},
+                        ),
+                        {"query_embedding": vector_to_pg_literal(query_embedding), "limit": limit},
+                    )
                 )
                 .mappings()
                 .all()
@@ -123,18 +127,20 @@ def evidence_for_chunk(chunk: ChunkDocument, max_chars: int = 180) -> EvidencePa
     )
 
 
-def evidence_for_product(product: ProductPayload) -> EvidencePayload:
-    chunk = _primary_evidence_chunk(product.product_id)
-    if chunk is not None:
-        return evidence_for_chunk(chunk)
+async def evidence_for_product(product: ProductPayload) -> list[EvidencePayload]:
+    chunks = await _evidence_chunks(product.product_id)
+    if chunks:
+        return [evidence_for_chunk(chunk) for chunk in chunks]
 
     dataset_snippet = evidence_snippet(product.product_id)
     if dataset_snippet:
-        return EvidencePayload(
-            source_type="product_chunk",
-            snippet=dataset_snippet,
-            source_id=f"chunk_{product.product_id}",
-        )
+        return [
+            EvidencePayload(
+                source_type="product_chunk",
+                snippet=dataset_snippet,
+                source_id=f"chunk_{product.product_id}",
+            )
+        ]
 
     parts = [
         product.name,
@@ -144,34 +150,56 @@ def evidence_for_product(product: ProductPayload) -> EvidencePayload:
         f"{product.price:g}元" if product.price is not None else "",
     ]
     snippet = "，".join(part for part in parts if part)
-    return EvidencePayload(
-        source_type="product_chunk",
-        snippet=snippet,
-        source_id=f"chunk_{product.product_id}",
-    )
+    return [
+        EvidencePayload(
+            source_type="product_chunk",
+            snippet=snippet,
+            source_id=f"chunk_{product.product_id}",
+        )
+    ]
 
 
-def _primary_evidence_chunk(product_id: str) -> ChunkDocument | None:
+_EVIDENCE_KIND_PRIORITY = ("why_buy", "faq", "risk", "compare")
+
+
+async def _evidence_chunks(product_id: str) -> list[ChunkDocument]:
     try:
-        with Session(get_engine()) as session:
-            rows = session.exec(
-                select(ProductChunk).where(ProductChunk.product_id == product_id).order_by(ProductChunk.chunk_index)
+        async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+            rows = (
+                await session.exec(
+                    select(ProductChunk).where(ProductChunk.product_id == product_id).order_by(ProductChunk.chunk_index)
+                )
             ).all()
     except SQLAlchemyError:
-        logger.exception("primary evidence chunk lookup failed")
+        logger.exception("evidence chunks lookup failed")
         if get_settings().strict_runtime:
             raise
-        return None
+        return []
 
     if not rows:
-        return None
+        return []
+
     preferred = [row for row in rows if (row.chunk_metadata or {}).get("retrieval_role") != "risk"]
-    row = (preferred or rows)[0]
-    return ChunkDocument(
-        id=row.id,
-        product_id=row.product_id,
-        chunk_text=row.chunk_text,
-        chunk_index=row.chunk_index,
-        embedding=row.embedding,
-        metadata=row.chunk_metadata,
-    )
+    candidates = preferred or rows
+
+    groups: dict[str, Any] = {}
+    for row in candidates:
+        kind = (row.chunk_metadata or {}).get("evidence_kind") or "other"
+        if kind not in groups:
+            groups[kind] = row
+
+    selected = [groups[kind] for kind in _EVIDENCE_KIND_PRIORITY if kind in groups]
+    if not selected:
+        selected = candidates[:1]
+
+    return [
+        ChunkDocument(
+            id=row.id,
+            product_id=row.product_id,
+            chunk_text=row.chunk_text,
+            chunk_index=row.chunk_index,
+            embedding=row.embedding,
+            metadata=row.chunk_metadata,
+        )
+        for row in selected
+    ]

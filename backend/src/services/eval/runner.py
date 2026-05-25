@@ -65,7 +65,7 @@ async def run_eval(
 
     Returns the aggregate_metrics dict for API consumption.
     """
-    samples = list_all()
+    samples = await list_all()
     if not samples:
         raise ValueError("No eval samples found. Seed the database first.")
 
@@ -168,7 +168,7 @@ async def run_eval(
 
     aggregate = _aggregate(sample_results)
     run_name = run_name or f"eval_{strategy_tag}_{uuid.uuid4().hex[:6]}"
-    save_run(
+    await save_run(
         run_name=run_name,
         strategy_tag=strategy_tag,
         aggregate_metrics=aggregate,

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.database import ensure_eval_schema, get_engine
+from src.repos.database import ensure_eval_schema, get_async_engine
 from src.repos.models import EvalRun
 
 
-def save_run(
+async def save_run(
     run_name: str,
     strategy_tag: str,
     aggregate_metrics: dict[str, Any],
@@ -20,7 +21,7 @@ def save_run(
     git_commit: str | None = None,
 ) -> EvalRun:
     """Persist a completed eval run to the database."""
-    ensure_eval_schema()
+    await ensure_eval_schema()
     run = EvalRun(
         run_name=run_name,
         strategy_tag=strategy_tag,
@@ -30,22 +31,22 @@ def save_run(
         samples_detail=samples_detail,
         sample_count=sample_count,
     )
-    with Session(get_engine()) as session:
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         session.add(run)
-        session.commit()
-        session.refresh(run)
+        await session.commit()
+        await session.refresh(run)
         return run
 
 
-def list_all(limit: int = 50) -> list[EvalRun]:
+async def list_all(limit: int = 50) -> list[EvalRun]:
     """Return recent eval runs, newest first."""
-    ensure_eval_schema()
-    with Session(get_engine()) as session:
-        return list(session.exec(select(EvalRun).order_by(EvalRun.created_at.desc()).limit(limit)).all())
+    await ensure_eval_schema()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return list((await session.exec(select(EvalRun).order_by(EvalRun.created_at.desc()).limit(limit))).all())
 
 
-def get_by_id(run_id: str) -> EvalRun | None:
+async def get_by_id(run_id: str) -> EvalRun | None:
     """Get a single eval run by its id."""
-    ensure_eval_schema()
-    with Session(get_engine()) as session:
-        return session.get(EvalRun, run_id)
+    await ensure_eval_schema()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return await session.get(EvalRun, run_id)

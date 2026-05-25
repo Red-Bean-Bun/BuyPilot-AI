@@ -9,7 +9,6 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, Generic, Mapping, P
 
 from src.runtime.cancel_registry import CancellationToken
 from src.runtime.stages.recommendation import RetrievalResult
-from src.services.async_io import run_sync_io
 from src.services.cancellation import is_chat_turn_cancellation_requested
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
@@ -51,10 +50,17 @@ class StageBundle(Protocol):
     @property
     def run_recommendation_text(
         self,
-    ) -> Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[RecommendationResult]]: ...
+    ) -> Callable[
+        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None],
+        Awaitable[RecommendationResult],
+    ]: ...
 
     @property
-    def run_decision(self) -> Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]]: ...
+    def run_decision(
+        self,
+    ) -> Callable[
+        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]
+    ]: ...
 
 
 @dataclass(frozen=True)
@@ -175,7 +181,7 @@ def cancel_background_tasks(timed_tasks: list[TimedTask[Any]]) -> None:
 
 async def ensure_active(ctx: StreamContext) -> None:
     ctx.ensure_active()
-    if await run_sync_io(is_chat_turn_cancellation_requested, ctx.session_id, ctx.turn_id):
+    if await is_chat_turn_cancellation_requested(ctx.session_id, ctx.turn_id):
         ctx.cancel_token.cancel()
     ctx.ensure_active()
 

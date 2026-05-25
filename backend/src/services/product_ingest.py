@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from typing import Callable
 
 from sqlalchemy import delete, func
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.database import create_db_and_tables, get_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import Product, ProductChunk
 from src.repos.products import list_raw_products
 from src.services.chunking import build_product_chunks, build_product_knowledge_package
@@ -29,21 +30,21 @@ class ChunkSeedRow:
     metadata: dict
 
 
-def seed_products(
+async def seed_products(
     expected_embedding_dimensions: int | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict[str, int]:
-    create_db_and_tables()
+    await create_db_and_tables()
     products = list_raw_products()
     chunk_rows = _build_chunk_rows(products)
-    embeddings = _embed_chunks(chunk_rows, expected_dimensions=expected_embedding_dimensions, progress=progress)
+    embeddings = await _embed_chunks(chunk_rows, expected_dimensions=expected_embedding_dimensions, progress=progress)
 
-    with Session(get_engine()) as session:
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         for raw in products:
             product_id = str(raw["product_id"])
             knowledge_package = build_product_knowledge_package(raw)
-            session.execute(delete(ProductChunk).where(ProductChunk.product_id == product_id))
-            session.merge(
+            await session.exec(delete(ProductChunk).where(ProductChunk.product_id == product_id))
+            await session.merge(
                 Product(
                     id=product_id,
                     name=str(raw["title"]),
@@ -71,25 +72,25 @@ def seed_products(
                     chunk_metadata=row.metadata,
                 )
             )
-        session.commit()
+        await session.commit()
 
     return {"products": len(products), "chunks": len(chunk_rows)}
 
 
-def reindex_chunk_embeddings(progress: ProgressCallback | None = None) -> dict[str, int]:
+async def reindex_chunk_embeddings(progress: ProgressCallback | None = None) -> dict[str, int]:
     """Rebuild product chunks and embeddings from the raw dataset."""
-    result = seed_products(expected_embedding_dimensions=EXPECTED_EMBEDDING_DIMENSIONS, progress=progress)
-    stats = chunk_embedding_stats()
+    result = await seed_products(expected_embedding_dimensions=EXPECTED_EMBEDDING_DIMENSIONS, progress=progress)
+    stats = await chunk_embedding_stats()
     return {**result, **stats}
 
 
-def seed_products_if_needed(expected_embedding_dimensions: int | None = None) -> dict[str, int | bool]:
+async def seed_products_if_needed(expected_embedding_dimensions: int | None = None) -> dict[str, int | bool]:
     """Seed product/chunk tables only when the current database is empty or stale."""
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        product_count = session.exec(select(func.count(Product.id))).one()
-        chunk_count = session.exec(select(func.count(ProductChunk.id))).one()
-        chunks = session.exec(select(ProductChunk.embedding)).all()
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        product_count = (await session.exec(select(func.count(Product.id)))).one()
+        chunk_count = (await session.exec(select(func.count(ProductChunk.id)))).one()
+        chunks = (await session.exec(select(ProductChunk.embedding))).all()
 
     dimensions = {len(embedding) for embedding in chunks if embedding}
     current_dimensions = dimensions.pop() if len(dimensions) == 1 else 0
@@ -103,15 +104,15 @@ def seed_products_if_needed(expected_embedding_dimensions: int | None = None) ->
             "embedding_dimensions": current_dimensions,
         }
 
-    result = seed_products(expected_embedding_dimensions=expected_embedding_dimensions)
-    stats = chunk_embedding_stats()
+    result = await seed_products(expected_embedding_dimensions=expected_embedding_dimensions)
+    stats = await chunk_embedding_stats()
     return {"seeded": True, **result, **stats}
 
 
-def chunk_embedding_stats() -> dict[str, int]:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        chunks = session.exec(select(ProductChunk)).all()
+async def chunk_embedding_stats() -> dict[str, int]:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        chunks = (await session.exec(select(ProductChunk))).all()
     dimensions = {len(chunk.embedding) for chunk in chunks if chunk.embedding}
     return {
         "embedded_chunks": sum(1 for chunk in chunks if chunk.embedding),
@@ -135,30 +136,27 @@ def _build_chunk_rows(products: list[dict]) -> list[ChunkSeedRow]:
     return rows
 
 
-def _embed_chunks(
+async def _embed_chunks(
     rows: list[ChunkSeedRow],
     batch_size: int = 10,
     expected_dimensions: int | None = None,
     progress: ProgressCallback | None = None,
 ) -> list[list[float]]:
-    async def run_batches() -> list[list[float]]:
-        vectors: list[list[float]] = []
-        for start in range(0, len(rows), batch_size):
-            batch = rows[start : start + batch_size]
-            batch_vectors = await embed_texts([row.chunk_text for row in batch])
-            if expected_dimensions is not None:
-                for vector in batch_vectors:
-                    if len(vector) != expected_dimensions:
-                        raise RuntimeError(
-                            f"Embedding dimension mismatch: expected {expected_dimensions}, got {len(vector)}"
-                        )
-            vectors.extend(batch_vectors)
-            if progress is not None:
-                progress(len(vectors), len(rows))
-        return vectors
-
-    return asyncio.run(run_batches())
+    vectors: list[list[float]] = []
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start : start + batch_size]
+        batch_vectors = await embed_texts([row.chunk_text for row in batch])
+        if expected_dimensions is not None:
+            for vector in batch_vectors:
+                if len(vector) != expected_dimensions:
+                    raise RuntimeError(
+                        f"Embedding dimension mismatch: expected {expected_dimensions}, got {len(vector)}"
+                    )
+        vectors.extend(batch_vectors)
+        if progress is not None:
+            progress(len(vectors), len(rows))
+    return vectors
 
 
 if __name__ == "__main__":
-    print(seed_products())
+    print(asyncio.run(seed_products()))

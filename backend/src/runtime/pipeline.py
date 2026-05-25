@@ -18,13 +18,21 @@ from src.runtime.stages.recommendation import run_recommendation_text, run_retri
 from src.runtime.stages.slot_checker import check_required_slots
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
-from src.services.async_io import run_sync_io
 from src.services.cancellation import clear_chat_turn, register_chat_turn
 from src.services.conversation_state import save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
-from src.types.sse_events import Constraints, CriteriaPayload, ErrorEvent, EventSeq, EvidencePayload, ProductPayload, SSEEventBase, now_ms
+from src.types.sse_events import (
+    Constraints,
+    CriteriaPayload,
+    ErrorEvent,
+    EventSeq,
+    EvidencePayload,
+    ProductPayload,
+    SSEEventBase,
+    now_ms,
+)
 
 HEARTBEAT_INTERVAL_SECONDS = 0.8
 PUBLIC_PIPELINE_ERROR_MESSAGE = "本轮导购处理失败，请稍后重试。"
@@ -38,8 +46,13 @@ class PipelineStages:
     run_intent: Callable[[str, ChatStreamRequest], Awaitable[IntentResult]]
     run_criteria: Callable[[str, ChatStreamRequest, IntentResult], Awaitable[CriteriaPayload]]
     run_retrieval: RunRetrieval
-    run_recommendation_text: Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[RecommendationResult]]
-    run_decision: Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]]
+    run_recommendation_text: Callable[
+        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None],
+        Awaitable[RecommendationResult],
+    ]
+    run_decision: Callable[
+        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]
+    ]
 
 
 async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerator[SSEEventBase, None]:
@@ -58,9 +71,8 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
     )
 
     try:
-        await run_sync_io(register_chat_turn, session_id, turn_id, trace_id=body.client_trace_id)
-        await run_sync_io(
-            record_audit_event,
+        await register_chat_turn(session_id, turn_id, trace_id=body.client_trace_id)
+        await record_audit_event(
             "chat.turn_started",
             session_id=session_id,
             turn_id=turn_id,
@@ -71,8 +83,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
         )
         async for event in _run_chat_turn(ctx, body):
             yield event
-        await run_sync_io(
-            record_audit_event,
+        await record_audit_event(
             "chat.turn_completed",
             session_id=session_id,
             turn_id=turn_id,
@@ -83,8 +94,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
         )
     except StreamCancelled:
         cancel_background_tasks(ctx.background_tasks)
-        await run_sync_io(
-            record_audit_event,
+        await record_audit_event(
             "chat.turn_cancelled",
             session_id=session_id,
             turn_id=turn_id,
@@ -97,8 +107,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
     except Exception as exc:
         cancel_background_tasks(ctx.background_tasks)
         logger.exception("chat_stream failed: session_id=%s turn_id=%s", session_id, turn_id)
-        await run_sync_io(
-            record_audit_event,
+        await record_audit_event(
             "chat.turn_failed",
             session_id=session_id,
             turn_id=turn_id,
@@ -120,7 +129,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
         )
         yield ctx.done()
     finally:
-        await run_sync_io(clear_chat_turn, session_id, turn_id)
+        await clear_chat_turn(session_id, turn_id)
         unregister_turn(session_id, turn_id)
 
 
@@ -165,7 +174,7 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
         async for event in handle_clarification(ctx, missing_slots):
             yield event
         partial = _intent_to_partial_criteria(intent, pipeline_body.message)
-        await run_sync_io(save_recommendation_turn, ctx.session_id, partial, [], user_message=pipeline_body.message)
+        await save_recommendation_turn(ctx.session_id, partial, [], user_message=pipeline_body.message)
         return
 
     handler = INTENT_HANDLERS.get(intent.intent, handle_recommendation)

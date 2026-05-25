@@ -13,7 +13,7 @@ from src.repos.audit import (
 from src.services.request_context import get_request_context
 
 
-def record_api_request(
+async def record_api_request(
     *,
     method: str,
     path: str,
@@ -26,7 +26,7 @@ def record_api_request(
 ) -> str | None:
     context = get_request_context()
     request_id = context.request_id if context else ""
-    return insert_api_request_log(
+    return await insert_api_request_log(
         request_id=request_id,
         trace_id=context.trace_id if context else None,
         session_id=context.session_id if context else None,
@@ -42,7 +42,7 @@ def record_api_request(
     )
 
 
-def record_audit_event(
+async def record_audit_event(
     action: str,
     *,
     session_id: str | None = None,
@@ -57,7 +57,7 @@ def record_audit_event(
     metadata: dict[str, Any] | None = None,
 ) -> str | None:
     context = get_request_context()
-    return insert_audit_event(
+    return await insert_audit_event(
         action=action,
         request_id=context.request_id if context else None,
         trace_id=trace_id or (context.trace_id if context else None),
@@ -111,9 +111,9 @@ def audit_event_payload(row) -> dict[str, Any]:
     }
 
 
-def list_request_log_payloads(**filters: Any) -> list[dict[str, Any]]:
-    return [api_request_log_payload(row) for row in list_api_request_logs(**filters)]
+async def list_request_log_payloads(**filters: Any) -> list[dict[str, Any]]:
+    return [api_request_log_payload(row) for row in await list_api_request_logs(**filters)]
 
 
-def list_audit_event_payloads(**filters: Any) -> list[dict[str, Any]]:
-    return [audit_event_payload(row) for row in list_audit_events(**filters)]
+async def list_audit_event_payloads(**filters: Any) -> list[dict[str, Any]]:
+    return [audit_event_payload(row) for row in await list_audit_events(**filters)]

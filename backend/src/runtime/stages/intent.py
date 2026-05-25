@@ -8,7 +8,7 @@ from src.types.schemas import ChatStreamRequest, IntentResult
 
 
 async def run_intent(session_id: str, body: ChatStreamRequest) -> IntentResult:
-    ctx_summary = get_conversation_summary(session_id)
+    ctx_summary = await get_conversation_summary(session_id)
     return await analyze_intent(
         body.message,
         history=[item.model_dump() for item in body.history],

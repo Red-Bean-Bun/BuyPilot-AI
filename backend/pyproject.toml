@@ -17,6 +17,7 @@ dependencies = [
     "httpx[socks]>=0.27.0",
     "openai>=1.55.0",
     "numpy>=2.1.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [project.optional-dependencies]

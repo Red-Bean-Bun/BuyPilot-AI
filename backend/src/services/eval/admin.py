@@ -7,8 +7,8 @@ from src.repos.eval_runs import get_by_id, list_all
 from src.repos.eval_samples import list_all as list_all_samples, seed_from_json
 
 
-def list_eval_runs(limit: int = 20) -> list[dict]:
-    runs = list_all(limit=limit)
+async def list_eval_runs(limit: int = 20) -> list[dict]:
+    runs = await list_all(limit=limit)
     return [
         {
             "id": run.id,
@@ -24,8 +24,8 @@ def list_eval_runs(limit: int = 20) -> list[dict]:
     ]
 
 
-def get_eval_run(run_id: str) -> dict:
-    run = get_by_id(run_id)
+async def get_eval_run(run_id: str) -> dict:
+    run = await get_by_id(run_id)
     if not run:
         return {"error": "not_found", "run_id": run_id}
     return {
@@ -41,8 +41,8 @@ def get_eval_run(run_id: str) -> dict:
     }
 
 
-def list_eval_samples() -> list[dict]:
-    samples = list_all_samples()
+async def list_eval_samples() -> list[dict]:
+    samples = await list_all_samples()
     return [
         {
             "id": sample.id,
@@ -56,7 +56,7 @@ def list_eval_samples() -> list[dict]:
     ]
 
 
-def seed_eval_samples() -> dict[str, int | str]:
+async def seed_eval_samples() -> dict[str, int | str]:
     json_path = PROJECT_DIR / "data" / "eval" / "eval_samples.json"
-    count = seed_from_json(str(json_path))
+    count = await seed_from_json(str(json_path))
     return {"status": "ok", "count": count}

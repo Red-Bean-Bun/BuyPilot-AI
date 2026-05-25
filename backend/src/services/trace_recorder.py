@@ -8,7 +8,7 @@ from src.repos.traces import write_evidence_links, write_retrieval_trace
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 
-def record_retrieval_trace(
+async def record_retrieval_trace(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidences_by_product: dict[str, list[EvidencePayload]],
@@ -17,7 +17,7 @@ def record_retrieval_trace(
     fallback_events: list[dict[str, Any]] | None = None,
     trace_details: dict[str, Any] | None = None,
 ) -> str | None:
-    return write_retrieval_trace(
+    return await write_retrieval_trace(
         criteria,
         products,
         evidences_by_product,
@@ -28,13 +28,13 @@ def record_retrieval_trace(
     )
 
 
-def record_evidence_links(
+async def record_evidence_links(
     products: list[ProductPayload],
     evidences_by_product: dict[str, list[EvidencePayload]],
     conversation_id: str | None = None,
     cited_in: str = "product_card",
 ) -> int:
-    return write_evidence_links(
+    return await write_evidence_links(
         products,
         evidences_by_product,
         conversation_id=conversation_id,

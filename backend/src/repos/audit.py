@@ -6,15 +6,16 @@ import logging
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.database import create_db_and_tables, get_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import ApiRequestLog, AuditEvent
 
 logger = logging.getLogger(__name__)
 
 
-def insert_api_request_log(
+async def insert_api_request_log(
     *,
     request_id: str,
     method: str,
@@ -29,7 +30,7 @@ def insert_api_request_log(
     error_code: str | None = None,
     error_type: str | None = None,
 ) -> str | None:
-    create_db_and_tables()
+    await create_db_and_tables()
     row = ApiRequestLog(
         request_id=request_id,
         trace_id=trace_id,
@@ -45,17 +46,17 @@ def insert_api_request_log(
         error_type=error_type,
     )
     try:
-        with Session(get_engine()) as session:
+        async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
             session.add(row)
-            session.commit()
-            session.refresh(row)
+            await session.commit()
+            await session.refresh(row)
             return row.id
     except SQLAlchemyError:
         logger.exception("insert_api_request_log failed")
         return None
 
 
-def insert_audit_event(
+async def insert_audit_event(
     *,
     action: str,
     request_id: str | None = None,
@@ -70,7 +71,7 @@ def insert_audit_event(
     after_json: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> str | None:
-    create_db_and_tables()
+    await create_db_and_tables()
     row = AuditEvent(
         request_id=request_id,
         trace_id=trace_id,
@@ -86,24 +87,24 @@ def insert_audit_event(
         audit_metadata=metadata or {},
     )
     try:
-        with Session(get_engine()) as session:
+        async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
             session.add(row)
-            session.commit()
-            session.refresh(row)
+            await session.commit()
+            await session.refresh(row)
             return row.id
     except SQLAlchemyError:
         logger.exception("insert_audit_event failed")
         return None
 
 
-def list_api_request_logs(
+async def list_api_request_logs(
     *,
     trace_id: str | None = None,
     session_id: str | None = None,
     turn_id: str | None = None,
     limit: int = 50,
 ) -> list[ApiRequestLog]:
-    create_db_and_tables()
+    await create_db_and_tables()
     statement = select(ApiRequestLog)
     if trace_id:
         statement = statement.where(ApiRequestLog.trace_id == trace_id)
@@ -112,11 +113,11 @@ def list_api_request_logs(
     if turn_id:
         statement = statement.where(ApiRequestLog.turn_id == turn_id)
     statement = statement.order_by(ApiRequestLog.created_at.desc()).limit(limit)
-    with Session(get_engine()) as session:
-        return list(session.exec(statement).all())
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return list((await session.exec(statement)).all())
 
 
-def list_audit_events(
+async def list_audit_events(
     *,
     trace_id: str | None = None,
     session_id: str | None = None,
@@ -124,7 +125,7 @@ def list_audit_events(
     action: str | None = None,
     limit: int = 50,
 ) -> list[AuditEvent]:
-    create_db_and_tables()
+    await create_db_and_tables()
     statement = select(AuditEvent)
     if trace_id:
         statement = statement.where(AuditEvent.trace_id == trace_id)
@@ -135,5 +136,5 @@ def list_audit_events(
     if action:
         statement = statement.where(AuditEvent.action == action)
     statement = statement.order_by(AuditEvent.created_at.desc()).limit(limit)
-    with Session(get_engine()) as session:
-        return list(session.exec(statement).all())
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return list((await session.exec(statement)).all())

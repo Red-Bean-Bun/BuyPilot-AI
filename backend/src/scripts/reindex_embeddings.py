@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import argparse
+import asyncio
 
 from src.repos.database import drop_stale_pgvector_tables
 from src.services.product_ingest import reindex_chunk_embeddings
@@ -34,8 +35,12 @@ def main() -> None:
         help="Explicitly drop stale product_chunks/evidence_links when migrating old pgvector schemas.",
     )
     args = parser.parse_args()
-    dropped = drop_stale_pgvector_tables() if args.drop_derived_tables else False
-    stats = reindex_chunk_embeddings(progress=_print_progress)
+    asyncio.run(_run_reindex(drop_derived_tables=args.drop_derived_tables))
+
+
+async def _run_reindex(*, drop_derived_tables: bool) -> None:
+    dropped = await drop_stale_pgvector_tables() if drop_derived_tables else False
+    stats = await reindex_chunk_embeddings(progress=_print_progress)
     ok = (
         stats["chunks"] > 0
         and stats["embedded_chunks"] == stats["chunks"]

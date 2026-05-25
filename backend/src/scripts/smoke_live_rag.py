@@ -18,7 +18,15 @@ from src.types.schemas import ChatStreamRequest
 EXPECTED_EMBEDDING_DIMENSIONS = 1024
 
 
-async def run_async_checks() -> None:
+async def run_checks() -> None:
+    index_stats = await chunk_embedding_stats()
+    index_ok = (
+        index_stats["embedded_chunks"] > 0 and index_stats["embedding_dimensions"] == EXPECTED_EMBEDDING_DIMENSIONS
+    )
+    print(json.dumps({"check": "embedding_index", "ok": index_ok, **index_stats}, ensure_ascii=False))
+    if not index_ok:
+        sys.exit(1)
+
     vector = await embed_text("油皮洗面奶 200元以内 日常护肤")
     embedding_ok = len(vector) == EXPECTED_EMBEDDING_DIMENSIONS
     print(
@@ -57,14 +65,7 @@ async def run_async_checks() -> None:
 
 
 def main() -> None:
-    index_stats = chunk_embedding_stats()
-    index_ok = (
-        index_stats["embedded_chunks"] > 0 and index_stats["embedding_dimensions"] == EXPECTED_EMBEDDING_DIMENSIONS
-    )
-    print(json.dumps({"check": "embedding_index", "ok": index_ok, **index_stats}, ensure_ascii=False))
-    if not index_ok:
-        sys.exit(1)
-    asyncio.run(run_async_checks())
+    asyncio.run(run_checks())
 
 
 if __name__ == "__main__":

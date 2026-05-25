@@ -2,77 +2,90 @@
 
 from __future__ import annotations
 
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.database import create_db_and_tables, get_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import ActiveChatTurn, ChatTurnCancellation
 
 
-def register_active_turn(session_id: str, turn_id: str, trace_id: str | None = None) -> None:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        _delete_active_turns(session, session_id, turn_id)
-        _delete_cancellation_requests(session, session_id, turn_id)
+async def register_active_turn(session_id: str, turn_id: str, trace_id: str | None = None) -> None:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        await _delete_active_turns(session, session_id, turn_id)
+        await _delete_cancellation_requests(session, session_id, turn_id)
         session.add(ActiveChatTurn(session_id=session_id, turn_id=turn_id, trace_id=trace_id))
-        session.commit()
+        await session.commit()
 
 
-def clear_active_turn(session_id: str, turn_id: str) -> None:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        _delete_active_turns(session, session_id, turn_id)
-        _delete_cancellation_requests(session, session_id, turn_id)
-        session.commit()
+async def clear_active_turn(session_id: str, turn_id: str) -> None:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        await _delete_active_turns(session, session_id, turn_id)
+        await _delete_cancellation_requests(session, session_id, turn_id)
+        await session.commit()
 
 
-def request_turn_cancellation(session_id: str, turn_id: str) -> bool:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        active = session.exec(
-            select(ActiveChatTurn)
-            .where(ActiveChatTurn.session_id == session_id)
-            .where(ActiveChatTurn.turn_id == turn_id)
-            .limit(1)
+async def request_turn_cancellation(session_id: str, turn_id: str) -> bool:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        active = (
+            await session.exec(
+                select(ActiveChatTurn)
+                .where(ActiveChatTurn.session_id == session_id)
+                .where(ActiveChatTurn.turn_id == turn_id)
+                .limit(1)
+            )
         ).first()
         if active is None:
             return False
-        existing = session.exec(
-            select(ChatTurnCancellation)
-            .where(ChatTurnCancellation.session_id == session_id)
-            .where(ChatTurnCancellation.turn_id == turn_id)
-            .limit(1)
+        existing = (
+            await session.exec(
+                select(ChatTurnCancellation)
+                .where(ChatTurnCancellation.session_id == session_id)
+                .where(ChatTurnCancellation.turn_id == turn_id)
+                .limit(1)
+            )
         ).first()
         if existing is None:
             session.add(ChatTurnCancellation(session_id=session_id, turn_id=turn_id))
-            session.commit()
+            await session.commit()
     return True
 
 
-def cancellation_requested(session_id: str, turn_id: str) -> bool:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        row = session.exec(
-            select(ChatTurnCancellation)
-            .where(ChatTurnCancellation.session_id == session_id)
-            .where(ChatTurnCancellation.turn_id == turn_id)
-            .limit(1)
+async def cancellation_requested(session_id: str, turn_id: str) -> bool:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        row = (
+            await session.exec(
+                select(ChatTurnCancellation)
+                .where(ChatTurnCancellation.session_id == session_id)
+                .where(ChatTurnCancellation.turn_id == turn_id)
+                .limit(1)
+            )
         ).first()
     return row is not None
 
 
-def _delete_active_turns(session: Session, session_id: str, turn_id: str) -> None:
-    rows = session.exec(
-        select(ActiveChatTurn).where(ActiveChatTurn.session_id == session_id).where(ActiveChatTurn.turn_id == turn_id)
+async def _delete_active_turns(session: AsyncSession, session_id: str, turn_id: str) -> None:
+    rows = (
+        await session.exec(
+            select(ActiveChatTurn)
+            .where(ActiveChatTurn.session_id == session_id)
+            .where(ActiveChatTurn.turn_id == turn_id)
+        )
     ).all()
     for row in rows:
-        session.delete(row)
+        await session.delete(row)
 
 
-def _delete_cancellation_requests(session: Session, session_id: str, turn_id: str) -> None:
-    rows = session.exec(
-        select(ChatTurnCancellation)
-        .where(ChatTurnCancellation.session_id == session_id)
-        .where(ChatTurnCancellation.turn_id == turn_id)
+async def _delete_cancellation_requests(session: AsyncSession, session_id: str, turn_id: str) -> None:
+    rows = (
+        await session.exec(
+            select(ChatTurnCancellation)
+            .where(ChatTurnCancellation.session_id == session_id)
+            .where(ChatTurnCancellation.turn_id == turn_id)
+        )
     ).all()
     for row in rows:
-        session.delete(row)
+        await session.delete(row)

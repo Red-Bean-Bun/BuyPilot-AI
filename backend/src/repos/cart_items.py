@@ -2,37 +2,45 @@
 
 from __future__ import annotations
 
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.database import create_db_and_tables, get_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import CartItem
 from src.repos.products import get_product
 from src.types.schemas import CartItemPayload, CartResponse
 
 
-def add_to_cart(session_id: str, product_id: str, quantity: int = 1) -> CartItemPayload:
+async def add_to_cart(session_id: str, product_id: str, quantity: int = 1) -> CartItemPayload:
     if quantity <= 0:
         quantity = 1
 
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        row = session.exec(
-            select(CartItem).where(CartItem.session_id == session_id).where(CartItem.product_id == product_id).limit(1)
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        row = (
+            await session.exec(
+                select(CartItem)
+                .where(CartItem.session_id == session_id)
+                .where(CartItem.product_id == product_id)
+                .limit(1)
+            )
         ).first()
         if row:
             row.quantity += quantity
         else:
             row = CartItem(session_id=session_id, product_id=product_id, quantity=quantity)
             session.add(row)
-        session.commit()
-        session.refresh(row)
+        await session.commit()
+        await session.refresh(row)
         return _payload_from_row(row)
 
 
-def get_cart(session_id: str) -> CartResponse:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        rows = session.exec(select(CartItem).where(CartItem.session_id == session_id).order_by(CartItem.added_at)).all()
+async def get_cart(session_id: str) -> CartResponse:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        rows = (
+            await session.exec(select(CartItem).where(CartItem.session_id == session_id).order_by(CartItem.added_at))
+        ).all()
     return _cart_response([_payload_from_row(row) for row in rows])
 
 

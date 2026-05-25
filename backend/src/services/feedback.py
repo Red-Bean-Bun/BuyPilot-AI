@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 _FEEDBACKS: list[FeedbackRecord] = []
 
 
-def submit_feedback_request(body: FeedbackRequest) -> FeedbackResponse:
+async def submit_feedback_request(body: FeedbackRequest) -> FeedbackResponse:
     action = body.feedback_type or body.action or "feedback"
-    record_feedback(body.session_id, action=action, product_id=body.product_id, reason=body.reason)
+    await record_feedback(body.session_id, action=action, product_id=body.product_id, reason=body.reason)
     return FeedbackResponse(session_id=body.session_id, feedback_type=body.feedback_type, action=body.action)
 
 
-def record_feedback(
+async def record_feedback(
     session_id: str,
     action: str,
     product_id: str | None = None,
@@ -30,7 +30,7 @@ def record_feedback(
 ) -> None:
     record = FeedbackRecord(session_id=session_id, action=action, product_id=product_id, reason=reason)
     try:
-        add_feedback(session_id, action=action, product_id=product_id, reason=reason)
+        await add_feedback(session_id, action=action, product_id=product_id, reason=reason)
         if _memory_state_fallback_enabled():
             _FEEDBACKS.append(record)
     except SQLAlchemyError:
@@ -41,9 +41,9 @@ def record_feedback(
         record_fallback("feedback", "explicit_dev_memory_fallback", operation="add")
 
 
-def get_feedback_context(session_id: str) -> dict[str, list[str]]:
+async def get_feedback_context(session_id: str) -> dict[str, list[str]]:
     try:
-        return extract_feedback_from_session(session_id)
+        return await extract_feedback_from_session(session_id)
     except SQLAlchemyError:
         logger.exception("get_session_feedbacks DB read failed")
         if not _memory_state_fallback_enabled():

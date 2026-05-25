@@ -13,11 +13,11 @@ from src.types.sse_events import Constraints, CriteriaPayload, QuickActionPayloa
 
 
 async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentResult) -> CriteriaPayload:
-    existing = get_previous_criteria(session_id)
+    existing = await get_previous_criteria(session_id)
     if body.criteria_patch:
         return apply_criteria_patch(existing or CriteriaPayload(criteria_id="c_auto_001"), body.criteria_patch)
-    feedback = get_feedback_context(session_id)
-    ctx_summary = get_conversation_summary(session_id)
+    feedback = await get_feedback_context(session_id)
+    ctx_summary = await get_conversation_summary(session_id)
     return await generate_criteria(
         body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
     )
@@ -28,7 +28,18 @@ def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> Cr
     allowed = set(Constraints.model_fields)
     updates = {key: value for key, value in raw_constraints.items() if key in allowed}
     constraints = criteria.constraints.model_copy(update=updates)
-    chips = [criteria.category] if criteria.category else []
+
+    old_constraint_chips = set(_constraint_chips(criteria.constraints))
+    chips = [c for c in criteria.chips if c not in old_constraint_chips and c != criteria.category]
+    if criteria.category:
+        chips.insert(0, criteria.category)
+    chips.extend(_constraint_chips(constraints))
+
+    return criteria.model_copy(update={"constraints": constraints, "chips": chips, "summary": "，".join(chips)})
+
+
+def _constraint_chips(constraints: Constraints) -> list[str]:
+    chips: list[str] = []
     if constraints.skin_type:
         chips.append(f"{constraints.skin_type}肌肤")
     if constraints.budget_max is not None:
@@ -43,7 +54,7 @@ def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> Cr
         chips.append(f"不要{item}")
     if constraints.product_type:
         chips.append(constraints.product_type)
-    return criteria.model_copy(update={"constraints": constraints, "chips": chips, "summary": "，".join(chips)})
+    return chips
 
 
 def criteria_quick_actions() -> list[QuickActionPayload]:

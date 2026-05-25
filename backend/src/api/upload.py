@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from src.services.async_io import run_sync_io
 from src.services.audit import record_audit_event
 from src.services.image_upload import (
     MAX_IMAGE_BYTES,
@@ -39,13 +38,15 @@ async def handle_upload_image(request: Request) -> ImageUploadResponse:
     if not content_type.startswith("multipart/form-data"):
         raise HTTPException(
             status_code=415,
-            detail={"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Only multipart/form-data image uploads are supported."},
+            detail={
+                "code": "UNSUPPORTED_MEDIA_TYPE",
+                "message": "Only multipart/form-data image uploads are supported.",
+            },
         )
     try:
         parsed = parse_multipart_image(await request.body(), content_type)
         response = save_uploaded_image(parsed.file_name, parsed.content_type, parsed.data)
-        await run_sync_io(
-            record_audit_event,
+        await record_audit_event(
             "image.uploaded",
             resource_type="image",
             resource_id=response.image_url,

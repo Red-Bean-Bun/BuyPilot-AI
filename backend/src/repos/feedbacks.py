@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.domain_terms import extract_feedback_avoid_terms, is_negative_feedback
-from src.repos.database import create_db_and_tables, get_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import Feedback
 
 
@@ -19,9 +20,9 @@ class FeedbackRecord:
     reason: str | None = None
 
 
-def add_feedback(session_id: str, action: str, product_id: str | None = None, reason: str | None = None) -> None:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
+async def add_feedback(session_id: str, action: str, product_id: str | None = None, reason: str | None = None) -> None:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         session.add(
             Feedback(
                 session_id=session_id,
@@ -30,14 +31,14 @@ def add_feedback(session_id: str, action: str, product_id: str | None = None, re
                 reason=reason,
             )
         )
-        session.commit()
+        await session.commit()
 
 
-def get_session_feedbacks(session_id: str) -> list[FeedbackRecord]:
-    create_db_and_tables()
-    with Session(get_engine()) as session:
-        rows = session.exec(
-            select(Feedback).where(Feedback.session_id == session_id).order_by(Feedback.created_at)
+async def get_session_feedbacks(session_id: str) -> list[FeedbackRecord]:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        rows = (
+            await session.exec(select(Feedback).where(Feedback.session_id == session_id).order_by(Feedback.created_at))
         ).all()
     return [
         FeedbackRecord(
@@ -50,8 +51,8 @@ def get_session_feedbacks(session_id: str) -> list[FeedbackRecord]:
     ]
 
 
-def extract_feedback_from_session(session_id: str) -> dict[str, list[str]]:
-    return extract_feedback_context(get_session_feedbacks(session_id))
+async def extract_feedback_from_session(session_id: str) -> dict[str, list[str]]:
+    return extract_feedback_context(await get_session_feedbacks(session_id))
 
 
 def extract_feedback_context(records: list[FeedbackRecord]) -> dict[str, list[str]]:

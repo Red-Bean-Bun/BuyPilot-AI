@@ -14,7 +14,6 @@ from src.api.upload import upload_router
 from src.config.settings import get_settings
 from src.middleware.request_context import RequestContextMiddleware
 from src.runtime.cancel_registry import active_turn_count
-from src.services.async_io import run_sync_io
 from src.services.http_client import close_http_client
 from src.services.startup import initialize_database
 
@@ -24,15 +23,15 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await run_sync_io(_initialize_database)
+    await _initialize_database()
     try:
         yield
     finally:
         await close_http_client()
 
 
-def _initialize_database() -> None:
-    stats = initialize_database(
+async def _initialize_database() -> None:
+    stats = await initialize_database(
         auto_seed=settings.auto_seed_on_startup,
         strict_embeddings=settings.auto_seed_strict_embeddings,
     )

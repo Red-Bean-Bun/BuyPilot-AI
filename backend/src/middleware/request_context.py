@@ -8,7 +8,6 @@ import uuid
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from src.services.async_io import run_sync_io
 from src.services.audit import record_api_request
 from src.services.request_context import RequestContext, clear_request_context, get_request_context, set_request_context
 
@@ -55,8 +54,7 @@ class RequestContextMiddleware:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             client = scope.get("client")
             client_ip = client[0] if client else None
-            await run_sync_io(
-                record_api_request,
+            await record_api_request(
                 method=scope["method"],
                 path=scope["path"],
                 status_code=status_code,
