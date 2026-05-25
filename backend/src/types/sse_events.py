@@ -104,6 +104,13 @@ class EvidencePayload(BaseModel):
     source_id: str | None = None
 
 
+class ReasonAtomPayload(BaseModel):
+    dimension: str
+    value: str
+    text: str
+    evidence_id: str | None = None
+
+
 class AlternativePayload(BaseModel):
     product_id: str
     name: str
@@ -155,6 +162,7 @@ class ProductCardEvent(SSEEventBase):
     rank: int
     product: ProductPayload
     reason: str
+    reason_atoms: list[ReasonAtomPayload] = Field(default_factory=list)
     risk_notes: list[str] = Field(default_factory=list)
     evidence: list[EvidencePayload] = Field(default_factory=list)
     actions: list[QuickActionPayload] = Field(default_factory=list)
@@ -163,7 +171,7 @@ class ProductCardEvent(SSEEventBase):
 class CartActionEvent(SSEEventBase):
     event: Literal["cart_action"] = "cart_action"
     display_mode: DisplayMode = "inline_card"
-    action: str  # add/remove/view
+    action: str  # add/remove/update_quantity/view
     product_id: str
     quantity: int = 1
     status: str = "success"  # success/failed

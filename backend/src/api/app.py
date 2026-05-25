@@ -58,7 +58,6 @@ async def health():
         "status": "ok",
         "service": settings.app_name,
         "strict_runtime": settings.strict_runtime,
-        "fallback_policy": "fail_fast" if settings.strict_runtime else "demo_visible_degradation",
-        "memory_state_fallback": settings.allow_memory_state_fallback and not settings.strict_runtime,
+        "fallback_policy": "llm_provider_fallback_only",
         "active_turns": active_turn_count(),
     }

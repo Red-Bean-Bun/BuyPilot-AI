@@ -37,18 +37,9 @@ def test_strict_runtime_flag(monkeypatch):
     settings_module._settings = None
 
 
-def test_memory_state_fallback_is_explicit(monkeypatch):
-    monkeypatch.delenv("ALLOW_MEMORY_STATE_FALLBACK", raising=False)
-    settings_module._settings = None
-
+def test_non_llm_tasks_do_not_configure_provider_fallbacks():
     settings = get_settings()
 
-    assert settings.allow_memory_state_fallback is False
-
-    monkeypatch.setenv("ALLOW_MEMORY_STATE_FALLBACK", "1")
-    settings_module._settings = None
-
-    settings = get_settings()
-
-    assert settings.allow_memory_state_fallback is True
+    assert settings.task_model_map["embedding"]["fallback"] is None
+    assert settings.task_model_map["rerank"]["fallback"] is None
     settings_module._settings = None

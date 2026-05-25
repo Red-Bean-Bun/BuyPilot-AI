@@ -11,10 +11,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.config.settings import get_settings
-from src.repos.database import get_async_engine, is_postgres_engine
+from src.repos.database import create_db_and_tables, get_async_engine, is_postgres_engine
 from src.repos.models import ProductChunk
-from src.repos.products import evidence_snippet
 from src.repos.vector import coerce_vector, vector_to_pg_literal
 from src.types.sse_events import EvidencePayload, ProductPayload
 
@@ -38,14 +36,13 @@ class VectorChunkHit:
 
 
 async def list_embedded_chunks() -> list[ChunkDocument]:
+    await create_db_and_tables()
     try:
         async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
             rows = (await session.exec(select(ProductChunk))).all()
     except SQLAlchemyError:
         logger.exception("list_embedded_chunks failed")
-        if get_settings().strict_runtime:
-            raise
-        return []
+        raise
     return [
         ChunkDocument(
             id=row.id,
@@ -61,10 +58,9 @@ async def list_embedded_chunks() -> list[ChunkDocument]:
 
 
 async def list_vector_chunks_by_similarity(query_embedding: list[float], limit: int) -> list[VectorChunkHit]:
+    await create_db_and_tables()
     engine = get_async_engine()
     if not is_postgres_engine(engine) or not query_embedding:
-        if get_settings().strict_runtime:
-            raise RuntimeError("Strict runtime requires PostgreSQL/pgvector for similarity search.")
         return []
 
     try:
@@ -97,9 +93,7 @@ async def list_vector_chunks_by_similarity(query_embedding: list[float], limit: 
             )
     except SQLAlchemyError:
         logger.exception("pgvector similarity search failed")
-        if get_settings().strict_runtime:
-            raise
-        return []
+        raise
 
     hits: list[VectorChunkHit] = []
     for row in rows:
@@ -131,30 +125,18 @@ async def evidence_for_product(product: ProductPayload) -> list[EvidencePayload]
     chunks = await _evidence_chunks(product.product_id)
     if chunks:
         return [evidence_for_chunk(chunk) for chunk in chunks]
-
-    dataset_snippet = evidence_snippet(product.product_id)
-    if dataset_snippet:
-        return [
-            EvidencePayload(
-                source_type="product_chunk",
-                snippet=dataset_snippet,
-                source_id=f"chunk_{product.product_id}",
-            )
-        ]
-
     parts = [
         product.name,
         product.category,
         product.sub_category or "",
-        product.use_scenario or "",
         f"{product.price:g}元" if product.price is not None else "",
     ]
-    snippet = "，".join(part for part in parts if part)
+    snippet = " | ".join(part for part in parts if part)
     return [
         EvidencePayload(
-            source_type="product_chunk",
+            source_type="product_fallback",
             snippet=snippet,
-            source_id=f"chunk_{product.product_id}",
+            source_id=f"fallback_{product.product_id}",
         )
     ]
 
@@ -163,6 +145,7 @@ _EVIDENCE_KIND_PRIORITY = ("why_buy", "faq", "risk", "compare")
 
 
 async def _evidence_chunks(product_id: str) -> list[ChunkDocument]:
+    await create_db_and_tables()
     try:
         async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
             rows = (
@@ -172,9 +155,7 @@ async def _evidence_chunks(product_id: str) -> list[ChunkDocument]:
             ).all()
     except SQLAlchemyError:
         logger.exception("evidence chunks lookup failed")
-        if get_settings().strict_runtime:
-            raise
-        return []
+        raise
 
     if not rows:
         return []

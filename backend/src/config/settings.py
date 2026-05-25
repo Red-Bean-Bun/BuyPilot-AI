@@ -42,7 +42,7 @@ TASK_MODEL_MAP: dict[str, dict[str, str | None]] = {
     "generate_recommendation": {"primary": "qwen_plus", "fallback": "doubao_generation"},
     "generate_decision": {"primary": "qwen_plus", "fallback": "doubao_generation"},
     "analyze_image": {"primary": "qwen_vl_plus", "fallback": None},
-    "embedding": {"primary": "qwen_embedding", "fallback": "doubao_embedding"},
+    "embedding": {"primary": "qwen_embedding", "fallback": None},
     "rerank": {"primary": "gte_rerank", "fallback": None},
 }
 
@@ -53,7 +53,6 @@ class Settings:
         self.debug = os.getenv("DEBUG", "0") == "1"
         self.database_url = _resolve_database_url(os.getenv("DATABASE_URL"))
         self.strict_runtime = os.getenv("STRICT_RUNTIME", "0") == "1"
-        self.allow_memory_state_fallback = os.getenv("ALLOW_MEMORY_STATE_FALLBACK", "0") == "1"
         self.auto_seed_on_startup = os.getenv("AUTO_SEED_ON_STARTUP", "0") == "1"
         self.auto_seed_strict_embeddings = os.getenv("AUTO_SEED_STRICT_EMBEDDINGS", "0") == "1"
         self.dataset_dir = Path(

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+import weakref
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from src.config.domain_terms import PRODUCT_TYPE_ALIASES, category_from_text, extract_skin_types, normalize_product_type
 from src.runtime.cancel_registry import StreamCancelled, register_turn, unregister_turn
 from src.runtime.handlers import INTENT_HANDLERS, handle_clarification, handle_recommendation
-from src.runtime.stages.criteria import run_criteria
+from src.runtime.stages.criteria import _constraint_chips, run_criteria
 from src.runtime.stages.decision import run_decision
 from src.runtime.stages.intent import run_intent
 from src.runtime.stages.multimodal import run_multimodal
@@ -40,6 +42,18 @@ PUBLIC_PIPELINE_ERROR_MESSAGE = "本轮导购处理失败，请稍后重试。"
 logger = logging.getLogger(__name__)
 
 
+class _TurnGuard:
+    """Ensures cancel_token cleanup even if the generator is abandoned without iteration."""
+
+    def __init__(self, session_id: str, turn_id: str) -> None:
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self._finalizer = weakref.finalize(self, unregister_turn, session_id, turn_id)
+
+    def detach(self) -> None:
+        self._finalizer.detach()
+
+
 @dataclass(frozen=True)
 class PipelineStages:
     run_multimodal: Callable[[str | None], Awaitable[dict[str, Any] | None]]
@@ -60,6 +74,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
     turn_id = body.client_turn_id or f"turn_{uuid.uuid4().hex[:8]}"
     update_request_context(trace_id=body.client_trace_id, session_id=session_id, turn_id=turn_id)
     cancel_token = register_turn(session_id, turn_id)
+    guard = _TurnGuard(session_id, turn_id)
     ctx = StreamContext(
         session_id=session_id,
         turn_id=turn_id,
@@ -129,6 +144,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
         )
         yield ctx.done()
     finally:
+        guard.detach()
         await clear_chat_turn(session_id, turn_id)
         unregister_turn(session_id, turn_id)
 
@@ -206,7 +222,61 @@ def _message_with_image_context(message: str, image_analysis: dict[str, Any] | N
         parts.append(f"描述={description}")
     if isinstance(visible_traits, list) and visible_traits:
         parts.append("可见特征=" + "，".join(str(item) for item in visible_traits))
+    retrieval_constraints = _image_analysis_to_retrieval_constraints(image_analysis)
+    if retrieval_constraints:
+        parts.append("检索条件=" + "，".join(f"{key}={value}" for key, value in retrieval_constraints.items() if value))
     return f"{message}\n图片分析：" + "；".join(parts) if parts else message
+
+
+def _image_analysis_to_retrieval_constraints(image_analysis: dict[str, Any]) -> dict[str, str]:
+    text = _image_analysis_text(image_analysis)
+    category = _normalized_image_category(str(image_analysis.get("category_hint") or "")) or category_from_text(text)
+    constraints: dict[str, str] = {}
+    if category:
+        constraints["category"] = category
+    product_type = _product_type_from_image_text(text)
+    if product_type:
+        constraints["product_type"] = product_type
+    skin_types = extract_skin_types(text)
+    if skin_types:
+        constraints["skin_type"] = skin_types[0]
+    dietary = [term for term in ("无糖", "低糖") if term in text]
+    if "0糖" in text or "零糖" in text:
+        dietary.append("无糖")
+    if dietary:
+        constraints["dietary"] = " ".join(dict.fromkeys(dietary))
+    if any(token in text for token in ("日常喝", "日常饮用", "日常使用")):
+        constraints["use_scenario"] = "日常使用"
+    return constraints
+
+
+def _image_analysis_text(image_analysis: dict[str, Any]) -> str:
+    traits = image_analysis.get("visible_traits")
+    trait_text = " ".join(str(item) for item in traits) if isinstance(traits, list) else ""
+    return " ".join(
+        str(part)
+        for part in (image_analysis.get("category_hint"), image_analysis.get("description"), trait_text)
+        if part
+    )
+
+
+def _normalized_image_category(value: str) -> str | None:
+    if not value:
+        return None
+    if "食品生活" in value:
+        return "食品饮料"
+    for category in ("美妆护肤", "数码电子", "服饰运动", "食品饮料"):
+        if category in value:
+            return category
+    return None
+
+
+def _product_type_from_image_text(text: str) -> str | None:
+    lowered = text.casefold()
+    for canonical, aliases in PRODUCT_TYPE_ALIASES.items():
+        if canonical.casefold() in lowered or any(alias.casefold() in lowered for alias in aliases):
+            return normalize_product_type(canonical)
+    return None
 
 
 def _intent_to_partial_criteria(intent: IntentResult, message: str) -> CriteriaPayload:
@@ -224,10 +294,7 @@ def _intent_to_partial_criteria(intent: IntentResult, message: str) -> CriteriaP
     constraints = Constraints(**constraint_kwargs)
     category = intent.category or ""
     chips = [category] if category else []
-    if constraints.budget_max is not None:
-        chips.append(f"{constraints.budget_max:g}元内")
-    if constraints.use_scenario:
-        chips.append(constraints.use_scenario)
+    chips.extend(_constraint_chips(constraints))
     return CriteriaPayload(
         criteria_id=f"pending_{uuid.uuid4().hex[:8]}",
         category=category,

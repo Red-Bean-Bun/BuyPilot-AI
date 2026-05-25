@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from typing import AsyncGenerator
 
-from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX
+from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX
 from src.types.sse_events import (
     AlternativePayload,
     CartActionEvent,
@@ -113,7 +113,7 @@ async def mock_pipeline(session_id: str, user_input: str) -> AsyncGenerator[SSEE
                 action_id="budget_low",
                 label="预算压低",
                 action="criteria_patch",
-                criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_FALLBACK_MAX}},
+                criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_DEFAULT_MAX}},
             ),
             QuickActionPayload(
                 action_id="sensitive_skin",
@@ -244,7 +244,7 @@ async def mock_pipeline(session_id: str, user_input: str) -> AsyncGenerator[SSEE
                 action_id="cheaper",
                 label="再便宜一点",
                 action="criteria_patch",
-                criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_FALLBACK_MAX}},
+                criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_DEFAULT_MAX}},
             ),
             QuickActionPayload(
                 action_id="no_alcohol",

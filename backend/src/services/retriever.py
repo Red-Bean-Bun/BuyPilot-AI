@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from src.config.domain_terms import avoid_trait_matches_text
-from src.config.settings import get_settings
+from src.config.domain_terms import avoid_trait_matches_text, normalize_product_type, product_type_aliases
 from src.config.tuning import (
     FILTER_SCORE_BUDGET,
     FILTER_SCORE_CATEGORY,
@@ -23,11 +21,11 @@ from src.repos.documents import (
     list_embedded_chunks,
     list_vector_chunks_by_similarity,
 )
-from src.repos.products import get_product, list_products
-from src.services.fallbacks import record_fallback
+from src.repos.database import get_async_engine, is_postgres_engine
+from src.repos.products import get_product
 from src.services.embedding import embed_text
 from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
-from src.services.reranker import rerank, rerank_texts
+from src.services.reranker import rerank_texts
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 TRACE_VECTOR_TOP_K_LIMIT = 50
@@ -70,60 +68,50 @@ async def retrieve_with_evidence(
     filters = _retrieval_filters(feedback)
     query_embedding = await embed_text(criteria_query_text(criteria))
     chunk_hits = await _vector_recall_from_db(criteria, query_embedding, filters)
-    if chunk_hits:
-        candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
-        ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
-        return RetrievalOutput(
-            products=[hit.product for hit in ranked_hits],
-            evidence_by_product=_evidence_by_product(ranked_hits, all_reranked_hits),
-            trace_details=_trace_details_for_chunk_retrieval(
-                chunk_hits=chunk_hits,
-                candidate_hits=candidate_hits,
-                ranked_hits=ranked_hits,
-            ),
-        )
+    recall_criteria = criteria
+    recall_filters = filters
+    relaxation_steps: list[dict[str, object]] = [
+        {
+            "step": "strict",
+            "reason": "category/budget/product_type/exclusion hard filters",
+            "relaxed_fields": [],
+            "candidate_count": len(chunk_hits),
+        }
+    ]
+    if not chunk_hits:
+        for step, relaxed_criteria, relaxed_filters, relaxed_fields in _relaxation_attempts(criteria, filters):
+            relaxed_hits = await _vector_recall_from_db(relaxed_criteria, query_embedding, relaxed_filters)
+            relaxation_steps.append(
+                {
+                    "step": step,
+                    "reason": "DB vector chunks only; non-DB product or memory fallback remains disabled",
+                    "relaxed_fields": relaxed_fields,
+                    "candidate_count": len(relaxed_hits),
+                }
+            )
+            if relaxed_hits:
+                chunk_hits = relaxed_hits
+                recall_criteria = relaxed_criteria
+                recall_filters = relaxed_filters
+                break
+    if not chunk_hits:
+        raise RuntimeError("DB vector retrieval returned no chunk hits; non-DB retrieval fallback is disabled.")
 
-    if get_settings().strict_runtime:
-        raise RuntimeError("Strict runtime requires pgvector/DB vector retrieval; fallback retrieval is disabled.")
-
-    record_fallback("retrieval", "non_db_vector_fallback")
-    hard_task = asyncio.create_task(asyncio.to_thread(_hard_filter, criteria, filters))
-    vector_task = asyncio.create_task(_vector_recall_fallback(criteria, filters))
-    hard_results, vector_results = await asyncio.gather(hard_task, vector_task)
-    merged = _merge_dedup(hard_results + vector_results)
-    ranked_products = await rerank(criteria, merged, top_n=top_n)
+    candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
+    ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
     return RetrievalOutput(
-        products=ranked_products,
-        evidence_by_product={},
-        trace_details=_trace_details_for_fallback(
-            hard_results=hard_results,
-            vector_results=vector_results,
-            ranked_products=ranked_products,
+        products=[hit.product for hit in ranked_hits],
+        evidence_by_product=_evidence_by_product(ranked_hits, all_reranked_hits),
+        trace_details=_trace_details_for_chunk_retrieval(
+            criteria=criteria,
+            recall_criteria=recall_criteria,
+            filters=recall_filters,
+            chunk_hits=chunk_hits,
+            candidate_hits=candidate_hits,
+            ranked_hits=ranked_hits,
+            relaxation_steps=relaxation_steps,
         ),
     )
-
-
-def _hard_filter(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
-    products = list_products()
-    results: list[ProductPayload] = []
-    for product in products:
-        if not _passes_hard_filters(criteria, product, filters):
-            continue
-        results.append(product)
-    return results
-
-
-async def _vector_recall_fallback(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
-    await embed_text(criteria.summary)
-    return await asyncio.to_thread(_vector_recall_fallback_sync, criteria, filters)
-
-
-def _vector_recall_fallback_sync(criteria: CriteriaPayload, filters: RetrievalFilters) -> list[ProductPayload]:
-    products = list_products()
-    products = [product for product in products if _passes_hard_filters(criteria, product, filters)]
-    if not criteria.category:
-        return products
-    return [product for product in products if product.category == criteria.category] or products
 
 
 async def _vector_recall_from_db(
@@ -134,6 +122,8 @@ async def _vector_recall_from_db(
     pgvector_hits = await _vector_recall_from_pgvector(criteria, query_embedding, filters)
     if pgvector_hits:
         return pgvector_hits
+    if is_postgres_engine(get_async_engine()):
+        return []
 
     chunks = await list_embedded_chunks()
     if not chunks or not query_embedding:
@@ -217,51 +207,41 @@ def _evidence_by_product(
             kind = candidate.chunk.metadata.get("evidence_kind") or "other"
             if kind not in groups:
                 groups[kind] = candidate.chunk
-        evidence_by_product[product_id] = [
-            evidence_for_chunk(groups[kind]) for kind in _EVIDENCE_KIND_PRIORITY if kind in groups
-        ]
+        selected_chunks = [groups[kind] for kind in _EVIDENCE_KIND_PRIORITY if kind in groups]
+        if not selected_chunks and groups:
+            selected_chunks = [next(iter(groups.values()))]
+        evidence_by_product[product_id] = [evidence_for_chunk(chunk) for chunk in selected_chunks]
     return evidence_by_product
 
 
 def _trace_details_for_chunk_retrieval(
+    criteria: CriteriaPayload,
+    recall_criteria: CriteriaPayload,
+    filters: RetrievalFilters,
     chunk_hits: list[ProductHit],
     candidate_hits: list[ProductHit],
     ranked_hits: list[ProductHit],
+    relaxation_steps: list[dict[str, object]],
 ) -> dict[str, object]:
     vector_hits = sorted(chunk_hits, key=lambda hit: hit.vector_score, reverse=True)[:TRACE_VECTOR_TOP_K_LIMIT]
     return {
         "filters_applied": {
             "_candidate_product_ids": _unique_product_ids(candidate_hits),
+            "category": criteria.category or None,
+            "budget_max": criteria.constraints.budget_max,
+            "product_type": criteria.constraints.product_type,
+            "product_type_aliases": list(product_type_aliases(criteria.constraints.product_type)),
+            "avoid_products": sorted(filters.avoid_products),
+            "avoid_traits": list(filters.avoid_traits),
+            "effective_budget_max": recall_criteria.constraints.budget_max,
+            "effective_product_type": recall_criteria.constraints.product_type,
+            "relaxation_steps": relaxation_steps,
         },
         "vector_top_k": [_trace_hit_payload(hit, rank) for rank, hit in enumerate(vector_hits, start=1)],
         "rerank_top_n": [_trace_hit_payload(hit, rank) for rank, hit in enumerate(ranked_hits, start=1)],
         "selected_ids": [hit.product.product_id for hit in ranked_hits],
         "hit_count": len(ranked_hits),
         "vector_count": len(chunk_hits),
-    }
-
-
-def _trace_details_for_fallback(
-    hard_results: list[ProductPayload],
-    vector_results: list[ProductPayload],
-    ranked_products: list[ProductPayload],
-) -> dict[str, object]:
-    return {
-        "filters_applied": {
-            "_hard_filter_candidate_ids": [product.product_id for product in hard_results],
-            "_fallback_vector_candidate_ids": [product.product_id for product in vector_results],
-        },
-        "vector_top_k": [
-            {"rank": index + 1, "product_id": product.product_id, "source": "fallback_vector"}
-            for index, product in enumerate(vector_results[:TRACE_VECTOR_TOP_K_LIMIT])
-        ],
-        "rerank_top_n": [
-            {"rank": index + 1, "product_id": product.product_id, "source": "fallback_rerank"}
-            for index, product in enumerate(ranked_products)
-        ],
-        "selected_ids": [product.product_id for product in ranked_products],
-        "hit_count": len(ranked_products),
-        "vector_count": len(vector_results),
     }
 
 
@@ -284,6 +264,54 @@ def _trace_hit_payload(hit: ProductHit, rank: int) -> dict[str, object]:
     return payload
 
 
+def _relaxation_attempts(
+    criteria: CriteriaPayload, filters: RetrievalFilters
+) -> list[tuple[str, CriteriaPayload, RetrievalFilters, list[str]]]:
+    attempts: list[tuple[str, CriteriaPayload, RetrievalFilters, list[str]]] = []
+    if criteria.constraints.product_type:
+        attempts.append(
+            (
+                "without_product_type",
+                _criteria_with_constraints(criteria, product_type=None),
+                filters,
+                ["product_type"],
+            )
+        )
+    if criteria.constraints.budget_max is not None:
+        attempts.append(
+            (
+                "without_budget_max",
+                _criteria_with_constraints(criteria, budget_max=None),
+                filters,
+                ["budget_max"],
+            )
+        )
+    if criteria.constraints.product_type and criteria.constraints.budget_max is not None:
+        attempts.append(
+            (
+                "without_product_type_and_budget_max",
+                _criteria_with_constraints(criteria, product_type=None, budget_max=None),
+                filters,
+                ["product_type", "budget_max"],
+            )
+        )
+    if filters.avoid_traits:
+        attempts.append(
+            (
+                "without_feedback_avoid_traits",
+                criteria,
+                RetrievalFilters(avoid_products=filters.avoid_products),
+                ["feedback.avoid_traits"],
+            )
+        )
+    return attempts
+
+
+def _criteria_with_constraints(criteria: CriteriaPayload, **updates: object) -> CriteriaPayload:
+    constraints = criteria.constraints.model_copy(update=updates)
+    return criteria.model_copy(update={"constraints": constraints})
+
+
 def _unique_product_ids(hits: list[ProductHit]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -300,8 +328,7 @@ async def _rerank_chunk_hits(
     criteria: CriteriaPayload, hits: list[ProductHit], top_n: int
 ) -> tuple[list[ProductHit], list[ProductHit]]:
     documents = [_chunk_document_text(hit) for hit in hits]
-    reranked_indexes = await rerank_texts(criteria, documents, top_n=len(hits))
-    index_order = reranked_indexes or list(range(len(hits)))
+    index_order = await rerank_texts(criteria, documents, top_n=len(hits))
 
     all_reranked_hits = [hits[index] for index in index_order if 0 <= index < len(hits)]
 
@@ -353,7 +380,9 @@ def _passes_hard_filters(criteria: CriteriaPayload, product: ProductPayload, fil
     if constraints.origin_avoid and product.brand:
         if any(avoid_trait_matches_text(origin, product.brand) for origin in constraints.origin_avoid):
             return False
-    if constraints.product_type and product.sub_category and product.sub_category != constraints.product_type:
+    criteria_product_type = normalize_product_type(constraints.product_type)
+    product_type = normalize_product_type(product.sub_category)
+    if criteria_product_type and product_type != criteria_product_type:
         return False
     avoid_traits = tuple(constraints.ingredient_avoid) + filters.avoid_traits
     return not any(_matches_avoid_trait(product, token) for token in avoid_traits)
@@ -415,14 +444,3 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
 
 def _distance_to_score(distance: float) -> float:
     return 1.0 / (1.0 + max(distance, 0.0))
-
-
-def _merge_dedup(products: list[ProductPayload]) -> list[ProductPayload]:
-    seen: set[str] = set()
-    merged: list[ProductPayload] = []
-    for product in products:
-        if product.product_id in seen:
-            continue
-        seen.add(product.product_id)
-        merged.append(product)
-    return merged

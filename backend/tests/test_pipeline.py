@@ -7,7 +7,12 @@ from src.runtime.cancel_registry import active_turn_count, cancel_turn
 from src.runtime.pipeline import chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
 from src.types.schemas import ChatStreamRequest, DecisionResult, RecommendationResult
-from src.types.sse_events import CriteriaPayload, ProductPayload
+from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
+
+
+@pytest.fixture(autouse=True)
+async def _seed_products_for_pipeline(seeded_products):
+    del seeded_products
 
 
 @pytest.mark.asyncio
@@ -86,7 +91,14 @@ async def test_pipeline_emits_product_card_before_slow_recommendation_text(monke
     )
 
     async def fast_retrieval(criteria, feedback=None):
-        return RetrievalResult(products=[product], evidence_by_product={})
+        return RetrievalResult(
+            products=[product],
+            evidence_by_product={
+                product.product_id: [
+                    EvidencePayload(source_type="product_chunk", source_id="test_chunk", snippet="测试证据")
+                ]
+            },
+        )
 
     async def slow_recommendation_text(criteria, products, evidence_by_product=None):
         await asyncio.sleep(0.035)

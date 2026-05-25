@@ -14,6 +14,9 @@ from src.types.schemas import CartItemPayload, CartResponse
 async def add_to_cart(session_id: str, product_id: str, quantity: int = 1) -> CartItemPayload:
     if quantity <= 0:
         quantity = 1
+    product = get_product(product_id)
+    if product is None:
+        raise ValueError(f"Product not found: {product_id}")
 
     await create_db_and_tables()
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
@@ -42,6 +45,54 @@ async def get_cart(session_id: str) -> CartResponse:
             await session.exec(select(CartItem).where(CartItem.session_id == session_id).order_by(CartItem.added_at))
         ).all()
     return _cart_response([_payload_from_row(row) for row in rows])
+
+
+async def remove_from_cart(session_id: str, product_id: str) -> CartItemPayload | None:
+    product = get_product(product_id)
+    if product is None:
+        raise ValueError(f"Product not found: {product_id}")
+
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        row = (
+            await session.exec(
+                select(CartItem)
+                .where(CartItem.session_id == session_id)
+                .where(CartItem.product_id == product_id)
+                .limit(1)
+            )
+        ).first()
+        if row is None:
+            return None
+        payload = _payload_from_row(row)
+        await session.delete(row)
+        await session.commit()
+        return payload
+
+
+async def update_cart_quantity(session_id: str, product_id: str, quantity: int) -> CartItemPayload | None:
+    if quantity <= 0:
+        return await remove_from_cart(session_id, product_id)
+    product = get_product(product_id)
+    if product is None:
+        raise ValueError(f"Product not found: {product_id}")
+
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        row = (
+            await session.exec(
+                select(CartItem)
+                .where(CartItem.session_id == session_id)
+                .where(CartItem.product_id == product_id)
+                .limit(1)
+            )
+        ).first()
+        if row is None:
+            return None
+        row.quantity = quantity
+        await session.commit()
+        await session.refresh(row)
+        return _payload_from_row(row)
 
 
 def _payload_from_row(row: CartItem) -> CartItemPayload:

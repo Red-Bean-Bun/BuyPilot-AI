@@ -14,7 +14,7 @@ import json
 import re
 from typing import Any
 
-from src.services.llm_client import _call_chat_task
+from src.services.llm_gateway import _call_chat_task
 
 
 async def evaluate_faithfulness(answer: str, contexts: list[str]) -> dict[str, float]:
@@ -292,21 +292,28 @@ async def _call_judge(prompt: str) -> dict[str, Any]:
         [{"role": "user", "content": prompt}],
         json_object=True,
     )
-    return _parse_json(raw) if raw else {}
+    if not raw:
+        raise RuntimeError("LLM judge returned an empty response.")
+    return _parse_json(raw)
 
 
 def _parse_json(text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else {}
+        if not isinstance(parsed, dict):
+            raise ValueError("LLM judge response was not a JSON object.")
+        return parsed
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.S)
         if not match:
-            return {}
+            raise ValueError("LLM judge response did not contain JSON.")
         try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError as exc:
+            raise ValueError("LLM judge response contained invalid JSON.") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("LLM judge response was not a JSON object.")
+        return parsed
 
 
 def _parse_score_and_count(result: dict[str, Any], score_key: str, count_key: str) -> dict[str, float]:

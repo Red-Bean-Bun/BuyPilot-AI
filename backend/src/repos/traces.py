@@ -9,7 +9,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.config.settings import get_settings
 from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import EvidenceLink, ProductChunk, RetrievalTrace
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
@@ -58,9 +57,7 @@ async def write_retrieval_trace(
             return trace.id
     except SQLAlchemyError:
         logger.exception("write_retrieval_trace failed")
-        if get_settings().strict_runtime:
-            raise
-        return None
+        raise
 
 
 async def write_evidence_links(
@@ -92,9 +89,7 @@ async def write_evidence_links(
             await session.commit()
     except SQLAlchemyError:
         logger.exception("write_evidence_links failed")
-        if get_settings().strict_runtime:
-            raise
-        return 0
+        raise
     return count
 
 

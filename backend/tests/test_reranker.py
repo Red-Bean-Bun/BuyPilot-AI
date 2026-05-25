@@ -11,7 +11,7 @@ def _reset_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rerank_falls_back_when_config_missing(monkeypatch):
+async def test_rerank_raises_when_config_missing(monkeypatch):
     monkeypatch.delenv("BAILIAN_BASE_URL", raising=False)
     monkeypatch.delenv("BAILIAN_API_KEY", raising=False)
     _reset_settings()
@@ -21,9 +21,8 @@ async def test_rerank_falls_back_when_config_missing(monkeypatch):
         ProductPayload(product_id="p2", name="B", category="美妆护肤", price=80),
     ]
 
-    ranked = await rerank(CriteriaPayload(category="美妆护肤"), products, top_n=1)
-
-    assert ranked[0].product_id == "p2"
+    with pytest.raises(reranker.RerankUnavailable):
+        await rerank(CriteriaPayload(category="美妆护肤"), products, top_n=1)
 
 
 @pytest.mark.asyncio

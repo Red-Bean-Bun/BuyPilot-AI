@@ -3,6 +3,11 @@ import pytest
 from tests.conftest import collect_sse_stream
 
 
+@pytest.fixture(autouse=True)
+async def _seed_products_for_chat_api(seeded_products):
+    del seeded_products
+
+
 class TestChatStreamEndpoint:
     @pytest.mark.asyncio
     async def test_stream_returns_events(self, test_client):
@@ -81,6 +86,7 @@ class TestChatStreamEndpoint:
         assert "product_id" in data["product"]
         assert "name" in data["product"]
         assert "reason" in data
+        assert data["reason_atoms"]
         assert "evidence" in data
 
     @pytest.mark.asyncio

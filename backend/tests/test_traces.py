@@ -40,8 +40,7 @@ async def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch,
     assert traces[0].vector_top_k[0]["vector_score"] > 0
     timings = traces[0].filters_applied.get("_stage_timings_ms", {})
     assert {"intent", "criteria", "retrieve", "recommendation", "decision"} <= set(timings)
-    fallbacks = traces[0].filters_applied.get("_fallbacks", [])
-    assert any(item.get("component") == "rerank.texts" for item in fallbacks)
+    assert traces[0].filters_applied.get("_fallbacks", []) == []
     assert links
     assert links[0].product_id in traces[0].selected_ids
     assert links[0].chunk_id

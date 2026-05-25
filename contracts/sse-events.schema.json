@@ -92,6 +92,16 @@
       },
       "required": ["source_type", "snippet"]
     },
+    "reason_atom_payload": {
+      "type": "object",
+      "properties": {
+        "dimension": { "type": "string" },
+        "value": { "type": "string" },
+        "text": { "type": "string" },
+        "evidence_id": { "type": ["string", "null"] }
+      },
+      "required": ["dimension", "value", "text"]
+    },
     "alternative_payload": {
       "type": "object",
       "properties": {
@@ -186,6 +196,7 @@
             "rank": { "type": "integer" },
             "product": { "$ref": "#/$defs/product_payload" },
             "reason": { "type": "string" },
+            "reason_atoms": { "type": "array", "items": { "$ref": "#/$defs/reason_atom_payload" } },
             "risk_notes": { "type": "array", "items": { "type": "string" } },
             "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_payload" } },
             "actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } }
@@ -202,7 +213,7 @@
           "properties": {
             "event": { "const": "cart_action" },
             "display_mode": { "const": "inline_card" },
-            "action": { "type": "string", "enum": ["add", "remove", "view"] },
+            "action": { "type": "string", "enum": ["add", "remove", "update_quantity", "view"] },
             "product_id": { "type": "string" },
             "quantity": { "type": "integer" },
             "status": { "type": "string", "enum": ["success", "failed"] }

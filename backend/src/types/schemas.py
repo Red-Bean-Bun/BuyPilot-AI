@@ -78,8 +78,21 @@ class CartResponse(BaseModel):
     total_price: float = 0.0
 
 
+class CartMutationRequest(BaseModel):
+    quantity: int = Field(default=1, ge=0)
+
+
 class IntentResult(BaseModel):
-    intent: Literal["recommend", "clarify", "feedback", "add_to_cart", "view_cart", "chitchat"]
+    intent: Literal[
+        "recommend",
+        "clarify",
+        "feedback",
+        "add_to_cart",
+        "remove_from_cart",
+        "update_cart_quantity",
+        "view_cart",
+        "chitchat",
+    ]
     confidence: float = 1.0
     category: str | None = None
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)

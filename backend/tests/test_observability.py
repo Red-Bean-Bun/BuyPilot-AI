@@ -6,9 +6,12 @@ from tests.conftest import collect_sse_stream
 
 
 @pytest.fixture
-def observability_database(monkeypatch, tmp_path):
+async def observability_database(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'observability.db'}")
     settings_module._settings = None
+    from src.services.product_ingest import seed_products_if_needed
+
+    await seed_products_if_needed()
     yield
     settings_module._settings = None
 

@@ -13,7 +13,7 @@ from src.runtime.pipeline import chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
 from src.services.retriever import _brand_matches, _passes_hard_filters
 from src.types.schemas import ChatStreamRequest, DecisionResult, RecommendationResult
-from src.types.sse_events import Constraints, CriteriaPayload, ProductPayload
+from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload
 
 # ---------------------------------------------------------------------------
 # Hard filter unit tests (pure functions, no I/O)
@@ -77,6 +77,14 @@ def test_hard_filter_product_type_matches_sub_category():
     criteria = CriteriaPayload(category="美妆护肤", constraints=Constraints(product_type="洁面乳"))
     cleanser = ProductPayload(
         product_id="p1", name="洁面", brand="测试", category="美妆护肤", sub_category="洁面乳", price=100
+    )
+    assert _passes_hard_filters(criteria, cleanser, _Filters())
+
+
+def test_hard_filter_product_type_alias_matches_dataset_label():
+    criteria = CriteriaPayload(category="美妆护肤", constraints=Constraints(product_type="洗面奶"))
+    cleanser = ProductPayload(
+        product_id="p1", name="洁面", brand="测试", category="美妆护肤", sub_category="洁面", price=100
     )
     assert _passes_hard_filters(criteria, cleanser, _Filters())
 
@@ -176,7 +184,7 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, tmp_
     async def mock_intent_round1(_session_id, _body):
         from src.types.schemas import IntentResult
 
-        return IntentResult(intent="recommend", category="运动鞋", extracted_constraints={})
+        return IntentResult(intent="recommend", category=None, extracted_constraints={})
 
     async def mock_intent_round2(_session_id, _body):
         from src.types.schemas import IntentResult
@@ -187,11 +195,14 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, tmp_
         return CriteriaPayload(criteria_id="c_test", category="运动鞋", summary="测试")
 
     async def fake_retrieval(criteria, feedback=None):
+        product = ProductPayload(product_id="p_shoe_001", name="测试跑鞋", category="服饰运动", price=300, brand="安踏")
         return RetrievalResult(
-            products=[
-                ProductPayload(product_id="p_shoe_001", name="测试跑鞋", category="服饰运动", price=300, brand="安踏")
-            ],
-            evidence_by_product={},
+            products=[product],
+            evidence_by_product={
+                product.product_id: [
+                    EvidencePayload(source_type="product_chunk", source_id="test_chunk", snippet="测试证据")
+                ]
+            },
         )
 
     async def fake_recommendation(criteria, products, evidence_by_product=None):
@@ -206,8 +217,8 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, tmp_
     monkeypatch.setattr(pipeline_module, "run_recommendation_text", fake_recommendation)
     monkeypatch.setattr(pipeline_module, "run_decision", fake_decision)
 
-    # Round 1: should trigger clarification (no scenario tokens in message → "运动鞋" alone won't match _has_scenario)
-    events1 = [e async for e in chat_stream("sess_multi", ChatStreamRequest(message="推荐跑鞋"))]
+    # Round 1: should trigger clarification (no category in intent)
+    events1 = [e async for e in chat_stream("sess_multi", ChatStreamRequest(message="推荐一些东西"))]
     tags1 = [e.event for e in events1]
     assert "clarification" in tags1, f"Expected clarification, got: {tags1}"
 

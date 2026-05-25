@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX
+from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX
 from src.services.conversation_state import get_conversation_summary, get_previous_criteria
 from src.services.feedback import get_feedback_context
 from src.services.llm_client import generate_criteria
@@ -23,10 +23,15 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
     )
 
 
+_MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "origin_avoid", "dietary"}
+
+
 def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> CriteriaPayload:
     raw_constraints = patch.get("constraints", patch)
     allowed = set(Constraints.model_fields)
     updates = {key: value for key, value in raw_constraints.items() if key in allowed}
+    for key in _MERGE_LIST_FIELDS & updates.keys():
+        updates[key] = list(dict.fromkeys([*(getattr(criteria.constraints, key) or []), *(updates[key] or [])]))
     constraints = criteria.constraints.model_copy(update=updates)
 
     old_constraint_chips = set(_constraint_chips(criteria.constraints))
@@ -63,7 +68,7 @@ def criteria_quick_actions() -> list[QuickActionPayload]:
             action_id="budget_low",
             label="预算压低",
             action="criteria_patch",
-            criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_FALLBACK_MAX}},
+            criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_DEFAULT_MAX}},
         ),
         QuickActionPayload(
             action_id="sensitive_skin",

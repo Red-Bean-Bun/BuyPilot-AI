@@ -1,10 +1,16 @@
 import pytest
 
 from src.services.product_ingest import seed_products
+from src.config.domain_terms import normalize_product_type
 from src.repos.documents import ChunkDocument, VectorChunkHit
 from src.repos.products import list_products
 from src.services.retriever import retrieve, retrieve_with_evidence
 from src.types.sse_events import Constraints, CriteriaPayload
+
+
+@pytest.fixture(autouse=True)
+async def _seed_products_for_retrieval(seeded_products):
+    del seeded_products
 
 
 @pytest.mark.asyncio
@@ -18,6 +24,20 @@ async def test_retrieve_applies_budget_and_category():
     assert products
     assert all(product.category == "美妆护肤" for product in products)
     assert products[0].price <= 200
+
+
+@pytest.mark.asyncio
+async def test_retrieve_normalizes_product_type_aliases():
+    criteria = CriteriaPayload(
+        category="美妆护肤",
+        summary="油皮洗面奶 200元内 日常护肤",
+        constraints=Constraints(skin_type="油性", budget_max=200, product_type="洗面奶"),
+    )
+
+    products = await retrieve(criteria, top_n=3)
+
+    assert products
+    assert all(normalize_product_type(product.sub_category) == "洁面" for product in products)
 
 
 @pytest.mark.asyncio
@@ -91,6 +111,23 @@ async def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_retrieve_empty_recall_relaxes_inside_db_chunks_only():
+    criteria = CriteriaPayload(
+        category="数码电子",
+        summary="蓝牙耳机 500元内",
+        constraints=Constraints(budget_max=500, product_type="蓝牙耳机"),
+    )
+
+    retrieval = await retrieve_with_evidence(criteria, top_n=2)
+
+    assert retrieval.products
+    assert all(normalize_product_type(product.sub_category) == "真无线耳机" for product in retrieval.products)
+    steps = retrieval.trace_details["filters_applied"]["relaxation_steps"]
+    assert steps[0]["step"] == "strict"
+    assert any(step["step"] == "without_budget_max" and step["candidate_count"] > 0 for step in steps)
+
+
+@pytest.mark.asyncio
 async def test_retrieve_prefers_pgvector_hits(monkeypatch):
     product = list_products()[0]
 
@@ -129,8 +166,7 @@ async def test_retrieve_prefers_pgvector_hits(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_retrieve_strict_mode_disables_non_pgvector_fallback(monkeypatch, tmp_path):
-    monkeypatch.setenv("STRICT_RUNTIME", "1")
+async def test_retrieve_raises_without_db_vector_hits(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'strict_retrieval.db'}")
 
     from src.config import settings as settings_module
@@ -144,6 +180,6 @@ async def test_retrieve_strict_mode_disables_non_pgvector_fallback(monkeypatch, 
 
     criteria = CriteriaPayload(category="美妆护肤", summary="油皮洗面奶")
 
-    with pytest.raises(RuntimeError, match="pgvector"):
+    with pytest.raises(RuntimeError, match="DB vector retrieval"):
         await retrieve(criteria, top_n=1)
     settings_module._settings = None

@@ -82,7 +82,7 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/conftest.py::mock_external_ai -> src.services.reranker._rerank_request",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_vector_chunks_by_similarity",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_embedded_chunks",
-    "tests/test_retrieval.py::test_retrieve_strict_mode_disables_non_pgvector_fallback -> src.services.retriever.embed_text",
+    "tests/test_retrieval.py::test_retrieve_raises_without_db_vector_hits -> src.services.retriever.embed_text",
 }
 
 

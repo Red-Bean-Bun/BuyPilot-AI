@@ -2,7 +2,7 @@
 
 FastAPI 后端，负责 SSE 对话管道、RAG 检索、pgvector 索引、模型调用、评测与最小购物车闭环。
 
-最后本地验证：2026-05-24，`90 passed`。
+最后本地验证：2026-05-26，`111 passed`。
 
 ## Quick Start
 
@@ -39,8 +39,7 @@ uv sync --extra dev
 - `ECOMMERCE_DATASET_DIR`：官方 100 条商品数据目录，默认 `data/raw/ecommerce_agent_dataset`。
 - `AUTO_SEED_ON_STARTUP=1`：启动时自动入库。
 - `AUTO_SEED_STRICT_EMBEDDINGS=1`：启动入库时要求 embedding 维度匹配 1024。
-- `STRICT_RUNTIME=1`：关闭 demo 级静默降级；LLM、embedding、rerank、DB/pgvector 失败会显性失败。
-- `ALLOW_MEMORY_STATE_FALLBACK=1`：仅开发调试用。显式开启后，cart/feedback/conversation 在 DB 异常时可退到进程内内存状态；默认关闭。
+- `STRICT_RUNTIME=1`：兼容旧配置；当前非 LLM 依赖已默认显性失败，不再靠 strict 才关闭兜底。
 - 商品图片通过 `/assets/products/{raw_image_path}` 暴露给 Android；上传图片仍通过 `/uploads/{file}` 暴露。
 
 ## Architecture
@@ -60,7 +59,7 @@ API -> Runtime -> Service -> Repo -> Config/Types
 
 - `api/`：FastAPI router，只做 HTTP/SSE 边界。
 - `runtime/`：对话 turn 编排，产出 SSE 事件。
-- `services/`：业务逻辑、LLM task interface、检索、fallback、上传、评测。
+- `services/`：业务逻辑、LLM task interface、检索、上传、评测；只保留 LLM provider fallback telemetry。
 - `repos/`：SQLModel/pgvector/官方数据读取，不承载业务决策。
 - `config/`：环境变量、模型 profile、调参常量、领域词典。
 - `types/`：HTTP schema 和 SSE event schema。
@@ -72,8 +71,9 @@ API -> Runtime -> Service -> Repo -> Config/Types
 1. `services.product_ingest` 读取 raw JSON。
 2. `services.chunking` 生成 `knowledge_package` 和 typed chunks。
 3. `services.embedding` 生成 1024 维 embedding。
-4. `repos.models.ProductChunk.embedding` 在 PostgreSQL 下编译为 `VECTOR(1024)`，SQLite 下作为 JSON fallback。
+4. `repos.models.ProductChunk.embedding` 在 PostgreSQL 下编译为 `VECTOR(1024)`，SQLite 下作为 JSON 持久化向量后端。
 5. `services.retriever` 优先走 pgvector `<=>` 召回，再 rerank，再绑定 evidence。
+6. 如果没有持久化 chunk embedding，检索直接失败，不退回原始商品表或内存结果。
 
 `create_db_and_tables()` 不再做破坏性迁移。旧表结构清理必须通过 `reindex_embeddings --drop-derived-tables` 明确触发。
 
@@ -90,6 +90,6 @@ CI 直接跑全量 pytest（`data/raw/` 已入 git）。
 ## Notes
 
 - 单元测试通过不代表 live provider 可用；真实链路要跑 `smoke_live_rag` 或 `demo_smoke`。
-- `STRICT_RUNTIME=1` 用于演示前验真，不适合默认开发体验。
+- 非 LLM provider fallback 已移除；演示前仍应跑真实 `smoke_live_rag` 验证 provider、embedding、rerank 和向量库。
 - `/chat/cancel` 同时使用本进程 token 和数据库 cancel request；多实例共用同一个数据库时可以跨进程取消。
 - Android 由客户端同学负责；本目录只维护后端契约和实现。

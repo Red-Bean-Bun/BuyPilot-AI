@@ -8,22 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import ValidationError
 
-from src.config.domain_terms import INTENT_TERMS, contains_any
-from src.config.settings import get_settings
-from src.services.fallbacks import record_fallback
+from src.repos.products import list_products
 from src.services.image_upload import image_url_to_provider_url
-from src.services.llm_fallbacks import (
-    budget_from_text as _budget_from_text,
-    category_from_text as _category_from_text,
-    chips_for_constraints as _chips_for_constraints,
-    ingredient_avoid_from_text as _ingredient_avoid_from_text,
-    scenario_from_text as _scenario_from_text,
-    skin_type_from_text as _skin_type_from_text,
-)
 from src.services.llm_gateway import (
     LiveLLMUnavailable,
     _call_chat_task,
@@ -38,11 +29,33 @@ from src.services.llm_task_payloads import (
     parse_json_object as _parse_json_object,
     recommendation_messages,
 )
+from src.services.recommendation_reasons import build_reason_atoms
 from src.types.schemas import DecisionResult, IntentResult, RecommendationResult
-from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload
+from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 logger = logging.getLogger(__name__)
 _LOG_PAYLOAD_PREVIEW_CHARS = 2000
+_PRODUCT_ID_RE = re.compile(r"\bp_[a-z]+_\d+\b")
+_FORBIDDEN_RECOMMENDATION_TERMS = (
+    "库存",
+    "现货",
+    "有货",
+    "缺货",
+    "优惠",
+    "优惠券",
+    "领券",
+    "满减",
+    "折扣",
+    "打折",
+    "包邮",
+    "免邮",
+    "运费",
+    "次日达",
+    "当日达",
+    "购买链接",
+    "下单",
+    "立即购买",
+)
 
 __all__ = [
     "LiveLLMUnavailable",
@@ -65,55 +78,16 @@ async def analyze_intent(
         intent_messages(message, history, image_url, conversation_context),
         json_object=True,
     )
-    if live:
-        parsed = _parse_json_object(live)
-        if parsed:
-            try:
-                return IntentResult.model_validate(_normalize_intent_payload(parsed))
-            except ValidationError as exc:
-                record_fallback(
-                    "llm.analyze_intent",
-                    "invalid_json_schema",
-                    error_fields=_validation_error_fields(exc),
-                )
-                logger.warning(
-                    "Live intent payload failed schema validation; using deterministic fallback. "
-                    "validation_errors=%s payload_preview=%s",
-                    _json_preview(exc.errors()),
-                    _json_preview(parsed),
-                )
-                _raise_if_strict("Live intent payload failed schema validation.")
-        else:
-            _raise_if_strict("Live intent response was not a JSON object.")
-    _raise_if_strict("Strict runtime requires a valid live intent response.")
-    if contains_any(message, INTENT_TERMS["add_to_cart"]):
-        return IntentResult(intent="add_to_cart")
-    if contains_any(message, INTENT_TERMS["view_cart"]):
-        return IntentResult(intent="view_cart")
-    if contains_any(message, INTENT_TERMS["feedback"]):
-        return IntentResult(intent="feedback", extracted_constraints={"feedback_text": message})
-
-    constraints: dict[str, Any] = {}
-    category = _category_from_text(message)
-    if category is None and contains_any(message, INTENT_TERMS["shopping"]):
-        category = "美妆护肤"
-    budget = _budget_from_text(message)
-    skin_type = _skin_type_from_text(message)
-    ingredient_avoid = _ingredient_avoid_from_text(message)
-    if budget is not None:
-        constraints["budget_max"] = budget
-    if skin_type:
-        constraints["skin_type"] = skin_type
-    if ingredient_avoid:
-        constraints["ingredient_avoid"] = ingredient_avoid
-    if image_url:
-        constraints["image_url"] = image_url
-    return IntentResult(
-        intent="recommend",
-        category=category,
-        extracted_constraints=constraints,
-        soft_preferences=[message],
-    )
+    parsed = _require_json_object(live, "analyze_intent")
+    try:
+        return IntentResult.model_validate(_normalize_intent_payload(parsed))
+    except ValidationError as exc:
+        logger.warning(
+            "Live intent payload failed schema validation. validation_errors=%s payload_preview=%s",
+            _json_preview(exc.errors()),
+            _json_preview(parsed),
+        )
+        raise RuntimeError("Live intent payload failed schema validation.") from exc
 
 
 async def generate_criteria(
@@ -134,34 +108,11 @@ async def generate_criteria(
         ),
         json_object=True,
     )
-    if live:
-        parsed = _parse_json_object(live)
-        criteria = _criteria_from_live_payload(parsed, existing)
-        if criteria:
-            return criteria
-        _raise_if_strict("Live criteria payload failed schema validation.")
-    _raise_if_strict("Strict runtime requires a valid live criteria response.")
-    base = existing.model_copy(deep=True) if existing else CriteriaPayload()
-    category = intent.category or base.category or _category_from_text(message) or "美妆护肤"
-    constraints = base.constraints.model_copy(deep=True) if base.constraints else Constraints()
-    updates = intent.extracted_constraints
-    constraints = constraints.model_copy(update={k: v for k, v in updates.items() if hasattr(constraints, k)})
-    if constraints.use_scenario is None:
-        constraints.use_scenario = _scenario_from_text(message)
-    if feedback:
-        constraints.ingredient_avoid = list(
-            dict.fromkeys(constraints.ingredient_avoid + feedback.get("avoid_traits", []))
-        )
-
-    chips = _chips_for_constraints(category, constraints)
-    summary = "，".join(chips) if chips else f"{category}导购"
-    return CriteriaPayload(
-        criteria_id=base.criteria_id or "c_auto_001",
-        category=category,
-        summary=summary,
-        chips=chips,
-        constraints=constraints,
-    )
+    parsed = _require_json_object(live, "generate_criteria")
+    criteria = _criteria_from_live_payload(parsed, existing)
+    if criteria:
+        return criteria
+    raise RuntimeError("Live criteria payload failed schema validation.")
 
 
 async def generate_recommendation(
@@ -169,28 +120,32 @@ async def generate_recommendation(
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
 ) -> RecommendationResult:
+    if not products:
+        return RecommendationResult(text_chunks=["暂时没有找到合适商品。"], products=[])
     live = await _call_chat_task(
         "generate_recommendation",
-        recommendation_messages(criteria, products, evidence_by_product),
+        recommendation_messages(
+            criteria,
+            products,
+            evidence_by_product,
+            {
+                product.product_id: build_reason_atoms(
+                    criteria,
+                    product,
+                    (evidence_by_product or {}).get(product.product_id, []),
+                )
+                for product in products
+            },
+        ),
         json_object=True,
     )
-    if live:
-        parsed = _parse_json_object(live)
-        chunks = parsed.get("text_chunks") if parsed else None
-        if isinstance(chunks, list) and all(isinstance(chunk, str) for chunk in chunks):
-            return RecommendationResult(text_chunks=chunks[:4], products=products)
-        _raise_if_strict("Live recommendation payload failed schema validation.")
-    _raise_if_strict("Strict runtime requires a valid live recommendation response.")
-    if not products:
-        return RecommendationResult(text_chunks=["没有找到完全匹配的商品，我会放宽软偏好再试。"])
-    category = criteria.category or "商品"
-    return RecommendationResult(
-        text_chunks=[
-            f"我先按{criteria.summary or category}来筛选。",
-            "下面给你几个更匹配的选择。",
-        ],
-        products=products,
-    )
+    parsed = _require_json_object(live, "generate_recommendation")
+    chunks = parsed.get("text_chunks")
+    if isinstance(chunks, list) and all(isinstance(chunk, str) for chunk in chunks):
+        validated_chunks = chunks[:4]
+        _validate_recommendation_chunks(validated_chunks, products)
+        return RecommendationResult(text_chunks=validated_chunks, products=products)
+    raise RuntimeError("Live recommendation payload failed schema validation.")
 
 
 async def analyze_image(image_url: str) -> dict[str, Any]:
@@ -200,14 +155,9 @@ async def analyze_image(image_url: str) -> dict[str, Any]:
         image_messages(image_url, provider_image_url),
         json_object=True,
     )
-    if live:
-        parsed = _parse_json_object(live)
-        if parsed:
-            parsed["image_url"] = image_url
-            return parsed
-        _raise_if_strict("Live image analysis payload was not valid JSON.")
-    _raise_if_strict("Strict runtime requires a valid live image analysis response.")
-    return {"image_url": image_url, "category_hint": "美妆护肤", "description": "图片已接收，P0 使用文本约束继续导购。"}
+    parsed = _require_json_object(live, "analyze_image")
+    parsed["image_url"] = image_url
+    return parsed
 
 
 async def generate_decision(
@@ -223,42 +173,46 @@ async def generate_decision(
         decision_messages(criteria, products, evidence_by_product),
         json_object=True,
     )
-    if live:
-        parsed = _parse_json_object(live)
-        if parsed:
-            winner_id = parsed.get("winner_product_id", "")
-            if winner_id in valid_ids:
-                return DecisionResult(
-                    winner_product_id=winner_id,
-                    summary=parsed.get("summary", f"优先选{winner_id}。"),
-                    why=parsed.get("why", ["综合匹配度最高"])
-                    if isinstance(parsed.get("why"), list)
-                    else ["综合匹配度最高"],
-                    not_for=parsed.get("not_for", []) if isinstance(parsed.get("not_for"), list) else [],
-                )
-        _raise_if_strict("Live decision payload failed schema validation.")
-    _raise_if_strict("Strict runtime requires a valid live decision response.")
-    winner = products[0]
-    why = []
-    if winner.price is not None:
-        why.append(f"{winner.price:g}元")
-    if criteria.constraints.skin_type and criteria.constraints.skin_type in winner.skin_type_match:
-        why.append(f"{criteria.constraints.skin_type}适用")
-    if winner.use_scenario:
-        why.append(winner.use_scenario)
-    if not why:
-        why.append("综合匹配度最高")
+    parsed = _require_json_object(live, "generate_decision")
+    winner_id = parsed.get("winner_product_id", "")
+    if winner_id not in valid_ids:
+        raise RuntimeError("Live decision payload selected an unknown product.")
     return DecisionResult(
-        winner_product_id=winner.product_id,
-        summary=f"优先选{winner.name}。",
-        why=why,
-        not_for=[],
+        winner_product_id=winner_id,
+        summary=parsed.get("summary", f"优先选{winner_id}。"),
+        why=parsed.get("why", ["综合匹配度最高"]) if isinstance(parsed.get("why"), list) else ["综合匹配度最高"],
+        not_for=parsed.get("not_for", []) if isinstance(parsed.get("not_for"), list) else [],
     )
 
 
-def _raise_if_strict(message: str) -> None:
-    if get_settings().strict_runtime:
-        raise RuntimeError(message)
+def _require_json_object(text: str, task: str) -> dict[str, Any]:
+    if not text:
+        raise RuntimeError(f"Live {task} response was empty.")
+    parsed = _parse_json_object(text)
+    if parsed is None:
+        raise RuntimeError(f"Live {task} response was not a JSON object.")
+    return parsed
+
+
+def _validate_recommendation_chunks(chunks: list[str], products: list[ProductPayload]) -> None:
+    text = "\n".join(chunks)
+    if not text.strip():
+        raise RuntimeError("Live recommendation payload had empty text_chunks.")
+
+    valid_ids = {product.product_id for product in products}
+    unknown_ids = sorted(set(_PRODUCT_ID_RE.findall(text)) - valid_ids)
+    if unknown_ids:
+        raise RuntimeError(f"Live recommendation text referenced unknown product ids: {unknown_ids}.")
+
+    candidate_names = {product.name for product in products}
+    known_names = {product.name for product in list_products()}
+    unknown_names = sorted(name for name in known_names - candidate_names if name and name in text)
+    if unknown_names:
+        raise RuntimeError("Live recommendation text referenced products outside the candidate set.")
+
+    forbidden_terms = [term for term in _FORBIDDEN_RECOMMENDATION_TERMS if term in text]
+    if forbidden_terms:
+        raise RuntimeError(f"Live recommendation text contained unsupported commercial claims: {forbidden_terms}.")
 
 
 def _json_preview(value: Any) -> str:
@@ -269,14 +223,3 @@ def _json_preview(value: Any) -> str:
     if len(text) <= _LOG_PAYLOAD_PREVIEW_CHARS:
         return text
     return f"{text[:_LOG_PAYLOAD_PREVIEW_CHARS]}...<truncated>"
-
-
-def _validation_error_fields(exc: ValidationError) -> list[str]:
-    fields: list[str] = []
-    for error in exc.errors()[:8]:
-        loc = error.get("loc", ())
-        if isinstance(loc, tuple):
-            fields.append(".".join(str(part) for part in loc))
-        else:
-            fields.append(str(loc))
-    return fields

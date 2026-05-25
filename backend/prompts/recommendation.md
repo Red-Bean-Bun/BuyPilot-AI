@@ -9,6 +9,7 @@
 购买标准: {criteria}
 候选商品: {ranked_products}
 商品证据片段: {evidence_chunks}
+已校验推荐理由事实原子: {reason_atoms_by_product}
 
 ## Output Format
 
@@ -32,7 +33,7 @@
 ## Rules
 
 1. 只解释传入的商品，不得编造不存在商品、价格、优惠或库存
-2. 理由必须引用 evidence_chunks 中的真实证据（FAQ、评价原文），不使用空洞营销词
+2. 理由必须优先基于已校验推荐理由事实原子和 evidence_chunks 中的真实证据，不使用空洞营销词
 3. 如果用户有排除条件（ingredient_avoid、brand_avoid），说明已帮你排除了哪些
 4. 商品名称必须与传入的 ranked_products 完全一致，不得改写
 5. 如果所有候选都不太匹配，诚实说明，不硬推

@@ -8,35 +8,35 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.services.llm_fallbacks import chips_for_constraints
+from src.config.domain_terms import normalize_product_type
 from src.services.prompts import get_prompt_store
-from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload
+from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload, ReasonAtomPayload
 
-INTENT_SYSTEM_FALLBACK = (
+INTENT_SYSTEM_SCHEMA = (
     "你是电商导购意图识别器。只输出 JSON，字段为 intent、confidence、category、"
     "extracted_constraints、soft_preferences、target_product_id。intent 只能是 "
-    "recommend/clarify/feedback/add_to_cart/view_cart/chitchat。"
+    "recommend/clarify/feedback/add_to_cart/remove_from_cart/update_cart_quantity/view_cart/chitchat。"
 )
 
-CRITERIA_SYSTEM_FALLBACK = (
+CRITERIA_SYSTEM_SCHEMA = (
     "你是电商导购购买标准生成器。只输出 JSON，字段为 criteria_id、category、summary、"
     "chips、constraints。constraints 必须只使用允许字段：budget_min,budget_max,"
     "use_scenario,brand_avoid,origin_avoid,product_type,skin_type,ingredient_avoid,"
     "ingredient_prefer,storage,screen_size,sport_type,season,dietary。不要输出商品。"
 )
 
-RECOMMENDATION_SYSTEM_FALLBACK = (
+RECOMMENDATION_SYSTEM_SCHEMA = (
     "你是电商导购推荐解释生成器。只输出 JSON，字段为 text_chunks。只能解释传入商品，不得编造商品、价格、优惠或库存。"
 )
 
-DECISION_SYSTEM_FALLBACK = (
+DECISION_SYSTEM_SCHEMA = (
     "你是电商导购决策器。只输出 JSON，字段为 winner_product_id、summary、why、not_for。"
     "winner_product_id 必须是传入商品之一，不得编造。"
     "why 是选择该商品的理由列表（每条一句话）。"
     "not_for 是不适合人群或场景列表。"
 )
 
-IMAGE_SYSTEM_FALLBACK = "你是商品图片理解器。只输出 JSON，字段为 category_hint、description、visible_traits。"
+IMAGE_SYSTEM_SCHEMA = "你是商品图片理解器。只输出 JSON，字段为 category_hint、description、visible_traits。"
 
 
 def intent_messages(
@@ -50,13 +50,12 @@ def intent_messages(
             "role": "system",
             "content": _prompt_content(
                 "intent_analysis",
-                INTENT_SYSTEM_FALLBACK,
                 {
                     "user_message": message,
                     "history": history or [],
                     "conversation_context": conversation_context,
                 },
-                INTENT_SYSTEM_FALLBACK,
+                INTENT_SYSTEM_SCHEMA,
             ),
         },
         {"role": "user", "content": _history_prompt(message, history, image_url)},
@@ -81,15 +80,15 @@ def criteria_messages(
             "role": "system",
             "content": _prompt_content(
                 "criteria_generation",
-                CRITERIA_SYSTEM_FALLBACK,
                 {
                     "user_message": message,
                     "intent_result": intent_dump,
                     "history": [],
                     "feedback_constraints": feedback or {},
+                    "existing": existing_dump,
                     "conversation_context": conversation_context,
                 },
-                CRITERIA_SYSTEM_FALLBACK,
+                CRITERIA_SYSTEM_SCHEMA,
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -100,23 +99,31 @@ def recommendation_messages(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    reason_atoms_by_product: dict[str, list[ReasonAtomPayload]] | None = None,
 ) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
         "products": [product.model_dump() for product in products],
+        "reason_atoms_by_product": {
+            product_id: [atom.model_dump() for atom in atoms]
+            for product_id, atoms in (reason_atoms_by_product or {}).items()
+        },
     }
     return [
         {
             "role": "system",
             "content": _prompt_content(
                 "recommendation",
-                RECOMMENDATION_SYSTEM_FALLBACK,
                 {
                     "criteria": criteria.model_dump(),
                     "ranked_products": [product.model_dump() for product in products],
                     "evidence_chunks": _format_evidence_context(evidence_by_product or {}),
+                    "reason_atoms_by_product": {
+                        product_id: [atom.model_dump() for atom in atoms]
+                        for product_id, atoms in (reason_atoms_by_product or {}).items()
+                    },
                 },
-                RECOMMENDATION_SYSTEM_FALLBACK,
+                RECOMMENDATION_SYSTEM_SCHEMA,
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -129,9 +136,8 @@ def image_messages(image_url: str, provider_image_url: str) -> list[dict[str, An
             "role": "system",
             "content": _prompt_content(
                 "image_analysis",
-                IMAGE_SYSTEM_FALLBACK,
                 {"image_url": image_url},
-                IMAGE_SYSTEM_FALLBACK,
+                IMAGE_SYSTEM_SCHEMA,
             ),
         },
         {
@@ -159,14 +165,13 @@ def decision_messages(
             "role": "system",
             "content": _prompt_content(
                 "decision",
-                DECISION_SYSTEM_FALLBACK,
                 {
                     "criteria": criteria.model_dump(),
                     "recommendations": [product.model_dump() for product in products],
                     "feedback_history": [],
                     "evidence_context": _format_evidence_context(evidence_by_product or {}),
                 },
-                DECISION_SYSTEM_FALLBACK,
+                DECISION_SYSTEM_SCHEMA,
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -230,6 +235,15 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "add_to_cart": "add_to_cart",
             "add_cart": "add_to_cart",
             "cart_add": "add_to_cart",
+            "remove_from_cart": "remove_from_cart",
+            "remove_cart": "remove_from_cart",
+            "cart_remove": "remove_from_cart",
+            "delete_from_cart": "remove_from_cart",
+            "delete_cart": "remove_from_cart",
+            "update_cart_quantity": "update_cart_quantity",
+            "update_quantity": "update_cart_quantity",
+            "cart_update": "update_cart_quantity",
+            "set_cart_quantity": "update_cart_quantity",
             "view_cart": "view_cart",
             "cart_view": "view_cart",
             "feedback": "feedback",
@@ -246,6 +260,11 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "追问": "clarify",
             "加购": "add_to_cart",
             "加入购物车": "add_to_cart",
+            "移出购物车": "remove_from_cart",
+            "从购物车删除": "remove_from_cart",
+            "删除购物车": "remove_from_cart",
+            "改数量": "update_cart_quantity",
+            "修改数量": "update_cart_quantity",
             "查看购物车": "view_cart",
             "反馈": "feedback",
             "不喜欢": "feedback",
@@ -329,6 +348,14 @@ def criteria_from_live_payload(
     base = existing.model_copy(deep=True) if existing else CriteriaPayload()
     raw_constraints_obj = payload.get("constraints")
     raw_constraints: dict[str, Any] = raw_constraints_obj if isinstance(raw_constraints_obj, dict) else {}
+    if "product_type" in raw_constraints:
+        raw_constraints = {
+            **raw_constraints,
+            "product_type": normalize_product_type(_normalize_nullable_string(raw_constraints.get("product_type"))),
+        }
+    category = _normalize_category(payload.get("category")) or base.category
+    if not category:
+        return None
     try:
         constraints = Constraints.model_validate(
             {
@@ -339,7 +366,7 @@ def criteria_from_live_payload(
         criteria = CriteriaPayload.model_validate(
             {
                 "criteria_id": payload.get("criteria_id") or base.criteria_id or "c_auto_001",
-                "category": payload.get("category") or base.category or "美妆护肤",
+                "category": category,
                 "summary": payload.get("summary") or base.summary,
                 "chips": payload.get("chips") if isinstance(payload.get("chips"), list) else [],
                 "constraints": constraints.model_dump(),
@@ -348,10 +375,17 @@ def criteria_from_live_payload(
     except ValidationError:
         return None
     if not criteria.chips:
-        criteria.chips = chips_for_constraints(criteria.category, criteria.constraints)
+        criteria.chips = _chips_for_constraints(criteria.category, criteria.constraints)
     if not criteria.summary:
         criteria.summary = "，".join(criteria.chips) if criteria.chips else f"{criteria.category}导购"
     return criteria
+
+
+def _normalize_category(value: Any) -> str | None:
+    category = _normalize_nullable_string(value)
+    if category == "食品生活":
+        return "食品饮料"
+    return category
 
 
 def _format_evidence_context(evidence_by_product: dict[str, list[EvidencePayload]]) -> str:
@@ -377,8 +411,25 @@ def _history_prompt(message: str, history: list[dict[str, Any]] | None, image_ur
     )
 
 
-def _prompt_content(name: str, fallback: str, variables: dict[str, Any], schema_override: str) -> str:
-    rendered = get_prompt_store().render(name, fallback, variables)
-    if rendered == fallback:
-        return fallback
+def _chips_for_constraints(category: str, constraints: Constraints) -> list[str]:
+    chips = [category]
+    if constraints.skin_type:
+        chips.append(f"{constraints.skin_type}肌肤")
+    if constraints.budget_max is not None:
+        chips.append(f"{constraints.budget_max:g}元内")
+    if constraints.use_scenario:
+        chips.append(constraints.use_scenario)
+    for item in constraints.ingredient_avoid:
+        chips.append(f"不要{item}")
+    for item in constraints.brand_avoid:
+        chips.append(f"不要{item}")
+    for item in constraints.origin_avoid:
+        chips.append(f"不要{item}")
+    if constraints.product_type:
+        chips.append(constraints.product_type)
+    return chips
+
+
+def _prompt_content(name: str, variables: dict[str, Any], schema_override: str) -> str:
+    rendered = get_prompt_store().render(name, variables)
     return f"{rendered}\n\n## Runtime Schema Override\n{schema_override}"

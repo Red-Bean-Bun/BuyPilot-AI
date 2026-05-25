@@ -1,4 +1,4 @@
-"""Runtime prompt template loading with hardcoded fallback support."""
+"""Runtime prompt template loading."""
 
 from __future__ import annotations
 
@@ -13,6 +13,10 @@ from src.config.settings import BACKEND_DIR
 PROMPTS_DIR = BACKEND_DIR / "prompts"
 
 
+class PromptTemplateMissing(RuntimeError):
+    """Raised when a required runtime prompt template is absent."""
+
+
 class PromptStore:
     def __init__(self, prompts_dir: Path = PROMPTS_DIR) -> None:
         self.prompts_dir = prompts_dir
@@ -24,8 +28,10 @@ class PromptStore:
             return None
         return path.read_text(encoding="utf-8").strip()
 
-    def render(self, name: str, fallback: str, variables: dict[str, Any] | None = None) -> str:
-        template = self.load(name) or fallback
+    def render(self, name: str, variables: dict[str, Any] | None = None) -> str:
+        template = self.load(name)
+        if template is None:
+            raise PromptTemplateMissing(f"Prompt template not found: {name}")
         return _render_template(template, variables or {})
 
 

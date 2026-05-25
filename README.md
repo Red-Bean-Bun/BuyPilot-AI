@@ -18,7 +18,7 @@
 | 前端架构 | 1 人负责，sealed interface + ChatUiNode |
 | 后端架构 | 2 人（主开发 + 算法），AGENTS.md 分层（API → Runtime → Service → Repo → Config/Types） |
 | SSE 管道 | async generator stage 模式（推荐文案与决策后台并行） |
-| 降级策略 | LLM→规则 fallback + embedding/rerank deterministic fallback；`STRICT_RUNTIME=1` 禁用降级 |
+| 降级策略 | 仅保留 LLM provider fallback；embedding/rerank/retrieval/state/audit 默认显性失败；SQLite 是持久化向量后端兼容，不是 memory fallback |
 | 图片上传 | multipart `/upload/image` |
 | LLM 调用 | task-oriented interface + Profile 配置驱动（YAML）+ PromptStore 运行时加载 |
 | 开发环境 | `uv run uvicorn`（默认 SQLite）；`deploy/docker-compose.yml`（Postgres + pgvector 演示） |
@@ -32,7 +32,7 @@
 
 | 指标 | 状态 |
 |------|------|
-| 测试 | `110 passed, 1 pre-existing failure`（2026-05-25） |
+| 测试 | `111 passed`（2026-05-26） |
 | CI | pytest + ruff check/format（`.github/workflows/backend-tests.yml`） |
 | Demo Smoke | 6/6 场景通过（Postgres/pgvector + 真实模型） |
 | 后端完成度 | P0 完成 / P1 基本完成 / P2 部分完成 → [详细状态](doc/status/backend-completion.md) |

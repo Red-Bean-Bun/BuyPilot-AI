@@ -53,7 +53,7 @@ async def insert_api_request_log(
             return row.id
     except SQLAlchemyError:
         logger.exception("insert_api_request_log failed")
-        return None
+        raise
 
 
 async def insert_audit_event(
@@ -94,7 +94,7 @@ async def insert_audit_event(
             return row.id
     except SQLAlchemyError:
         logger.exception("insert_audit_event failed")
-        return None
+        raise
 
 
 async def list_api_request_logs(

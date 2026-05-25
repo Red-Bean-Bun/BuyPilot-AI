@@ -97,7 +97,7 @@ def image_url_to_provider_url(image_url: str) -> str:
     file_name = Path(image_url).name
     path = get_settings().upload_dir / file_name
     if not path.exists() or not path.is_file():
-        return image_url
+        raise ImageUploadError("IMAGE_FILE_NOT_FOUND", f"Uploaded image is not available: {file_name}", status_code=404)
     mime_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"

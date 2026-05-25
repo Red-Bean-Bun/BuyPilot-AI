@@ -194,16 +194,12 @@ async def _run_pipeline(
 
     body = ChatStreamRequest(message=question, session_id=session_id, history=history)
 
-    # Capture intent directly from the intent stage (before full pipeline)
-    try:
-        from src.runtime.stages.intent import run_intent
+    # Capture intent directly from the intent stage before the full pipeline.
+    from src.runtime.stages.intent import run_intent
 
-        intent_result = await run_intent(session_id, body)
-        capture.intent_type = intent_result.intent
-        capture.extracted_constraints = intent_result.extracted_constraints
-    except Exception:
-        logger.exception("intent capture failed")
-        pass
+    intent_result = await run_intent(session_id, body)
+    capture.intent_type = intent_result.intent
+    capture.extracted_constraints = intent_result.extracted_constraints
 
     try:
         async for event in chat_stream(session_id, body):
@@ -248,9 +244,8 @@ def _collect_event(event: Any, capture: PipelineCapture) -> None:
     elif event_type == "final_decision" and isinstance(event, FinalDecisionEvent):
         capture.winner_product_id = event.winner_product_id
 
-    # intent is captured from the pipeline's extracted_constraints
-    # via the intent stage output saved to the stage context
-    # Fallback: use "recommend" if no error
+    # Intent is captured from the pipeline's extracted constraints via the
+    # intent stage output saved to the stage context.
     if event_type == "thinking":
         pass  # skip thinking events
     elif event_type == "clarification":

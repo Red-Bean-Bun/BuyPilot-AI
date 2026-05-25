@@ -8,12 +8,13 @@
 
 用户消息: {user_message}
 对话历史: {history}
+对话上下文: {conversation_context}
 
 ## Task
 
 分析用户输入，输出结构化 JSON。你需要判断：
 1. 用户是否在进行购物咨询（vs 闲聊/无关问题）
-2. 识别商品品类（美妆护肤/数码电子/服饰运动/食品生活 等）
+2. 识别商品品类（美妆护肤/数码电子/服饰运动/食品饮料 等）
 3. 提取所有可识别的品类约束条件
 4. 判断意图类型
 
@@ -23,9 +24,9 @@
 
 ```json
 {
-  "intent": "recommend | clarify | feedback | add_to_cart | view_cart | chitchat",
+  "intent": "recommend | clarify | feedback | add_to_cart | remove_from_cart | update_cart_quantity | view_cart | chitchat",
   "confidence": 0.9,
-  "category": "美妆护肤 | 数码电子 | 服饰运动 | 食品生活 | null",
+  "category": "美妆护肤 | 数码电子 | 服饰运动 | 食品饮料 | null",
   "extracted_constraints": {
     "budget_max": null,
     "budget_min": null,
@@ -43,19 +44,21 @@
 | 美妆护肤 | skin_type(油性/干性/混合/敏感/通用), ingredient_avoid(成分列表), ingredient_prefer(成分列表), use_scenario(日常/夜间/户外/敏感肌专用) |
 | 数码电子 | storage, screen_size, use_scenario(日常/商务/游戏/创作) |
 | 服饰运动 | sport_type(跑步/篮球/徒步/瑜伽), season(春夏/秋冬/四季) |
-| 食品生活 | dietary(无糖/低糖/含咖啡因/含乳/素食), use_scenario(早餐/下午茶/运动补给) |
+| 食品饮料 | dietary(无糖/低糖/含咖啡因/含乳/素食), use_scenario(早餐/下午茶/运动补给) |
 
 未识别品类时 `category` 输出 null，`extracted_constraints` 只保留通用字段（budget/use_scenario）。
 
 ## Rules
 
 1. budget 提取为数字，注意货币单位（"200元" -> 200，"$30" -> 30）
-2. 品类判断优先看关键词：护肤/洗面奶/防晒 -> 美妆护肤，手机/耳机/笔记本 -> 数码电子，跑鞋/瑜伽裤 -> 服饰运动，零食/咖啡/麦片 -> 食品生活
+2. 品类判断优先看关键词：护肤/洗面奶/防晒 -> 美妆护肤，手机/耳机/笔记本 -> 数码电子，跑鞋/瑜伽裤 -> 服饰运动，零食/咖啡/麦片 -> 食品饮料
 3. intent 定义：
    - recommend: 用户请求推荐商品
    - clarify: 用户在澄清需求、回答追问，或信息不足需要追问
    - feedback: 用户表达不喜欢、排除某商品/品牌/特征等反馈
    - add_to_cart: 用户要加购物车
+   - remove_from_cart: 用户要从购物车删除/移出商品
+   - update_cart_quantity: 用户要修改购物车里商品数量
    - view_cart: 用户要查看购物车
    - chitchat: 非购物咨询
 4. 不要猜测用户没有明确表达的约束，未提及的字段保持 null 或空数组

@@ -1,4 +1,4 @@
-"""Per-turn fallback telemetry for degraded but recoverable paths."""
+"""Per-turn telemetry for allowed LLM provider fallback paths."""
 
 from __future__ import annotations
 

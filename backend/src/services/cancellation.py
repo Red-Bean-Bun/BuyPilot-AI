@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from sqlalchemy.exc import SQLAlchemyError
-
 from src.repos.cancellations import (
     cancellation_requested,
     clear_active_turn,
@@ -25,7 +23,4 @@ async def request_chat_turn_cancellation(session_id: str, turn_id: str) -> bool:
 
 
 async def is_chat_turn_cancellation_requested(session_id: str, turn_id: str) -> bool:
-    try:
-        return await cancellation_requested(session_id, turn_id)
-    except SQLAlchemyError:
-        return False
+    return await cancellation_requested(session_id, turn_id)

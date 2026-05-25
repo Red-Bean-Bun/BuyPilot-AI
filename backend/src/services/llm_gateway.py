@@ -29,7 +29,7 @@ class LiveLLMUnavailable(RuntimeError):
     """Raised when live provider config is incomplete or unavailable."""
 
 
-async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object: bool = False) -> str | None:
+async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object: bool = False) -> str:
     last_error: Exception | None = None
     for profile_name in _task_profile_names(task):
         try:
@@ -49,15 +49,13 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
                 error_type=type(exc).__name__,
             )
             logger.warning(
-                "LLM provider failed for task %s profile %s; trying fallback",
+                "LLM provider failed for task %s profile %s; trying next configured profile",
                 task,
                 profile_name,
                 exc_info=True,
             )
             continue
-    if get_settings().strict_runtime:
-        raise LiveLLMUnavailable(f"Strict runtime requires live LLM task '{task}'.") from last_error
-    return None
+    raise LiveLLMUnavailable(f"Live LLM task '{task}' has no usable provider.") from last_error
 
 
 def _resolve_chat_profile(profile_name: str) -> ChatProfile:

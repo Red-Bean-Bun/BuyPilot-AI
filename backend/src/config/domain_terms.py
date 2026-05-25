@@ -17,9 +17,55 @@ SKIN_TERMS: dict[str, str] = {
 
 CATEGORY_TERMS: dict[str, tuple[str, ...]] = {
     "美妆护肤": ("洗面奶", "防晒", "护肤", "肤", "洁面", "面霜"),
-    "数码电子": ("耳机", "手机", "电脑", "数码"),
+    "数码电子": ("耳机", "手机", "电脑", "笔记本", "平板", "数码"),
     "服饰运动": ("跑鞋", "运动", "衣服", "服饰"),
-    "食品饮料": ("食品", "饮料", "零食", "无糖"),
+    "食品饮料": ("食品", "饮料", "零食", "无糖", "麦片", "咖啡", "茶饮"),
+}
+
+PRODUCT_TYPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "洁面": ("洁面", "洁面乳", "洗面奶", "洗颜", "泡沫洁面"),
+    "防晒": ("防晒", "防晒霜", "防晒乳", "隔离露"),
+    "面霜": ("面霜", "乳霜", "修复霜", "特护霜"),
+    "精华": ("精华", "精华液", "肌底液"),
+    "化妆水": ("化妆水", "爽肤水", "柔肤水", "神仙水"),
+    "卸妆": ("卸妆", "卸妆油", "卸妆液"),
+    "粉底液": ("粉底液", "粉底"),
+    "面膜": ("面膜", "涂抹面膜"),
+    "眉笔": ("眉笔",),
+    "蜜粉": ("蜜粉", "散粉", "粉饼"),
+    "唇釉": ("唇釉",),
+    "眼霜": ("眼霜",),
+    "智能手机": ("智能手机", "手机", "5g手机", "游戏手机", "旗舰手机"),
+    "真无线耳机": ("真无线耳机", "蓝牙耳机", "无线耳机", "耳机", "降噪耳机", "airpods"),
+    "笔记本电脑": ("笔记本电脑", "笔记本", "电脑", "轻薄本", "商务本"),
+    "平板电脑": ("平板电脑", "平板", "pad", "ipad"),
+    "跑步鞋": ("跑步鞋", "跑鞋", "训练鞋", "慢跑鞋"),
+    "篮球鞋": ("篮球鞋", "实战篮球鞋"),
+    "短袖T恤": ("短袖t恤", "短袖", "t恤", "运动上衣"),
+    "速干T恤": ("速干t恤", "速干短袖", "速干上衣"),
+    "运动长裤": ("运动长裤", "长裤", "束脚裤"),
+    "运动短裤": ("运动短裤", "短裤", "训练裤"),
+    "卫衣": ("卫衣", "连帽卫衣"),
+    "徒步鞋": ("徒步鞋", "登山鞋"),
+    "户外裤": ("户外裤", "软壳长裤"),
+    "背包": ("背包", "双肩包", "通勤包"),
+    "帽子": ("帽子", "棒球帽", "鸭舌帽", "遮阳帽"),
+    "瑜伽裤": ("瑜伽裤", "紧身裤"),
+    "茶饮": ("茶饮", "茶饮料", "无糖茶", "乌龙茶", "茉莉花茶"),
+    "碳酸饮料": ("碳酸饮料", "气泡水", "苏打水", "汽水", "可乐"),
+    "功能饮料": ("功能饮料", "能量饮料", "维生素饮料"),
+    "坚果/零食": ("坚果/零食", "坚果", "零食", "点心", "肉松饼", "每日坚果"),
+    "方便食品": ("方便食品", "方便面", "泡面", "速食"),
+    "咖啡": ("咖啡", "速溶咖啡", "黑咖啡", "冷萃"),
+    "牛奶": ("牛奶", "纯牛奶"),
+    "酸奶": ("酸奶", "风味酸奶"),
+    "调味品": ("调味品", "酱油", "生抽", "老抽"),
+}
+
+_PRODUCT_TYPE_INDEX = {
+    alias.casefold(): canonical
+    for canonical, aliases in PRODUCT_TYPE_ALIASES.items()
+    for alias in (canonical, *aliases)
 }
 
 INTENT_TERMS: dict[str, tuple[str, ...]] = {
@@ -181,6 +227,28 @@ def category_from_text(text: str) -> str | None:
         if contains_any(text, terms):
             return category
     return None
+
+
+def normalize_product_type(value: str | None) -> str | None:
+    if value is None:
+        return None
+    key = value.strip()
+    if not key:
+        return None
+    direct = _PRODUCT_TYPE_INDEX.get(key.casefold())
+    if direct:
+        return direct
+    for alias, canonical in _PRODUCT_TYPE_INDEX.items():
+        if len(alias) >= 2 and alias in key.casefold():
+            return canonical
+    return key
+
+
+def product_type_aliases(value: str | None) -> tuple[str, ...]:
+    canonical = normalize_product_type(value)
+    if not canonical:
+        return ()
+    return (canonical, *PRODUCT_TYPE_ALIASES.get(canonical, ()))
 
 
 def first_skin_type(text: str) -> str | None:

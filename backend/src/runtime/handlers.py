@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 from src.config.tuning import (
-    CHEAPER_BUDGET_FALLBACK_MAX,
+    CHEAPER_BUDGET_DEFAULT_MAX,
     CHEAPER_BUDGET_MIN_MAX,
     CHEAPER_BUDGET_RATIO,
 )
@@ -22,11 +24,12 @@ from src.runtime.streaming import (
     start_stage_task,
 )
 from src.services.audit import record_audit_event
-from src.services.cart import add_product_to_cart
+from src.services.cart import add_product_to_cart, remove_product_from_cart, update_product_quantity
 from src.services.conversation_state import get_previous_product_ids, save_recommendation_turn
 from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events
 from src.services.feedback import get_feedback_context, record_feedback
+from src.services.recommendation_reasons import build_reason_atoms, reason_from_atoms
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
@@ -82,45 +85,88 @@ async def handle_view_cart(
 async def handle_add_to_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    del body
-    product_id = intent.target_product_id if intent.target_product_id else await _last_product_id(ctx.session_id)
+    product_id = await _referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
-        yield ctx.thinking("clarifying", "需要确认要加购的商品。")
-        yield ClarificationEvent(
-            session_id=ctx.session_id,
-            turn_id=ctx.turn_id,
-            seq=ctx.seq.next(),
-            event_id=ctx.seq.event_id(),
-            node_id=f"clarification_{ctx.turn_id}",
-            created_at_ms=now_ms(),
-            question="你想把哪个商品加入购物车？",
-            required_slots=["target_product"],
-            suggested_options=[],
-        )
+        async for event in _clarify_cart_target(ctx, "你想把哪个商品加入购物车？"):
+            yield event
         yield ctx.done()
         return
-    await add_product_to_cart(ctx.session_id, product_id)
+    quantity = _quantity_from_intent(intent, body.message, default=1)
+    try:
+        await add_product_to_cart(ctx.session_id, product_id, quantity=quantity)
+    except ValueError:
+        yield _cart_action_event(ctx, "add", product_id, 0, "failed")
+        yield ctx.done()
+        return
     await record_audit_event(
         "cart.item_added",
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
         resource_type="cart_item",
         resource_id=product_id,
-        metadata={"quantity": 1, "source": "chat_intent"},
+        metadata={"quantity": quantity, "source": "chat_intent"},
     )
     ctx.ensure_active()
-    yield CartActionEvent(
+    yield _cart_action_event(ctx, "add", product_id, quantity, "success")
+    yield ctx.done()
+
+
+async def handle_remove_from_cart(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    product_id = await _referenced_product_id(ctx.session_id, intent, body.message)
+    if product_id is None:
+        async for event in _clarify_cart_target(ctx, "你想从购物车移出哪个商品？"):
+            yield event
+        yield ctx.done()
+        return
+    try:
+        item = await remove_product_from_cart(ctx.session_id, product_id)
+    except ValueError:
+        item = None
+    if item is None:
+        yield _cart_action_event(ctx, "remove", product_id, 0, "failed")
+        yield ctx.done()
+        return
+    await record_audit_event(
+        "cart.item_removed",
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"cart_{ctx.turn_id}",
-        created_at_ms=now_ms(),
-        action="add",
-        product_id=product_id,
-        quantity=1,
-        status="success",
+        resource_type="cart_item",
+        resource_id=product_id,
+        metadata={"source": "chat_intent"},
     )
+    yield _cart_action_event(ctx, "remove", product_id, 0, "success")
+    yield ctx.done()
+
+
+async def handle_update_cart_quantity(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    product_id = await _referenced_product_id(ctx.session_id, intent, body.message)
+    if product_id is None:
+        async for event in _clarify_cart_target(ctx, "你想修改哪个商品的数量？"):
+            yield event
+        yield ctx.done()
+        return
+    quantity = _quantity_from_intent(intent, body.message, default=1)
+    try:
+        item = await update_product_quantity(ctx.session_id, product_id, quantity)
+    except ValueError:
+        item = None
+    if item is None:
+        yield _cart_action_event(ctx, "update_quantity", product_id, quantity, "failed")
+        yield ctx.done()
+        return
+    await record_audit_event(
+        "cart.quantity_updated",
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        resource_type="cart_item",
+        resource_id=product_id,
+        metadata={"quantity": quantity, "source": "chat_intent"},
+    )
+    yield _cart_action_event(ctx, "update_quantity", product_id, quantity, "success")
     yield ctx.done()
 
 
@@ -145,7 +191,7 @@ async def handle_recommendation(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     if intent.intent == "feedback":
-        await _record_feedback_intent(ctx, intent)
+        await _record_feedback_intent(ctx, intent, body.message)
 
     yield ctx.thinking("criteria", "正在生成购买标准...")
     criteria_capture: CapturedStage[CriteriaPayload] = CapturedStage()
@@ -199,7 +245,7 @@ async def handle_recommendation(
     )
 
     yield ctx.thinking("searching", f"找到{len(products)}个匹配商品...")
-    async for event in _product_card_events(ctx, products, evidences_by_product):
+    async for event in _product_card_events(ctx, criteria, products, evidences_by_product):
         yield event
 
     recommendation_capture: CapturedStage[RecommendationResult] = CapturedStage()
@@ -240,11 +286,15 @@ async def handle_recommendation(
     yield ctx.done()
 
 
-async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult) -> None:
+async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult, message: str) -> None:
     reason = intent.extracted_constraints.get("feedback_text", "feedback")
+    product_id = None
+    if intent.target_product_id or _message_refers_to_previous_product(message):
+        product_id = await _referenced_product_id(ctx.session_id, intent, message)
     await record_feedback(
         ctx.session_id,
-        action="feedback",
+        action="not_interested" if product_id else "feedback",
+        product_id=product_id,
         reason=reason,
     )
     await record_audit_event(
@@ -252,6 +302,7 @@ async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult) -> N
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
         resource_type="feedback",
+        resource_id=product_id,
         metadata={"source": "chat_intent", "reason": reason},
     )
 
@@ -282,6 +333,7 @@ def _criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> Crite
 
 async def _product_card_events(
     ctx: StreamContext,
+    criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidences_by_product: dict[str, list[EvidencePayload]],
 ) -> AsyncGenerator[ProductCardEvent, None]:
@@ -291,6 +343,7 @@ async def _product_card_events(
         if evidence is None:
             evidence = await get_evidence(product)
         evidences_by_product[product.product_id] = evidence
+        reason_atoms = build_reason_atoms(criteria, product, evidence)
         yield ProductCardEvent(
             session_id=ctx.session_id,
             turn_id=ctx.turn_id,
@@ -301,7 +354,8 @@ async def _product_card_events(
             created_at_ms=now_ms(),
             rank=rank,
             product=product,
-            reason=_reason_for_product(product),
+            reason=reason_from_atoms(product, reason_atoms),
+            reason_atoms=reason_atoms,
             risk_notes=[],
             evidence=evidence,
             actions=[
@@ -392,16 +446,18 @@ async def _persist_recommendation(
         [product.product_id for product in products],
         user_message=body.message,
     )
-    await record_retrieval_trace(
-        criteria,
-        products,
-        evidences_by_product,
-        conversation_id=conversation_id,
-        stage_timings_ms=ctx.stage_timings_ms,
-        fallback_events=get_fallback_events(),
-        trace_details=retrieval.trace_details,
+    await asyncio.gather(
+        record_retrieval_trace(
+            criteria,
+            products,
+            evidences_by_product,
+            conversation_id=conversation_id,
+            stage_timings_ms=ctx.stage_timings_ms,
+            fallback_events=get_fallback_events(),
+            trace_details=retrieval.trace_details,
+        ),
+        record_evidence_links(products, evidences_by_product, conversation_id=conversation_id),
     )
-    await record_evidence_links(products, evidences_by_product, conversation_id=conversation_id)
     await record_audit_event(
         "chat.recommendation_persisted",
         session_id=ctx.session_id,
@@ -419,13 +475,9 @@ async def _persist_recommendation(
 INTENT_HANDLERS: dict[str, IntentHandler] = {
     "view_cart": handle_view_cart,
     "add_to_cart": handle_add_to_cart,
+    "remove_from_cart": handle_remove_from_cart,
+    "update_cart_quantity": handle_update_cart_quantity,
 }
-
-
-def _reason_for_product(product: ProductPayload) -> str:
-    if product.skin_type_match:
-        return f"{product.skin_type_match[0]}适用，{product.sub_category or product.category}匹配。"
-    return f"{product.category}下综合匹配度较高。"
 
 
 async def _last_product_id(session_id: str) -> str | None:
@@ -433,8 +485,97 @@ async def _last_product_id(session_id: str) -> str | None:
     return last_ids[0] if last_ids else None
 
 
+async def _referenced_product_id(session_id: str, intent: IntentResult, message: str) -> str | None:
+    if intent.target_product_id:
+        return intent.target_product_id
+    product_ids = await get_previous_product_ids(session_id)
+    if not product_ids:
+        return None
+    index = _ordinal_index(message)
+    if index is not None and 0 <= index < len(product_ids):
+        return product_ids[index]
+    return product_ids[0]
+
+
+_ORDINAL_INDEXES = {
+    "第一个": 0,
+    "第一款": 0,
+    "第1个": 0,
+    "第1款": 0,
+    "第二个": 1,
+    "第二款": 1,
+    "第2个": 1,
+    "第2款": 1,
+    "第三个": 2,
+    "第三款": 2,
+    "第3个": 2,
+    "第3款": 2,
+}
+
+
+def _ordinal_index(message: str) -> int | None:
+    for token, index in _ORDINAL_INDEXES.items():
+        if token in message:
+            return index
+    match = re.search(r"第\s*(\d+)\s*(?:个|款|件|项)?", message)
+    if match:
+        return max(0, int(match.group(1)) - 1)
+    return None
+
+
+def _quantity_from_intent(intent: IntentResult, message: str, *, default: int) -> int:
+    raw = intent.extracted_constraints.get("quantity") or intent.extracted_constraints.get("target_quantity")
+    if isinstance(raw, int | float):
+        return max(0, int(raw))
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return max(0, int(raw.strip()))
+    match = re.search(r"(?:改成|改为|设置为|调整为|变成)\s*(\d+)\s*(?:件|个|份)?", message)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"(\d+)\s*(?:件|个|份)", message)
+    if match:
+        return int(match.group(1))
+    return default
+
+
+def _message_refers_to_previous_product(message: str) -> bool:
+    return any(
+        token in message for token in ("这个", "这款", "刚才", "第一个", "第二个", "第三个", "第1", "第2", "第3")
+    )
+
+
+async def _clarify_cart_target(ctx: StreamContext, question: str) -> AsyncGenerator[SSEEventBase, None]:
+    yield ctx.thinking("clarifying", "需要确认购物车商品。")
+    yield ClarificationEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"clarification_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        question=question,
+        required_slots=["target_product"],
+        suggested_options=[],
+    )
+
+
+def _cart_action_event(ctx: StreamContext, action: str, product_id: str, quantity: int, status: str) -> CartActionEvent:
+    return CartActionEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"cart_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        action=action,
+        product_id=product_id,
+        quantity=quantity,
+        status=status,
+    )
+
+
 def _cheaper_budget_max(criteria: CriteriaPayload) -> float:
     current = criteria.constraints.budget_max
     if current is None:
-        return CHEAPER_BUDGET_FALLBACK_MAX
+        return CHEAPER_BUDGET_DEFAULT_MAX
     return max(CHEAPER_BUDGET_MIN_MAX, round(current * CHEAPER_BUDGET_RATIO, 2))
