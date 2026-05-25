@@ -10,4 +10,7 @@ data class ChatUiState(
     val isStreaming: Boolean = false,
     val lastError: String? = null,
     val lastUserMessage: String? = null,
+    val lastUserMessageKey: String? = null,
+    val streamingTextKey: String? = null,
+    val streamingTextLength: Int = 0,
 )
