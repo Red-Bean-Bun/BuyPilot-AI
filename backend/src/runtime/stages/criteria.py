@@ -37,6 +37,12 @@ def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> Cr
         chips.append(constraints.use_scenario)
     for item in constraints.ingredient_avoid:
         chips.append(f"不要{item}")
+    for item in constraints.brand_avoid:
+        chips.append(f"不要{item}")
+    for item in constraints.origin_avoid:
+        chips.append(f"不要{item}")
+    if constraints.product_type:
+        chips.append(constraints.product_type)
     return criteria.model_copy(update={"constraints": constraints, "chips": chips, "summary": "，".join(chips)})
 
 

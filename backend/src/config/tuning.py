@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-DEFAULT_CART_PRODUCT_ID = "p_beauty_011"
-
 FALLBACK_EVENT_LIMIT = 50
 
 LLM_TEMPERATURE = 0.2

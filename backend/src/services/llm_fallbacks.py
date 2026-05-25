@@ -50,4 +50,10 @@ def chips_for_constraints(category: str, constraints: Constraints) -> list[str]:
         chips.append(constraints.use_scenario)
     for item in constraints.ingredient_avoid:
         chips.append(f"不要{item}")
+    for item in constraints.brand_avoid:
+        chips.append(f"不要{item}")
+    for item in constraints.origin_avoid:
+        chips.append(f"不要{item}")
+    if constraints.product_type:
+        chips.append(constraints.product_type)
     return chips

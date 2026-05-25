@@ -24,7 +24,7 @@ from src.services.conversation_state import save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
-from src.types.sse_events import Constraints, CriteriaPayload, ErrorEvent, EventSeq, ProductPayload, SSEEventBase, now_ms
+from src.types.sse_events import Constraints, CriteriaPayload, ErrorEvent, EventSeq, EvidencePayload, ProductPayload, SSEEventBase, now_ms
 
 HEARTBEAT_INTERVAL_SECONDS = 0.8
 PUBLIC_PIPELINE_ERROR_MESSAGE = "本轮导购处理失败，请稍后重试。"
@@ -38,8 +38,8 @@ class PipelineStages:
     run_intent: Callable[[str, ChatStreamRequest], Awaitable[IntentResult]]
     run_criteria: Callable[[str, ChatStreamRequest, IntentResult], Awaitable[CriteriaPayload]]
     run_retrieval: RunRetrieval
-    run_recommendation_text: Callable[[CriteriaPayload, list[ProductPayload]], Awaitable[RecommendationResult]]
-    run_decision: Callable[[CriteriaPayload, list[ProductPayload]], Awaitable[DecisionResult]]
+    run_recommendation_text: Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[RecommendationResult]]
+    run_decision: Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]]
 
 
 async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerator[SSEEventBase, None]:

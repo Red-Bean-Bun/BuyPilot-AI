@@ -39,7 +39,7 @@ from src.services.llm_task_payloads import (
     recommendation_messages,
 )
 from src.types.schemas import DecisionResult, IntentResult, RecommendationResult
-from src.types.sse_events import Constraints, CriteriaPayload, ProductPayload
+from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload
 
 logger = logging.getLogger(__name__)
 _LOG_PAYLOAD_PREVIEW_CHARS = 2000
@@ -164,10 +164,14 @@ async def generate_criteria(
     )
 
 
-async def generate_recommendation(criteria: CriteriaPayload, products: list[ProductPayload]) -> RecommendationResult:
+async def generate_recommendation(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> RecommendationResult:
     live = await _call_chat_task(
         "generate_recommendation",
-        recommendation_messages(criteria, products),
+        recommendation_messages(criteria, products, evidence_by_product),
         json_object=True,
     )
     if live:
@@ -206,13 +210,17 @@ async def analyze_image(image_url: str) -> dict[str, Any]:
     return {"image_url": image_url, "category_hint": "美妆护肤", "description": "图片已接收，P0 使用文本约束继续导购。"}
 
 
-async def generate_decision(criteria: CriteriaPayload, products: list[ProductPayload]) -> DecisionResult:
+async def generate_decision(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> DecisionResult:
     if not products:
         return DecisionResult(winner_product_id="", summary="暂时没有找到合适商品。")
     valid_ids = [p.product_id for p in products]
     live = await _call_chat_task(
         "generate_decision",
-        decision_messages(criteria, products),
+        decision_messages(criteria, products, evidence_by_product),
         json_object=True,
     )
     if live:

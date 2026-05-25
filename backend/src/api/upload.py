@@ -9,11 +9,10 @@ from src.services.audit import record_audit_event
 from src.services.image_upload import (
     MAX_IMAGE_BYTES,
     ImageUploadError,
-    legacy_upload_response,
     parse_multipart_image,
     save_uploaded_image,
 )
-from src.types.schemas import ImageUploadRequest, ImageUploadResponse
+from src.types.schemas import ImageUploadResponse
 
 upload_router = APIRouter(tags=["upload"])
 
@@ -37,34 +36,26 @@ async def handle_upload_image(request: Request) -> ImageUploadResponse:
         )
 
     content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        raise HTTPException(
+            status_code=415,
+            detail={"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Only multipart/form-data image uploads are supported."},
+        )
     try:
-        if content_type.startswith("multipart/form-data"):
-            parsed = parse_multipart_image(await request.body(), content_type)
-            response = save_uploaded_image(parsed.file_name, parsed.content_type, parsed.data)
-            await run_sync_io(
-                record_audit_event,
-                "image.uploaded",
-                resource_type="image",
-                resource_id=response.image_url,
-                metadata={
-                    "file_name": parsed.file_name,
-                    "mime_type": response.mime_type,
-                    "bytes": len(parsed.data),
-                    "width": response.width,
-                    "height": response.height,
-                },
-            )
-            return response
-
-        body = ImageUploadRequest.model_validate(await request.json())
-        response = legacy_upload_response(body.file_name, body.content_type)
+        parsed = parse_multipart_image(await request.body(), content_type)
+        response = save_uploaded_image(parsed.file_name, parsed.content_type, parsed.data)
         await run_sync_io(
             record_audit_event,
-            "image.upload_placeholder",
+            "image.uploaded",
             resource_type="image",
             resource_id=response.image_url,
-            side_effect=False,
-            metadata={"file_name": body.file_name, "mime_type": response.mime_type},
+            metadata={
+                "file_name": parsed.file_name,
+                "mime_type": response.mime_type,
+                "bytes": len(parsed.data),
+                "width": response.width,
+                "height": response.height,
+            },
         )
         return response
     except ImageUploadError as exc:

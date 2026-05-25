@@ -16,6 +16,7 @@ from src.types.sse_events import (
     CriteriaPayload,
     DoneEvent,
     EventSeq,
+    EvidencePayload,
     ProductPayload,
     SSEEventBase,
     ThinkingEvent,
@@ -50,10 +51,10 @@ class StageBundle(Protocol):
     @property
     def run_recommendation_text(
         self,
-    ) -> Callable[[CriteriaPayload, list[ProductPayload]], Awaitable[RecommendationResult]]: ...
+    ) -> Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[RecommendationResult]]: ...
 
     @property
-    def run_decision(self) -> Callable[[CriteriaPayload, list[ProductPayload]], Awaitable[DecisionResult]]: ...
+    def run_decision(self) -> Callable[[CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]]: ...
 
 
 @dataclass(frozen=True)

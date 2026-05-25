@@ -10,7 +10,6 @@ from src.config.tuning import (
     CHEAPER_BUDGET_FALLBACK_MAX,
     CHEAPER_BUDGET_MIN_MAX,
     CHEAPER_BUDGET_RATIO,
-    DEFAULT_CART_PRODUCT_ID,
 )
 from src.runtime.stages.criteria import criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
@@ -88,8 +87,23 @@ async def handle_add_to_cart(
     product_id = (
         intent.target_product_id
         if intent.target_product_id
-        else await run_sync_io(_last_or_default_product, ctx.session_id)
+        else await run_sync_io(_last_product_id, ctx.session_id)
     )
+    if product_id is None:
+        yield ctx.thinking("clarifying", "需要确认要加购的商品。")
+        yield ClarificationEvent(
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            seq=ctx.seq.next(),
+            event_id=ctx.seq.event_id(),
+            node_id=f"clarification_{ctx.turn_id}",
+            created_at_ms=now_ms(),
+            question="你想把哪个商品加入购物车？",
+            required_slots=["target_product"],
+            suggested_options=[],
+        )
+        yield ctx.done()
+        return
     await run_sync_io(add_product_to_cart, ctx.session_id, product_id)
     await run_sync_io(
         record_audit_event,
@@ -179,13 +193,13 @@ async def handle_recommendation(
     ctx.ensure_active()
     recommendation_task = start_stage_task(
         ctx,
-        ctx.stages.run_recommendation_text(criteria, products),
+        ctx.stages.run_recommendation_text(criteria, products, evidences_by_product),
         timing_key="recommendation",
         background=True,
     )
     decision_task = start_stage_task(
         ctx,
-        ctx.stages.run_decision(criteria, products),
+        ctx.stages.run_decision(criteria, products, evidences_by_product),
         timing_key="decision",
         background=True,
     )
@@ -425,9 +439,9 @@ def _reason_for_product(product: ProductPayload) -> str:
     return f"{product.category}下综合匹配度较高。"
 
 
-def _last_or_default_product(session_id: str) -> str:
+def _last_product_id(session_id: str) -> str | None:
     last_ids = get_previous_product_ids(session_id)
-    return last_ids[0] if last_ids else DEFAULT_CART_PRODUCT_ID
+    return last_ids[0] if last_ids else None
 
 
 def _cheaper_budget_max(criteria: CriteriaPayload) -> float:

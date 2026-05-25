@@ -50,10 +50,10 @@ async def test_pipeline_emits_heartbeat_during_slow_stage(monkeypatch):
     async def fast_retrieval(criteria, feedback=None):
         return RetrievalResult(products=[], evidence_by_product={})
 
-    async def fast_recommendation_text(criteria, products):
+    async def fast_recommendation_text(criteria, products, evidence_by_product=None):
         return RecommendationResult(text_chunks=["已生成推荐。"], products=products)
 
-    async def fast_decision(criteria, products):
+    async def fast_decision(criteria, products, evidence_by_product=None):
         return DecisionResult(winner_product_id="", summary="暂无匹配商品。")
 
     monkeypatch.setattr(pipeline_module, "run_criteria", slow_run_criteria)
@@ -88,11 +88,11 @@ async def test_pipeline_emits_product_card_before_slow_recommendation_text(monke
     async def fast_retrieval(criteria, feedback=None):
         return RetrievalResult(products=[product], evidence_by_product={})
 
-    async def slow_recommendation_text(criteria, products):
+    async def slow_recommendation_text(criteria, products, evidence_by_product=None):
         await asyncio.sleep(0.035)
         return RecommendationResult(text_chunks=["这款更适合油皮日常使用。"], products=products)
 
-    async def fast_decision(criteria, products):
+    async def fast_decision(criteria, products, evidence_by_product=None):
         return DecisionResult(winner_product_id=product.product_id, summary="优先选测试洁面乳。")
 
     monkeypatch.setattr(pipeline_module, "run_retrieval", fast_retrieval)

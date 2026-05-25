@@ -31,8 +31,12 @@ async def run_retrieval(
     )
 
 
-async def run_recommendation_text(criteria: CriteriaPayload, products: list[ProductPayload]) -> RecommendationResult:
-    result = await generate_recommendation(criteria, products)
+async def run_recommendation_text(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> RecommendationResult:
+    result = await generate_recommendation(criteria, products, evidence_by_product)
     return result.model_copy(update={"products": products})
 
 
@@ -41,5 +45,5 @@ async def run_recommendation(
     feedback: Mapping[str, list[str]] | None = None,
 ) -> RecommendationResult:
     retrieval = await run_retrieval(criteria, feedback=feedback)
-    result = await run_recommendation_text(criteria, retrieval.products)
+    result = await run_recommendation_text(criteria, retrieval.products, retrieval.evidence_by_product)
     return result.model_copy(update={"evidence_by_product": retrieval.evidence_by_product})

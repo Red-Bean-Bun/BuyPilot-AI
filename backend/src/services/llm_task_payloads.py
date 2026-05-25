@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from src.services.llm_fallbacks import chips_for_constraints
 from src.services.prompts import get_prompt_store
-from src.types.sse_events import Constraints, CriteriaPayload, ProductPayload
+from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload
 
 INTENT_SYSTEM_FALLBACK = (
     "你是电商导购意图识别器。只输出 JSON，字段为 intent、confidence、category、"
@@ -21,8 +21,8 @@ INTENT_SYSTEM_FALLBACK = (
 CRITERIA_SYSTEM_FALLBACK = (
     "你是电商导购购买标准生成器。只输出 JSON，字段为 criteria_id、category、summary、"
     "chips、constraints。constraints 必须只使用允许字段：budget_min,budget_max,"
-    "use_scenario,skin_type,ingredient_avoid,ingredient_prefer,storage,screen_size,"
-    "sport_type,season,dietary。不要输出商品。"
+    "use_scenario,brand_avoid,origin_avoid,product_type,skin_type,ingredient_avoid,"
+    "ingredient_prefer,storage,screen_size,sport_type,season,dietary。不要输出商品。"
 )
 
 RECOMMENDATION_SYSTEM_FALLBACK = (
@@ -96,7 +96,11 @@ def criteria_messages(
     ]
 
 
-def recommendation_messages(criteria: CriteriaPayload, products: list[ProductPayload]) -> list[dict[str, Any]]:
+def recommendation_messages(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
         "products": [product.model_dump() for product in products],
@@ -110,7 +114,7 @@ def recommendation_messages(criteria: CriteriaPayload, products: list[ProductPay
                 {
                     "criteria": criteria.model_dump(),
                     "ranked_products": [product.model_dump() for product in products],
-                    "evidence_chunks": [],
+                    "evidence_chunks": _format_evidence_context(evidence_by_product or {}),
                 },
                 RECOMMENDATION_SYSTEM_FALLBACK,
             ),
@@ -140,7 +144,11 @@ def image_messages(image_url: str, provider_image_url: str) -> list[dict[str, An
     ]
 
 
-def decision_messages(criteria: CriteriaPayload, products: list[ProductPayload]) -> list[dict[str, Any]]:
+def decision_messages(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
         "products": [product.model_dump() for product in products],
@@ -156,6 +164,7 @@ def decision_messages(criteria: CriteriaPayload, products: list[ProductPayload])
                     "criteria": criteria.model_dump(),
                     "recommendations": [product.model_dump() for product in products],
                     "feedback_history": [],
+                    "evidence_context": _format_evidence_context(evidence_by_product or {}),
                 },
                 DECISION_SYSTEM_FALLBACK,
             ),
@@ -343,6 +352,18 @@ def criteria_from_live_payload(
     if not criteria.summary:
         criteria.summary = "，".join(criteria.chips) if criteria.chips else f"{criteria.category}导购"
     return criteria
+
+
+def _format_evidence_context(evidence_by_product: dict[str, list[EvidencePayload]]) -> str:
+    if not evidence_by_product:
+        return "无商品证据片段。"
+    lines: list[str] = []
+    for product_id, pieces in evidence_by_product.items():
+        for piece in pieces[:3]:
+            snippet = piece.snippet[:150]
+            source_type = piece.source_type or "证据"
+            lines.append(f"- [{product_id}] ({source_type}) {snippet}")
+    return "\n".join(lines) if lines else "无商品证据片段。"
 
 
 def _history_prompt(message: str, history: list[dict[str, Any]] | None, image_url: str | None) -> str:

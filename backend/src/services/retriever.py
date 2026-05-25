@@ -326,8 +326,22 @@ def _passes_hard_filters(criteria: CriteriaPayload, product: ProductPayload, fil
         and product.price > criteria.constraints.budget_max
     ):
         return False
-    avoid_traits = tuple(criteria.constraints.ingredient_avoid) + filters.avoid_traits
+    constraints = criteria.constraints
+    if constraints.brand_avoid and product.brand:
+        product_brand_lower = product.brand.lower()
+        if any(_brand_matches(brand, product_brand_lower) for brand in constraints.brand_avoid):
+            return False
+    if constraints.origin_avoid and product.brand:
+        if any(avoid_trait_matches_text(origin, product.brand) for origin in constraints.origin_avoid):
+            return False
+    if constraints.product_type and product.sub_category and product.sub_category != constraints.product_type:
+        return False
+    avoid_traits = tuple(constraints.ingredient_avoid) + filters.avoid_traits
     return not any(_matches_avoid_trait(product, token) for token in avoid_traits)
+
+
+def _brand_matches(avoid_brand: str, product_brand_lower: str) -> bool:
+    return avoid_brand.strip().lower() == product_brand_lower
 
 
 def _matches_avoid_trait(product: ProductPayload, token: str) -> bool:

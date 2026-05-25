@@ -19,7 +19,7 @@
 | 7 | 数据入库（100 商品 × 1292 semantic chunk） | ✅ 已完成 | 3.5 | `services/product_ingest.py` `services/chunking.py` `scripts/reindex_embeddings.py` | seed 已按 profile/marketing/faq/review/warning/compare 语义 chunk 入库，并在 product_metadata 写入 `knowledge_package`；Postgres reindex 已通过；旧派生表清理必须显式传 `--drop-derived-tables` |
 | 8 | API 端点注册 | ✅ 已完成 | 5.2 | `api/app.py` | 7 个 router 已注册（chat/cancel/feedback/upload/cart/admin_eval/observability），upload 支持 multipart 图片上传；cancel 已接本进程 token + DB cancel request |
 | 9 | 管道编排 | ✅ 已完成 | 4.1 | `runtime/pipeline.py` `runtime/handlers.py` `runtime/streaming.py` | pipeline 只负责 turn 生命周期、图片/意图前置和 handler 路由；检索完成后立即发 product_card，推荐文案与最终决策后台并行，阶段耗时写入 retrieval trace |
-| 10 | 混合检索（硬过滤 + pgvector/SQLite 向量召回 + Rerank） | ✅ 已完成 | 4.2 | `services/retriever.py` `repos/documents.py` | PostgreSQL 下使用 pgvector `<=>` 库内 top-k + HNSW index，SQLite 下保留 JSON embedding + Python 余弦 fallback；`retrieval_role=risk` 的负评/风险 chunk 不进入主召回 |
+| 10 | 混合检索（硬过滤 + pgvector/SQLite 向量召回 + Rerank） | ✅ 已完成 | 4.2 | `services/retriever.py` `repos/documents.py` | PostgreSQL 下使用 pgvector `<=>` 库内 top-k + HNSW index，SQLite 下保留 JSON embedding + Python 余弦 fallback；`retrieval_role=risk` 的负评/风险 chunk 不进入主召回；硬过滤涵盖 category/budget/brand_avoid/origin_avoid/product_type/ingredient_avoid |
 
 ## P1：效果与可靠性（评审权重 20%）+ 加分项启动（20%）
 
@@ -28,13 +28,13 @@
 | 11 | 双轨模型 + fallback 机制 | ✅ 已完成 | 2 | `services/llm_client.py` `services/llm_gateway.py` `config/settings.py` | Doubao+Qwen 双轨，TASK_MODEL_MAP 控制 primary/fallback；transport/profile 已从 task 逻辑拆出 |
 | 12 | Embedding 服务 | ✅ 已完成 | 2 | `services/embedding.py` | 百炼 text-embedding-v3 primary，Doubao fallback，有 deterministic fallback；strict 下禁用 deterministic fallback |
 | 13 | Rerank 服务 | ✅ 已完成 | 2 | `services/reranker.py` | qwen3-rerank 接入，API 失败时 deterministic rerank；strict 下禁用 deterministic rerank |
-| 14 | 证据绑定 | ⚠️ 部分完成 | 4.2 | `services/evidence.py` `repos/documents.py` | product_card 带 evidence；DB/pgvector chunk 命中时 source_id 可关联真实 chunk，chunk metadata 已带 chunk_type/evidence_kind/retrieval_role；fallback source_id 不可关联 `product_chunks` |
+| 14 | 证据绑定 | ⚠️ 部分完成 | 4.2 | `services/evidence.py` `repos/documents.py` `services/llm_task_payloads.py` | product_card 带 evidence；DB/pgvector chunk 命中时 source_id 可关联真实 chunk；recommendation/decision LLM prompt 已注入 evidence snippets（`_format_evidence_context`）；fallback source_id 不可关联 `product_chunks` |
 | 15 | 检索追踪 + 证据链接 | ✅ 已完成 | 6.1 | `repos/traces.py` `services/fallbacks.py` | retrieval_traces + evidence_links 写入 SQLite，filters_applied 内记录 intent/criteria/retrieve/recommendation/decision 阶段耗时和 `_fallbacks` 降级事件 |
 | 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids 已持久化到 Conversations 表；澄清轮次现在保存部分 CriteriaPayload（`_intent_to_partial_criteria`），后续轮次通过 `get_conversation_summary`/`get_previous_criteria` 自动恢复上下文；完整消息历史尚未用于 LLM |
 | 17 | 反馈闭环 | ✅ 已完成 | 7 | `services/feedback.py` `repos/feedbacks.py` `services/retriever.py` | Feedbacks 表已持久化，avoid_products/avoid_traits 已进入 retrieval 硬过滤；反馈否定词/品牌规避词已集中到 `domain_terms.py`；内存兜底默认关闭；覆盖“不喜欢这个/除了耐克/不要含酒精” |
 | 18 | 反选排除（⭐⭐） | ✅ 已完成 | — | `stages/criteria.py` | criteria_patch + ingredient_avoid + DB 会话恢复已覆盖 Demo 3 |
-| 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；旧 JSON 占位请求仍兼容 |
-| 20 | 对话式加购（⭐入门） | ⚠️ 部分完成 | — | `services/cart.py` `repos/cart_items.py` `api/cart.py` | add/view 已持久化到 cart_items 表并覆盖 Demo 4；内存兜底为显式 dev adapter（默认关闭）；Remove/Update 未做 |
+| 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；JSON legacy mock 已移除，非 multipart 请求返回 415 |
+| 20 | 对话式加购（⭐入门） | ✅ 已完成 | — | `services/cart.py` `repos/cart_items.py` `api/cart.py` `runtime/handlers.py` | add/view 已持久化到 cart_items 表并覆盖 Demo 4；内存兜底为显式 dev adapter（默认关闭）；无可指代商品时发 ClarificationEvent 而非静默兜底；Remove/Update 未做 |
 
 ## P2：打磨与稳定性
 
@@ -56,7 +56,7 @@
 | 29 | 配置集中管理 | ✅ 符合 | `settings.py` + `llm_profiles.yaml` + `config/tuning.py` + `config/domain_terms.py`，运行时调参常量、领域词典、反馈规避词和品牌别名已集中，禁止散落 `os.getenv()` |
 | 30 | 错误处理 | ✅ 有 | pipeline try/except 兜底，ErrorEvent 对外只返回稳定文案 + trace_id，内部异常进日志；LLM/embedding/rerank/cart/trace 等可降级路径已加日志；推荐链路 trace 记录 `_fallbacks`；`STRICT_RUNTIME=1` 下关键降级会显性失败 |
 | 31 | Docker Compose | ✅ 基本可用 | `deploy/docker-compose.yml` 已配置 `pgvector/pgvector:pg16`；Postgres 启动时自动 `CREATE EXTENSION vector`，`product_chunks.embedding` 在 Postgres 下为 `VECTOR(1024)`；旧 JSON chunk 表不再运行时自动 drop，需通过 `reindex_embeddings --drop-derived-tables` 显式清理；SQLite 测试环境仍为 JSON |
-| 32 | Prompt 文件 | ✅ 已接入 | `analyze_intent`/`generate_criteria`/`generate_recommendation`/`generate_decision`/`analyze_image` 已通过 `PromptStore` 运行时加载 `backend/prompts/*.md`，缺失时 fallback 到硬编码 schema；intent prompt 已收敛到运行时 `IntentResult` schema，normalize 仍兼容旧 prompt 的 `intent_type` 字段 |
+| 32 | Prompt 文件 | ✅ 已完成 | `analyze_intent`/`generate_criteria`/`generate_recommendation`/`generate_decision`/`analyze_image` 已通过 `PromptStore` 运行时加载 `backend/prompts/*.md`；三个核心 prompt 已重写严格对齐 Pydantic 模型（CriteriaPayload/RecommendationResult/DecisionResult），移除 weights/quick_actions/verdict/why_chips/confidence/decision_basis 等运行时不存在字段 |
 | 33 | 接口契约文档 | ✅ 有 | `contracts/sse-events.schema.json` + 3 个 golden trace 示例 |
 | 34 | 评测看板（Streamlit） | ✅ 已完成 | `static/eval_dashboard.py`，4 页：总览/版本对比/样本详情/错误分析，`streamlit run` 启动 |
 | 35 | Pytest + Ruff + Mypy CI | ✅ 已完成 | `.github/workflows/backend-tests.yml`；使用 `uv sync --locked`；CI 运行 `ruff check` + `ruff format --check` + 目标 mypy + 全量 pytest；另有手动/定时 live provider + pgvector smoke job（需要 secrets） |
@@ -79,7 +79,8 @@
 | B | ~~Cancel 空壳：无法真正中断正在生成的 SSE 流~~ 已接本进程 token + DB active turn/cancel request，pipeline heartbeat 会跨进程检查取消请求 | ✅ 已解决；长期生产可再加 TTL/lease 清理异常退出残留 active turn | P2 |
 | C | **本地 `.env` 默认仍指向 SQLite**：Postgres/pgvector 已验证通过，但直接运行后端命令如果不显式传 `DATABASE_URL` 仍会使用 `backend/buypilot-dev.db` | 演示环境需使用 compose API 环境变量，或显式传 `DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot` | P1 |
 | D | **状态存储仍不完整**：conversations/feedbacks/cart 已持久化核心状态，feedback 已进入检索硬过滤，澄清轮次已保存部分 CriteriaPayload；完整多轮消息历史尚未用于 LLM | 复杂多轮表达理解仍有限 | P1 |
-| E | **Prompt 覆盖仍未全量统一**：主链路 intent/criteria/recommendation/decision/image 已接入文件 prompt，但 clarification/metadata_extraction 暂未接入运行时 | 核心演示链路已可调 prompt；剩余文件属于非当前主链路 | P2 |
+| E | **Prompt 覆盖仍未全量统一**：主链路 criteria/recommendation/decision prompt 已重写并严格对齐 Pydantic 模型；intent/image/analyze_intent 已接入运行时；clarification/metadata_extraction 暂未接入 | 核心演示链路 prompt 已对齐模型；剩余文件属于非当前主链路 | P2 |
 | F | **死代码**：PipelineState TypedDict 无人引用 | 维护负担 | P2 |
 | G | **Service 仍是薄门面为主**：cart/feedback/conversation/trace 当前主要做层级隔离，复杂业务不多 | 分层方向已收口，但后续新增业务要继续进 Service，避免 Runtime/API 再次膨胀 | P2 |
 | H | ~~CI 全量测试依赖官方 raw 数据：`data/raw/` 被 gitignore~~ `data/raw/` 已入 git（`520d2c2`），CI 远端可跑全量 pytest | ✅ 已解决 | P1 |
+| I | **已知测试失败**：`test_pipeline_emits_product_card_before_slow_recommendation_text` 断言 `thinking stage=recommending` 失败。根因：`ensure_active` 中 `is_chat_turn_cancellation_requested` 执行 DB 查询，远程 PostgreSQL 延迟吃掉 mock 35ms sleep，导致 heartbeat 轮询还未来得及发 thinking 事件任务即已完成。| 待修复：mock 掉 `is_chat_turn_cancellation_requested` 或调整 mock sleep 时长适配远程 DB | P2 |

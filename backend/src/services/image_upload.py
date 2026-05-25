@@ -91,18 +91,6 @@ def save_uploaded_image(file_name: str, content_type: str, data: bytes) -> Image
     )
 
 
-def legacy_upload_response(file_name: str, content_type: str) -> ImageUploadResponse:
-    normalized_type = _normalize_content_type(content_type)
-    return ImageUploadResponse(
-        image_url=f"https://example.com/upload/mock_{Path(file_name).name}",
-        width=1280,
-        height=960,
-        mime_type=normalized_type,
-        ocr_text=None,
-        analysis={"status": "received"},
-    )
-
-
 def image_url_to_provider_url(image_url: str) -> str:
     if not image_url.startswith(f"{UPLOAD_URL_PREFIX}/"):
         return image_url

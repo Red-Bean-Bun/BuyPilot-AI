@@ -57,6 +57,10 @@ class Constraints(BaseModel):
     budget_min: float | None = None
     budget_max: float | None = None
     use_scenario: str | None = None
+    # 排除与限定
+    brand_avoid: list[str] = Field(default_factory=list)
+    origin_avoid: list[str] = Field(default_factory=list)
+    product_type: str | None = None
     # 美妆护肤专属
     skin_type: str | None = None
     ingredient_avoid: list[str] = Field(default_factory=list)

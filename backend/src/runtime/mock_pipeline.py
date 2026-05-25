@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from typing import AsyncGenerator
 
-from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX, DEFAULT_CART_PRODUCT_ID
+from src.config.tuning import CHEAPER_BUDGET_FALLBACK_MAX
 from src.types.sse_events import (
     AlternativePayload,
     CartActionEvent,
@@ -26,7 +26,7 @@ SSE_CHUNK_DELAY = 0.1
 
 MOCK_PRODUCTS = [
     ProductPayload(
-        product_id=DEFAULT_CART_PRODUCT_ID,
+        product_id="p_beauty_011",
         name="珊珂洗颜专科绵润泡沫洁面乳",
         price=52.0,
         currency="CNY",
@@ -218,7 +218,7 @@ async def mock_pipeline(session_id: str, user_input: str) -> AsyncGenerator[SSEE
         node_id=f"cart_{turn_id}",
         created_at_ms=now_ms(),
         action="add",
-        product_id=DEFAULT_CART_PRODUCT_ID,
+        product_id="p_beauty_011",
         quantity=1,
         status="success",
     )

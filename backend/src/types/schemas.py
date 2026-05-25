@@ -39,11 +39,6 @@ class CancelResponse(BaseModel):
     canceled: bool = True
 
 
-class ImageUploadRequest(BaseModel):
-    file_name: str
-    content_type: str = "image/jpeg"
-
-
 class ImageUploadResponse(BaseModel):
     image_url: str
     width: int | None = None
