@@ -32,7 +32,7 @@
 
 | 指标 | 状态 |
 |------|------|
-| 测试 | `111 passed`（2026-05-26） |
+| 测试 | `136 passed`（2026-05-26） |
 | CI | pytest + ruff check/format（`.github/workflows/backend-tests.yml`） |
 | Demo Smoke | 6/6 场景通过（Postgres/pgvector + 真实模型） |
 | 后端完成度 | P0 完成 / P1 基本完成 / P2 部分完成 → [详细状态](doc/status/backend-completion.md) |

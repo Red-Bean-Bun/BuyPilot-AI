@@ -526,15 +526,19 @@ def _ordinal_index(message: str) -> int | None:
 def _quantity_from_intent(intent: IntentResult, message: str, *, default: int) -> int:
     raw = intent.extracted_constraints.get("quantity") or intent.extracted_constraints.get("target_quantity")
     if isinstance(raw, int | float):
-        return max(0, int(raw))
+        parsed = int(raw)
+        return parsed if parsed > 0 else default
     if isinstance(raw, str) and raw.strip().isdigit():
-        return max(0, int(raw.strip()))
+        parsed = int(raw.strip())
+        return parsed if parsed > 0 else default
     match = re.search(r"(?:改成|改为|设置为|调整为|变成)\s*(\d+)\s*(?:件|个|份)?", message)
     if match:
-        return int(match.group(1))
+        parsed = int(match.group(1))
+        return parsed if parsed > 0 else default
     match = re.search(r"(\d+)\s*(?:件|个|份)", message)
     if match:
-        return int(match.group(1))
+        parsed = int(match.group(1))
+        return parsed if parsed > 0 else default
     return default
 
 
