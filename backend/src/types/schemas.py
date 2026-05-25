@@ -18,7 +18,7 @@ class MessageLite(BaseModel):
 
 
 class ChatStreamRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=2000)
     session_id: str | None = None
     history: list[MessageLite] = Field(default_factory=list)
     image_url: str | None = None
