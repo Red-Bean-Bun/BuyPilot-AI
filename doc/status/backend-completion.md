@@ -2,7 +2,7 @@
 
 > 最后核实：2026-05-25
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 核实命令：`uv run pytest -q`（89 passed, 1 pre-existing failure）；`uv run ruff check src tests` 通过；`uv run ruff format --check src tests` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；smoke_live_rag 通过（1024 维 + pgvector + 真实 live provider）
+> 核实命令：`uv run pytest -q`（110 passed, 1 pre-existing failure）；`uv run ruff check src tests` 通过；`uv run ruff format --check src tests` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；smoke_live_rag 通过（1024 维 + pgvector + 真实 live provider）
 
 ---
 
@@ -51,7 +51,7 @@
 
 | # | 项目 | 状态 | 备注 |
 |---|------|------|------|
-| 27 | 测试覆盖 | ✅ 90 测试全通过 | 2026-05-24 核实：`backend/.venv/bin/python -m pytest -q`；覆盖 model/schema/pipeline/API/retrieval/state repos/startup seed/image upload/multimodal/heartbeat/cancel/跨进程 cancel request/错误脱敏/fast product cards/feedback hard filter/semantic chunk/pgvector DDL/runtime prompt loading/demo smoke/architecture layer guards/否定词抽取/反馈领域词集中/fallback trace/strict runtime/显式内存 fallback/observability audit/intent payload normalization/product image URL |
+| 27 | 测试覆盖 | ✅ 111 测试（110 passed, 1 pre-existing failure） | 2026-05-25 核实：`uv run pytest -q`；覆盖 model/schema/pipeline/API/retrieval/state repos/startup seed/image upload/multimodal/heartbeat/cancel/跨进程 cancel request/错误脱敏/fast product cards/feedback hard filter/semantic chunk/pgvector DDL/runtime prompt loading/demo smoke/architecture layer guards/否定词抽取/反馈领域词集中/fallback trace/strict runtime/显式内存 fallback/observability audit/intent payload normalization/product image URL/reliability（硬过滤 brand/origin/product_type + 多轮澄清状态 + 加购澄清 + 注入防御 + 输入校验）|
 | 28 | 架构分层（AGENTS.md） | ✅ 基本符合 | API/Runtime 已通过 Service 访问业务能力；`repos.ingest` 反向依赖已移到 `services/product_ingest.py`；新增测试防止 API/Runtime 直接 import Repo、Repo 反向 import Service |
 | 29 | 配置集中管理 | ✅ 符合 | `settings.py` + `llm_profiles.yaml` + `config/tuning.py` + `config/domain_terms.py`，运行时调参常量、领域词典、反馈规避词和品牌别名已集中，禁止散落 `os.getenv()` |
 | 30 | 错误处理 | ✅ 有 | pipeline try/except 兜底，ErrorEvent 对外只返回稳定文案 + trace_id，内部异常进日志；LLM/embedding/rerank/cart/trace 等可降级路径已加日志；推荐链路 trace 记录 `_fallbacks`；`STRICT_RUNTIME=1` 下关键降级会显性失败 |
@@ -84,3 +84,4 @@
 | G | **Service 仍是薄门面为主**：cart/feedback/conversation/trace 当前主要做层级隔离，复杂业务不多 | 分层方向已收口，但后续新增业务要继续进 Service，避免 Runtime/API 再次膨胀 | P2 |
 | H | ~~CI 全量测试依赖官方 raw 数据：`data/raw/` 被 gitignore~~ `data/raw/` 已入 git（`520d2c2`），CI 远端可跑全量 pytest | ✅ 已解决 | P1 |
 | I | **已知测试失败**：`test_pipeline_emits_product_card_before_slow_recommendation_text` 断言 `thinking stage=recommending` 失败。根因：`ensure_active` 中 `is_chat_turn_cancellation_requested` 执行 DB 查询，远程 PostgreSQL 延迟吃掉 mock 35ms sleep，导致 heartbeat 轮询还未来得及发 thinking 事件任务即已完成。| 待修复：mock 掉 `is_chat_turn_cancellation_requested` 或调整 mock sleep 时长适配远程 DB | P2 |
+| J | **README 已同步**：根 README 测试数已更新为 110 passed、smoke_live_rag 命令已添加、JSON 图片上传兼容描述已移除 | ✅ 已解决（item 10） | P2 |

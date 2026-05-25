@@ -19,7 +19,7 @@
 | 后端架构 | 2 人（主开发 + 算法），AGENTS.md 分层（API → Runtime → Service → Repo → Config/Types） |
 | SSE 管道 | async generator stage 模式（推荐文案与决策后台并行） |
 | 降级策略 | LLM→规则 fallback + embedding/rerank deterministic fallback；`STRICT_RUNTIME=1` 禁用降级 |
-| 图片上传 | multipart `/upload/image`，支持 JSON 兼容旧客户端 |
+| 图片上传 | multipart `/upload/image` |
 | LLM 调用 | task-oriented interface + Profile 配置驱动（YAML）+ PromptStore 运行时加载 |
 | 开发环境 | `uv run uvicorn`（默认 SQLite）；`deploy/docker-compose.yml`（Postgres + pgvector 演示） |
 | 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/eval_samples/retrieval_traces/evidence_links |
@@ -32,7 +32,7 @@
 
 | 指标 | 状态 |
 |------|------|
-| 测试 | `108 passed`（2026-05-24） |
+| 测试 | `110 passed, 1 pre-existing failure`（2026-05-25） |
 | CI | pytest + ruff check/format（`.github/workflows/backend-tests.yml`） |
 | Demo Smoke | 6/6 场景通过（Postgres/pgvector + 真实模型） |
 | 后端完成度 | P0 完成 / P1 基本完成 / P2 部分完成 → [详细状态](doc/status/backend-completion.md) |
@@ -128,7 +128,10 @@ uv run uvicorn src.api.app:app --reload --port 8000
 # 测试
 uv run pytest -q
 
-# Demo smoke（需 Postgres/pgvector + 真实 API Key）
+# Live RAG 验真（答辩必过门禁，需 Postgres/pgvector + 真实 API Key）
+uv run -m src.scripts.smoke_live_rag
+
+# Demo smoke（6 条 Demo 路径端到端，需 Postgres/pgvector + 真实 API Key）
 uv run -m src.scripts.demo_smoke
 
 # Docker Compose 演示环境
