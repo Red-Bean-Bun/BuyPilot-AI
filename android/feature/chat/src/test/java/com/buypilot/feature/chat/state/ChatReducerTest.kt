@@ -11,7 +11,9 @@ import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.TextDeltaPayload
 import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.model.AiStreamNode
+import com.buypilot.feature.chat.model.ClarificationNode
 import com.buypilot.feature.chat.model.ProductDeckNode
+import com.buypilot.feature.chat.model.ThinkingNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -50,6 +52,99 @@ class ChatReducerTest {
         assertEquals("hello world", node.content)
         assertEquals("msg_1", node.messageId)
         assertEquals("msg_1", node.key)
+        assertEquals("msg_1", state.streamingTextKey)
+        assertEquals("hello world".length, state.streamingTextLength)
+    }
+
+    @Test
+    fun addUserMessageStoresScrollAnchorAndResetsStreamingTextAnchor() {
+        val state = ChatReducer.addUserMessage(
+            state = ChatUiState(streamingTextKey = "old_msg", streamingTextLength = 12),
+            key = "user_1",
+            content = "推荐适合油皮的洗面奶",
+        )
+
+        assertEquals("user_1", state.lastUserMessageKey)
+        assertEquals("推荐适合油皮的洗面奶", state.lastUserMessage)
+        assertEquals(null, state.streamingTextKey)
+        assertEquals(0, state.streamingTextLength)
+    }
+
+    @Test
+    fun clarificationRemovesTransientThinkingForSameTurn() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.Clarification,
+                nodeId = "clarify_turn_1",
+                payload = ClarificationPayload(question = "请问你的肤质是？"),
+            ),
+        )
+
+        assertEquals(1, state.nodes.size)
+        assertTrue(state.nodes.single() is ClarificationNode)
+        assertFalse(state.nodes.any { it is ThinkingNode })
+    }
+
+    @Test
+    fun textDeltaRemovesTransientThinkingAndAppendsIntoAiStreamNode() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+
+        val state = listOf("敏感肌面霜，", "我会先避开酒精和香精。").fold(thinking) { acc, delta ->
+            ChatReducer.reduce(
+                acc,
+                envelope(
+                    event = AgentEventType.TextDelta,
+                    nodeId = "assistant_intro_turn_1",
+                    payload = TextDeltaPayload(messageId = "assistant_intro_turn_1", delta = delta),
+                ),
+            )
+        }
+
+        val node = state.nodes.single() as AiStreamNode
+        assertEquals("敏感肌面霜，我会先避开酒精和香精。", node.content)
+        assertFalse(state.nodes.any { it is ThinkingNode })
+    }
+
+    @Test
+    fun doneRemovesTransientThinkingAndClosesStreaming() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                payload = DonePayload(),
+            ),
+        )
+
+        assertTrue(state.nodes.isEmpty())
+        assertFalse(state.isStreaming)
+        assertEquals(ChatInputState.Idle, state.inputState)
     }
 
     @Test

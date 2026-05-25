@@ -7,6 +7,7 @@ lifecycle = "2.8.7"
 robolectric = "4.13"
 activityCompose = "1.9.3"
 navigationCompose = "2.8.5"
+lottie = "6.7.1"
 hilt = "2.57.2"
 hiltNavigationCompose = "1.2.0"
 okhttp = "5.3.0"
@@ -34,6 +35,7 @@ androidx-compose-ui = { module = "androidx.compose.ui:ui" }
 androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
+lottie-compose = { module = "com.airbnb.android:lottie-compose", version.ref = "lottie" }
 
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }

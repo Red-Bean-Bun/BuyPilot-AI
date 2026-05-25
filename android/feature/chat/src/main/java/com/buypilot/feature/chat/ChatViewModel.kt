@@ -181,7 +181,7 @@ class ChatViewModel @Inject constructor(
             emit(
                 event = AgentEventType.Thinking,
                 nodeId = "thinking_$turnId",
-                payload = ThinkingPayload(stage = "intent", message = "正在思考中..."),
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求..."),
             )
             delay(700)
 
@@ -190,9 +190,9 @@ class ChatViewModel @Inject constructor(
                     event = AgentEventType.Clarification,
                     nodeId = "clarification_$turnId",
                     payload = ClarificationPayload(
-                        question = "请问你的肤质是？",
+                        question = "请问你的**肤质**是？",
                         requiredSlots = listOf("skin_type"),
-                        suggestedOptions = listOf("油性", "干性", "混合性", "敏感性"),
+                        suggestedOptions = listOf("油性", "干性", "混合性", "敏感性", "中性", "痘痘肌", "干敏肌", "不确定"),
                     ),
                     displayMode = "inline_card",
                 )
@@ -216,15 +216,37 @@ class ChatViewModel @Inject constructor(
             delay(650)
 
             emit(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_$turnId",
+                payload = ThinkingPayload(stage = "searching", message = "正在检索匹配商品..."),
+            )
+            delay(420)
+
+            emit(
                 event = AgentEventType.TextDelta,
                 nodeId = "assistant_intro_$turnId",
                 payload = TextDeltaPayload(
                     messageId = "assistant_intro_$turnId",
-                    delta = "针对油性肌肤，我为你挑选了几款控油能力强且温和不紧绷的洁面产品：",
+                    delta = """
+                        针对**油性肌肤**，我先按下面几个条件筛了一轮：
+
+                        - **控油清洁**：优先选择清洁力稳定、洗后不容易紧绷的洁面。
+                        - **预算友好**：控制在 **200 元以内**。
+                        - **使用风险**：避开过度刺激，敏感肌会额外提示注意点。
+
+                        下面是这轮最值得看的候选商品：
+                    """.trimIndent(),
                     done = true,
                 ),
             )
             delay(550)
+
+            emit(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_$turnId",
+                payload = ThinkingPayload(stage = "searching", message = "找到3个匹配商品..."),
+            )
+            delay(360)
 
             mockProducts().forEach { product ->
                 emit(
@@ -237,6 +259,13 @@ class ChatViewModel @Inject constructor(
                 delay(260)
             }
             delay(650)
+
+            emit(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_$turnId",
+                payload = ThinkingPayload(stage = "recommending", message = "正在生成推荐解释..."),
+            )
+            delay(420)
 
             emit(
                 event = AgentEventType.FinalDecision,
@@ -293,7 +322,7 @@ class ChatViewModel @Inject constructor(
             criteria = CriteriaPayload(
                 criteriaId = "criteria_mock_001",
                 category = "洁面类",
-                summary = "推荐适合油皮的洗面奶，200元以内，最好不要含酒精",
+                summary = "**油皮洁面**，预算 **200 元以内**，避开酒精刺激",
                 chips = listOf("洁面类", "油性肌肤", "200元以内", "不要含酒精"),
                 skinType = "油性肌肤",
                 budgetMax = 200.0,
@@ -324,14 +353,14 @@ class ChatViewModel @Inject constructor(
                     ingredientTags = listOf("控油王者", "温和"),
                     useScenario = listOf("日常洁面"),
                 ),
-                reason = "控油能力强，洗后不容易紧绷，适合预算 200 元内的油性肌肤日常洁面。",
-                riskNotes = listOf("极度敏感肌建议先做局部测试。"),
+                reason = "**控油能力强**，洗后不容易紧绷，适合预算 **200 元内**的油性肌肤日常洁面。",
+                riskNotes = listOf("如果是**极度敏感肌**，建议先做局部测试。"),
                 evidence = listOf(
                     EvidencePayload(
                         evidenceId = "EV-MOCK-001",
                         sourceType = "用户评价",
                         trustLabel = "Verified",
-                        snippet = "质地清透，使用后皮肤水润不紧绷，控油表现稳定。",
+                        snippet = "> 质地清透，使用后皮肤水润不紧绷，**控油表现稳定**。",
                     ),
                 ),
                 actions = listOf(
@@ -353,14 +382,14 @@ class ChatViewModel @Inject constructor(
                     ingredientTags = listOf("清洁力强", "高性价比"),
                     useScenario = listOf("日常护肤"),
                 ),
-                reason = "价格低、清洁力强，适合作为预算优先时的首选。",
-                riskNotes = listOf("清洁力偏强，极敏感肌需谨慎。"),
+                reason = "**价格低、清洁力强**，适合作为预算优先时的首选。",
+                riskNotes = listOf("清洁力偏强，**极敏感肌需谨慎**。"),
                 evidence = listOf(
                     EvidencePayload(
                         evidenceId = "EV-MOCK-002",
                         sourceType = "商品资料",
                         trustLabel = "商品资料",
-                        snippet = "油性肌肤适用，泡沫绵密，价格在 200 元以内。",
+                        snippet = "- 油性肌肤适用\n- 泡沫绵密\n- 价格在 **200 元以内**",
                     ),
                 ),
             ),
@@ -378,14 +407,14 @@ class ChatViewModel @Inject constructor(
                     ingredientTags = listOf("氨基酸", "温和"),
                     useScenario = listOf("晨间洁面"),
                 ),
-                reason = "清洁和温和度更均衡，适合不想要过强清洁力的用户。",
+                reason = "清洁和**温和度**更均衡，适合不想要过强清洁力的用户。",
                 riskNotes = emptyList(),
                 evidence = listOf(
                     EvidencePayload(
                         evidenceId = "EV-MOCK-003",
                         sourceType = "官方说明",
                         trustLabel = "成分信息",
-                        snippet = "氨基酸表活体系，主打温和洁面和日常使用。",
+                        snippet = "**氨基酸表活体系**，主打温和洁面和日常使用。",
                     ),
                 ),
             ),
@@ -394,9 +423,19 @@ class ChatViewModel @Inject constructor(
     private fun mockDecision(): FinalDecisionPayload =
         FinalDecisionPayload(
             winnerProductId = "p_mock_002",
-            summary = "综合考量了你提出的“深层清洁、控油、预算200内”的需求，并对比了几款候选产品后，我为你得出了最终的购买建议。",
-            why = listOf("油性肌肤适用", "200元内", "清洁力强", "极高性价比"),
-            notFor = listOf("极度敏感肌", "完全不接受香精", "想要修护型面霜而不是洁面"),
+            summary = """
+                **最终建议：优先选珊珂洗颜专科绵润泡沫洁面乳。**
+
+                我主要看了三件事：
+
+                1. 是否适合**油性肌肤**的日常清洁。
+                2. 价格是否稳定落在 **200 元以内**。
+                3. 清洁力和潜在刺激之间是否平衡。
+
+                如果你是**极度敏感肌**，我会建议先局部试用，或者切换到更温和的氨基酸洁面。
+            """.trimIndent(),
+            why = listOf("**油性肌肤适用**", "**200 元内**", "清洁力强", "极高性价比"),
+            notFor = listOf("**极度敏感肌**", "完全不接受香精", "想要修护型面霜而不是洁面"),
             alternatives = listOf(
                 AlternativePayload(productId = "p_mock_alt_001", name = "薇诺娜舒敏保湿特护霜"),
             ),

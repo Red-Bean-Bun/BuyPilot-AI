@@ -40,6 +40,9 @@ object ChatReducer {
             isStreaming = true,
             lastError = null,
             lastUserMessage = content,
+            lastUserMessageKey = key,
+            streamingTextKey = null,
+            streamingTextLength = 0,
         )
 
     fun reduce(
@@ -50,42 +53,47 @@ object ChatReducer {
             sessionId = state.sessionId ?: envelope.sessionId,
             currentTurnId = envelope.turnId,
         )
+        val contentBase = if (envelope.event.clearsTransientThinking()) {
+            base.withoutThinking(envelope.turnId)
+        } else {
+            base
+        }
 
         return when (envelope.event) {
             AgentEventType.Thinking -> base.upsertNode(
                 ThinkingNode(envelope.nodeId, envelope.payload as ThinkingPayload),
             ).copy(inputState = ChatInputState.Streaming, isStreaming = true)
 
-            AgentEventType.Clarification -> base.upsertNode(
+            AgentEventType.Clarification -> contentBase.upsertNode(
                 ClarificationNode(envelope.nodeId, envelope.payload as ClarificationPayload),
             ).copy(inputState = ChatInputState.Clarifying, isStreaming = true)
 
-            AgentEventType.CriteriaCard -> base.upsertNode(
+            AgentEventType.CriteriaCard -> contentBase.upsertNode(
                 CriteriaNode(envelope.nodeId, envelope.payload as CriteriaCardPayload),
             )
 
-            AgentEventType.TextDelta -> reduceTextDelta(base, envelope)
+            AgentEventType.TextDelta -> reduceTextDelta(contentBase, envelope)
 
-            AgentEventType.ProductCard -> reduceProductCard(base, envelope)
+            AgentEventType.ProductCard -> reduceProductCard(contentBase, envelope)
 
-            AgentEventType.CartAction -> base.upsertNode(
+            AgentEventType.CartAction -> contentBase.upsertNode(
                 CartActionNode(envelope.nodeId, envelope.payload as CartActionPayload),
             )
 
-            AgentEventType.FinalDecision -> base.upsertNode(
+            AgentEventType.FinalDecision -> contentBase.upsertNode(
                 FinalDecisionNode(envelope.nodeId, envelope.payload as FinalDecisionPayload),
             )
 
             AgentEventType.Done -> {
                 val payload = envelope.payload as DonePayload
-                base.copy(
+                contentBase.copy(
                     inputState = if (payload.finishReason == "canceled") {
                         ChatInputState.Canceled
-                    } else if (base.inputState == ChatInputState.Clarifying ||
-                        base.inputState == ChatInputState.Error ||
-                        base.inputState == ChatInputState.Canceled
+                    } else if (contentBase.inputState == ChatInputState.Clarifying ||
+                        contentBase.inputState == ChatInputState.Error ||
+                        contentBase.inputState == ChatInputState.Canceled
                     ) {
-                        base.inputState
+                        contentBase.inputState
                     } else {
                         ChatInputState.Idle
                     },
@@ -95,7 +103,7 @@ object ChatReducer {
 
             AgentEventType.Error -> {
                 val payload = envelope.payload as ErrorPayload
-                base.upsertNode(
+                contentBase.upsertNode(
                     ErrorNode(
                         key = envelope.nodeId,
                         code = payload.code,
@@ -113,8 +121,10 @@ object ChatReducer {
         }
     }
 
-    fun cancel(state: ChatUiState): ChatUiState =
-        state.copy(inputState = ChatInputState.Canceled, isStreaming = false)
+    fun cancel(state: ChatUiState): ChatUiState {
+        val base = state.currentTurnId?.let { state.withoutThinking(it) } ?: state
+        return base.copy(inputState = ChatInputState.Canceled, isStreaming = false)
+    }
 
     fun markComposing(state: ChatUiState, hasText: Boolean, hasImage: Boolean): ChatUiState =
         state.copy(
@@ -139,7 +149,10 @@ object ChatReducer {
             content = (existing?.content.orEmpty()) + payload.delta,
             done = payload.done,
         )
-        return state.upsertNode(node)
+        return state.upsertNode(node).copy(
+            streamingTextKey = messageKey,
+            streamingTextLength = node.content.length,
+        )
     }
 
     private fun reduceProductCard(
@@ -170,5 +183,14 @@ object ChatReducer {
             nodes + node
         }
         return copy(nodes = nextNodes)
+    }
+
+    private fun AgentEventType.clearsTransientThinking(): Boolean =
+        this != AgentEventType.Thinking && this != AgentEventType.Unknown
+
+    private fun ChatUiState.withoutThinking(turnId: String): ChatUiState {
+        val thinkingKey = "thinking_$turnId"
+        val nextNodes = nodes.filterNot { it is ThinkingNode && it.key == thinkingKey }
+        return if (nextNodes.size == nodes.size) this else copy(nodes = nextNodes)
     }
 }

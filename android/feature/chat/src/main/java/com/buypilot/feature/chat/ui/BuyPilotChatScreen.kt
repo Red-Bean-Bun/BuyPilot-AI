@@ -1,9 +1,18 @@
 package com.buypilot.feature.chat.ui
 
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,14 +20,19 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +42,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imeNestedScroll
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -35,6 +51,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -52,7 +69,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -61,6 +77,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,20 +89,39 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.LinearGradientShader
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
@@ -108,6 +144,20 @@ import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
 
 private val MenuEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private const val StreamRevealCharsPerFrame = 1
+private const val StreamRevealFrameDelayMs = 24L
+
+private enum class MarkdownInlineStyle {
+    Normal,
+    Bold,
+    Italic,
+    Code,
+}
+
+private data class MarkdownInlineSegment(
+    val text: String,
+    val style: MarkdownInlineStyle,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,7 +174,16 @@ fun BuyPilotChatScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val products = state.nodes.filterIsInstance<ProductDeckNode>().flatMap { it.products }
     val focusManager = LocalFocusManager.current
+    val composerFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val showWelcome = state.nodes.isEmpty() && !welcomeDismissed
+
+    fun focusComposer() {
+        welcomeDismissed = true
+        showAttachmentMenu = false
+        composerFocusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
     fun sendAndClear(message: String, imageUrl: String? = null) {
         val next = message.trim()
@@ -165,6 +224,7 @@ fun BuyPilotChatScreen(
                     onProductEvidence = { sheetContent = ChatSheetContent.ProductEvidence(it) },
                     onDecisionEvidence = { sheetContent = ChatSheetContent.DecisionEvidence(it) },
                     onQuickAction = { action -> sendAndClear(action.label) },
+                    onClarificationManualInput = { focusComposer() },
                 )
 
                 AttachmentMenuMotion(
@@ -182,7 +242,10 @@ fun BuyPilotChatScreen(
             inputState = state.inputState,
             isStreaming = state.isStreaming,
             isAttachmentMenuOpen = showAttachmentMenu,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            focusRequester = composerFocusRequester,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .imePadding(),
             onAttachmentClick = {
                 welcomeDismissed = true
                 showAttachmentMenu = !showAttachmentMenu
@@ -236,12 +299,26 @@ fun BuyPilotChatScreen(
     }
 }
 
+private data class WelcomePrompt(
+    @DrawableRes val iconRes: Int,
+    val text: String,
+    val tint: Color,
+)
+
+private val WelcomePrompts = listOf(
+    WelcomePrompt(R.drawable.ic_search_24, "油皮洁面怎么选？", BuyPilotColors.Info),
+    WelcomePrompt(R.drawable.ic_shield_24, "敏感肌面霜，帮我避开酒精香精", BuyPilotColors.Success),
+    WelcomePrompt(R.drawable.ic_compare_arrows_24, "帮我对比两款商品，选更稳的", BuyPilotColors.PrimaryDark),
+    WelcomePrompt(R.drawable.ic_payments_24, "200 元以内，推荐一支通勤防晒", BuyPilotColors.Warning),
+)
+
 @Composable
 private fun ConversationStage(
     showWelcome: Boolean,
     state: ChatUiState,
     products: List<ProductCardPayload>,
     onClarificationOption: (String) -> Unit,
+    onClarificationManualInput: () -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (ProductCardPayload) -> Unit,
     onProductEvidence: (ProductCardPayload) -> Unit,
@@ -292,6 +369,7 @@ private fun ConversationStage(
                 state = state,
                 products = products,
                 onClarificationOption = onClarificationOption,
+                onClarificationManualInput = onClarificationManualInput,
                 onCriteriaEdit = onCriteriaEdit,
                 onProductOpen = onProductOpen,
                 onProductEvidence = onProductEvidence,
@@ -391,7 +469,7 @@ private fun TopBar(
 
 @Composable
 private fun WelcomeHome() {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(
@@ -403,72 +481,47 @@ private fun WelcomeHome() {
                     ),
                 ),
             )
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 50.dp, y = (-112).dp)
-                .size(220.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            BuyPilotColors.Primary.copy(alpha = 0.2f),
-                            Color(0xFFFFDBD1).copy(alpha = 0.1f),
-                            Color.Transparent,
-                        ),
-                    ),
-                )
-                .blur(50.dp),
-        )
-
+        Spacer(Modifier.height(92.dp))
         Column(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 96.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.Start,
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = "开启",
                 color = BuyPilotColors.TextPrimary.copy(alpha = 0.86f),
-                fontSize = BuyPilotType.Display,
-                lineHeight = 36.sp,
-                letterSpacing = 3.sp,
-                modifier = Modifier.padding(start = 56.dp),
+                fontSize = 32.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Normal,
+                textAlign = TextAlign.Center,
             )
             Text(
                 text = "你的购物",
                 color = BuyPilotColors.Primary,
-                fontSize = BuyPilotType.Hero,
-                lineHeight = 48.sp,
-                fontWeight = FontWeight.Medium,
+                fontSize = 52.sp,
+                lineHeight = 58.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
             )
             Text(
                 text = "新体验🌟",
-                color = BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.Display,
+                color = BuyPilotColors.TextPrimary.copy(alpha = 0.92f),
+                fontSize = 30.sp,
                 lineHeight = 36.sp,
-                modifier = Modifier.padding(start = 104.dp, top = 12.dp),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 12.dp),
             )
         }
 
+        Spacer(Modifier.weight(1f))
         PromptSuggestions(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 2.dp, bottom = 146.dp),
-        )
-
-        Mascot(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 8.dp, bottom = 142.dp),
-            size = 118,
-            imageSize = 100,
-            borderWidth = 0,
-            shadowElevation = 6,
-            shadowAlpha = 0.035f,
+                .fillMaxWidth()
+                .padding(bottom = 134.dp),
         )
     }
 }
@@ -476,55 +529,53 @@ private fun WelcomeHome() {
 @Composable
 private fun PromptSuggestions(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier.width(204.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(11.dp)
-                    .border(3.dp, BuyPilotColors.Primary.copy(alpha = 0.3f), CircleShape),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = "你可以这样问",
-                color = BuyPilotColors.TextPrimary,
-                fontSize = 18.sp,
-                lineHeight = 22.sp,
-                fontWeight = FontWeight.Bold,
-            )
+        WelcomePrompts.forEach { prompt ->
+            PromptSuggestionCard(prompt = prompt)
         }
-        Box(
-            modifier = Modifier
-                .padding(start = 21.dp)
-                .width(132.dp)
-                .height(1.dp)
-                .background(BuyPilotColors.Primary.copy(alpha = 0.2f)),
-        )
-        PromptSuggestionCard("油皮洁面怎么选？")
-        PromptSuggestionCard("敏感肌面霜，帮我避开酒精香精")
-        PromptSuggestionCard("帮我对比两款商品，选更稳的")
     }
 }
 
 @Composable
-private fun PromptSuggestionCard(text: String) {
-    Text(
-        text = text,
-        color = BuyPilotColors.TextSecondary,
-        fontSize = BuyPilotType.Body,
-        lineHeight = 20.sp,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(start = 21.dp),
-    )
+private fun PromptSuggestionCard(
+    prompt: WelcomePrompt,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 38.dp)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(prompt.iconRes),
+            contentDescription = null,
+            tint = prompt.tint.copy(alpha = 0.9f),
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = prompt.text,
+            color = BuyPilotColors.TextPrimary.copy(alpha = 0.86f),
+            fontSize = BuyPilotType.Body,
+            lineHeight = 20.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatTimeline(
     state: ChatUiState,
     products: List<ProductCardPayload>,
     onClarificationOption: (String) -> Unit,
+    onClarificationManualInput: () -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (ProductCardPayload) -> Unit,
     onProductEvidence: (ProductCardPayload) -> Unit,
@@ -532,16 +583,47 @@ private fun ChatTimeline(
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    var followStreamingText by remember { mutableStateOf(true) }
+    var lastHandledUserMessageKey by remember { mutableStateOf<String?>(null) }
+    val isNearTimelineEnd by remember(state.nodes.size, state.lastError) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf true
+            val lastContentIndex = state.nodes.lastIndex + if (state.lastError != null) 1 else 0
+            lastVisibleIndex >= lastContentIndex - 1
+        }
+    }
 
-    LaunchedEffect(state.nodes.size, state.isStreaming, state.lastError) {
-        if (state.nodes.isNotEmpty()) {
+    LaunchedEffect(state.lastUserMessageKey) {
+        val key = state.lastUserMessageKey ?: return@LaunchedEffect
+        val index = state.nodes.indexOfFirst { it.key == key }
+        if (index >= 0 && key != lastHandledUserMessageKey) {
+            lastHandledUserMessageKey = key
+            followStreamingText = true
+            listState.animateScrollToItem(index = index, scrollOffset = 0)
+        }
+    }
+
+    LaunchedEffect(isNearTimelineEnd, isUserDragging) {
+        if (isUserDragging && !isNearTimelineEnd) {
+            followStreamingText = false
+        } else if (isNearTimelineEnd) {
+            followStreamingText = true
+        }
+    }
+
+    LaunchedEffect(state.streamingTextKey, state.streamingTextLength) {
+        if (followStreamingText && state.streamingTextKey != null && state.nodes.isNotEmpty()) {
             listState.animateScrollToItem(state.nodes.lastIndex)
         }
     }
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .imeNestedScroll(),
         contentPadding = PaddingValues(
             start = 16.dp,
             top = 16.dp,
@@ -555,8 +637,8 @@ private fun ChatTimeline(
                 when (node) {
                     is UserMessageNode -> UserBubble(node)
                     is ThinkingNode -> ThinkingBubble(node.payload.message.ifBlank { "正在思考中..." })
-                    is AiStreamNode -> AssistantText(node.content)
-                    is ClarificationNode -> ClarificationBlock(node.payload, onClarificationOption)
+                    is AiStreamNode -> StreamingAssistantText(node.content, node.done)
+                    is ClarificationNode -> ClarificationBlock(node.payload, onClarificationOption, onClarificationManualInput)
                     is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
                     is ProductDeckNode -> ProductSwipeDeck(node, onOpen = onProductOpen, onEvidence = onProductEvidence)
                     is FinalDecisionNode -> DecisionSummaryCard(
@@ -602,6 +684,8 @@ private fun TimelineItemMotion(content: @Composable () -> Unit) {
 
 @Composable
 private fun UserBubble(node: UserMessageNode) {
+    val bubbleShape = RoundedCornerShape(18.dp)
+
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Text(
             text = node.content.ifBlank { "已发送图片" },
@@ -610,8 +694,8 @@ private fun UserBubble(node: UserMessageNode) {
             lineHeight = 21.sp,
             modifier = Modifier
                 .widthIn(max = 304.dp)
-                .shadow(4.dp, RoundedCornerShape(16.dp, 16.dp, 2.dp, 16.dp), ambientColor = Color.Black.copy(alpha = 0.04f))
-                .background(BuyPilotColors.Primary, RoundedCornerShape(16.dp, 16.dp, 2.dp, 16.dp))
+                .shadow(4.dp, bubbleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
+                .background(BuyPilotColors.Primary, bubbleShape)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         )
     }
@@ -619,36 +703,197 @@ private fun UserBubble(node: UserMessageNode) {
 
 @Composable
 private fun ThinkingBubble(message: String) {
+    val displayMessage = message.ifBlank { "正在思考中..." }.withoutTrailingDots()
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.8f)),
-            )
-            Mascot(size = 24)
+        ThinkingMascotAnimation()
+        Spacer(Modifier.width(10.dp))
+        AnimatedContent(
+            targetState = displayMessage,
+            transitionSpec = {
+                fadeIn(
+                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                ) + slideInVertically(
+                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                    initialOffsetY = { it / 4 },
+                ) togetherWith fadeOut(
+                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+                ) + slideOutVertically(
+                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+                    targetOffsetY = { -it / 4 },
+                )
+            },
+            label = "thinking_message",
+        ) { targetMessage ->
+            ThinkingShimmerText(targetMessage)
         }
-        Spacer(Modifier.width(8.dp))
-        Column {
-            Text(
-                text = message,
-                color = BuyPilotColors.TextSecondary,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 16.sp,
-            )
-            Spacer(Modifier.height(4.dp))
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .width(86.dp)
-                    .height(3.dp)
-                    .clip(CircleShape),
-                color = BuyPilotColors.Primary,
-                trackColor = BuyPilotColors.PrimarySoft,
-            )
+    }
+}
+
+@Composable
+private fun ThinkingMascotAnimation(modifier: Modifier = Modifier) {
+    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.mascot_thinking))
+    val progress by animateLottieCompositionAsState(
+        composition = composition,
+        iterations = LottieConstants.IterateForever,
+        restartOnPlay = false,
+    )
+
+    if (composition != null) {
+        LottieAnimation(
+            composition = composition,
+            progress = { progress },
+            modifier = modifier.size(32.dp),
+        )
+    } else {
+        Image(
+            painter = painterResource(R.drawable.redbean_bun_mascot_white),
+            contentDescription = "BuyPilot mascot",
+            modifier = modifier.size(32.dp),
+            contentScale = ContentScale.Fit,
+        )
+    }
+}
+
+@Composable
+private fun ThinkingShimmerText(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val isDarkTheme = isSystemInDarkTheme()
+    val transition = rememberInfiniteTransition(label = "thinking_shimmer")
+    val animationProgress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "thinking_shimmer_progress",
+    )
+    val textStyle = TextStyle(
+        fontSize = BuyPilotType.Body,
+        lineHeight = 20.sp,
+        fontWeight = FontWeight.Normal,
+    )
+    val shimmerColor = if (isDarkTheme) {
+        BuyPilotColors.SurfaceCard
+    } else {
+        Color(0xFFA4AAB3)
+    }
+    val textBrush = remember(animationProgress, shimmerColor) {
+        object : ShaderBrush() {
+            override fun createShader(size: Size): Shader {
+                val width = size.width
+                val gradientWidth = width * 2f
+                val gradientProgress = gradientWidth * animationProgress
+                return LinearGradientShader(
+                    from = Offset(-width + gradientProgress, 0f),
+                    to = Offset(gradientProgress, 0f),
+                    colors = listOf(
+                        shimmerColor.copy(alpha = 0.64f),
+                        shimmerColor,
+                        shimmerColor.copy(alpha = 0.64f),
+                    ),
+                )
+            }
+        }
+    }
+
+    Text(
+        text = text,
+        style = textStyle.copy(brush = textBrush),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+private fun String.withoutTrailingDots(): String =
+    trim().replace(Regex("""[.。…]+$"""), "")
+
+private fun String.withoutMarkdownMarkup(): String =
+    parseMarkdownInlineSegments().joinToString("") { it.text }
+
+private fun String.parseMarkdownInlineSegments(): List<MarkdownInlineSegment> {
+    val source = replace(Regex("""^\s*[-*>]\s*""", RegexOption.MULTILINE), "")
+    val segments = mutableListOf<MarkdownInlineSegment>()
+    val plain = StringBuilder()
+    var index = 0
+
+    fun flushPlain() {
+        if (plain.isNotEmpty()) {
+            segments += MarkdownInlineSegment(plain.toString(), MarkdownInlineStyle.Normal)
+            plain.clear()
+        }
+    }
+
+    while (index < source.length) {
+        val marker = when {
+            source.startsWith("**", index) -> "**"
+            source.startsWith("__", index) -> "__"
+            source[index] == '`' -> "`"
+            source[index] == '*' -> "*"
+            source[index] == '_' -> "_"
+            else -> null
+        }
+        if (marker == null) {
+            plain.append(source[index])
+            index += 1
+            continue
+        }
+
+        val end = source.indexOf(marker, startIndex = index + marker.length)
+        if (end < 0) {
+            plain.append(marker)
+            index += marker.length
+            continue
+        }
+
+        val inner = source.substring(index + marker.length, end)
+        if (inner.isBlank()) {
+            plain.append(source.substring(index, end + marker.length))
+            index = end + marker.length
+            continue
+        }
+
+        flushPlain()
+        val style = when (marker) {
+            "**", "__" -> MarkdownInlineStyle.Bold
+            "`" -> MarkdownInlineStyle.Code
+            else -> MarkdownInlineStyle.Italic
+        }
+        segments += MarkdownInlineSegment(inner, style)
+        index = end + marker.length
+    }
+    flushPlain()
+    return segments
+}
+
+private fun String.toMarkdownAnnotatedString(
+    baseColor: Color,
+): AnnotatedString {
+    val segments = parseMarkdownInlineSegments()
+    return buildAnnotatedString {
+        segments.forEach { segment ->
+            val start = length
+            append(segment.text)
+            val style = when (segment.style) {
+                MarkdownInlineStyle.Normal -> null
+                MarkdownInlineStyle.Bold -> SpanStyle(fontWeight = FontWeight.Bold)
+                MarkdownInlineStyle.Italic -> SpanStyle(fontStyle = FontStyle.Italic)
+                MarkdownInlineStyle.Code -> SpanStyle(
+                    color = baseColor.copy(alpha = 0.86f),
+                    fontWeight = FontWeight.Medium,
+                    background = BuyPilotColors.SurfaceMuted,
+                )
+            }
+            if (style != null) {
+                addStyle(style, start, length)
+            }
         }
     }
 }
@@ -656,32 +901,102 @@ private fun ThinkingBubble(message: String) {
 @Composable
 private fun AssistantText(content: String) {
     if (content.isBlank()) return
-    Text(
-        text = content,
+    MarkdownTextBlock(
+        content = content,
+        style = TextStyle(
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.LargeBody,
+            lineHeight = 26.sp,
+        ),
+    )
+}
+
+@Composable
+private fun StreamingAssistantText(
+    content: String,
+    @Suppress("UNUSED_PARAMETER") done: Boolean = false,
+) {
+    if (content.isBlank()) return
+    val plainContent = remember(content) { content.withoutMarkdownMarkup() }
+    if (plainContent.isBlank()) return
+    var visibleLength by remember { mutableStateOf(0) }
+
+    LaunchedEffect(plainContent) {
+        val targetLength = plainContent.length
+        if (targetLength <= visibleLength) {
+            visibleLength = targetLength
+            return@LaunchedEffect
+        }
+        while (visibleLength < targetLength) {
+            visibleLength = (visibleLength + StreamRevealCharsPerFrame).coerceAtMost(targetLength)
+            kotlinx.coroutines.delay(StreamRevealFrameDelayMs)
+        }
+    }
+
+    MarkdownTextBlock(content.takeMarkdownPlainChars(visibleLength))
+}
+
+@Composable
+private fun StreamingAssistantText(
+    content: String,
+) {
+    StreamingAssistantText(content = content, done = false)
+}
+
+@Composable
+private fun MarkdownTextBlock(
+    content: String,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    style: TextStyle = TextStyle(
         color = BuyPilotColors.TextPrimary,
         fontSize = BuyPilotType.LargeBody,
         lineHeight = 26.sp,
-        modifier = Modifier.fillMaxWidth(),
+    ),
+) {
+    if (content.isBlank()) return
+    Text(
+        text = remember(content, style.color) { content.toMarkdownAnnotatedString(style.color) },
+        style = style,
+        modifier = modifier,
     )
+}
+
+private fun String.takeMarkdownPlainChars(count: Int): String {
+    if (count <= 0) return ""
+    val result = StringBuilder()
+    var remaining = count
+    parseMarkdownInlineSegments().forEach { segment ->
+        if (remaining <= 0) return@forEach
+        val takeCount = segment.text.length.coerceAtMost(remaining)
+        val text = segment.text.take(takeCount)
+        result.append(
+            when (segment.style) {
+                MarkdownInlineStyle.Bold -> "**$text**"
+                MarkdownInlineStyle.Italic -> "*$text*"
+                MarkdownInlineStyle.Code -> "`$text`"
+                MarkdownInlineStyle.Normal -> text
+            },
+        )
+        remaining -= takeCount
+    }
+    return result.toString()
 }
 
 @Composable
 private fun ClarificationBlock(
     payload: ClarificationPayload,
     onOption: (String) -> Unit,
+    onManualInput: () -> Unit,
 ) {
     val question = payload.question.ifBlank { "请补充一个关键信息" }
     val options = payload.suggestedOptions.ifEmpty { payload.requiredSlots }
 
     Column(verticalArrangement = Arrangement.spacedBy(26.dp)) {
-        Text(
-            text = "为了能为您推荐最合适的产品，我还需要了解一下${question.trimEnd('？', '?')}。",
-            color = BuyPilotColors.TextPrimary,
-            fontSize = BuyPilotType.LargeBody,
-            lineHeight = 26.sp,
+        StreamingAssistantText(
+            content = "为了能为您推荐最合适的产品，我还需要了解一下**${question.trimEnd('？', '?')}**。",
         )
         Surface(
-            modifier = Modifier.widthIn(max = 322.dp),
+            modifier = Modifier.fillMaxWidth(),
             color = BuyPilotColors.SurfaceCard,
             shape = RoundedCornerShape(BuyPilotDimens.RadiusMd),
             shadowElevation = 4.dp,
@@ -700,28 +1015,145 @@ private fun ClarificationBlock(
                     lineHeight = 22.5.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                Text(
-                    text = question,
-                    color = BuyPilotColors.PrimaryDark,
-                    fontSize = BuyPilotType.Body,
-                    lineHeight = 21.sp,
+                MarkdownTextBlock(
+                    content = question,
+                    style = TextStyle(
+                        color = BuyPilotColors.PrimaryDark,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 21.sp,
+                    ),
                 )
-                ChipRows(
-                    labels = options.ifEmpty { listOf("油性", "干性", "混合性", "敏感性") },
+                ClarificationOptionScroller(
+                    labels = options.ifEmpty { DefaultSkinTypeOptions },
                     onClick = onOption,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-                Text(
-                    text = "也可以直接输入补充",
-                    color = BuyPilotColors.TextMuted,
-                    fontSize = BuyPilotType.Label,
-                    lineHeight = 16.sp,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .heightIn(min = 40.dp)
+                        .clip(CircleShape)
+                        .clickable(
+                            onClickLabel = "聚焦输入框",
+                            role = Role.Button,
+                            onClick = onManualInput,
+                        )
+                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_edit_24),
+                        contentDescription = null,
+                        tint = BuyPilotColors.TextMuted,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "也可以直接输入补充",
+                        color = BuyPilotColors.TextMuted,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 16.sp,
+                    )
+                }
             }
         }
     }
 }
+
+@Composable
+private fun ClarificationOptionScroller(
+    labels: List<String>,
+    modifier: Modifier = Modifier,
+    onClick: ((String) -> Unit)? = null,
+) {
+    val listState = rememberLazyListState()
+    val canScrollBackward by remember(labels.size) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+        }
+    }
+    val canScrollForward by remember(labels.size) {
+        derivedStateOf { listState.canScrollForward }
+    }
+    val leadingEdgeAlpha by animateFloatAsState(
+        targetValue = if (canScrollBackward) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "clarification_options_leading_edge",
+    )
+    val trailingEdgeAlpha by animateFloatAsState(
+        targetValue = if (canScrollForward) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "clarification_options_trailing_edge",
+    )
+
+    LaunchedEffect(labels) {
+        if (labels.size > 4) {
+            kotlinx.coroutines.delay(260L)
+            listState.animateScrollBy(
+                value = 34f,
+                animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+            )
+            listState.animateScrollBy(
+                value = -34f,
+                animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(start = 2.dp, end = 36.dp),
+        ) {
+            items(labels, key = { it }) { label ->
+                SmallActionChip(label = label) { onClick?.invoke(label) }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(42.dp)
+                .height(38.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0f),
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0.62f * trailingEdgeAlpha),
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0.96f * trailingEdgeAlpha),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(30.dp)
+                .height(38.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0.96f * leadingEdgeAlpha),
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0.56f * leadingEdgeAlpha),
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0f),
+                        ),
+                    ),
+                ),
+        )
+    }
+}
+
+private val DefaultSkinTypeOptions = listOf(
+    "油性",
+    "干性",
+    "混合性",
+    "敏感性",
+    "中性",
+    "痘痘肌",
+    "干敏肌",
+    "不确定",
+)
 
 @Composable
 private fun CriteriaSummaryCard(
@@ -738,7 +1170,7 @@ private fun CriteriaSummaryCard(
     val exclusions = criteria.ingredientAvoid.ifEmpty { criteria.constraints?.ingredientAvoid.orEmpty() }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        AssistantText("已理解你的需求")
+        StreamingAssistantText("已理解你的需求")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -790,7 +1222,14 @@ private fun CriteriaSummaryCard(
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text("排除项", color = BuyPilotColors.Danger.copy(alpha = 0.8f), fontSize = BuyPilotType.Tiny)
-                    Text(exclusions.joinToString("、"), color = BuyPilotColors.TextPrimary, fontSize = BuyPilotType.LargeBody)
+                    MarkdownTextBlock(
+                        content = exclusions.joinToString("、"),
+                        style = TextStyle(
+                            color = BuyPilotColors.TextPrimary,
+                            fontSize = BuyPilotType.LargeBody,
+                            lineHeight = 22.sp,
+                        ),
+                    )
                 }
             }
         }
@@ -1029,7 +1468,7 @@ private fun DecisionSummaryCard(
     val product = winner?.product
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        AssistantText(
+        StreamingAssistantText(
             payload.summary.ifBlank {
                 "综合考量你的需求，并对比候选商品后，我为你得出了最终购买建议。"
             },
@@ -1073,13 +1512,13 @@ private fun DecisionSummaryCard(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                text = winner?.reason ?: "匹配当前购买标准，综合风险和预算后更值得优先考虑。",
-                                color = BuyPilotColors.TextSecondary,
-                                fontSize = BuyPilotType.Body,
-                                lineHeight = 21.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                            MarkdownTextBlock(
+                                content = winner?.reason ?: "匹配当前购买标准，综合风险和预算后更值得优先考虑。",
+                                style = TextStyle(
+                                    color = BuyPilotColors.TextSecondary,
+                                    fontSize = BuyPilotType.Body,
+                                    lineHeight = 21.sp,
+                                ),
                             )
                             Text(
                                 text = product?.priceLabel() ?: "价格待确认",
@@ -1153,11 +1592,13 @@ private fun BottomComposer(
     inputState: ChatInputState,
     isStreaming: Boolean,
     isAttachmentMenuOpen: Boolean,
+    focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     onAttachmentClick: () -> Unit,
     onTextChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     val placeholder = when (inputState) {
         ChatInputState.Clarifying -> "请回答上面的问题"
         ChatInputState.Streaming -> "正在生成，可随时停止"
@@ -1165,6 +1606,30 @@ private fun BottomComposer(
         else -> "继续追问或描述需求..."
     }
     val canSubmit = isStreaming || text.isNotBlank()
+    val hasError = inputState == ChatInputState.Error
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            hasError -> BuyPilotColors.Attention
+            isFocused -> BuyPilotColors.SurfaceCard
+            else -> BuyPilotColors.SurfaceMuted
+        },
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        label = "composer_container_color",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            hasError -> BuyPilotColors.Danger.copy(alpha = 0.58f)
+            isFocused -> BuyPilotColors.Primary.copy(alpha = 0.68f)
+            else -> BuyPilotColors.Border
+        },
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        label = "composer_border_color",
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (isFocused || hasError) 1.5.dp else 1.dp,
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        label = "composer_border_width",
+    )
     val attachmentIconRotation by animateFloatAsState(
         targetValue = if (isAttachmentMenuOpen) 45f else 0f,
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
@@ -1182,15 +1647,15 @@ private fun BottomComposer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 50.dp)
-                .background(BuyPilotColors.SurfaceMuted, CircleShape)
-                .border(1.dp, BuyPilotColors.Border, CircleShape)
-                .padding(horizontal = 6.dp, vertical = 5.dp),
+                .heightIn(min = 56.dp)
+                .background(containerColor, CircleShape)
+                .border(borderWidth, borderColor, CircleShape)
+                .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
                 onClick = onAttachmentClick,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_add_24),
@@ -1206,6 +1671,8 @@ private fun BottomComposer(
                 onValueChange = onTextChange,
                 modifier = Modifier
                     .weight(1f)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { isFocused = it.isFocused }
                     .padding(horizontal = 8.dp),
                 textStyle = TextStyle(
                     color = BuyPilotColors.TextPrimary,
@@ -1217,7 +1684,13 @@ private fun BottomComposer(
                 keyboardActions = KeyboardActions(onSend = { if (canSubmit) onSubmit() }),
                 maxLines = 3,
                 decorationBox = { innerTextField ->
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 28.dp)
+                            .padding(vertical = 4.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
                         if (text.isEmpty()) {
                             Text(
                                 text = placeholder,
@@ -1232,13 +1705,13 @@ private fun BottomComposer(
             )
             FilledIconButton(
                 onClick = onSubmit,
-                enabled = true,
-                modifier = Modifier.size(40.dp),
+                enabled = canSubmit,
+                modifier = Modifier.size(48.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = if (isStreaming) BuyPilotColors.TextPrimary else BuyPilotColors.Primary,
                     contentColor = BuyPilotColors.OnPrimary,
-                    disabledContainerColor = BuyPilotColors.Primary,
-                    disabledContentColor = BuyPilotColors.OnPrimary,
+                    disabledContainerColor = BuyPilotColors.Border.copy(alpha = 0.65f),
+                    disabledContentColor = BuyPilotColors.TextMuted,
                 ),
             ) {
                 Icon(
@@ -1388,11 +1861,13 @@ private fun ProductDetailSheet(
         )
         Text(product.priceLabel(), color = BuyPilotColors.Primary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         ChipRows((product.ingredientTags + product.skinTypeMatch + product.useScenario).distinct().take(5).ifEmpty { listOf("控油", "温和", "日常洁面") })
-        Text(
-            text = payload.reason.ifBlank { "这款商品与当前需求高度匹配，适合作为优先比较对象。" },
-            color = BuyPilotColors.TextSecondary,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 22.sp,
+        MarkdownTextBlock(
+            content = payload.reason.ifBlank { "这款商品与当前需求高度匹配，适合作为优先比较对象。" },
+            style = TextStyle(
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 22.sp,
+            ),
         )
         if (payload.riskNotes.isNotEmpty()) {
             WarningBox(payload.riskNotes.joinToString("；"))
@@ -1442,11 +1917,13 @@ private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
             }
         }
         Surface(color = BuyPilotColors.SurfaceMuted, shape = RoundedCornerShape(14.dp)) {
-            Text(
-                text = payload.summary.ifBlank { "决策详情会根据本轮商品、证据和约束生成。" },
-                color = BuyPilotColors.TextSecondary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 22.sp,
+            MarkdownTextBlock(
+                content = payload.summary.ifBlank { "决策详情会根据本轮商品、证据和约束生成。" },
+                style = TextStyle(
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 22.sp,
+                ),
                 modifier = Modifier.padding(16.dp),
             )
         }
@@ -1522,7 +1999,14 @@ private fun EvidenceSection(title: String, items: List<String>, numbered: Boolea
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.width(28.dp),
                         )
-                        Text(item, color = BuyPilotColors.TextPrimary, fontSize = BuyPilotType.Body, lineHeight = 22.sp)
+                        MarkdownTextBlock(
+                            content = item,
+                            style = TextStyle(
+                                color = BuyPilotColors.TextPrimary,
+                                fontSize = BuyPilotType.Body,
+                                lineHeight = 22.sp,
+                            ),
+                        )
                     }
                 }
             }
@@ -1545,11 +2029,13 @@ private fun EvidenceBlock(evidence: EvidencePayload) {
             evidence.evidenceId?.let {
                 Text(it, color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Tiny)
             }
-            Text(
-                text = "“${evidence.snippet.ifBlank { "暂无证据片段" }}”",
-                color = BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.LargeBody,
-                lineHeight = 26.sp,
+            MarkdownTextBlock(
+                content = evidence.snippet.ifBlank { "暂无证据片段" },
+                style = TextStyle(
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.LargeBody,
+                    lineHeight = 26.sp,
+                ),
             )
         }
     }
@@ -1566,11 +2052,13 @@ private fun WarningBox(text: String) {
     ) {
         Text("!", color = BuyPilotColors.PrimaryDark, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(8.dp))
-        Text(
-            text = "注意：$text",
-            color = BuyPilotColors.TextSecondary,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 21.sp,
+        MarkdownTextBlock(
+            content = "**注意：**$text",
+            style = TextStyle(
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 21.sp,
+            ),
         )
     }
 }
@@ -1615,7 +2103,7 @@ private fun SmallActionChip(
     onClick: () -> Unit = {},
 ) {
     Text(
-        text = label,
+        text = label.withoutMarkdownMarkup(),
         color = BuyPilotColors.TextPrimary,
         fontSize = BuyPilotType.Label,
         lineHeight = 16.sp,
@@ -1673,7 +2161,7 @@ private fun ProductTag(
     active: Boolean = false,
 ) {
     Text(
-        text = label,
+        text = label.withoutMarkdownMarkup(),
         color = if (active) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
         fontSize = BuyPilotType.LargeBody,
         lineHeight = 22.sp,
@@ -1745,6 +2233,7 @@ private fun Mascot(
     borderWidth: Int = 4,
     shadowElevation: Int = 10,
     shadowAlpha: Float = 0.22f,
+    imageModifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
@@ -1769,7 +2258,7 @@ private fun Mascot(
         Image(
             painter = painterResource(R.drawable.redbean_bun_mascot_white),
             contentDescription = "BuyPilot mascot",
-            modifier = Modifier.size(imageSize.dp),
+            modifier = imageModifier.size(imageSize.dp),
             contentScale = ContentScale.Fit,
         )
     }

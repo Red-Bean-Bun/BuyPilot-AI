@@ -7,18 +7,25 @@
         android:name=".BuyPilotApplication"
         android:allowBackup="true"
         android:usesCleartextTraffic="true"
+        android:icon="@drawable/logo"
+        android:roundIcon="@drawable/logo"
         android:label="BuyPilot"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.BuyPilot">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".SplashActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:theme="@style/Theme.BuyPilot.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
     </application>
 
