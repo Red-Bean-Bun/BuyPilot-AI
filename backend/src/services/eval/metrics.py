@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 
@@ -21,32 +22,46 @@ def compute_constraint_extraction_accuracy(
     """
     if not expected_constraints:
         return 1.0
-    checks = 0
-    passed = 0
-    for key, expected_value in expected_constraints.items():
-        checks += 1
-        actual_value = extracted_constraints.get(key)
-        if key == "must_have_features" or key == "forbidden_features":
-            actual_set = set(actual_value) if isinstance(actual_value, list) else set()
-            expected_set = set(expected_value) if isinstance(expected_value, list) else set()
-            if expected_set and expected_set.issubset(actual_set):
-                passed += 1
-            elif not expected_set:
-                passed += 1
-        elif key == "max_price":
-            if actual_value is not None and isinstance(actual_value, (int, float)):
-                passed += 1 if actual_value <= expected_value else 0
-            else:
-                passed += 0
-        elif key == "min_price":
-            if actual_value is not None and isinstance(actual_value, (int, float)):
-                passed += 1 if actual_value >= expected_value else 0
-            else:
-                passed += 0
-        else:
-            if actual_value == expected_value:
-                passed += 1
-    return passed / checks if checks > 0 else 1.0
+    passed = sum(
+        1
+        for key, expected_value in expected_constraints.items()
+        if _constraint_matches(key, extracted_constraints.get(key), expected_value)
+    )
+    return passed / len(expected_constraints)
+
+
+ConstraintComparator = Callable[[Any, Any], bool]
+
+
+def _constraint_matches(key: str, actual_value: Any, expected_value: Any) -> bool:
+    comparator = CONSTRAINT_COMPARATORS.get(key, _equals)
+    return comparator(actual_value, expected_value)
+
+
+def _expected_subset(actual_value: Any, expected_value: Any) -> bool:
+    actual_set = set(actual_value) if isinstance(actual_value, list) else set()
+    expected_set = set(expected_value) if isinstance(expected_value, list) else set()
+    return not expected_set or expected_set.issubset(actual_set)
+
+
+def _max_price_match(actual_value: Any, expected_value: Any) -> bool:
+    return isinstance(actual_value, int | float) and actual_value <= expected_value
+
+
+def _min_price_match(actual_value: Any, expected_value: Any) -> bool:
+    return isinstance(actual_value, int | float) and actual_value >= expected_value
+
+
+def _equals(actual_value: Any, expected_value: Any) -> bool:
+    return actual_value == expected_value
+
+
+CONSTRAINT_COMPARATORS: dict[str, ConstraintComparator] = {
+    "must_have_features": _expected_subset,
+    "forbidden_features": _expected_subset,
+    "max_price": _max_price_match,
+    "min_price": _min_price_match,
+}
 
 
 def compute_criteria_coverage(
@@ -89,22 +104,49 @@ def compute_constraint_satisfaction(
     constraints: dict[str, Any],
 ) -> float:
     """Per-product: fraction of hard constraints satisfied."""
-    checks: list[bool] = []
-    if constraints.get("max_price"):
-        checks.append(product_metadata.get("price", float("inf")) <= constraints["max_price"])
-    if constraints.get("category"):
-        checks.append(product_metadata.get("category") == constraints["category"])
-    if constraints.get("forbidden_features"):
-        product_text = str(product_metadata).lower()
-        for feat in constraints["forbidden_features"]:
-            checks.append(feat.lower() not in product_text)
-    if constraints.get("must_have_features"):
-        product_text = str(product_metadata).lower()
-        for feat in constraints["must_have_features"]:
-            checks.append(feat.lower() in product_text)
+    checks = [result for rule in SATISFACTION_RULES for result in rule(product_metadata, constraints)]
     if not checks:
         return 1.0
     return sum(checks) / len(checks)
+
+
+SatisfactionRule = Callable[[dict[str, Any], dict[str, Any]], list[bool]]
+
+
+def _price_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
+    if not constraints.get("max_price"):
+        return []
+    return [product_metadata.get("price", float("inf")) <= constraints["max_price"]]
+
+
+def _category_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
+    if not constraints.get("category"):
+        return []
+    return [product_metadata.get("category") == constraints["category"]]
+
+
+def _forbidden_feature_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
+    features = constraints.get("forbidden_features")
+    if not features:
+        return []
+    product_text = str(product_metadata).lower()
+    return [feat.lower() not in product_text for feat in features]
+
+
+def _must_have_feature_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
+    features = constraints.get("must_have_features")
+    if not features:
+        return []
+    product_text = str(product_metadata).lower()
+    return [feat.lower() in product_text for feat in features]
+
+
+SATISFACTION_RULES: tuple[SatisfactionRule, ...] = (
+    _price_satisfaction,
+    _category_satisfaction,
+    _forbidden_feature_satisfaction,
+    _must_have_feature_satisfaction,
+)
 
 
 def compute_feedback_change_rate(

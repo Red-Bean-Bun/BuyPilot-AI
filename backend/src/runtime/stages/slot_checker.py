@@ -36,7 +36,16 @@ def build_clarification_question(missing_slots: list[str]) -> tuple[str, list[st
         return "你想买哪一类商品？", ["美妆护肤", "数码电子", "服饰运动", "食品饮料"]
     if "product_type" in missing_slots:
         return "你想买具体哪一类商品？", [
-            "洁面", "防晒", "面霜", "精华", "手机", "耳机",
-            "跑鞋", "T恤", "咖啡", "茶饮", "零食",
+            "洁面",
+            "防晒",
+            "面霜",
+            "精华",
+            "手机",
+            "耳机",
+            "跑鞋",
+            "T恤",
+            "咖啡",
+            "茶饮",
+            "零食",
         ]
     return "请补充一下你的购买需求。", []

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -13,6 +12,7 @@ from src.config.tuning import (
     CHEAPER_BUDGET_MIN_MAX,
     CHEAPER_BUDGET_RATIO,
 )
+from src.runtime.cart_rules import message_refers_to_previous_product, quantity_from_intent, referenced_product_id
 from src.runtime.stages.criteria import criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
 from src.runtime.stages.slot_checker import build_clarification_question
@@ -25,7 +25,7 @@ from src.runtime.streaming import (
 )
 from src.services.audit import record_audit_event
 from src.services.cart import add_product_to_cart, remove_product_from_cart, update_product_quantity
-from src.services.conversation_state import get_previous_product_ids, save_recommendation_turn
+from src.services.conversation_state import save_recommendation_turn
 from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events
 from src.services.feedback import get_feedback_context, record_feedback
@@ -86,13 +86,13 @@ async def handle_view_cart(
 async def handle_add_to_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    product_id = await _referenced_product_id(ctx.session_id, intent, body.message)
+    product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
         async for event in _clarify_cart_target(ctx, "你想把哪个商品加入购物车？"):
             yield event
         yield ctx.done()
         return
-    quantity = _quantity_from_intent(intent, body.message, default=1)
+    quantity = quantity_from_intent(intent, body.message, default=1)
     try:
         await add_product_to_cart(ctx.session_id, product_id, quantity=quantity)
     except ValueError:
@@ -115,7 +115,7 @@ async def handle_add_to_cart(
 async def handle_remove_from_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    product_id = await _referenced_product_id(ctx.session_id, intent, body.message)
+    product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
         async for event in _clarify_cart_target(ctx, "你想从购物车移出哪个商品？"):
             yield event
@@ -144,13 +144,13 @@ async def handle_remove_from_cart(
 async def handle_update_cart_quantity(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    product_id = await _referenced_product_id(ctx.session_id, intent, body.message)
+    product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
         async for event in _clarify_cart_target(ctx, "你想修改哪个商品的数量？"):
             yield event
         yield ctx.done()
         return
-    quantity = _quantity_from_intent(intent, body.message, default=1)
+    quantity = quantity_from_intent(intent, body.message, default=1)
     try:
         item = await update_product_quantity(ctx.session_id, product_id, quantity)
     except ValueError:
@@ -341,8 +341,8 @@ async def continue_recommendation_from_criteria(
 async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult, message: str) -> None:
     reason = intent.extracted_constraints.get("feedback_text", "feedback")
     product_id = None
-    if intent.target_product_id or _message_refers_to_previous_product(message):
-        product_id = await _referenced_product_id(ctx.session_id, intent, message)
+    if intent.target_product_id or message_refers_to_previous_product(message):
+        product_id = await referenced_product_id(ctx.session_id, intent, message)
     await record_feedback(
         ctx.session_id,
         action="not_interested" if product_id else "feedback",
@@ -486,14 +486,49 @@ def _is_continue_command(message: str) -> bool:
 def _has_shopping_constraints(text: str) -> bool:
     """Auto-continue when the message already specifies concrete product requirements."""
     constraint_markers = (
-        "以内", "以下", "预算", "元", "块", "推荐", "想要", "帮我", "适合",
-        "油皮", "干皮", "敏感肌", "混合", "日常",
-        "洁面", "防晒", "洗面奶", "面霜", "精华", "面膜",
-        "手机", "耳机", "电脑", "平板", "笔记本",
-        "跑鞋", "篮球鞋", "t恤", "运动裤", "瑜伽",
-        "茶饮", "咖啡", "零食", "酸奶", "方便",
+        "以内",
+        "以下",
+        "预算",
+        "元",
+        "块",
+        "推荐",
+        "想要",
+        "帮我",
+        "适合",
+        "油皮",
+        "干皮",
+        "敏感肌",
+        "混合",
+        "日常",
+        "洁面",
+        "防晒",
+        "洗面奶",
+        "面霜",
+        "精华",
+        "面膜",
+        "手机",
+        "耳机",
+        "电脑",
+        "平板",
+        "笔记本",
+        "跑鞋",
+        "篮球鞋",
+        "t恤",
+        "运动裤",
+        "瑜伽",
+        "茶饮",
+        "咖啡",
+        "零食",
+        "酸奶",
+        "方便",
         # Follow-up / feedback cues
-        "不要", "排除", "去掉", "刚才", "第一个", "第二个", "换",
+        "不要",
+        "排除",
+        "去掉",
+        "刚才",
+        "第一个",
+        "第二个",
+        "换",
     )
     return any(marker in text for marker in constraint_markers)
 
@@ -587,74 +622,6 @@ INTENT_HANDLERS: dict[str, IntentHandler] = {
     "update_cart_quantity": handle_update_cart_quantity,
     "chitchat": handle_chitchat,
 }
-
-
-async def _last_product_id(session_id: str) -> str | None:
-    last_ids = await get_previous_product_ids(session_id)
-    return last_ids[0] if last_ids else None
-
-
-async def _referenced_product_id(session_id: str, intent: IntentResult, message: str) -> str | None:
-    if intent.target_product_id:
-        return intent.target_product_id
-    product_ids = await get_previous_product_ids(session_id)
-    if not product_ids:
-        return None
-    index = _ordinal_index(message)
-    if index is not None and 0 <= index < len(product_ids):
-        return product_ids[index]
-    return product_ids[0]
-
-
-_ORDINAL_INDEXES = {
-    "第一个": 0,
-    "第一款": 0,
-    "第1个": 0,
-    "第1款": 0,
-    "第二个": 1,
-    "第二款": 1,
-    "第2个": 1,
-    "第2款": 1,
-    "第三个": 2,
-    "第三款": 2,
-    "第3个": 2,
-    "第3款": 2,
-}
-
-
-def _ordinal_index(message: str) -> int | None:
-    for token, index in _ORDINAL_INDEXES.items():
-        if token in message:
-            return index
-    match = re.search(r"第\s*(\d+)\s*(?:个|款|件|项)?", message)
-    if match:
-        return max(0, int(match.group(1)) - 1)
-    return None
-
-
-def _quantity_from_intent(intent: IntentResult, message: str, *, default: int) -> int:
-    raw = intent.extracted_constraints.get("quantity") or intent.extracted_constraints.get("target_quantity")
-    if isinstance(raw, int | float):
-        parsed = int(raw)
-        return parsed if parsed > 0 else default
-    if isinstance(raw, str) and raw.strip().isdigit():
-        parsed = int(raw.strip())
-        return parsed if parsed > 0 else default
-    match = re.search(r"(?:改成|改为|设置为|调整为|变成)\s*(\d+)\s*(?:件|个|份)?", message)
-    if match:
-        parsed = int(match.group(1))
-        return parsed if parsed > 0 else default
-    match = re.search(r"(\d+)\s*(?:件|个|份)", message)
-    if match:
-        parsed = int(match.group(1))
-        return parsed if parsed > 0 else default
-    return default
-
-
-def _message_refers_to_previous_product(message: str) -> bool:
-    return any(
-        token in message for token in ("这个", "这款", "刚才", "第一个", "第二个", "第三个", "第1", "第2", "第3")
-    )
 
 
 async def _clarify_cart_target(ctx: StreamContext, question: str) -> AsyncGenerator[SSEEventBase, None]:

@@ -57,7 +57,7 @@ async def _main() -> None:
     )
     args = parser.parse_args()
 
-    from src.services.eval.runner import run_eval
+    from src.runtime.eval_runner import run_eval
 
     git_commit = _get_git_commit()
     print(f"Starting eval run: strategy={args.strategy}, git={git_commit}")

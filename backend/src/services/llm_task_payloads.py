@@ -38,6 +38,15 @@ DECISION_SYSTEM_SCHEMA = (
 
 IMAGE_SYSTEM_SCHEMA = "你是商品图片理解器。只输出 JSON，字段为 category_hint、description、visible_traits。"
 
+CONFIDENCE_LABELS = {
+    "high": 0.9,
+    "medium": 0.7,
+    "low": 0.5,
+    "高": 0.9,
+    "中": 0.7,
+    "低": 0.5,
+}
+
 
 def intent_messages(
     message: str,
@@ -283,25 +292,28 @@ def _normalize_confidence(value: Any) -> float:
     if isinstance(value, int | float):
         confidence = float(value)
     elif isinstance(value, str):
-        key = value.strip().lower()
-        if key.endswith("%"):
-            key = key[:-1].strip()
-            try:
-                confidence = float(key) / 100
-            except ValueError:
-                confidence = 1.0
-        else:
-            confidence = {"high": 0.9, "medium": 0.7, "low": 0.5, "高": 0.9, "中": 0.7, "低": 0.5}.get(key, 1.0)
-            if confidence == 1.0:
-                try:
-                    confidence = float(key)
-                except ValueError:
-                    confidence = 1.0
+        confidence = _confidence_from_string(value)
     else:
         confidence = 1.0
     if confidence > 1 and confidence <= 100:
         confidence = confidence / 100
     return max(0.0, min(1.0, confidence))
+
+
+def _confidence_from_string(value: str) -> float:
+    key = value.strip().lower()
+    if key.endswith("%"):
+        return _parse_float(key[:-1].strip(), default=100.0) / 100
+    if key in CONFIDENCE_LABELS:
+        return CONFIDENCE_LABELS[key]
+    return _parse_float(key, default=1.0)
+
+
+def _parse_float(value: str, *, default: float) -> float:
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 def _normalize_nullable_string(value: Any) -> str | None:

@@ -33,6 +33,14 @@ def get_async_engine() -> AsyncEngine:
     return cached[1]
 
 
+async def dispose_async_engine() -> None:
+    global _ASYNC_ENGINE_CACHE
+    cached = _ASYNC_ENGINE_CACHE
+    _ASYNC_ENGINE_CACHE = None
+    if cached is not None:
+        await cached[1].dispose()
+
+
 async def create_db_and_tables() -> None:
     database_url = get_settings().database_url
     if database_url in _CREATED_DATABASE_URLS:

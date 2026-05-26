@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
 
@@ -348,31 +349,72 @@ def _eligible_for_primary_recall(chunk: ChunkDocument) -> bool:
     return chunk.metadata.get("retrieval_role") != "risk"
 
 
+FilterCheck = Callable[[CriteriaPayload, ProductPayload, RetrievalFilters], bool]
+
+
 def _passes_hard_filters(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
-    if product.product_id in filters.avoid_products:
-        return False
-    if criteria.category and product.category != criteria.category:
-        return False
-    if (
+    return all(check(criteria, product, filters) for check in _FILTER_CHECKS)
+
+
+def _passes_feedback_product_filter(
+    criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters
+) -> bool:
+    del criteria
+    return product.product_id not in filters.avoid_products
+
+
+def _passes_category_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
+    del filters
+    return not criteria.category or product.category == criteria.category
+
+
+def _passes_budget_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
+    del filters
+    return not (
         criteria.constraints.budget_max is not None
         and product.price is not None
         and product.price > criteria.constraints.budget_max
-    ):
-        return False
+    )
+
+
+def _passes_brand_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
+    del filters
     constraints = criteria.constraints
-    if constraints.brand_avoid and product.brand:
-        product_brand_lower = product.brand.lower()
-        if any(_brand_matches(brand, product_brand_lower) for brand in constraints.brand_avoid):
-            return False
-    if constraints.origin_avoid and product.brand:
-        if any(avoid_trait_matches_text(origin, product.brand) for origin in constraints.origin_avoid):
-            return False
-    criteria_product_type = normalize_product_type(constraints.product_type)
+    if not constraints.brand_avoid or not product.brand:
+        return True
+    product_brand_lower = product.brand.lower()
+    return not any(_brand_matches(brand, product_brand_lower) for brand in constraints.brand_avoid)
+
+
+def _passes_origin_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
+    del filters
+    constraints = criteria.constraints
+    if not constraints.origin_avoid or not product.brand:
+        return True
+    return not any(avoid_trait_matches_text(origin, product.brand) for origin in constraints.origin_avoid)
+
+
+def _passes_product_type_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
+    del filters
+    criteria_product_type = normalize_product_type(criteria.constraints.product_type)
     product_type = normalize_product_type(product.sub_category)
-    if criteria_product_type and product_type != criteria_product_type:
-        return False
-    avoid_traits = tuple(constraints.ingredient_avoid) + filters.avoid_traits
+    return not criteria_product_type or product_type == criteria_product_type
+
+
+def _passes_avoid_trait_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
+    avoid_traits = tuple(criteria.constraints.ingredient_avoid) + filters.avoid_traits
     return not any(_matches_avoid_trait(product, token) for token in avoid_traits)
+
+
+_FILTER_CHECKS: tuple[FilterCheck, ...] = (
+    _passes_feedback_product_filter,
+    _passes_category_filter,
+    _passes_budget_filter,
+    _passes_brand_filter,
+    _passes_origin_filter,
+    _passes_product_type_filter,
+    _passes_avoid_trait_filter,
+)
 
 
 def _brand_matches(avoid_brand: str, product_brand_lower: str) -> bool:

@@ -52,6 +52,14 @@ def mock_external_ai(monkeypatch):
     monkeypatch.setattr(reranker, "_rerank_request", fake_rerank_request)
 
 
+@pytest.fixture(autouse=True)
+async def reset_database_engine():
+    yield
+    from src.repos.database import dispose_async_engine
+
+    await dispose_async_engine()
+
+
 @pytest.fixture
 async def seeded_products(monkeypatch, tmp_path):
     """Seed products with mock embeddings. Uses a temp SQLite DB so mock embedding

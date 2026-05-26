@@ -34,6 +34,30 @@ class SemanticChunk:
     metadata: dict[str, Any]
 
 
+CATEGORY_ALIASES = {
+    "洁面": ("洗面奶", "洁面乳", "日常清洁", "控油洁面"),
+    "防晒": ("防晒霜", "防晒乳", "通勤防晒", "户外防晒"),
+    "跑鞋": ("跑步鞋", "日常训练", "公路跑", "缓震跑鞋"),
+    "耳机": ("蓝牙耳机", "降噪耳机", "通勤耳机"),
+    "饮料": ("无糖饮料", "低糖饮品", "办公室饮料"),
+}
+
+COMPARE_AXES = {
+    "美妆护肤": ("肤质匹配", "成分风险", "使用场景", "价格"),
+    "数码电子": ("核心参数", "性能", "续航", "价格"),
+    "服饰运动": ("运动场景", "材质/脚感", "尺码适配", "价格"),
+    "食品饮料": ("配料", "糖分/热量", "储存方式", "价格"),
+    "食品生活": ("配料", "糖分/热量", "储存方式", "价格"),
+}
+
+NOT_SUITABLE_MARKERS = (
+    ("敏感肌", "敏感肌或屏障受损用户"),
+    ("酒精", "酒精敏感用户"),
+    ("孕妇", "孕妇"),
+    ("未成年人", "未成年人"),
+)
+
+
 def clean_text(text: str, max_chars: int) -> str:
     return " ".join(str(text).split())[:max_chars]
 
@@ -137,11 +161,22 @@ def build_product_chunks(raw: dict[str, Any]) -> list[SemanticChunk]:
     add("profile", _profile_text(package), "primary", evidence_kind="profile")
 
     rag = raw.get("rag_knowledge") or {}
+    _add_marketing_chunks(add, rag)
+    _add_faq_chunks(add, rag)
+    _add_review_chunks(add, rag)
+    _add_summary_chunks(add, package)
+
+    return chunks
+
+
+def _add_marketing_chunks(add, rag: dict[str, Any]) -> None:
     for index, chunk in enumerate(
         _split_long_text(str(rag.get("marketing_description") or ""), max_chars=MARKETING_CHUNK_MAX_CHARS)
     ):
         add("marketing", chunk, "primary", evidence_kind="why_buy", section_index=index)
 
+
+def _add_faq_chunks(add, rag: dict[str, Any]) -> None:
     for index, faq in enumerate(rag.get("official_faq") or []):
         question = str(faq.get("question") or "")
         answer = str(faq.get("answer") or "")
@@ -155,6 +190,8 @@ def build_product_chunks(raw: dict[str, Any]) -> list[SemanticChunk]:
             section_index=index,
         )
 
+
+def _add_review_chunks(add, rag: dict[str, Any]) -> None:
     for index, review in enumerate(rag.get("user_reviews") or []):
         rating = review.get("rating")
         chunk_type = "negative_review" if _is_negative_rating(rating) else "positive_review"
@@ -169,6 +206,8 @@ def build_product_chunks(raw: dict[str, Any]) -> list[SemanticChunk]:
             section_index=index,
         )
 
+
+def _add_summary_chunks(add, package: dict[str, Any]) -> None:
     warning_text = " ".join(package["evidence_summary"]["risk"])
     if warning_text:
         add("warning", warning_text, "risk", evidence_kind="risk")
@@ -176,8 +215,6 @@ def build_product_chunks(raw: dict[str, Any]) -> list[SemanticChunk]:
     compare_text = "；".join(package["evidence_summary"]["compare_axis"])
     if compare_text:
         add("compare", compare_text, "evidence", evidence_kind="compare")
-
-    return chunks
 
 
 def _profile_text(package: dict[str, Any]) -> str:
@@ -215,15 +252,8 @@ def _raw_text(raw: dict[str, Any]) -> str:
 
 
 def _category_aliases(category: str, sub_category: str) -> list[str]:
-    aliases = {
-        "洁面": ["洗面奶", "洁面乳", "日常清洁", "控油洁面"],
-        "防晒": ["防晒霜", "防晒乳", "通勤防晒", "户外防晒"],
-        "跑鞋": ["跑步鞋", "日常训练", "公路跑", "缓震跑鞋"],
-        "耳机": ["蓝牙耳机", "降噪耳机", "通勤耳机"],
-        "饮料": ["无糖饮料", "低糖饮品", "办公室饮料"],
-    }
     result = [category, sub_category]
-    for key, values in aliases.items():
+    for key, values in CATEGORY_ALIASES.items():
         if key and key in sub_category:
             result.extend(values)
     return result
@@ -251,10 +281,7 @@ def _summary_sentences(raw: dict[str, Any], positive: bool, limit: int) -> list[
     for faq in rag.get("official_faq") or []:
         candidates.extend(_sentences(str(faq.get("answer") or "")))
     for review in rag.get("user_reviews") or []:
-        rating = review.get("rating")
-        if positive and _is_positive_rating(rating):
-            candidates.extend(_sentences(str(review.get("content") or "")))
-        if not positive and _is_negative_rating(rating):
+        if _review_matches_polarity(review.get("rating"), positive=positive):
             candidates.extend(_sentences(str(review.get("content") or "")))
 
     markers = POSITIVE_MARKERS if positive else WARNING_MARKERS
@@ -262,6 +289,10 @@ def _summary_sentences(raw: dict[str, Any], positive: bool, limit: int) -> list[
     if not selected and candidates:
         selected = candidates[:limit]
     return [clean_text(sentence, SUMMARY_SENTENCE_MAX_CHARS) for sentence in selected[:limit]]
+
+
+def _review_matches_polarity(rating: Any, *, positive: bool) -> bool:
+    return _is_positive_rating(rating) if positive else _is_negative_rating(rating)
 
 
 def _split_long_text(text: str, max_chars: int) -> list[str]:
@@ -289,29 +320,14 @@ def _sentences(text: str) -> list[str]:
 
 
 def _compare_axis(category: str, sub_category: str) -> list[str]:
-    if category == "美妆护肤":
-        return ["肤质匹配", "成分风险", "使用场景", "价格"]
-    if category == "数码电子":
-        return ["核心参数", "性能", "续航", "价格"]
-    if category == "服饰运动":
-        return ["运动场景", "材质/脚感", "尺码适配", "价格"]
-    if category in {"食品饮料", "食品生活"}:
-        return ["配料", "糖分/热量", "储存方式", "价格"]
+    if category in COMPARE_AXES:
+        return list(COMPARE_AXES[category])
     return [sub_category, "场景", "价格"]
 
 
 def _not_suitable_for(risk_sentences: list[str]) -> list[str]:
     text = " ".join(risk_sentences)
-    result: list[str] = []
-    if "敏感肌" in text:
-        result.append("敏感肌或屏障受损用户")
-    if "酒精" in text:
-        result.append("酒精敏感用户")
-    if "孕妇" in text:
-        result.append("孕妇")
-    if "未成年人" in text:
-        result.append("未成年人")
-    return _dedup(result)
+    return _dedup([audience for marker, audience in NOT_SUITABLE_MARKERS if marker in text])
 
 
 def _has_warning_text(text: str) -> bool:

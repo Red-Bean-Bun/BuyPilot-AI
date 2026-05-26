@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.repos.database import create_db_and_tables, get_async_engine, is_postgres_engine
@@ -148,11 +148,15 @@ async def _evidence_chunks(product_id: str) -> list[ChunkDocument]:
     await create_db_and_tables()
     try:
         async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
-            rows = (
-                await session.exec(
-                    select(ProductChunk).where(ProductChunk.product_id == product_id).order_by(ProductChunk.chunk_index)
-                )
-            ).all()
+            rows: list[ProductChunk] = list(
+                (
+                    await session.exec(
+                        select(ProductChunk)
+                        .where(ProductChunk.product_id == product_id)
+                        .order_by(col(ProductChunk.chunk_index))
+                    )
+                ).all()
+            )
     except SQLAlchemyError:
         logger.exception("evidence chunks lookup failed")
         raise
@@ -169,9 +173,9 @@ async def _evidence_chunks(product_id: str) -> list[ChunkDocument]:
         if kind not in groups:
             groups[kind] = row
 
-    selected = [groups[kind] for kind in _EVIDENCE_KIND_PRIORITY if kind in groups]
+    selected: list[ProductChunk] = [groups[kind] for kind in _EVIDENCE_KIND_PRIORITY if kind in groups]
     if not selected:
-        selected = candidates[:1]
+        selected = list(candidates[:1])
 
     return [
         ChunkDocument(
