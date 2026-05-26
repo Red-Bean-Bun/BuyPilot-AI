@@ -22,7 +22,7 @@
 
 ### 不可做功能清单
 
-为了匹配三周比赛节奏，前端必须严格收缩范围。**P0 不做**：商城首页、类目浏览页、商品详情长页、支付、订单系统、消息通知中心、账号体系深集成、客服系统、多端同登同步。**P1 也不建议做**：复杂筛选页、长列表瀑布流、活动会场、优惠券、多图多视频理解、完整埋点后台。购物车仅做⭐入门档（对话式加购 + 购物车图标 + 购物车底板查看），不做⭐⭐进阶（NLP操作购物车）和⭐⭐⭐挑战（下单确认流程）。上述能力在原始材料中**未指定**，本 PRD 决策为**除购物车⭐入门外全部降级为非目标项**。
+为了匹配三周比赛节奏，前端必须严格收缩范围。**P0 不做**：商城首页、类目浏览页、商城式商品详情长页、支付、订单系统、消息通知中心、账号体系深集成、客服系统、多端同登同步。商品推荐允许做轻量的 AI 推荐详情层，用于承接 Swipe 挑选、商品大图、下滑详情和证据解释，但它不是传统商城详情页。**P1 也不建议做**：复杂筛选页、长列表瀑布流、活动会场、优惠券、多图多视频理解、完整埋点后台。购物车仅做⭐入门档（对话式加购 + 购物车图标 + 购物车底板查看），不做⭐⭐进阶（NLP操作购物车）和⭐⭐⭐挑战（下单确认流程）。上述能力在原始材料中**未指定**，本 PRD 决策为**除购物车⭐入门外全部降级为非目标项**。
 
 ## 技术栈与工程结构
 
@@ -60,7 +60,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
    - AI 文本流消息
    - `clarification` 澄清完整小卡
    - `criteria_card` 购买标准摘要卡
-   - `product_card` 商品 `SwipeDeck` 卡堆节点
+   - `product_card` 商品缩略推荐带节点
    - `cart_action` 加购/购物车操作反馈节点
    - `final_decision` 最终决策摘要卡
    - 系统错误气泡
@@ -73,13 +73,13 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
    - 停止生成按钮，仅在流式进行中显示
    - 重试按钮，仅在错误态显示
 4. **反馈区**  
-仅在出现 `criteria_card`、`product_card` 或 `final_decision` 后显示轻量操作。`clarification` 可以直接在对话区完整展示；`criteria_card` 在对话区只展示摘要确认卡与“修改/展开”等入口；`product_card` 进入独立 SwipeDeck，通过左右滑表达喜欢/不喜欢，通过点击或上滑进入详情；`final_decision` 展示中等完整摘要，点击“查看依据”进入底板。证据不直接塞进聊天流。
+仅在出现 `criteria_card`、`product_card` 或 `final_decision` 后显示轻量操作。`clarification` 可以直接在对话区完整展示；`criteria_card` 在对话区只展示摘要确认卡与“修改/展开”等入口；`product_card` 在聊天流中先聚合为可横向滑动的缩略推荐带，点击后进入独立 Swipe 挑选模式；在 Swipe 模式中通过左右滑表达喜欢/不喜欢，点击商品大图进入商品详情，下滑查看更多信息，右上角更多入口查看证据；`final_decision` 展示中等完整摘要，点击“查看依据”进入底板。证据不直接塞进聊天流。
 5. **浮层/底板**  
-用于购买标准编辑、商品详情、证据详情、图片预览、商品对比与错误详情。P0 要求购买标准编辑底板、商品详情/证据底板与图片预览；对比页可到 P1 实现。
+用于购买标准编辑、Swipe 挑选模式、商品详情、证据详情、图片预览、商品对比与错误详情。P0 要求购买标准编辑底板、商品推荐缩略带、Swipe 挑选模式、商品详情/证据层与图片预览；对比页可到 P1 实现。
 
 ### 交互流程
 
-当用户发送文本或图片后，前端先做**本地回显**，随后创建或续用 `session_id`，发起 `/chat/stream`。**session_id 规则**：首次对话时 `session_id` 为 null，后端会生成新的 session_id 并在所有响应事件的 envelope 中返回；前端必须从首个 SSE 事件中提取 `session_id` 并缓存到 ViewModel，后续请求携带同一 `session_id`。一旦连接建立，聊天流中立即插入或更新一条 AI thinking 动画气泡，`thinking.message` 用于驱动该气泡内的阶段文案，例如”正在理解需求””正在生成购买标准””正在检索商品”。TopBar 只展示会话/连接状态，不承载这些阶段文案。如果收到 `clarification`，输入框保持可编辑，用户可以直接回答，当前 stream 结束；如果收到 `criteria_card`，则在时间线上插入购买标准摘要卡，完整字段、quick actions 与可编辑项进入 Bottom Sheet，用户修改后通过 `criteria_patch` 回流。`text_delta` 会持续增量更新同一条 AI 气泡；多个 `product_card` 到达时进入同一个商品 `SwipeDeck` 数据源，而不是在聊天流中连续插入多张完整商品详情卡；`final_decision` 到达时，在流末插入最终决策摘要卡并关闭 loading。整个过程中，用户点击底部输入区的”停止生成”应立即关闭 SSE 连接（主要取消信号），同时 best-effort 调用 `POST /chat/cancel`，并将当前状态改为 `Canceled`，保留已生成内容供继续追问。
+当用户发送文本或图片后，前端先做**本地回显**，随后创建或续用 `session_id`，发起 `/chat/stream`。**session_id 规则**：首次对话时 `session_id` 为 null，后端会生成新的 session_id 并在所有响应事件的 envelope 中返回；前端必须从首个 SSE 事件中提取 `session_id` 并缓存到 ViewModel，后续请求携带同一 `session_id`。一旦连接建立，聊天流中立即插入或更新一条 AI thinking 动画气泡，`thinking.message` 用于驱动该气泡内的阶段文案，例如”正在理解需求””正在生成购买标准””正在检索商品”。TopBar 只展示会话/连接状态，不承载这些阶段文案。如果收到 `clarification`，输入框保持可编辑，用户可以直接回答，当前 stream 结束；如果收到 `criteria_card`，则在时间线上插入购买标准摘要卡，完整字段、quick actions 与可编辑项进入 Bottom Sheet，用户修改后通过 `criteria_patch` 回流。`text_delta` 会持续增量更新同一条 AI 气泡；多个 `product_card` 到达时先进入同一个商品缩略推荐带数据源，而不是在聊天流中连续插入多张完整商品详情卡。用户点击缩略推荐带后进入独立 Swipe 挑选模式；在 Swipe 模式里点击商品大图进入商品详情，下滑查看更多商品信息，右上角更多入口查看推荐证据。`final_decision` 到达时，在流末插入最终决策摘要卡并关闭 loading。整个过程中，用户点击底部输入区的”停止生成”应立即关闭 SSE 连接（主要取消信号），同时 best-effort 调用 `POST /chat/cancel`，并将当前状态改为 `Canceled`，保留已生成内容供继续追问。
 
 ### 输入区规范
 
@@ -91,7 +91,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 ### 消息列表与卡片流渲染规则
 
-渲染层必须满足四条硬规则。第一，**仅有一个时间线**；第二，`thinking` 与 `text_delta` **永远更新同一条当前 AI 回复节点**，不得每个 delta 或阶段变化新增一条列表项；第三，**所有结构化卡片都使用后端提供的稳定 `node_id` 或 `deck_id`**，插入后以 upsert 方式更新，避免重组造成抖动；第四，多个 `product_card` 必须聚合到同一个 `ProductSwipeDeck` 节点，不能在聊天流中堆叠成多张详情卡。
+渲染层必须满足四条硬规则。第一，**仅有一个时间线**；第二，`thinking` 与 `text_delta` **永远更新同一条当前 AI 回复节点**，不得每个 delta 或阶段变化新增一条列表项；第三，**所有结构化卡片都使用后端提供的稳定 `node_id` 或 `deck_id`**，插入后以 upsert 方式更新，避免重组造成抖动；第四，多个 `product_card` 必须聚合到同一个 `ProductRecommendationStrip` 节点，不能在聊天流中堆叠成多张详情卡。独立 Swipe 挑选模式与商品详情页复用这个 `deck_id` 的数据，不再向后端重新请求同一批推荐。
 
 建议渲染策略如下：
 
@@ -119,7 +119,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 - `turn_id`：一次用户输入对应一次 Agent 回复轮次；同一轮所有事件必须一致。
 - `seq` / `event_id`：后端按轮次单调递增，客户端用来排序和去重。
 - `node_id`：聊天流节点稳定 key。`thinking` 与本轮 AI 文本可以共享同一个回复节点，也可以分别使用稳定节点；不得每次阶段变化生成新节点。
-- `deck_id`：商品推荐卡堆稳定 key。所有同一轮推荐商品必须带同一个 `deck_id`，客户端据此创建或更新一个 `ProductSwipeDeck`。
+- `deck_id`：商品推荐分组稳定 key。所有同一轮推荐商品必须带同一个 `deck_id`，客户端据此创建或更新一个 `ProductRecommendationStrip`，并在进入 `ProductSwipeMode` 后复用同一组商品数据。
 - `display_mode`：后端明确建议前端如何渲染，例如 `inline_thinking`、`inline_card`、`inline_text`、`summary_card`、`swipe_deck_item`、`none`。前端可以按设计系统实现样式，但不能反向猜测数据用途。
 - `summary` / `detail` / `evidence`：结构化卡片必须拆成对话区摘要、底板详情和证据三层；证据只进入底板或详情页，不直接作为聊天节点。
 
@@ -127,54 +127,31 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 <sheet sheet-id="dzyNci" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
 
-`criteria_card` 的目标不是”展示系统内部理解”，而是让用户看见**当前购买标准已被结构化**，并可一键修正。对话区中的购买标准只展示摘要，例如”已理解你的需求：油性肌肤｜200元内｜日常护肤｜洁面类”，完整字段、权重、quick actions 与编辑控件进入 Bottom Sheet。`product_card` 的目标不是穷举参数，而是进入 SwipeDeck 后把用户最关心的肌肤适配、成分标签、使用场景和预算前置；商品完整详情、风险说明和证据在详情底板展示。`final_decision` 则必须给出**可执行结论**，对话区展示中等完整摘要，”查看依据”进入 Bottom Sheet。
+`criteria_card` 的目标不是”展示系统内部理解”，而是让用户看见**当前购买标准已被结构化**，并可一键修正。对话区中的购买标准只展示摘要，例如”已理解你的需求：油性肌肤｜200元内｜日常护肤｜洁面类”，完整字段、权重、quick actions 与编辑控件进入 Bottom Sheet。`product_card` 的目标不是穷举参数，而是先在聊天流里形成缩略推荐带，再把真正的挑选动作放进独立 Swipe 模式。缩略推荐带只承载预览和入口；Swipe 模式承载喜欢/不喜欢；商品大图详情承载单品认真查看；下滑详情承载更多参数、风险说明和推荐理由；右上角更多入口承载证据。`final_decision` 则必须给出**可执行结论**，对话区展示中等完整摘要，”查看依据”进入 Bottom Sheet。
 
 推荐 quick action 最小集合如下：
 
 <sheet sheet-id="uEasQp" token="F4F5sgj1YhVLR3tDD8YcLTXXnrc"></sheet>
 
-### UI示意图
+### UI 示意图
 
-仅仅草稿，不代表最终效果
+完整设计稿已本地化放入 `doc/ui`，以文件名和组件语义对应。商品推荐部分以 `deck_id` 聚合商品，但界面分为五层，不再把完整 Swipe 卡直接塞进聊天流。
 
-
-
-<grid>
-<column width-ratio="0.502754">
-![](https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=YjI2MzVlYTQ3YzZhNDlmYzkxZTgwMGZjYTUxMzNhMjNfMWRkMzczYzUyMDNkZGUwMTcyMjcwNjlhNzBjMzdhYTlfSUQ6NzYzOTc0Njg5ODAyMjUzNDA5Ml8xNzc5MTI0MzQ5OjE3NzkxMjc5NDlfVjM)
-</column>
-<column width-ratio="0.497246">
-![](https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=ZTYwYmI5MTg0NGViYjk2ZDMxODBmYTJjOWQwZGVmZmRfZjI2OTJjMDRkZDUwNDc3YzZlNjc1NjRjMWI0OTAyMjhfSUQ6NzYzOTc0NzEwMDEzMzAzNDk0Nl8xNzc5MTI0MzQ5OjE3NzkxMjc5NDlfVjM)
-</column>
-</grid>
-
-                                **01 导购聊天首页                                                                                          02 Thinking 状态**
-
-
-
-<grid>
-<column width-ratio="0.512394">
-![](https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=OTUwMTFhZjc2NGFmMmIyOTdmMDQ1MTI0OGUxZjJkZmJfYTY2ODEzY2E0Y2FkODIxNmRkMmNkN2NiMjIwMGM2YjlfSUQ6NzYzOTc0NzQ3NTI1MDcxMTc3MF8xNzc5MTI0MzQ5OjE3NzkxMjc5NDlfVjM)
-</column>
-<column width-ratio="0.487606">
-![](https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=YWM5ZjkzMjg2ZmNmYmRkNGYzM2IzN2JjOTVhZDQzZTVfMWVhOWE2N2I3NTUwMzBkM2FjNDVlZmIwMjQ4NjAyNTBfSUQ6NzYzOTc0NzczMzk4MDU4MDgwOV8xNzc5MTI0MzQ5OjE3NzkxMjc5NDlfVjM)
-</column>
-</grid>
-
-                         **03 Clarification 澄清卡                                                                                         04 criteria_card**
-
-
-
-<grid>
-<column width-ratio="0.501588">
-![](https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=Mjg4NThiM2YzODg4ZDM2MTNlZWE0YjYzNjAyMmQ3NDNfN2VkMGVmZDY5NDk2MTdmYTNjZDgxZDEwNDQ0ZjdlNDNfSUQ6NzYzOTc0ODIxODY3ODU3ODQwMF8xNzc5MTI0MzQ5OjE3NzkxMjc5NDlfVjM)
-</column>
-<column width-ratio="0.498412">
-![](https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=OGM0MzY2MTA0OGRhMGYwYmVkY2NhNzRmNDgwNDI1YWNfM2M3ODhjOGUxNDY5OGE4YTJjNTk4OGQ2NjM1NzI3ODRfSUQ6NzYzOTc0ODM2MTc4MTM5ODQ1Nl8xNzc5MTI0MzQ5OjE3NzkxMjc5NDlfVjM)
-</column>
-</grid>
-
-                                             **05商品推荐卡                                                                         06商品推荐卡--详情**
+| 顺序 | 设计稿 | 对应组件 | 关键交互 |
+|---|---|---|---|
+| 01 | ![导购聊天首页](../ui/01-onboarding-home.png) | EmptyHome | 首次进入时建立“直接说需求”的心智。 |
+| 02 | ![Thinking 状态](../ui/02-chat-thinking.png) | ThinkingBubble | 当前 AI 回复节点内展示推理状态。 |
+| 03 | ![Clarification 澄清卡](../ui/03-clarification-card.png) | ClarificationCard | 缺少关键槽位时追问一个问题。 |
+| 04 | ![Criteria 标准摘要卡](../ui/04-criteria-summary-card.png) | CriteriaSummaryCard | 把用户需求结构化为可确认标准。 |
+| 05 | ![Criteria 编辑底板](../ui/05-criteria-edit-sheet.png) | CriteriaEditSheet | 修改预算、品类、场景、排除项和 quick actions。 |
+| 06 | ![商品缩略推荐带](../ui/06-product-recommendation-strip.png) | ProductRecommendationStrip | 聊天流内横向滑动查看缩小商品卡，点击进入挑选模式。 |
+| 07 | ![Swipe 挑选模式](../ui/07-product-swipe-mode.png) | ProductSwipeMode | 独立页面承载左滑无感、右滑心动的正式挑选动作。 |
+| 08 | ![商品大图详情](../ui/08-product-hero-detail.png) | ProductHeroDetail | 在 Swipe 模式中点击商品大图进入，聚焦单个商品。 |
+| 09 | ![商品下滑详情](../ui/09-product-scroll-detail.png) | ProductScrollDetail | 商品详情继续下滑后展示更多信息。 |
+| 10 | ![商品推荐证据](../ui/10-product-evidence-overlay.png) | ProductEvidenceOverlay | 商品详情右上角更多入口打开证据层。 |
+| 11 | ![最终决策摘要](../ui/11-decision-summary-card.png) | DecisionSummaryCard | 展示最终首选、理由和不适合情况。 |
+| 12 | ![最终决策依据](../ui/12-decision-evidence-sheet.png) | DecisionEvidenceSheet | 查看最终决策依据、备选和风险。 |
+| 13 | ![输入扩展菜单](../ui/13-input-attachment-menu.png) | InputAttachmentMenu | 图片输入入口与未来能力预留。 |
 
 ##  SSE 协议与接口契约
 
@@ -190,7 +167,7 @@ Android 端建议统一采用 **Kotlin + Jetpack Compose**，并通过官方 **C
 
 ### 完整流式示例
 
-下面给出一组**从用户请求到完整 SSE / A2UI 序列**的工程样例。为便于 Android 侧直接联调，示例包含原始请求体、SSE 帧内容与事件顺序。后端必须提供 `turn_id`、`seq`、`event_id`、`node_id`、`display_mode`；商品推荐必须提供统一 `deck_id`，客户端据此把多个 `product_card` 聚合为一个 SwipeDeck。
+下面给出一组**从用户请求到完整 SSE / A2UI 序列**的工程样例。为便于 Android 侧直接联调，示例包含原始请求体、SSE 帧内容与事件顺序。后端必须提供 `turn_id`、`seq`、`event_id`、`node_id`、`display_mode`；商品推荐必须提供统一 `deck_id`，客户端据此把多个 `product_card` 聚合为一个聊天内缩略推荐带，并在用户点击后进入独立 Swipe 挑选模式。
 
 **请求**
 
