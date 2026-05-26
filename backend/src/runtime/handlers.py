@@ -50,6 +50,7 @@ from src.types.sse_events import (
 
 IntentHandler = Callable[[StreamContext, ChatStreamRequest, IntentResult], AsyncGenerator[SSEEventBase, None]]
 T = TypeVar("T")
+CRITERIA_CONFIRMATION_PROMPT = "你可以先确认或修改这些标准。没问题的话回复「继续」，我再开始推荐。"
 
 
 @dataclass
@@ -210,6 +211,22 @@ async def handle_recommendation(
     criteria = criteria_capture.require("criteria")
 
     yield _criteria_card_event(ctx, criteria)
+    if not _should_continue_after_criteria(body):
+        yield _criteria_confirmation_event(ctx)
+        await run_sync_io(save_recommendation_turn, ctx.session_id, criteria, [], user_message=body.message)
+        yield ctx.done()
+        return
+
+    async for event in continue_recommendation_from_criteria(ctx, body, criteria):
+        yield event
+
+
+async def continue_recommendation_from_criteria(
+    ctx: StreamContext,
+    body: ChatStreamRequest,
+    criteria: CriteriaPayload,
+) -> AsyncGenerator[SSEEventBase, None]:
+    ctx.ensure_active()
 
     feedback = await get_feedback_context(ctx.session_id)
     yield ctx.thinking("searching", "正在检索匹配商品...")
@@ -391,6 +408,42 @@ def _text_delta_events(ctx: StreamContext, recommendation: RecommendationResult)
             )
         )
     return events
+
+
+def _criteria_confirmation_event(ctx: StreamContext) -> TextDeltaEvent:
+    return TextDeltaEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"criteria_confirmation_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        message_id=f"criteria_confirmation_{ctx.turn_id}",
+        delta=CRITERIA_CONFIRMATION_PROMPT,
+        done=True,
+    )
+
+
+def _should_continue_after_criteria(body: ChatStreamRequest) -> bool:
+    return "recommendation" in body.skip_stages or _is_continue_command(body.message)
+
+
+def _is_continue_command(message: str) -> bool:
+    text = message.strip().lower()
+    return any(
+        token in text
+        for token in (
+            "继续",
+            "可以",
+            "确认",
+            "没问题",
+            "开始推荐",
+            "推荐吧",
+            "go",
+            "ok",
+            "continue",
+        )
+    )
 
 
 def _drop_completed_background_tasks(ctx: StreamContext) -> None:

@@ -5,7 +5,6 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeOut
@@ -37,10 +36,13 @@ import com.buypilot.navigation.AppNavGraph
 import kotlinx.coroutines.delay
 
 private val SurfaceBg = Color(0xFFF7F8FA)
-private val SplashBg = Color(0xFFF84202)
+private val SplashBg = Color(0xFFFC5D02)
 private val AppEnterEase = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 private val SplashExitEase = CubicBezierEasing(0.3f, 0f, 1f, 1f)
-private const val SplashHoldMillis = 1580L
+private val MascotRestingOffsetX = 28.dp
+private val TextRestingOffsetY = (-12).dp
+private const val TextRestingScale = 0.9f
+private const val SplashHoldMillis = 2850L
 
 @Composable
 fun BuyPilotStartupHost(showStartupSplash: Boolean = true) {
@@ -126,98 +128,52 @@ fun BuyPilotLayeredSplash(
     val transition = updateTransition(targetState = entered, label = "startup_layered_splash")
     val mascotOffsetX by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 1160
-                (-42f) at 0
-                26f at 260
-                (-24f) at 520
-                14f at 760
-                (-6f) at 960
-                0f at 1160
-            }
+            tween(durationMillis = 980, easing = AppEnterEase)
         },
-        label = "startup_mascot_sway_x",
-    ) { isEntered -> if (isEntered) 0f else -42f }
+        label = "startup_mascot_greeting_x",
+    ) { isEntered -> if (isEntered) 0f else 52f }
     val mascotOffsetY by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 1160
-                186f at 0
-                126f at 260
-                70f at 520
-                26f at 760
-                (-5f) at 960
-                0f at 1160
-            }
+            tween(durationMillis = 980, easing = AppEnterEase)
         },
-        label = "startup_mascot_rise_y",
-    ) { isEntered -> if (isEntered) 0f else 186f }
+        label = "startup_mascot_greeting_y",
+    ) { isEntered -> if (isEntered) 0f else 248f }
     val mascotRotation by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 1180
-                (-7f) at 0
-                5f at 260
-                (-4f) at 520
-                2.4f at 760
-                (-1f) at 960
-                0f at 1180
-            }
+            tween(durationMillis = 960, easing = AppEnterEase)
         },
-        label = "startup_mascot_sway_rotation",
-    ) { isEntered -> if (isEntered) 0f else -7f }
+        label = "startup_mascot_greeting_rotation",
+    ) { isEntered -> if (isEntered) 0f else -4.8f }
     val mascotScale by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 1080
-                0.985f at 0
-                1.01f at 760
-                1f at 1080
-            }
+            tween(durationMillis = 980, easing = AppEnterEase)
         },
         label = "startup_mascot_scale",
-    ) { isEntered -> if (isEntered) 1f else 0.985f }
+    ) { isEntered -> if (isEntered) 1f else 0.975f }
     val textAlpha by transition.animateFloat(
         transitionSpec = {
-            tween(durationMillis = 480, delayMillis = 120, easing = AppEnterEase)
+            tween(durationMillis = 620, delayMillis = 260, easing = AppEnterEase)
         },
         label = "startup_text_alpha",
     ) { isEntered -> if (isEntered) 1f else 0f }
     val textOffsetX by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 900
-                (-18f) at 0
-                8f at 360
-                (-4f) at 610
-                0f at 900
-            }
+            tween(durationMillis = 840, delayMillis = 240, easing = AppEnterEase)
         },
-        label = "startup_text_sway_x",
-    ) { isEntered -> if (isEntered) 0f else -18f }
+        label = "startup_text_greeting_x",
+    ) { isEntered -> if (isEntered) 0f else 22f }
     val textOffsetY by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 900
-                44f at 0
-                18f at 360
-                (-3f) at 680
-                0f at 900
-            }
+            tween(durationMillis = 840, delayMillis = 240, easing = AppEnterEase)
         },
-        label = "startup_text_rise_y",
-    ) { isEntered -> if (isEntered) 0f else 44f }
+        label = "startup_text_greeting_y",
+    ) { isEntered -> if (isEntered) 0f else 34f }
     val textScale by transition.animateFloat(
         transitionSpec = {
-            keyframes {
-                durationMillis = 860
-                0.965f at 0
-                1.012f at 620
-                1f at 860
-            }
+            tween(durationMillis = 860, delayMillis = 240, easing = AppEnterEase)
         },
         label = "startup_text_scale",
-    ) { isEntered -> if (isEntered) 1f else 0.965f }
+    ) { isEntered -> if (isEntered) 1f else 0.94f }
     val splashContentDescription = stringResource(R.string.buy_pilot_splash_content_description)
 
     Box(
@@ -237,7 +193,9 @@ fun BuyPilotLayeredSplash(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    translationX = with(density) { mascotOffsetX.dp.toPx() }
+                    translationX = with(density) {
+                        MascotRestingOffsetX.toPx() + mascotOffsetX.dp.toPx()
+                    }
                     translationY = with(density) { mascotOffsetY.dp.toPx() }
                     rotationZ = mascotRotation
                     scaleX = mascotScale
@@ -255,9 +213,12 @@ fun BuyPilotLayeredSplash(
                 .graphicsLayer {
                     alpha = textAlpha
                     translationX = with(density) { textOffsetX.dp.toPx() }
-                    translationY = with(density) { textOffsetY.dp.toPx() }
-                    scaleX = textScale
-                    scaleY = textScale
+                    translationY = with(density) {
+                        TextRestingOffsetY.toPx() + textOffsetY.dp.toPx()
+                    }
+                    scaleX = TextRestingScale * textScale
+                    scaleY = TextRestingScale * textScale
+                    transformOrigin = TransformOrigin(0.5f, 0.28f)
                 },
         )
     }

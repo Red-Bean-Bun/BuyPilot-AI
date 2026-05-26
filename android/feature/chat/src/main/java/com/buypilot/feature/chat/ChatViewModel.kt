@@ -35,8 +35,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 
 private const val USE_MOCK_CHAT = true
+private const val FALLBACK_THINKING_MIN_MS = 8_000L
+private const val CRITERIA_CONFIRMATION_PROMPT = "你可以先确认或修改这些标准。没问题的话回复「继续」，我再开始推荐。"
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -46,6 +49,7 @@ class ChatViewModel @Inject constructor(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var streamJob: Job? = null
+    private val fallbackThinkingStartedAt = mutableMapOf<String, Long>()
 
     fun sendMessage(message: String, imageUrl: String? = null) {
         if (message.isBlank() && imageUrl == null) return
@@ -54,6 +58,29 @@ class ChatViewModel @Inject constructor(
             return
         }
 
+        startRealStream(message = message, imageUrl = imageUrl)
+    }
+
+    fun sendCriteriaPatch(criteriaPatch: JsonObject) {
+        val patchMessage = "保存并重新推荐"
+        if (USE_MOCK_CHAT) {
+            sendMockMessage(patchMessage, imageUrl = null)
+            return
+        }
+        startRealStream(
+            message = patchMessage,
+            imageUrl = null,
+            criteriaPatch = criteriaPatch,
+            skipStages = listOf("recommendation"),
+        )
+    }
+
+    private fun startRealStream(
+        message: String,
+        imageUrl: String? = null,
+        criteriaPatch: JsonObject? = null,
+        skipStages: List<String> = emptyList(),
+    ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = Ids.clientTurnId()
         val currentSessionId = _uiState.value.sessionId
@@ -83,6 +110,8 @@ class ChatViewModel @Inject constructor(
                 message = message,
                 sessionId = currentSessionId,
                 imageUrl = imageUrl,
+                criteriaPatch = criteriaPatch,
+                skipStages = skipStages,
                 clientTurnId = clientTurnId,
                 clientTraceId = Ids.clientTraceId(),
             )
@@ -106,7 +135,7 @@ class ChatViewModel @Inject constructor(
                             nowMs = nowMs,
                         )
                     }
-                    _uiState.update { ChatReducer.reduce(it, envelope) }
+                    applyEnvelopeWithFallbackDelay(envelope)
                 }
         }
     }
@@ -114,6 +143,7 @@ class ChatViewModel @Inject constructor(
     fun cancel() {
         val state = _uiState.value
         streamJob?.cancel()
+        fallbackThinkingStartedAt.clear()
         _uiState.update(ChatReducer::cancel)
 
         if (USE_MOCK_CHAT) return
@@ -135,9 +165,11 @@ class ChatViewModel @Inject constructor(
         val nowMs = System.currentTimeMillis()
         val sessionId = _uiState.value.sessionId ?: "mock_session_001"
         val turnId = "mock_turn_$nowMs"
-        val hasStructuredContext = _uiState.value.nodes.any {
-            it is CriteriaNode || it is ProductDeckNode || it is FinalDecisionNode
-        }
+        val currentNodes = _uiState.value.nodes
+        val hasCriteriaContext = currentNodes.any { it is CriteriaNode }
+        val hasPendingCriteriaConfirmation = hasCriteriaContext &&
+            currentNodes.none { it is ProductDeckNode || it is FinalDecisionNode }
+        val shouldContinueFromCriteria = hasPendingCriteriaConfirmation && message.isMockContinueCommand()
 
         streamJob?.cancel()
         _uiState.update {
@@ -151,30 +183,27 @@ class ChatViewModel @Inject constructor(
 
         streamJob = viewModelScope.launch {
             var seq = 1
-            fun emit(
+            suspend fun emit(
                 event: AgentEventType,
                 nodeId: String,
                 payload: AgentPayload,
                 deckId: String? = null,
                 displayMode: String? = null,
             ) {
-                _uiState.update {
-                    ChatReducer.reduce(
-                        it,
-                        AgentUiEnvelope(
-                            event = event,
-                            sessionId = sessionId,
-                            turnId = turnId,
-                            seq = seq,
-                            eventId = "$turnId:${seq.toString().padStart(4, '0')}",
-                            nodeId = nodeId,
-                            deckId = deckId,
-                            displayMode = displayMode,
-                            createdAtMs = System.currentTimeMillis(),
-                            payload = payload,
-                        ),
+                applyEnvelopeWithFallbackDelay(
+                    AgentUiEnvelope(
+                        event = event,
+                        sessionId = sessionId,
+                        turnId = turnId,
+                        seq = seq,
+                        eventId = "$turnId:${seq.toString().padStart(4, '0')}",
+                        nodeId = nodeId,
+                        deckId = deckId,
+                        displayMode = displayMode,
+                        createdAtMs = System.currentTimeMillis(),
+                        payload = payload,
                     )
-                }
+                )
                 seq += 1
             }
 
@@ -185,7 +214,7 @@ class ChatViewModel @Inject constructor(
             )
             delay(700)
 
-            if (!hasStructuredContext && message.needsMockClarification()) {
+            if (!hasCriteriaContext && message.needsMockClarification()) {
                 emit(
                     event = AgentEventType.Clarification,
                     nodeId = "clarification_$turnId",
@@ -200,20 +229,34 @@ class ChatViewModel @Inject constructor(
                 return@launch
             }
 
-            emit(
-                event = AgentEventType.Thinking,
-                nodeId = "thinking_$turnId",
-                payload = ThinkingPayload(stage = "criteria", message = "正在生成购买标准..."),
-            )
-            delay(550)
+            if (!shouldContinueFromCriteria) {
+                emit(
+                    event = AgentEventType.Thinking,
+                    nodeId = "thinking_$turnId",
+                    payload = ThinkingPayload(stage = "criteria", message = "正在生成购买标准..."),
+                )
+                delay(550)
 
-            emit(
-                event = AgentEventType.CriteriaCard,
-                nodeId = "criteria_mock_001",
-                payload = mockCriteria(),
-                displayMode = "summary_card",
-            )
-            delay(650)
+                emit(
+                    event = AgentEventType.CriteriaCard,
+                    nodeId = "criteria_mock_001",
+                    payload = mockCriteria(),
+                    displayMode = "summary_card",
+                )
+                delay(360)
+
+                emit(
+                    event = AgentEventType.TextDelta,
+                    nodeId = "criteria_confirmation_$turnId",
+                    payload = TextDeltaPayload(
+                        messageId = "criteria_confirmation_$turnId",
+                        delta = CRITERIA_CONFIRMATION_PROMPT,
+                        done = true,
+                    ),
+                )
+                emitDone(turnId, sessionId, seq, totalProducts = 0)
+                return@launch
+            }
 
             emit(
                 event = AgentEventType.Thinking,
@@ -277,7 +320,12 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun emitDone(turnId: String, sessionId: String, seq: Int) {
+    private fun emitDone(
+        turnId: String,
+        sessionId: String,
+        seq: Int,
+        totalProducts: Int = 3,
+    ) {
         _uiState.update {
             ChatReducer.reduce(
                 it,
@@ -291,12 +339,42 @@ class ChatViewModel @Inject constructor(
                     payload = DonePayload(
                         criteriaId = "criteria_mock_001",
                         deckId = "deck_mock_001",
-                        totalProducts = 3,
+                        totalProducts = totalProducts,
                         clientTurnId = turnId,
                     ),
                 ),
             )
         }
+    }
+
+    private suspend fun applyEnvelopeWithFallbackDelay(envelope: AgentUiEnvelope<AgentPayload>) {
+        val thinking = envelope.payload as? ThinkingPayload
+        if (envelope.event == AgentEventType.Thinking && thinking?.isFallbackThinking() == true) {
+            fallbackThinkingStartedAt[envelope.turnId] = envelope.createdAtMs ?: System.currentTimeMillis()
+            applyEnvelope(envelope)
+            return
+        }
+
+        val startedAt = fallbackThinkingStartedAt[envelope.turnId]
+        if (startedAt != null && envelope.event != AgentEventType.Thinking) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed < FALLBACK_THINKING_MIN_MS) {
+                delay(FALLBACK_THINKING_MIN_MS - elapsed)
+            }
+            fallbackThinkingStartedAt.remove(envelope.turnId)
+        }
+
+        applyEnvelope(envelope)
+    }
+
+    private fun applyEnvelope(envelope: AgentUiEnvelope<AgentPayload>) {
+        _uiState.update { ChatReducer.reduce(it, envelope) }
+    }
+
+    private fun ThinkingPayload.isFallbackThinking(): Boolean {
+        if (fallback || isFallback) return true
+        val marker = "${stage.lowercase()} ${message.lowercase()}"
+        return listOf("fallback", "degraded", "mock", "兜底", "降级", "备用").any { it in marker }
     }
 
     private fun String.needsMockClarification(): Boolean {
@@ -316,14 +394,30 @@ class ChatViewModel @Inject constructor(
         ).none { it in text }
     }
 
+    private fun String.isMockContinueCommand(): Boolean {
+        val text = lowercase().trim()
+        return listOf(
+            "继续",
+            "可以",
+            "确认",
+            "没问题",
+            "开始推荐",
+            "推荐吧",
+            "go",
+            "ok",
+            "continue",
+        ).any { it in text }
+    }
+
     private fun mockCriteria(): CriteriaCardPayload =
         CriteriaCardPayload(
             editable = true,
             criteria = CriteriaPayload(
                 criteriaId = "criteria_mock_001",
-                category = "洁面类",
+                category = "美妆护肤",
                 summary = "**油皮洁面**，预算 **200 元以内**，避开酒精刺激",
                 chips = listOf("洁面类", "油性肌肤", "200元以内", "不要含酒精"),
+                productType = "洁面类",
                 skinType = "油性肌肤",
                 budgetMax = 200.0,
                 ingredientAvoid = listOf("不要含酒精"),

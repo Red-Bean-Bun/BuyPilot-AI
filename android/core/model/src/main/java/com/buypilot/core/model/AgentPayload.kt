@@ -11,6 +11,8 @@ sealed interface AgentPayload
 data class ThinkingPayload(
     val stage: String = "",
     val message: String = "",
+    val fallback: Boolean = false,
+    @SerialName("is_fallback") val isFallback: Boolean = false,
 ) : AgentPayload
 
 @Serializable
@@ -28,9 +30,14 @@ data class CriteriaPayload(
     val summary: String = "",
     val chips: List<String> = emptyList(),
     val constraints: Constraints? = null,
+    @SerialName("product_type") val productType: String? = null,
     @SerialName("skin_type") val skinType: String? = null,
     @SerialName("budget_min") val budgetMin: Double? = null,
     @SerialName("budget_max") val budgetMax: Double? = null,
+    @SerialName("brand_avoid") @Serializable(with = FlexibleStringListSerializer::class)
+    val brandAvoid: List<String> = emptyList(),
+    @SerialName("origin_avoid") @Serializable(with = FlexibleStringListSerializer::class)
+    val originAvoid: List<String> = emptyList(),
     @SerialName("ingredient_avoid") @Serializable(with = FlexibleStringListSerializer::class)
     val ingredientAvoid: List<String> = emptyList(),
     @SerialName("ingredient_prefer") @Serializable(with = FlexibleStringListSerializer::class)

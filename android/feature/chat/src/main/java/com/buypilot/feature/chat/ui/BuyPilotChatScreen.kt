@@ -4,9 +4,9 @@ import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -18,6 +18,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -26,13 +27,16 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,7 +46,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imeNestedScroll
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -53,6 +56,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -66,10 +70,15 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,28 +90,41 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -111,12 +133,20 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
@@ -142,8 +172,29 @@ import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private val MenuEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val MenuEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
+private val ClarificationEaseOut = CubicBezierEasing(0.1f, 1f, 0.1f, 1f)
+private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+private val CriteriaLeadingNumberRegex = Regex("""^(\d+(?:\.\d+)?)(.*)$""")
+private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
+private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
+private const val DefaultBudgetPreset = 200
+private const val ClarificationSelectionHoldMs = 0
+private const val ClarificationExitMs = 110
+private const val ClarificationFlightMs = 360
+private const val ClarificationTargetSettleMs = 24L
+private const val ClarificationTargetFallbackMs = 760L
 private const val StreamRevealCharsPerFrame = 1
 private const val StreamRevealFrameDelayMs = 24L
 
@@ -159,30 +210,130 @@ private data class MarkdownInlineSegment(
     val style: MarkdownInlineStyle,
 )
 
+private data class PendingClarificationAnswer(
+    val nodeKey: String,
+    val message: String,
+    val selectedOption: String? = null,
+    val awaitsFlight: Boolean = false,
+    val previousUserMessageKey: String? = null,
+    val flightId: Int? = null,
+)
+
+private data class ClarificationChipSnapshot(
+    val position: Offset,
+    val size: Size,
+)
+
+private fun LayoutCoordinates.toClarificationSnapshot(): ClarificationChipSnapshot {
+    val bounds = boundsInRoot()
+    return ClarificationChipSnapshot(
+        position = Offset(bounds.left, bounds.top),
+        size = Size(bounds.width, bounds.height),
+    )
+}
+
+private data class ClarificationFlight(
+    val id: Int,
+    val nodeKey: String,
+    val option: String,
+    val message: String,
+    val startPosition: Offset,
+    val startSize: Size,
+    val previousUserMessageKey: String?,
+    val targetMessageKey: String? = null,
+    val messageSent: Boolean = false,
+)
+
+private data class CriteriaTileSpec(
+    val label: String,
+    val value: String,
+    @DrawableRes val iconRes: Int,
+    val accent: Color,
+    val glow: Color,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuyPilotChatScreen(
     state: ChatUiState,
     onInputChanged: (String, Boolean) -> Unit,
     onSendMessage: (String, String?) -> Unit,
+    onCriteriaPatch: (JsonObject) -> Unit,
     onCancel: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
     var welcomeDismissed by rememberSaveable { mutableStateOf(false) }
     var sheetContent by remember { mutableStateOf<ChatSheetContent?>(null) }
+    var sheetExiting by remember { mutableStateOf(false) }
+    var sheetTransitionId by remember { mutableStateOf(0) }
+    var dismissedClarificationKeys by remember { mutableStateOf(emptySet<String>()) }
+    var dismissingClarificationKey by remember { mutableStateOf<String?>(null) }
+    var revealedMessageKeys by remember { mutableStateOf(emptySet<String>()) }
+    var pendingClarificationAnswer by remember { mutableStateOf<PendingClarificationAnswer?>(null) }
+    var activeClarificationFlight by remember { mutableStateOf<ClarificationFlight?>(null) }
+    var hiddenFlightMessageKeys by remember { mutableStateOf(emptySet<String>()) }
+    var userBubbleSnapshots by remember { mutableStateOf(emptyMap<String, ClarificationChipSnapshot>()) }
+    var flightSequence by remember { mutableStateOf(0) }
+    var rootSize by remember { mutableStateOf(IntSize.Zero) }
+    var timelineTopPx by remember { mutableStateOf(0f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val products = state.nodes.filterIsInstance<ProductDeckNode>().flatMap { it.products }
     val focusManager = LocalFocusManager.current
     val composerFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val coroutineScope = rememberCoroutineScope()
     val showWelcome = state.nodes.isEmpty() && !welcomeDismissed
+    val activeClarificationKey = state.nodes
+        .filterIsInstance<ClarificationNode>()
+        .lastOrNull { it.key !in dismissedClarificationKeys }
+        ?.key
+    val pendingFlightMessageKey = pendingClarificationAnswer?.let { pending ->
+        state.lastUserMessageKey?.takeIf { key ->
+            pending.awaitsFlight && key != pending.previousUserMessageKey
+        }
+    }
+    val activeFlightMessageKey = activeClarificationFlight?.let { flight ->
+        state.lastUserMessageKey?.takeIf { key ->
+            flight.messageSent && key != flight.previousUserMessageKey
+        }
+    }
+    val hiddenUserMessageKeysForFlight = hiddenFlightMessageKeys +
+        listOfNotNull(pendingFlightMessageKey, activeFlightMessageKey)
 
     fun focusComposer() {
         welcomeDismissed = true
         showAttachmentMenu = false
         composerFocusRequester.requestFocus()
         keyboardController?.show()
+    }
+
+    fun dismissComposerFocus() {
+        showAttachmentMenu = false
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    fun openSheet(content: ChatSheetContent) {
+        sheetTransitionId += 1
+        sheetExiting = false
+        sheetContent = content
+    }
+
+    fun dismissSheet(onDismissStarted: () -> Unit = {}) {
+        if (sheetContent == null || sheetExiting) return
+
+        sheetExiting = true
+        sheetTransitionId += 1
+        val transitionId = sheetTransitionId
+        onDismissStarted()
+        coroutineScope.launch {
+            sheetState.hide()
+            if (sheetTransitionId == transitionId) {
+                sheetContent = null
+                sheetExiting = false
+            }
+        }
     }
 
     fun sendAndClear(message: String, imageUrl: String? = null) {
@@ -197,9 +348,92 @@ fun BuyPilotChatScreen(
         focusManager.clearFocus()
     }
 
+    fun answerClarification(
+        message: String,
+        selectedOption: String? = null,
+        chipSnapshot: ClarificationChipSnapshot? = null,
+    ) {
+        val next = message.trim()
+        if (next.isEmpty()) return
+
+        val nodeKey = activeClarificationKey
+        if (
+            nodeKey != null &&
+            (nodeKey == dismissingClarificationKey || pendingClarificationAnswer?.nodeKey == nodeKey)
+        ) {
+            return
+        }
+        if (nodeKey == null || nodeKey in dismissedClarificationKeys) {
+            sendAndClear(next)
+            return
+        }
+
+        welcomeDismissed = true
+        showAttachmentMenu = false
+        input = ""
+        onInputChanged("", false)
+        focusManager.clearFocus()
+        val shouldFly = selectedOption != null && chipSnapshot != null
+        val previousUserMessageKey = state.lastUserMessageKey
+        val flightId = if (shouldFly) ++flightSequence else null
+        pendingClarificationAnswer = PendingClarificationAnswer(
+            nodeKey = nodeKey,
+            message = next,
+            selectedOption = selectedOption?.trim()?.takeIf { it.isNotEmpty() },
+            awaitsFlight = shouldFly,
+            previousUserMessageKey = previousUserMessageKey,
+            flightId = flightId,
+        )
+        val snapshot = chipSnapshot
+        if (snapshot != null && flightId != null) {
+            activeClarificationFlight = ClarificationFlight(
+                id = flightId,
+                nodeKey = nodeKey,
+                option = selectedOption ?: next,
+                message = next,
+                startPosition = snapshot.position,
+                startSize = snapshot.size,
+                previousUserMessageKey = previousUserMessageKey,
+            )
+        }
+        dismissingClarificationKey = nodeKey
+    }
+
+    fun finishClarificationDismissal(nodeKey: String) {
+        dismissedClarificationKeys = dismissedClarificationKeys + nodeKey
+        if (dismissingClarificationKey == nodeKey) {
+            dismissingClarificationKey = null
+        }
+        val pending = pendingClarificationAnswer
+        if (pending?.nodeKey == nodeKey) {
+            if (pending.awaitsFlight) {
+                val flight = activeClarificationFlight
+                if (flight != null && flight.id == pending.flightId) {
+                    if (!flight.messageSent) {
+                        activeClarificationFlight = flight.copy(messageSent = true)
+                        sendAndClear(pending.message)
+                    }
+                } else {
+                    if (dismissingClarificationKey == nodeKey) {
+                        dismissingClarificationKey = null
+                    }
+                    pendingClarificationAnswer = null
+                    sendAndClear(pending.message)
+                }
+            } else {
+                if (dismissingClarificationKey == nodeKey) {
+                    dismissingClarificationKey = null
+                }
+                pendingClarificationAnswer = null
+                sendAndClear(pending.message)
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onSizeChanged { rootSize = it }
             .background(BuyPilotColors.SurfaceBg),
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -212,19 +446,47 @@ fun BuyPilotChatScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .onGloballyPositioned { timelineTopPx = it.positionInRoot().y },
             ) {
                 ConversationStage(
                     showWelcome = showWelcome,
                     state = state,
                     products = products,
-                    onClarificationOption = { sendAndClear(it) },
-                    onCriteriaEdit = { sheetContent = ChatSheetContent.Criteria(it) },
-                    onProductOpen = { sheetContent = ChatSheetContent.Product(it) },
-                    onProductEvidence = { sheetContent = ChatSheetContent.ProductEvidence(it) },
-                    onDecisionEvidence = { sheetContent = ChatSheetContent.DecisionEvidence(it) },
-                    onQuickAction = { action -> sendAndClear(action.label) },
+                    onClarificationOption = { label, snapshot ->
+                        answerClarification(
+                            label.toClarificationUserMessage(),
+                            selectedOption = label,
+                            chipSnapshot = snapshot,
+                        )
+                    },
+                    onCriteriaEdit = { openSheet(ChatSheetContent.Criteria(it)) },
+                    onProductOpen = { openSheet(ChatSheetContent.Product(it)) },
+                    onProductEvidence = { openSheet(ChatSheetContent.ProductEvidence(it)) },
+                    onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
+                    onQuickAction = { action ->
+                        val patch = action.criteriaPatch
+                        if (patch != null) {
+                            onCriteriaPatch(patch)
+                        } else {
+                            sendAndClear(action.label)
+                        }
+                    },
                     onClarificationManualInput = { focusComposer() },
+                    onTimelineDrag = { dismissComposerFocus() },
+                    dismissingClarificationKey = dismissingClarificationKey,
+                    dismissedClarificationKeys = dismissedClarificationKeys,
+                    selectedClarificationOption = pendingClarificationAnswer?.selectedOption,
+                    hiddenUserMessageKeys = hiddenUserMessageKeysForFlight,
+                    activeFlightMessageKey = activeFlightMessageKey,
+                    revealedMessageKeys = revealedMessageKeys,
+                    onMessageRevealComplete = { revealedMessageKeys = revealedMessageKeys + it },
+                    onUserBubblePositioned = { key, snapshot ->
+                        if (userBubbleSnapshots[key] != snapshot) {
+                            userBubbleSnapshots = userBubbleSnapshots + (key to snapshot)
+                        }
+                    },
+                    onClarificationCardDismissed = { finishClarificationDismissal(it) },
                 )
 
                 AttachmentMenuMotion(
@@ -255,6 +517,10 @@ fun BuyPilotChatScreen(
                 input = it
                 onInputChanged(it, false)
             },
+            onTextFocus = {
+                welcomeDismissed = true
+                showAttachmentMenu = false
+            },
             onSubmit = {
                 if (state.isStreaming) {
                     onCancel()
@@ -262,39 +528,139 @@ fun BuyPilotChatScreen(
                 }
                 val next = input.trim()
                 if (next.isNotEmpty()) {
-                    sendAndClear(next)
+                    if (activeClarificationKey != null) {
+                        answerClarification(next)
+                    } else {
+                        sendAndClear(next)
+                    }
+                }
+            },
+        )
+
+        ClarificationFlightOverlay(
+            flight = activeClarificationFlight,
+            targetSnapshot = activeClarificationFlight
+                ?.targetMessageKey
+                ?.let { userBubbleSnapshots[it] },
+            rootSize = rootSize,
+            timelineTopPx = timelineTopPx,
+            onFinished = { finished ->
+                if (activeClarificationFlight?.id == finished.id) {
+                    activeClarificationFlight = null
+                    finished.targetMessageKey?.let {
+                        hiddenFlightMessageKeys = hiddenFlightMessageKeys - it
+                    }
+                    pendingClarificationAnswer = null
+                    if (dismissingClarificationKey == finished.nodeKey) {
+                        dismissingClarificationKey = null
+                    }
                 }
             },
         )
     }
 
+    LaunchedEffect(state.lastUserMessageKey, activeClarificationFlight?.id) {
+        val flight = activeClarificationFlight ?: return@LaunchedEffect
+        val key = state.lastUserMessageKey ?: return@LaunchedEffect
+        if (
+            flight.messageSent &&
+            flight.targetMessageKey == null &&
+            key != flight.previousUserMessageKey
+        ) {
+            hiddenFlightMessageKeys = hiddenFlightMessageKeys + key
+            activeClarificationFlight = flight.copy(targetMessageKey = key)
+        }
+    }
+
     val content = sheetContent
     if (content != null) {
         ModalBottomSheet(
-            onDismissRequest = { sheetContent = null },
+            onDismissRequest = { dismissSheet() },
             sheetState = sheetState,
             containerColor = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             dragHandle = { SheetHandle() },
         ) {
-            when (content) {
-                is ChatSheetContent.Criteria -> CriteriaEditSheet(
-                    payload = content.payload,
-                    onQuickAction = {
-                        sheetContent = null
-                        sendAndClear(it.label)
-                    },
-                )
-                is ChatSheetContent.Product -> ProductDetailSheet(
-                    payload = content.payload,
-                    onEvidence = { sheetContent = ChatSheetContent.ProductEvidence(content.payload) },
-                    onAction = {
-                        sheetContent = null
-                        sendAndClear(it.label)
-                    },
-                )
-                is ChatSheetContent.ProductEvidence -> ProductEvidenceSheet(content.payload)
-                is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(content.payload)
+            SmoothSheetBody(
+                sheetContent = content,
+                exiting = sheetExiting,
+            ) { targetContent ->
+                when (targetContent) {
+                    is ChatSheetContent.Criteria -> CriteriaEditSheet(
+                        payload = targetContent.payload,
+                        onQuickAction = { action ->
+                            dismissSheet {
+                                val patch = action.criteriaPatch
+                                if (patch != null) {
+                                    onCriteriaPatch(patch)
+                                } else {
+                                    sendAndClear(action.label)
+                                }
+                            }
+                        },
+                        onSave = { patch ->
+                            dismissSheet { onCriteriaPatch(patch) }
+                        },
+                    )
+                    is ChatSheetContent.Product -> ProductDetailSheet(
+                        payload = targetContent.payload,
+                        onEvidence = { openSheet(ChatSheetContent.ProductEvidence(targetContent.payload)) },
+                        onAction = { action ->
+                            dismissSheet { sendAndClear(action.label) }
+                        },
+                    )
+                    is ChatSheetContent.ProductEvidence -> ProductEvidenceSheet(targetContent.payload)
+                    is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(targetContent.payload)
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun SmoothSheetBody(
+    sheetContent: ChatSheetContent,
+    exiting: Boolean,
+    content: @Composable (ChatSheetContent) -> Unit,
+) {
+    val bodyAlpha by animateFloatAsState(
+        targetValue = if (exiting) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (exiting) 160 else 280,
+            easing = if (exiting) MenuEaseIn else MenuEaseOut,
+        ),
+        label = "sheet_body_alpha",
+    )
+    val bodyOffsetY by animateDpAsState(
+        targetValue = if (exiting) 10.dp else 0.dp,
+        animationSpec = tween(
+            durationMillis = if (exiting) 170 else 320,
+            easing = if (exiting) MenuEaseIn else MenuEaseOut,
+        ),
+        label = "sheet_body_offset",
+    )
+
+    AnimatedContent(
+        targetState = sheetContent,
+        transitionSpec = {
+            fadeIn(
+                animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+            ) + slideInVertically(
+                animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+                initialOffsetY = { it / 10 },
+            ) togetherWith fadeOut(
+                animationSpec = tween(durationMillis = 110, easing = MenuEaseIn),
+            )
+        },
+        label = "sheet_content_transition",
+    ) { targetContent ->
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = bodyOffsetY)
+                .alpha(bodyAlpha),
+        ) {
+            content(targetContent)
         }
     }
 }
@@ -317,13 +683,23 @@ private fun ConversationStage(
     showWelcome: Boolean,
     state: ChatUiState,
     products: List<ProductCardPayload>,
-    onClarificationOption: (String) -> Unit,
+    onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (ProductCardPayload) -> Unit,
     onProductEvidence: (ProductCardPayload) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onTimelineDrag: () -> Unit,
+    dismissingClarificationKey: String?,
+    dismissedClarificationKeys: Set<String>,
+    selectedClarificationOption: String?,
+    hiddenUserMessageKeys: Set<String>,
+    activeFlightMessageKey: String?,
+    revealedMessageKeys: Set<String>,
+    onMessageRevealComplete: (String) -> Unit,
+    onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
+    onClarificationCardDismissed: (String) -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
         AnimatedVisibility(
@@ -375,6 +751,16 @@ private fun ConversationStage(
                 onProductEvidence = onProductEvidence,
                 onDecisionEvidence = onDecisionEvidence,
                 onQuickAction = onQuickAction,
+                onTimelineDrag = onTimelineDrag,
+                dismissingClarificationKey = dismissingClarificationKey,
+                dismissedClarificationKeys = dismissedClarificationKeys,
+                selectedClarificationOption = selectedClarificationOption,
+                hiddenUserMessageKeys = hiddenUserMessageKeys,
+                activeFlightMessageKey = activeFlightMessageKey,
+                revealedMessageKeys = revealedMessageKeys,
+                onMessageRevealComplete = onMessageRevealComplete,
+                onUserBubblePositioned = onUserBubblePositioned,
+                onClarificationCardDismissed = onClarificationCardDismissed,
             )
         }
     }
@@ -569,18 +955,27 @@ private fun PromptSuggestionCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatTimeline(
     state: ChatUiState,
     products: List<ProductCardPayload>,
-    onClarificationOption: (String) -> Unit,
+    onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (ProductCardPayload) -> Unit,
     onProductEvidence: (ProductCardPayload) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onTimelineDrag: () -> Unit,
+    dismissingClarificationKey: String?,
+    dismissedClarificationKeys: Set<String>,
+    selectedClarificationOption: String?,
+    hiddenUserMessageKeys: Set<String>,
+    activeFlightMessageKey: String?,
+    revealedMessageKeys: Set<String>,
+    onMessageRevealComplete: (String) -> Unit,
+    onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
+    onClarificationCardDismissed: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
@@ -595,13 +990,14 @@ private fun ChatTimeline(
         }
     }
 
-    LaunchedEffect(state.lastUserMessageKey) {
+    LaunchedEffect(state.lastUserMessageKey, activeFlightMessageKey) {
         val key = state.lastUserMessageKey ?: return@LaunchedEffect
+        if (key == activeFlightMessageKey) return@LaunchedEffect
         val index = state.nodes.indexOfFirst { it.key == key }
         if (index >= 0 && key != lastHandledUserMessageKey) {
             lastHandledUserMessageKey = key
             followStreamingText = true
-            listState.animateScrollToItem(index = index, scrollOffset = 0)
+            listState.scrollToItem(index = index, scrollOffset = 0)
         }
     }
 
@@ -610,6 +1006,12 @@ private fun ChatTimeline(
             followStreamingText = false
         } else if (isNearTimelineEnd) {
             followStreamingText = true
+        }
+    }
+
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            onTimelineDrag()
         }
     }
 
@@ -622,8 +1024,7 @@ private fun ChatTimeline(
     LazyColumn(
         state = listState,
         modifier = Modifier
-            .fillMaxSize()
-            .imeNestedScroll(),
+            .fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
             top = 16.dp,
@@ -633,12 +1034,37 @@ private fun ChatTimeline(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         items(state.nodes, key = { it.key }) { node ->
-            TimelineItemMotion {
+            val hiddenUserMessage = node is UserMessageNode && node.key in hiddenUserMessageKeys
+            TimelineItemMotion(animateEnter = !hiddenUserMessage) {
                 when (node) {
-                    is UserMessageNode -> UserBubble(node)
-                    is ThinkingNode -> ThinkingBubble(node.payload.message.ifBlank { "正在思考中..." })
-                    is AiStreamNode -> StreamingAssistantText(node.content, node.done)
-                    is ClarificationNode -> ClarificationBlock(node.payload, onClarificationOption, onClarificationManualInput)
+                    is UserMessageNode -> UserBubble(
+                        node = node,
+                        hidden = hiddenUserMessage,
+                        onPositioned = { onUserBubblePositioned(node.key, it) },
+                    )
+                    is ThinkingNode -> ThinkingBubble(
+                        message = node.payload.message.ifBlank { "正在思考中..." },
+                    )
+                    is AiStreamNode -> StreamingAssistantText(
+                        content = node.content,
+                        done = node.done,
+                        revealed = node.key in revealedMessageKeys,
+                        onRevealComplete = { onMessageRevealComplete(node.key) },
+                    )
+                    is ClarificationNode -> ClarificationBlock(
+                        nodeKey = node.key,
+                        payload = node.payload,
+                        anchorRevealed = node.anchorMessageKey.isBlank() ||
+                            node.anchorMessageKey in revealedMessageKeys,
+                        dismissed = node.key in dismissedClarificationKeys,
+                        dismissing = node.key == dismissingClarificationKey,
+                        selectedOption = selectedClarificationOption.takeIf {
+                            node.key == dismissingClarificationKey
+                        },
+                        onOption = onClarificationOption,
+                        onManualInput = onClarificationManualInput,
+                        onCardDismissed = onClarificationCardDismissed,
+                    )
                     is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
                     is ProductDeckNode -> ProductSwipeDeck(node, onOpen = onProductOpen, onEvidence = onProductEvidence)
                     is FinalDecisionNode -> DecisionSummaryCard(
@@ -655,17 +1081,23 @@ private fun ChatTimeline(
 
         state.lastError?.let {
             item("last_error") {
-                InlineSystemNotice(it)
+                Box {
+                    InlineSystemNotice(it)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TimelineItemMotion(content: @Composable () -> Unit) {
-    var visible by remember { mutableStateOf(false) }
+private fun TimelineItemMotion(
+    modifier: Modifier = Modifier,
+    animateEnter: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    var visible by remember { mutableStateOf(!animateEnter) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(animateEnter) {
         visible = true
     }
 
@@ -677,32 +1109,48 @@ private fun TimelineItemMotion(content: @Composable () -> Unit) {
             animationSpec = tween(durationMillis = 230, easing = FastOutSlowInEasing),
             initialOffsetY = { it / 14 },
         ),
+        modifier = modifier,
     ) {
         content()
     }
 }
 
 @Composable
-private fun UserBubble(node: UserMessageNode) {
+private fun UserBubble(
+    node: UserMessageNode,
+    hidden: Boolean = false,
+    onPositioned: ((ClarificationChipSnapshot) -> Unit)? = null,
+) {
     val bubbleShape = RoundedCornerShape(18.dp)
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Text(
-            text = node.content.ifBlank { "已发送图片" },
-            color = Color.White,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 21.sp,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (hidden) 0f else 1f),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Box(
             modifier = Modifier
                 .widthIn(max = 304.dp)
                 .shadow(4.dp, bubbleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
                 .background(BuyPilotColors.Primary, bubbleShape)
+                .onGloballyPositioned { coordinates -> onPositioned?.invoke(coordinates.toClarificationSnapshot()) }
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-        )
+        ) {
+            Text(
+                text = node.content.ifBlank { "已发送图片" },
+                color = Color.White,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 21.sp,
+            )
+        }
     }
 }
 
 @Composable
-private fun ThinkingBubble(message: String) {
+private fun ThinkingBubble(
+    message: String,
+) {
     val displayMessage = message.ifBlank { "正在思考中..." }.withoutTrailingDots()
 
     Row(
@@ -914,22 +1362,51 @@ private fun AssistantText(content: String) {
 @Composable
 private fun StreamingAssistantText(
     content: String,
-    @Suppress("UNUSED_PARAMETER") done: Boolean = false,
+    done: Boolean = false,
+    revealed: Boolean = false,
+    onRevealComplete: (() -> Unit)? = null,
 ) {
-    if (content.isBlank()) return
+    if (content.isBlank()) {
+        LaunchedEffect(done, revealed, onRevealComplete) {
+            if (done || revealed) {
+                onRevealComplete?.invoke()
+            }
+        }
+        return
+    }
     val plainContent = remember(content) { content.withoutMarkdownMarkup() }
-    if (plainContent.isBlank()) return
-    var visibleLength by remember { mutableStateOf(0) }
+    if (plainContent.isBlank()) {
+        LaunchedEffect(done, revealed, onRevealComplete) {
+            if (done || revealed) {
+                onRevealComplete?.invoke()
+            }
+        }
+        return
+    }
+    var visibleLength by rememberSaveable {
+        mutableStateOf(if (revealed) plainContent.length else 0)
+    }
 
-    LaunchedEffect(plainContent) {
+    LaunchedEffect(plainContent, done, revealed) {
         val targetLength = plainContent.length
+        if (revealed) {
+            visibleLength = targetLength
+            onRevealComplete?.invoke()
+            return@LaunchedEffect
+        }
         if (targetLength <= visibleLength) {
             visibleLength = targetLength
+            if (done) {
+                onRevealComplete?.invoke()
+            }
             return@LaunchedEffect
         }
         while (visibleLength < targetLength) {
             visibleLength = (visibleLength + StreamRevealCharsPerFrame).coerceAtMost(targetLength)
             kotlinx.coroutines.delay(StreamRevealFrameDelayMs)
+        }
+        if (done) {
+            onRevealComplete?.invoke()
         }
     }
 
@@ -940,7 +1417,7 @@ private fun StreamingAssistantText(
 private fun StreamingAssistantText(
     content: String,
 ) {
-    StreamingAssistantText(content = content, done = false)
+    StreamingAssistantText(content = content, done = false, revealed = true)
 }
 
 @Composable
@@ -982,80 +1459,143 @@ private fun String.takeMarkdownPlainChars(count: Int): String {
     return result.toString()
 }
 
+private fun String.toClarificationUserMessage(): String {
+    val clean = withoutMarkdownMarkup().trim()
+    if (clean.isBlank()) return this
+    val skinLabel = clean.withoutSkinSuffix()
+    return when {
+        clean == "不确定" -> "我还不确定肤质"
+        clean in DefaultSkinTypeOptions || clean.contains("肌") || clean.contains("肤") -> "我是${skinLabel}肌肤"
+        else -> clean
+    }
+}
+
+private fun lerp(start: Float, stop: Float, fraction: Float): Float =
+    start + (stop - start) * fraction
+
+private fun quadraticBezier(start: Float, control: Float, end: Float, fraction: Float): Float {
+    val inverse = 1f - fraction
+    return inverse * inverse * start + 2f * inverse * fraction * control + fraction * fraction * end
+}
+
+private fun segmentProgress(value: Float, start: Float, end: Float): Float =
+    ((value - start) / (end - start)).coerceIn(0f, 1f)
+
 @Composable
 private fun ClarificationBlock(
+    nodeKey: String,
     payload: ClarificationPayload,
-    onOption: (String) -> Unit,
+    anchorRevealed: Boolean,
+    dismissed: Boolean,
+    dismissing: Boolean,
+    selectedOption: String?,
+    onOption: (String, ClarificationChipSnapshot?) -> Unit,
     onManualInput: () -> Unit,
+    onCardDismissed: (String) -> Unit,
 ) {
     val question = payload.question.ifBlank { "请补充一个关键信息" }
     val options = payload.suggestedOptions.ifEmpty { payload.requiredSlots }
+    var dismissNotified by remember(nodeKey) { mutableStateOf(false) }
+    var exitReady by remember(nodeKey) { mutableStateOf(false) }
+    val hasSelection = selectedOption != null
+    val cardVisible = anchorRevealed && !dismissed && (!dismissing || !exitReady)
 
-    Column(verticalArrangement = Arrangement.spacedBy(26.dp)) {
-        StreamingAssistantText(
-            content = "为了能为您推荐最合适的产品，我还需要了解一下**${question.trimEnd('？', '?')}**。",
-        )
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = BuyPilotColors.SurfaceCard,
-            shape = RoundedCornerShape(BuyPilotDimens.RadiusMd),
-            shadowElevation = 4.dp,
-            tonalElevation = 0.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border),
+    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+        AnimatedVisibility(
+            visible = cardVisible,
+            enter = fadeIn(
+                animationSpec = tween(durationMillis = 280, easing = ClarificationEaseOut),
+            ) + slideInVertically(
+                animationSpec = tween(durationMillis = 340, easing = ClarificationEaseOut),
+                initialOffsetY = { it / 8 },
+            ) + scaleIn(
+                animationSpec = tween(durationMillis = 340, easing = ClarificationEaseOut),
+                initialScale = 0.96f,
+            ),
+            exit = fadeOut(
+                animationSpec = tween(durationMillis = ClarificationExitMs, easing = MenuEaseIn),
+            ) + slideOutVertically(
+                animationSpec = tween(durationMillis = ClarificationExitMs, easing = MenuEaseIn),
+                targetOffsetY = { -it / 12 },
+            ) + scaleOut(
+                animationSpec = tween(durationMillis = ClarificationExitMs, easing = MenuEaseIn),
+                targetScale = 0.975f,
+            ),
         ) {
-            Column(
-                modifier = Modifier.padding(21.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PillLabel("需要确认")
-                Text(
-                    text = "还差一个关键信息",
-                    color = BuyPilotColors.TextPrimary,
-                    fontSize = BuyPilotType.Title,
-                    lineHeight = 22.5.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                MarkdownTextBlock(
-                    content = question,
-                    style = TextStyle(
-                        color = BuyPilotColors.PrimaryDark,
-                        fontSize = BuyPilotType.Body,
-                        lineHeight = 21.sp,
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 16.dp,
+                        shape = RoundedCornerShape(18.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.035f),
+                        spotColor = Color.Black.copy(alpha = 0.055f),
                     ),
-                )
-                ClarificationOptionScroller(
-                    labels = options.ifEmpty { DefaultSkinTypeOptions },
-                    onClick = onOption,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                Row(
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .heightIn(min = 40.dp)
-                        .clip(CircleShape)
-                        .clickable(
-                            onClickLabel = "聚焦输入框",
-                            role = Role.Button,
-                            onClick = onManualInput,
-                        )
-                        .padding(horizontal = 4.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                color = BuyPilotColors.SurfaceCard.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(18.dp),
+                shadowElevation = 0.dp,
+                tonalElevation = 0.dp,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (hasSelection) {
+                        BuyPilotColors.PrimarySoft.copy(alpha = 0.92f)
+                    } else {
+                        Color(0xFFE8ECF3)
+                    },
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_edit_24),
-                        contentDescription = null,
-                        tint = BuyPilotColors.TextMuted,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
+                    ClarificationStatusPill()
                     Text(
-                        text = "也可以直接输入补充",
-                        color = BuyPilotColors.TextMuted,
-                        fontSize = BuyPilotType.Label,
-                        lineHeight = 16.sp,
+                        text = "还差一个关键信息",
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = BuyPilotType.Title,
+                        lineHeight = 22.5.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    MarkdownTextBlock(
+                        content = question,
+                        style = TextStyle(
+                            color = BuyPilotColors.PrimaryDark,
+                            fontSize = BuyPilotType.Body,
+                            lineHeight = 21.sp,
+                        ),
+                    )
+                    ClarificationOptionScroller(
+                        labels = options.ifEmpty { DefaultSkinTypeOptions },
+                        selectedLabel = selectedOption,
+                        enabled = !dismissing,
+                        onClick = onOption,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                    ClarificationManualInputRow(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .alpha(if (hasSelection) 0f else 1f),
+                        enabled = !dismissing,
+                        onClick = onManualInput,
                     )
                 }
             }
+        }
+    }
+
+    LaunchedEffect(dismissing, nodeKey) {
+        exitReady = false
+        if (dismissing) {
+            kotlinx.coroutines.delay(ClarificationSelectionHoldMs.toLong())
+            exitReady = true
+        }
+    }
+
+    LaunchedEffect(dismissing) {
+        if (dismissing && !dismissNotified) {
+            kotlinx.coroutines.delay((ClarificationSelectionHoldMs + ClarificationExitMs).toLong())
+            dismissNotified = true
+            onCardDismissed(nodeKey)
         }
     }
 }
@@ -1064,7 +1604,9 @@ private fun ClarificationBlock(
 private fun ClarificationOptionScroller(
     labels: List<String>,
     modifier: Modifier = Modifier,
-    onClick: ((String) -> Unit)? = null,
+    selectedLabel: String? = null,
+    enabled: Boolean = true,
+    onClick: ((String, ClarificationChipSnapshot?) -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     val canScrollBackward by remember(labels.size) {
@@ -1086,20 +1628,6 @@ private fun ClarificationOptionScroller(
         label = "clarification_options_trailing_edge",
     )
 
-    LaunchedEffect(labels) {
-        if (labels.size > 4) {
-            kotlinx.coroutines.delay(260L)
-            listState.animateScrollBy(
-                value = 34f,
-                animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-            )
-            listState.animateScrollBy(
-                value = -34f,
-                animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
-            )
-        }
-    }
-
     Box(modifier = modifier.fillMaxWidth()) {
         LazyRow(
             state = listState,
@@ -1107,8 +1635,38 @@ private fun ClarificationOptionScroller(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(start = 2.dp, end = 36.dp),
         ) {
-            items(labels, key = { it }) { label ->
-                SmallActionChip(label = label) { onClick?.invoke(label) }
+            itemsIndexed(labels, key = { _, label -> label }) { index, label ->
+                AnimatedVisibility(
+                    visible = selectedLabel == null || selectedLabel == label,
+                    enter = fadeIn(
+                        animationSpec = tween(
+                            durationMillis = 190,
+                            delayMillis = (index * 40).coerceAtMost(160),
+                            easing = MenuEaseOut,
+                        ),
+                    ) + slideInHorizontally(
+                        animationSpec = tween(
+                            durationMillis = 220,
+                            delayMillis = (index * 40).coerceAtMost(160),
+                            easing = MenuEaseOut,
+                        ),
+                        initialOffsetX = { it / 4 },
+                    ),
+                    exit = fadeOut(
+                        animationSpec = tween(durationMillis = 100, easing = MenuEaseIn),
+                    ) + scaleOut(
+                        animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+                        targetScale = 0.92f,
+                    ),
+                ) {
+                    ClarificationOptionChip(
+                        label = label,
+                        selected = selectedLabel == label,
+                        enabled = enabled && selectedLabel == null,
+                    ) { snapshot ->
+                        onClick?.invoke(label, snapshot)
+                    }
+                }
             }
         }
         Box(
@@ -1144,6 +1702,278 @@ private fun ClarificationOptionScroller(
     }
 }
 
+@Composable
+private fun ClarificationStatusPill() {
+    Text(
+        text = "需要确认",
+        color = BuyPilotColors.Info.copy(alpha = 0.92f),
+        fontSize = BuyPilotType.Tiny,
+        lineHeight = 15.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .background(BuyPilotColors.Info.copy(alpha = 0.08f), CircleShape)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun ClarificationFlightOverlay(
+    flight: ClarificationFlight?,
+    targetSnapshot: ClarificationChipSnapshot?,
+    rootSize: IntSize,
+    timelineTopPx: Float,
+    onFinished: (ClarificationFlight) -> Unit,
+) {
+    if (flight == null || rootSize.width == 0 || rootSize.height == 0) return
+
+    val progress = remember(flight.id) { Animatable(0f) }
+    val density = LocalDensity.current
+    val latestFlight by rememberUpdatedState(flight)
+    val latestOnFinished by rememberUpdatedState(onFinished)
+    var settledTargetSnapshot by remember(flight.id) { mutableStateOf<ClarificationChipSnapshot?>(null) }
+    var flightStarted by remember(flight.id) { mutableStateOf(false) }
+    val lockedTarget = settledTargetSnapshot
+    val maxBubbleWidthPx = minOf(
+        with(density) { 304.dp.toPx() },
+        rootSize.width - with(density) { 32.dp.toPx() },
+    )
+    val estimatedTextWidthPx = flight.message
+        .withoutMarkdownMarkup()
+        .length
+        .coerceAtLeast(4) *
+        with(density) { 14.sp.toPx() } *
+        0.92f
+    val targetWidthPx = lockedTarget?.size?.width ?: (estimatedTextWidthPx + with(density) { 32.dp.toPx() })
+        .coerceIn(
+            minimumValue = maxOf(flight.startSize.width, with(density) { 132.dp.toPx() }),
+            maximumValue = maxBubbleWidthPx,
+        )
+    val targetHeightPx = lockedTarget?.size?.height ?: with(density) { 45.dp.toPx() }
+    val endX = lockedTarget?.position?.x
+        ?.coerceIn(0f, rootSize.width - targetWidthPx)
+        ?: flight.startPosition.x
+    val endY = lockedTarget?.position?.y
+        ?.coerceIn(timelineTopPx, rootSize.height - targetHeightPx)
+        ?: flight.startPosition.y
+
+    LaunchedEffect(flight.id, targetSnapshot) {
+        if (targetSnapshot == null || settledTargetSnapshot != null) return@LaunchedEffect
+        kotlinx.coroutines.delay(ClarificationTargetSettleMs)
+        settledTargetSnapshot = targetSnapshot
+    }
+
+    LaunchedEffect(flight.id, settledTargetSnapshot) {
+        if (settledTargetSnapshot == null) return@LaunchedEffect
+        flightStarted = true
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = ClarificationFlightMs,
+                easing = ClarificationFlightEase,
+            ),
+        )
+        latestOnFinished(latestFlight)
+    }
+
+    LaunchedEffect(flight.id) {
+        kotlinx.coroutines.delay(ClarificationTargetFallbackMs)
+        if (settledTargetSnapshot == null) {
+            latestOnFinished(latestFlight)
+        }
+    }
+
+    val t = progress.value
+    val flyT = t
+    val settleT = segmentProgress(t, 0.78f, 1f)
+    val morphT = segmentProgress(t, 0.04f, 0.88f)
+    val width = lerp(flight.startSize.width, targetWidthPx, morphT)
+    val height = lerp(flight.startSize.height, targetHeightPx, morphT)
+    val startCenterX = flight.startPosition.x + flight.startSize.width / 2f
+    val startCenterY = flight.startPosition.y + flight.startSize.height / 2f
+    val endCenterX = endX + targetWidthPx / 2f
+    val endCenterY = endY + targetHeightPx / 2f
+    val verticalTravel = endCenterY - startCenterY
+    val horizontalTravel = endCenterX - startCenterX
+    val controlX = lerp(startCenterX, endCenterX, 0.56f)
+    val controlY = lerp(startCenterY, endCenterY, 0.5f) -
+        minOf(
+            with(density) { 14.dp.toPx() },
+            kotlin.math.abs(verticalTravel) * 0.18f + kotlin.math.abs(horizontalTravel) * 0.04f,
+        )
+    val centerX = if (flightStarted) {
+        quadraticBezier(startCenterX, controlX, endCenterX, flyT)
+    } else {
+        startCenterX
+    }
+    val centerY = if (flightStarted) {
+        quadraticBezier(startCenterY, controlY, endCenterY, flyT)
+    } else {
+        startCenterY
+    }
+    val x = centerX - width / 2f
+    val y = centerY - height / 2f
+    val oldTextAlpha = (1f - segmentProgress(t, 0.18f, 0.34f)).coerceIn(0f, 1f)
+    val newTextAlpha = segmentProgress(t, 0.26f, 0.48f)
+    val settlePulse = (1f - settleT) * settleT * 4f
+    val scaleX = 1f + 0.014f * settlePulse
+    val scaleY = 1f + 0.008f * settlePulse
+    val cornerRadius = with(density) { lerp(22.dp.toPx(), 18.dp.toPx(), segmentProgress(t, 0.48f, 1f)).toDp() }
+    val bubbleShape = RoundedCornerShape(cornerRadius)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                translationX = x
+                translationY = y
+            },
+    ) {
+        Box(
+            modifier = Modifier
+                .width(with(density) { width.toDp() })
+                .height(with(density) { height.toDp() })
+                .scale(scaleX = scaleX, scaleY = scaleY)
+                .shadow(
+                    elevation = if (t < 0.86f) 12.dp else 8.dp,
+                    shape = bubbleShape,
+                    ambientColor = Color.Black.copy(alpha = 0.07f),
+                    spotColor = Color.Black.copy(alpha = 0.09f),
+                )
+                .background(BuyPilotColors.Primary, bubbleShape)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = flight.option.withoutMarkdownMarkup(),
+                color = BuyPilotColors.OnPrimary.copy(alpha = oldTextAlpha),
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = flight.message.withoutMarkdownMarkup(),
+                color = BuyPilotColors.OnPrimary.copy(alpha = newTextAlpha),
+                fontSize = BuyPilotType.Body,
+                lineHeight = 20.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ClarificationOptionChip(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: (ClarificationChipSnapshot?) -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val haptic = LocalHapticFeedback.current
+    var snapshot by remember { mutableStateOf<ClarificationChipSnapshot?>(null) }
+    val backgroundColor by animateColorAsState(
+        targetValue = when {
+            selected -> BuyPilotColors.PrimarySoft.copy(alpha = 0.95f)
+            pressed -> Color(0xFFE8EDF6)
+            else -> Color(0xFFF3F6FA)
+        },
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
+        label = "clarification_chip_background",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            selected -> BuyPilotColors.Primary.copy(alpha = 0.26f)
+            pressed -> Color(0xFFD9E0EA)
+            else -> Color(0xFFE5EAF1)
+        },
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
+        label = "clarification_chip_border",
+    )
+    val chipScale by animateFloatAsState(
+        targetValue = when {
+            pressed -> 0.96f
+            selected -> 0.98f
+            else -> 1f
+        },
+        animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing),
+        label = "clarification_chip_scale",
+    )
+
+    Text(
+        text = label.withoutMarkdownMarkup(),
+        color = if (selected) BuyPilotColors.PrimaryDark else BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.Label,
+        lineHeight = 16.sp,
+        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+        modifier = Modifier
+            .scale(chipScale)
+            .clip(CircleShape)
+            .background(backgroundColor, CircleShape)
+            .border(1.dp, borderColor, CircleShape)
+            .onGloballyPositioned { coordinates ->
+                snapshot = coordinates.toClarificationSnapshot()
+            }
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick(snapshot)
+                },
+            )
+            .padding(horizontal = 15.dp, vertical = 9.dp),
+    )
+}
+
+@Composable
+private fun ClarificationManualInputRow(
+    modifier: Modifier = Modifier,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .heightIn(min = 38.dp)
+            .clip(CircleShape)
+            .clickable(
+                enabled = enabled,
+                onClickLabel = "聚焦输入框",
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_edit_24),
+            contentDescription = null,
+            tint = BuyPilotColors.TextMuted.copy(alpha = 0.76f),
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.width(IntrinsicSize.Max)) {
+            Text(
+                text = "也可以直接输入补充",
+                color = BuyPilotColors.TextSecondary.copy(alpha = 0.8f),
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+            )
+            Box(
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .height(1.dp)
+                    .fillMaxWidth()
+                    .background(BuyPilotColors.TextMuted.copy(alpha = 0.32f)),
+            )
+        }
+    }
+}
+
 private val DefaultSkinTypeOptions = listOf(
     "油性",
     "干性",
@@ -1161,80 +1991,110 @@ private fun CriteriaSummaryCard(
     onEdit: () -> Unit,
 ) {
     val criteria = payload.criteria
-    val tiles = listOf(
-        "核心诉求" to criteria.category.ifBlank { criteria.summary.ifBlank { "待确认" } },
-        "状态" to (criteria.skinType ?: criteria.constraints?.skinType ?: "按需求匹配"),
-        "约束" to criteria.budgetLabel(),
-        "频次" to criteria.useScenario.firstOrNull().orEmpty().ifBlank { criteria.constraints?.useScenario ?: "日常使用" },
-    )
-    val exclusions = criteria.ingredientAvoid.ifEmpty { criteria.constraints?.ingredientAvoid.orEmpty() }
+    val tiles = criteria.summaryTiles()
+    val exclusions = criteria.exclusionLabels()
 
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         StreamingAssistantText("已理解你的需求")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            CriteriaTile(
-                label = tiles[0].first,
-                value = tiles[0].second,
-                accent = BuyPilotColors.PrimaryDark,
-                glow = BuyPilotColors.PrimaryDark.copy(alpha = 0.06f),
-                modifier = Modifier.weight(1f),
-            )
-            CriteriaTile(
-                label = tiles[1].first,
-                value = tiles[1].second,
-                accent = BuyPilotColors.TextSecondary,
-                glow = BuyPilotColors.Info.copy(alpha = 0.06f),
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            CriteriaTile(
-                label = tiles[2].first,
-                value = tiles[2].second,
-                accent = BuyPilotColors.TextSecondary,
-                glow = BuyPilotColors.Warning.copy(alpha = 0.08f),
-                modifier = Modifier.weight(1f),
-            )
-            CriteriaTile(
-                label = tiles[3].first,
-                value = tiles[3].second,
-                accent = BuyPilotColors.TextSecondary,
-                glow = BuyPilotColors.TextSecondary.copy(alpha = 0.06f),
-                modifier = Modifier.weight(1f),
-            )
-        }
-        if (exclusions.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(BuyPilotColors.Danger.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-                    .border(1.dp, BuyPilotColors.Danger.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
-                    .padding(13.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("⊘", color = BuyPilotColors.Danger, fontSize = 18.sp)
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("排除项", color = BuyPilotColors.Danger.copy(alpha = 0.8f), fontSize = BuyPilotType.Tiny)
-                    MarkdownTextBlock(
-                        content = exclusions.joinToString("、"),
-                        style = TextStyle(
-                            color = BuyPilotColors.TextPrimary,
-                            fontSize = BuyPilotType.LargeBody,
-                            lineHeight = 22.sp,
-                        ),
-                    )
-                }
-            }
-        }
+        CriteriaBentoGrid(tiles = tiles, exclusions = exclusions)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            GhostButton(label = "修改标准", leading = "☷", onClick = onEdit)
+            GhostButton(label = "修改标准", leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
+        }
+    }
+}
+
+@Composable
+private fun CriteriaBentoGrid(
+    tiles: List<CriteriaTileSpec>,
+    exclusions: List<String>,
+) {
+    val exclusionTile = CriteriaTileSpec(
+        label = "排除项",
+        value = exclusions.joinToString("、").ifBlank { "暂无排除" },
+        iconRes = R.drawable.ic_block_24,
+        accent = Color(0xFFB56B76),
+        glow = Color(0xFFFFEEF1),
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(112.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            CriteriaTile(
+                label = tiles[0].label,
+                value = tiles[0].value,
+                iconRes = tiles[0].iconRes,
+                accent = tiles[0].accent,
+                glow = tiles[0].glow,
+                prominent = true,
+                modifier = Modifier
+                    .weight(1.12f)
+                    .fillMaxHeight(),
+            )
+            CriteriaTile(
+                label = tiles[1].label,
+                value = tiles[1].value,
+                iconRes = tiles[1].iconRes,
+                accent = tiles[1].accent,
+                glow = tiles[1].glow,
+                prominent = true,
+                modifier = Modifier
+                    .weight(0.88f)
+                    .fillMaxHeight(),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(142.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            CriteriaTile(
+                label = tiles[2].label,
+                value = tiles[2].value,
+                iconRes = tiles[2].iconRes,
+                accent = tiles[2].accent,
+                glow = tiles[2].glow,
+                prominent = true,
+                modifier = Modifier
+                    .weight(0.92f)
+                    .fillMaxHeight(),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1.08f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                CriteriaTile(
+                    label = tiles[3].label,
+                    value = tiles[3].value,
+                    iconRes = tiles[3].iconRes,
+                    accent = tiles[3].accent,
+                    glow = tiles[3].glow,
+                    compact = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+                CriteriaTile(
+                    label = exclusionTile.label,
+                    value = exclusionTile.value,
+                    iconRes = exclusionTile.iconRes,
+                    accent = exclusionTile.accent,
+                    glow = exclusionTile.glow,
+                    compact = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+            }
         }
     }
 }
@@ -1243,48 +2103,142 @@ private fun CriteriaSummaryCard(
 private fun CriteriaTile(
     label: String,
     value: String,
+    @DrawableRes iconRes: Int,
     accent: Color,
     glow: Color,
+    prominent: Boolean = false,
+    compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val shape = RoundedCornerShape(16.dp)
+    val horizontalPadding = if (compact) 12.dp else 14.dp
+    val verticalPadding = if (compact) 11.dp else 14.dp
+    val valueSize = when {
+        prominent -> 17.sp
+        compact -> 14.sp
+        else -> BuyPilotType.Body
+    }
+    val valueLineHeight = when {
+        prominent -> 22.sp
+        compact -> 18.sp
+        else -> 18.sp
+    }
+    val iconSize = if (prominent) 16.dp else 15.dp
+    val iconContainerSize = if (prominent) 29.dp else 27.dp
+
     Box(
         modifier = modifier
-            .aspectRatio(1.55f)
-            .shadow(3.dp, RoundedCornerShape(16.dp), ambientColor = Color.Black.copy(alpha = 0.04f))
-            .background(BuyPilotColors.SurfaceCard, RoundedCornerShape(16.dp))
-            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.38f), RoundedCornerShape(16.dp))
-            .padding(17.dp),
+            .shadow(
+                elevation = 4.dp,
+                shape = shape,
+                ambientColor = Color(0xFF8E97A4).copy(alpha = 0.025f),
+                spotColor = Color(0xFF8E97A4).copy(alpha = 0.035f),
+            )
+            .clip(shape)
+            .background(BuyPilotColors.SurfaceCard)
+            .border(
+                width = 1.dp,
+                color = BuyPilotColors.Border.copy(alpha = 0.62f),
+                shape = shape,
+            )
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 16.dp, y = (-16).dp)
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(glow)
-                .blur(8.dp),
-        )
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                text = label,
-                color = accent,
-                fontSize = BuyPilotType.Tiny,
-                lineHeight = 15.sp,
-                letterSpacing = 0.5.sp,
-            )
-            Text(
-                text = value,
-                color = BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 18.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(iconContainerSize)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(glow.copy(alpha = if (prominent) 0.82f else 0.68f))
+                        .border(
+                            1.dp,
+                            accent.copy(alpha = if (prominent) 0.12f else 0.1f),
+                            RoundedCornerShape(10.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(iconRes),
+                        contentDescription = null,
+                        tint = accent.copy(alpha = if (prominent) 0.82f else 0.72f),
+                        modifier = Modifier.size(iconSize),
+                    )
+                }
+                Text(
+                    text = label,
+                    color = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            CriteriaTileValueText(
+                value = value,
+                prominent = prominent,
+                fontSize = valueSize,
+                lineHeight = valueLineHeight,
             )
         }
+    }
+}
+
+@Composable
+private fun CriteriaTileValueText(
+    value: String,
+    prominent: Boolean,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+) {
+    val numberMatch = CriteriaLeadingNumberRegex.matchEntire(value)
+    if (prominent && numberMatch != null) {
+        val number = numberMatch.groupValues[1]
+        val suffix = numberMatch.groupValues[2]
+        val numberSize = 20.sp
+        val suffixSize = 16.sp
+        Text(
+            text = buildAnnotatedString {
+                withStyle(
+                    SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = numberSize,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                ) {
+                    append(number)
+                }
+                withStyle(
+                    SpanStyle(
+                        fontSize = suffixSize,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                ) {
+                    append(suffix)
+                }
+            },
+            color = BuyPilotColors.TextPrimary,
+            lineHeight = lineHeight,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    } else {
+        Text(
+            text = value,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            fontWeight = if (prominent) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1596,6 +2550,7 @@ private fun BottomComposer(
     modifier: Modifier = Modifier,
     onAttachmentClick: () -> Unit,
     onTextChange: (String) -> Unit,
+    onTextFocus: () -> Unit,
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -1672,7 +2627,10 @@ private fun BottomComposer(
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(focusRequester)
-                    .onFocusChanged { isFocused = it.isFocused }
+                    .onFocusChanged {
+                        isFocused = it.isFocused
+                        if (it.isFocused) onTextFocus()
+                    }
                     .padding(horizontal = 8.dp),
                 textStyle = TextStyle(
                     color = BuyPilotColors.TextPrimary,
@@ -1781,42 +2739,112 @@ private fun AttachmentAction(
 private fun CriteriaEditSheet(
     payload: CriteriaCardPayload,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onSave: (JsonObject) -> Unit,
 ) {
     val criteria = payload.criteria
-    SheetContentColumn {
+    var productType by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.productTypeLabel()) }
+    var budgetMax by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.budgetMaxLabel()) }
+    var skinType by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.skinTypeLabel()) }
+    var useScenario by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.useScenarioLabel()) }
+    var exclusions by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.exclusionLabels().joinToString("、")) }
+
+    fun resetFields() {
+        productType = criteria.productTypeLabel()
+        budgetMax = criteria.budgetMaxLabel()
+        skinType = criteria.skinTypeLabel()
+        useScenario = criteria.useScenarioLabel()
+        exclusions = criteria.exclusionLabels().joinToString("、")
+    }
+
+    SheetContentColumn(expandToMaxHeight = false) {
         SheetTitle("编辑购买标准")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TabPill("基础信息", active = true)
-            TabPill("适用人群")
-            TabPill("筛选条件")
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            EditableFieldBlock(
+                label = "核心诉求",
+                value = productType,
+                placeholder = "例如 洁面乳、防晒霜、蓝牙耳机",
+                onValueChange = { productType = it },
+                imeAction = ImeAction.Next,
+            )
+            BudgetSliderBlock(
+                value = budgetMax,
+                onValueChange = { budgetMax = it },
+            )
+            EditableFieldBlock(
+                label = "适用对象",
+                value = skinType,
+                placeholder = "例如 油性、敏感、通勤党",
+                onValueChange = { skinType = it },
+                imeAction = ImeAction.Next,
+            )
+            EditableFieldBlock(
+                label = "场景/用途",
+                value = useScenario,
+                placeholder = "例如 日常护肤、通勤、跑步训练",
+                onValueChange = { useScenario = it },
+                imeAction = ImeAction.Next,
+            )
+            EditableFieldBlock(
+                label = "排除项",
+                value = exclusions,
+                placeholder = "例如 酒精、日系、SK-II",
+                onValueChange = { exclusions = it },
+                imeAction = ImeAction.Done,
+            )
         }
-        FieldBlock("品类", criteria.category.ifBlank { "洗面奶" })
-        FieldBlock("预算", criteria.budgetLabel())
-        FieldBlock("适用人群", criteria.skinType ?: criteria.constraints?.skinType ?: "按需求匹配")
-        FieldBlock("排除项", criteria.ingredientAvoid.ifEmpty { criteria.constraints?.ingredientAvoid.orEmpty() }.joinToString("、").ifBlank { "暂无" })
-        Text("快速微调建议", color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
-        ChipRows(
-            labels = payload.quickActions.map { it.label }.ifEmpty { listOf("再便宜一点", "温和亲肤", "大容量", "注重品牌") },
+        CriteriaSuggestionSection(
+            labels = payload.quickActions.map { it.label }
+                .ifEmpty { listOf("再便宜一点", "温和亲肤", "大容量", "注重品牌") },
             onClick = { label ->
                 payload.quickActions.firstOrNull { it.label == label }?.let(onQuickAction)
             },
         )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
-                onClick = {},
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = BuyPilotColors.SurfaceMuted, contentColor = BuyPilotColors.TextPrimary),
-                shape = RoundedCornerShape(14.dp),
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            FilledTonalButton(
+                onClick = { resetFields() },
+                modifier = Modifier
+                    .weight(0.82f)
+                    .height(52.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = BuyPilotColors.SurfaceMuted.copy(alpha = 0.9f),
+                    contentColor = BuyPilotColors.TextPrimary,
+                ),
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp),
             ) {
-                Text("重置")
+                Text("重置", fontSize = BuyPilotType.Body, fontWeight = FontWeight.Medium)
             }
             Button(
-                onClick = {},
-                modifier = Modifier.weight(1f),
+                onClick = {
+                    onSave(
+                        buildCriteriaPatch(
+                            productType = productType,
+                            budgetMax = budgetMax,
+                            skinType = skinType,
+                            useScenario = useScenario,
+                            exclusions = exclusions,
+                        ),
+                    )
+                },
+                modifier = Modifier
+                    .weight(1.28f)
+                    .height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = BuyPilotColors.Primary, contentColor = Color.White),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
             ) {
-                Text("保存并重新推荐")
+                Text(
+                    text = "保存并重新推荐",
+                    fontSize = BuyPilotType.Body,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -1931,14 +2959,23 @@ private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
 }
 
 @Composable
-private fun SheetContentColumn(content: @Composable ColumnScope.() -> Unit) {
+private fun SheetContentColumn(
+    expandToMaxHeight: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.92f)
+            .then(
+                if (expandToMaxHeight) {
+                    Modifier.fillMaxHeight(0.92f)
+                } else {
+                    Modifier
+                },
+            )
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(start = 20.dp, top = 2.dp, end = 20.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
         content = content,
     )
 }
@@ -1947,10 +2984,10 @@ private fun SheetContentColumn(content: @Composable ColumnScope.() -> Unit) {
 private fun SheetHandle() {
     Box(
         modifier = Modifier
-            .padding(top = 10.dp, bottom = 10.dp)
-            .size(width = 40.dp, height = 4.dp)
+            .padding(top = 12.dp, bottom = 8.dp)
+            .size(width = 32.dp, height = 4.dp)
             .clip(CircleShape)
-            .background(BuyPilotColors.Border),
+            .background(BuyPilotColors.TextMuted.copy(alpha = 0.38f)),
     )
 }
 
@@ -1961,7 +2998,7 @@ private fun SheetTitle(title: String) {
         color = BuyPilotColors.TextPrimary,
         fontSize = BuyPilotType.Title,
         lineHeight = 23.sp,
-        fontWeight = FontWeight.Bold,
+        fontWeight = FontWeight.SemiBold,
         modifier = Modifier.fillMaxWidth(),
         textAlign = TextAlign.Center,
     )
@@ -1978,6 +3015,401 @@ private fun FieldBlock(label: String, value: String) {
     ) {
         Text(label, color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Label)
         Text(value, color = BuyPilotColors.TextPrimary, fontSize = BuyPilotType.LargeBody, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun EditableFieldBlock(
+    label: String,
+    value: String,
+    placeholder: String,
+    onValueChange: (String) -> Unit,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    imeAction: ImeAction = ImeAction.Next,
+    suffix: String? = null,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 58.dp),
+        label = {
+            Text(
+                text = label,
+                fontSize = BuyPilotType.Label,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        },
+        placeholder = {
+            Text(
+                text = placeholder,
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Body,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        suffix = suffix?.let {
+            {
+                Text(
+                    text = it,
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    maxLines = 1,
+                )
+            }
+        },
+        singleLine = true,
+        textStyle = TextStyle(
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.LargeBody,
+            lineHeight = 22.sp,
+            fontWeight = FontWeight.Medium,
+        ),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = keyboardType,
+            imeAction = imeAction,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = BuyPilotColors.TextPrimary,
+            unfocusedTextColor = BuyPilotColors.TextPrimary,
+            focusedContainerColor = BuyPilotColors.SurfaceCard,
+            unfocusedContainerColor = BuyPilotColors.SurfaceCard,
+            disabledContainerColor = BuyPilotColors.SurfaceMuted,
+            cursorColor = BuyPilotColors.Primary,
+            focusedBorderColor = BuyPilotColors.Primary.copy(alpha = 0.82f),
+            unfocusedBorderColor = BuyPilotColors.Border,
+            focusedLabelColor = BuyPilotColors.PrimaryDark,
+            unfocusedLabelColor = BuyPilotColors.TextSecondary,
+            focusedPlaceholderColor = BuyPilotColors.TextMuted,
+            unfocusedPlaceholderColor = BuyPilotColors.TextMuted,
+            focusedSuffixColor = BuyPilotColors.TextMuted,
+            unfocusedSuffixColor = BuyPilotColors.TextMuted,
+        ),
+        visualTransformation = VisualTransformation.None,
+    )
+}
+
+@Composable
+private fun BudgetSliderBlock(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val parsedBudget = value.extractFirstNumber()?.roundToInt()
+    val budgetOptions = remember(parsedBudget) { budgetSliderOptions(parsedBudget) }
+    val selectedBudget = parsedBudget?.nearestBudgetOption(budgetOptions) ?: DefaultBudgetPreset
+    val selectedIndex = budgetOptions.indexOf(selectedBudget).takeIf { it >= 0 } ?: 0
+    val sliderInteractionSource = remember { MutableInteractionSource() }
+    val isDragging by sliderInteractionSource.collectIsDraggedAsState()
+    val displayIndex by animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = tween(durationMillis = 260, easing = MenuEaseOut),
+        label = "budget_slider_display_index",
+    )
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border),
+    ) {
+        Column(
+            modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "预算上限",
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "${selectedBudget}元以内",
+                    color = BuyPilotColors.PrimaryDark,
+                    fontSize = BuyPilotType.LargeBody,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            ElegantBudgetSlider(
+                selectedIndex = selectedIndex,
+                displayIndex = displayIndex,
+                options = budgetOptions,
+                selectedBudget = selectedBudget,
+                isDragging = isDragging,
+                interactionSource = sliderInteractionSource,
+                onIndexChange = { nextIndex ->
+                    val nextBudget = budgetOptions[nextIndex.coerceIn(budgetOptions.indices)]
+                    onValueChange(nextBudget.toString())
+                },
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "¥${budgetOptions.first()}",
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                )
+                Text(
+                    text = budgetOptions.midBudgetLabel(),
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                )
+                Text(
+                    text = "¥${budgetOptions.last()}",
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ElegantBudgetSlider(
+    selectedIndex: Int,
+    displayIndex: Float,
+    options: List<Int>,
+    selectedBudget: Int,
+    isDragging: Boolean,
+    interactionSource: MutableInteractionSource,
+    onIndexChange: (Int) -> Unit,
+) {
+    val valueRange = 0f..(options.lastIndex).toFloat()
+    val activeFraction = (displayIndex / options.lastIndex.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val thumbScale by animateFloatAsState(
+        targetValue = if (isDragging) 1.08f else 1f,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "budget_thumb_scale",
+    )
+    val thumbHaloAlpha by animateFloatAsState(
+        targetValue = if (isDragging) 0.16f else 0.07f,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "budget_thumb_halo_alpha",
+    )
+    val valueBubbleAlpha by animateFloatAsState(
+        targetValue = if (isDragging) 1f else 0.82f,
+        animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
+        label = "budget_value_bubble_alpha",
+    )
+    val valueBubbleOffset by animateDpAsState(
+        targetValue = if (isDragging) 0.dp else 3.dp,
+        animationSpec = tween(durationMillis = 210, easing = MenuEaseOut),
+        label = "budget_value_bubble_offset",
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(74.dp),
+    ) {
+        BudgetSliderValueBubble(
+            budget = selectedBudget,
+            fraction = activeFraction,
+            alpha = valueBubbleAlpha,
+            offsetY = valueBubbleOffset,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .zIndex(2f),
+        )
+        Slider(
+            value = selectedIndex.toFloat(),
+            onValueChange = { rawIndex ->
+                onIndexChange(rawIndex.roundToInt())
+            },
+            valueRange = valueRange,
+            steps = (options.size - 2).coerceAtLeast(0),
+            interactionSource = interactionSource,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.Transparent,
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent,
+            ),
+            thumb = {
+                BudgetSliderThumb(
+                    scale = thumbScale,
+                    haloAlpha = thumbHaloAlpha,
+                )
+            },
+            track = {
+                BudgetSliderTrack(
+                    activeFraction = activeFraction,
+                    options = options,
+                )
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter),
+        )
+    }
+}
+
+@Composable
+private fun BudgetSliderValueBubble(
+    budget: Int,
+    fraction: Float,
+    alpha: Float,
+    offsetY: Dp,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .graphicsLayer { this.alpha = alpha },
+    ) {
+        val bubbleWidth = 74.dp
+        val bubbleX = (maxWidth - bubbleWidth) * fraction
+        Surface(
+            color = BuyPilotColors.PrimarySoft.copy(alpha = 0.78f),
+            contentColor = BuyPilotColors.PrimaryDark,
+            shape = CircleShape,
+            shadowElevation = 0.dp,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .offset(x = bubbleX, y = offsetY)
+                .width(bubbleWidth)
+                .height(28.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "¥$budget",
+                    color = BuyPilotColors.PrimaryDark,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetSliderThumb(
+    scale: Float,
+    haloAlpha: Float,
+) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .scale(scale),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(31.dp)
+                .background(BuyPilotColors.Primary.copy(alpha = haloAlpha), CircleShape),
+        )
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .shadow(
+                    elevation = 5.dp,
+                    shape = CircleShape,
+                    ambientColor = Color.Black.copy(alpha = 0.08f),
+                    spotColor = Color.Black.copy(alpha = 0.12f),
+                )
+                .background(BuyPilotColors.SurfaceCard, CircleShape)
+                .border(5.dp, BuyPilotColors.Primary, CircleShape),
+        )
+    }
+}
+
+@Composable
+private fun BudgetSliderTrack(
+    activeFraction: Float,
+    options: List<Int>,
+) {
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(28.dp),
+    ) {
+        val centerY = size.height / 2f
+        val horizontalInset = 2.dp.toPx()
+        val startX = horizontalInset
+        val endX = size.width - horizontalInset
+        val activeX = lerp(startX, endX, activeFraction)
+        val inactiveStroke = 7.dp.toPx()
+        val activeStroke = 7.dp.toPx()
+        val tickRadius = 2.dp.toPx()
+
+        drawLine(
+            color = BuyPilotColors.SurfaceMuted,
+            start = Offset(startX, centerY),
+            end = Offset(endX, centerY),
+            strokeWidth = inactiveStroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    BuyPilotColors.Primary.copy(alpha = 0.82f),
+                    BuyPilotColors.Primary,
+                ),
+                startX = startX,
+                endX = activeX.coerceAtLeast(startX + 1f),
+            ),
+            start = Offset(startX, centerY),
+            end = Offset(activeX, centerY),
+            strokeWidth = activeStroke,
+            cap = StrokeCap.Round,
+        )
+
+        options.forEachIndexed { index, _ ->
+            val fraction = index / options.lastIndex.coerceAtLeast(1).toFloat()
+            val tickX = lerp(startX, endX, fraction)
+            val tickColor = if (fraction <= activeFraction) {
+                BuyPilotColors.OnPrimary.copy(alpha = 0.72f)
+            } else {
+                BuyPilotColors.Border.copy(alpha = 0.86f)
+            }
+            drawCircle(
+                color = tickColor,
+                radius = tickRadius,
+                center = Offset(tickX, centerY),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CriteriaSuggestionSection(
+    labels: List<String>,
+    onClick: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = "快速微调建议",
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        ClarificationOptionScroller(
+            labels = labels,
+            onClick = { label, _ -> onClick(label) },
+        )
     }
 }
 
@@ -2175,24 +3607,28 @@ private fun ProductTag(
 @Composable
 private fun GhostButton(
     label: String,
-    leading: String? = null,
+    @DrawableRes leadingIconRes: Int? = null,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
-            .shadow(2.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
-            .background(BuyPilotColors.SurfaceCard, CircleShape)
-            .border(1.dp, BuyPilotColors.Border, CircleShape)
+            .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.72f), CircleShape)
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.78f), CircleShape)
             .clip(CircleShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 17.dp, vertical = 9.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        leading?.let {
-            Text(it, color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
+        leadingIconRes?.let {
+            Icon(
+                painter = painterResource(it),
+                contentDescription = null,
+                tint = BuyPilotColors.TextSecondary.copy(alpha = 0.78f),
+                modifier = Modifier.size(14.dp),
+            )
             Spacer(Modifier.width(8.dp))
         }
-        Text(label, color = Color(0xFF59413A), fontSize = BuyPilotType.Label)
+        Text(label, color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
     }
 }
 
@@ -2210,18 +3646,6 @@ private fun PillLabel(
         modifier = modifier
             .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.72f), CircleShape)
             .padding(horizontal = 10.dp, vertical = 3.dp),
-    )
-}
-
-@Composable
-private fun TabPill(label: String, active: Boolean = false) {
-    Text(
-        text = label,
-        color = if (active) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
-        fontSize = BuyPilotType.Label,
-        modifier = Modifier
-            .background(if (active) BuyPilotColors.PrimarySoft else BuyPilotColors.SurfaceMuted, CircleShape)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
 
@@ -2290,6 +3714,156 @@ private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {
         else -> "预算待确认"
     }
 }
+
+private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<CriteriaTileSpec> =
+    listOf(
+        CriteriaTileSpec(
+            label = "核心诉求",
+            value = productTypeLabel().ifBlank { category.ifBlank { summary.withoutMarkdownMarkup().ifBlank { "待确认" } } },
+            iconRes = R.drawable.ic_search_24,
+            accent = Color(0xFFE0643B),
+            glow = Color(0xFFFFEFE8),
+        ),
+        CriteriaTileSpec(
+            label = "适用对象",
+            value = skinTypeLabel().ifBlank { "按需求匹配" },
+            iconRes = R.drawable.ic_shield_24,
+            accent = Color(0xFF4F86D8),
+            glow = Color(0xFFEEF5FF),
+        ),
+        CriteriaTileSpec(
+            label = "预算",
+            value = budgetLabel(),
+            iconRes = R.drawable.ic_payments_24,
+            accent = Color(0xFFB87920),
+            glow = Color(0xFFFFF4DE),
+        ),
+        CriteriaTileSpec(
+            label = "场景/用途",
+            value = useScenarioLabel().ifBlank { "日常使用" },
+            iconRes = R.drawable.ic_history_24,
+            accent = Color(0xFF8B96A5),
+            glow = Color(0xFFF2F4F7),
+        ),
+    )
+
+private fun com.buypilot.core.model.CriteriaPayload.productTypeLabel(): String =
+    productType.orEmpty().ifBlank { constraints?.productType.orEmpty() }
+
+private fun com.buypilot.core.model.CriteriaPayload.skinTypeLabel(): String =
+    skinType.orEmpty().ifBlank { constraints?.skinType.orEmpty() }
+
+private fun com.buypilot.core.model.CriteriaPayload.useScenarioLabel(): String =
+    useScenario.firstOrNull().orEmpty().ifBlank { constraints?.useScenario.orEmpty() }
+
+private fun com.buypilot.core.model.CriteriaPayload.budgetMaxLabel(): String {
+    val max = budgetMax ?: constraints?.budgetMax
+    return max?.clean().orEmpty()
+}
+
+private fun com.buypilot.core.model.CriteriaPayload.exclusionLabels(): List<String> =
+    (
+        ingredientAvoid + constraints?.ingredientAvoid.orEmpty() +
+            brandAvoid + constraints?.brandAvoid.orEmpty() +
+            originAvoid + constraints?.originAvoid.orEmpty()
+        )
+        .map { it.withoutAvoidPrefix().trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+
+private fun buildCriteriaPatch(
+    productType: String,
+    budgetMax: String,
+    skinType: String,
+    useScenario: String,
+    exclusions: String,
+): JsonObject {
+    val exclusionItems = exclusions.split('、', ',', '，', ';', '；', '\n')
+        .map { it.withoutAvoidPrefix().trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+    val originAvoid = exclusionItems.filter { it.looksLikeOriginAvoidance() }
+    val ingredientAvoid = exclusionItems.filterNot { it.looksLikeOriginAvoidance() || it.looksLikeBrandAvoidance() }
+    val brandAvoid = exclusionItems.filter { it.looksLikeBrandAvoidance() }
+    return buildJsonObject {
+        putJsonObject("constraints") {
+            productType.trim().takeIf { it.isNotBlank() }?.let { put("product_type", it) }
+            budgetMax.extractFirstNumber()?.let { put("budget_max", it) }
+            skinType.trim().withoutSkinSuffix().takeIf { it.isNotBlank() }?.let { put("skin_type", it) }
+            useScenario.trim().takeIf { it.isNotBlank() }?.let { put("use_scenario", it) }
+            if (ingredientAvoid.isNotEmpty()) {
+                put(
+                    "ingredient_avoid",
+                    buildJsonArray {
+                        ingredientAvoid.forEach { add(JsonPrimitive(it)) }
+                    },
+                )
+            }
+            if (brandAvoid.isNotEmpty()) {
+                put(
+                    "brand_avoid",
+                    buildJsonArray {
+                        brandAvoid.forEach { add(JsonPrimitive(it)) }
+                    },
+                )
+            }
+            if (originAvoid.isNotEmpty()) {
+                put(
+                    "origin_avoid",
+                    buildJsonArray {
+                        originAvoid.forEach { add(JsonPrimitive(it)) }
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun String.withoutAvoidPrefix(): String =
+    trim()
+        .removePrefix("不要含")
+        .removePrefix("不要")
+        .removePrefix("排除")
+
+private fun String.withoutSkinSuffix(): String =
+    trim()
+        .removeSuffix("肌肤")
+        .removeSuffix("肤质")
+        .removeSuffix("肌")
+
+private fun String.extractFirstNumber(): Double? =
+    Regex("""\d+(?:\.\d+)?""").find(this)?.value?.toDoubleOrNull()
+
+private fun budgetSliderOptions(currentBudget: Int?): List<Int> {
+    val positiveBudget = currentBudget?.takeIf { it > 0 }
+    val ceiling = when {
+        positiveBudget == null -> BudgetBasePresets.last()
+        positiveBudget <= BudgetBasePresets.last() -> BudgetBasePresets.last()
+        else -> BudgetHighPresets.firstOrNull { it >= positiveBudget } ?: positiveBudget.roundUpBudgetCeiling()
+    }
+    return (BudgetBasePresets + BudgetHighPresets.filter { it <= ceiling } + listOfNotNull(positiveBudget))
+        .distinct()
+        .sorted()
+}
+
+private fun Int.nearestBudgetOption(options: List<Int>): Int =
+    options.minByOrNull { abs(it - this) } ?: this
+
+private fun Int.roundUpBudgetCeiling(): Int {
+    val step = 5000
+    return ((this + step - 1) / step) * step
+}
+
+private fun List<Int>.midBudgetLabel(): String {
+    val midBudget = firstOrNull { it >= 500 } ?: get(size / 2)
+    return "¥$midBudget"
+}
+
+private fun String.looksLikeOriginAvoidance(): Boolean =
+    listOf("日系", "日本", "韩系", "韩国", "欧美", "国产", "进口").any { it in this }
+
+private fun String.looksLikeBrandAvoidance(): Boolean =
+    any { it in 'A'..'Z' || it in 'a'..'z' } || contains("-") || contains("·")
 
 private fun com.buypilot.core.model.ProductPayload.priceLabel(): String =
     price?.let { "${currency.orEmpty().ifBlank { "¥" }}${it.clean()}" } ?: "价格待确认"

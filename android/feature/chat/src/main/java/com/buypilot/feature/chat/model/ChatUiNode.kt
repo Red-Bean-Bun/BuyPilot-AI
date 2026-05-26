@@ -24,6 +24,7 @@ data class UserMessageNode(
 data class ThinkingNode(
     override val key: String,
     val payload: ThinkingPayload,
+    val turnId: String = "",
 ) : ChatUiNode
 
 data class AiStreamNode(
@@ -36,6 +37,8 @@ data class AiStreamNode(
 data class ClarificationNode(
     override val key: String,
     val payload: ClarificationPayload,
+    val turnId: String = "",
+    val anchorMessageKey: String = "",
 ) : ChatUiNode
 
 data class CriteriaNode(

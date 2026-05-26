@@ -71,7 +71,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun clarificationRemovesTransientThinkingForSameTurn() {
+    fun clarificationReplacesThinkingLineWithIntroTextAndThenShowsCard() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -90,9 +90,14 @@ class ChatReducerTest {
             ),
         )
 
-        assertEquals(1, state.nodes.size)
-        assertTrue(state.nodes.single() is ClarificationNode)
+        assertEquals(2, state.nodes.size)
         assertFalse(state.nodes.any { it is ThinkingNode })
+        val intro = state.nodes.first() as AiStreamNode
+        val card = state.nodes.last() as ClarificationNode
+        assertEquals("thinking_turn_1", intro.key)
+        assertEquals("thinking_turn_1", card.anchorMessageKey)
+        assertTrue(intro.content.contains("请问你的肤质"))
+        assertEquals("thinking_turn_1", state.streamingTextKey)
     }
 
     @Test
@@ -118,6 +123,7 @@ class ChatReducerTest {
         }
 
         val node = state.nodes.single() as AiStreamNode
+        assertEquals("thinking_turn_1", node.key)
         assertEquals("敏感肌面霜，我会先避开酒精和香精。", node.content)
         assertFalse(state.nodes.any { it is ThinkingNode })
     }
@@ -213,6 +219,41 @@ class ChatReducerTest {
         )
 
         assertTrue(state.isStreaming)
+        assertEquals(ChatInputState.Clarifying, state.inputState)
+    }
+
+    @Test
+    fun doneKeepsClarificationIntroAndCard() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+        val clarifying = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.Clarification,
+                nodeId = "clarify_turn_1",
+                payload = ClarificationPayload(question = "请问你的肤质是？"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            clarifying,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                payload = DonePayload(),
+            ),
+        )
+
+        assertFalse(state.nodes.any { it is ThinkingNode })
+        assertTrue(state.nodes.any { it is AiStreamNode })
+        assertTrue(state.nodes.any { it is ClarificationNode })
+        assertFalse(state.isStreaming)
         assertEquals(ChatInputState.Clarifying, state.inputState)
     }
 

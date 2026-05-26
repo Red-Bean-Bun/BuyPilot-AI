@@ -16,6 +16,7 @@ fun ChatRoute(
         state = uiState,
         onInputChanged = viewModel::onInputChanged,
         onSendMessage = viewModel::sendMessage,
+        onCriteriaPatch = viewModel::sendCriteriaPatch,
         onCancel = viewModel::cancel,
     )
 }

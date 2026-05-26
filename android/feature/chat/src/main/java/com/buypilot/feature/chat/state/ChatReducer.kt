@@ -53,7 +53,7 @@ object ChatReducer {
             sessionId = state.sessionId ?: envelope.sessionId,
             currentTurnId = envelope.turnId,
         )
-        val contentBase = if (envelope.event.clearsTransientThinking()) {
+        val contentBase = if (envelope.event.shouldClearTransientThinking(base, envelope.turnId)) {
             base.withoutThinking(envelope.turnId)
         } else {
             base
@@ -61,18 +61,23 @@ object ChatReducer {
 
         return when (envelope.event) {
             AgentEventType.Thinking -> base.upsertNode(
-                ThinkingNode(envelope.nodeId, envelope.payload as ThinkingPayload),
-            ).copy(inputState = ChatInputState.Streaming, isStreaming = true)
+                ThinkingNode(
+                    key = envelope.nodeId,
+                    payload = envelope.payload as ThinkingPayload,
+                    turnId = envelope.turnId,
+                ),
+            ).copy(
+                inputState = ChatInputState.Streaming,
+                isStreaming = true,
+            )
 
-            AgentEventType.Clarification -> contentBase.upsertNode(
-                ClarificationNode(envelope.nodeId, envelope.payload as ClarificationPayload),
-            ).copy(inputState = ChatInputState.Clarifying, isStreaming = true)
+            AgentEventType.Clarification -> reduceClarification(contentBase, envelope)
 
             AgentEventType.CriteriaCard -> contentBase.upsertNode(
                 CriteriaNode(envelope.nodeId, envelope.payload as CriteriaCardPayload),
             )
 
-            AgentEventType.TextDelta -> reduceTextDelta(contentBase, envelope)
+            AgentEventType.TextDelta -> reduceTextDelta(base, envelope)
 
             AgentEventType.ProductCard -> reduceProductCard(contentBase, envelope)
 
@@ -143,16 +148,59 @@ object ChatReducer {
         val messageKey = payload.messageId.ifBlank { envelope.nodeId }
         val existing = state.nodes.filterIsInstance<AiStreamNode>()
             .firstOrNull { it.messageId == payload.messageId || it.key == messageKey }
+        val replacedThinkingKey = existing?.key ?: state.nodes
+            .filterIsInstance<ThinkingNode>()
+            .lastOrNull { it.turnId == envelope.turnId }
+            ?.key
         val node = AiStreamNode(
-            key = messageKey,
+            key = replacedThinkingKey ?: messageKey,
             messageId = payload.messageId,
             content = (existing?.content.orEmpty()) + payload.delta,
             done = payload.done,
         )
         return state.upsertNode(node).copy(
-            streamingTextKey = messageKey,
+            streamingTextKey = node.key,
             streamingTextLength = node.content.length,
         )
+    }
+
+    private fun reduceClarification(
+        state: ChatUiState,
+        envelope: AgentUiEnvelope<AgentPayload>,
+    ): ChatUiState {
+        val payload = envelope.payload as ClarificationPayload
+        val intro = clarificationIntroText(payload)
+        val thinkingKey = state.nodes
+            .filterIsInstance<ThinkingNode>()
+            .lastOrNull { it.turnId == envelope.turnId }
+            ?.key
+        val introNode = AiStreamNode(
+            key = thinkingKey ?: "clarification_intro_${envelope.turnId}",
+            messageId = "clarification_intro_${envelope.turnId}",
+            content = intro,
+            done = true,
+        )
+        return state
+            .upsertNode(introNode)
+            .upsertNode(
+                ClarificationNode(
+                    key = envelope.nodeId,
+                    payload = payload,
+                    turnId = envelope.turnId,
+                    anchorMessageKey = introNode.key,
+                ),
+            )
+            .copy(
+                inputState = ChatInputState.Clarifying,
+                isStreaming = true,
+                streamingTextKey = introNode.key,
+                streamingTextLength = introNode.content.length,
+            )
+    }
+
+    private fun clarificationIntroText(payload: ClarificationPayload): String {
+        val question = payload.question.ifBlank { "请补充一个关键信息" }
+        return "为了能为您推荐最合适的产品，我还需要了解一下**${question.trimEnd('？', '?')}**。"
     }
 
     private fun reduceProductCard(
@@ -185,12 +233,28 @@ object ChatReducer {
         return copy(nodes = nextNodes)
     }
 
-    private fun AgentEventType.clearsTransientThinking(): Boolean =
-        this != AgentEventType.Thinking && this != AgentEventType.Unknown
+    private fun AgentEventType.shouldClearTransientThinking(state: ChatUiState, turnId: String): Boolean =
+        when (this) {
+            AgentEventType.Thinking,
+            AgentEventType.Clarification,
+            AgentEventType.TextDelta,
+            AgentEventType.Unknown -> false
+            AgentEventType.Done -> !state.hasClarificationForTurn(turnId)
+            else -> true
+        }
+
+    private fun ChatUiState.hasClarificationForTurn(turnId: String): Boolean =
+        turnId.isNotBlank() && nodes.any { it is ClarificationNode && it.turnId == turnId }
 
     private fun ChatUiState.withoutThinking(turnId: String): ChatUiState {
         val thinkingKey = "thinking_$turnId"
-        val nextNodes = nodes.filterNot { it is ThinkingNode && it.key == thinkingKey }
-        return if (nextNodes.size == nodes.size) this else copy(nodes = nextNodes)
+        val nextNodes = nodes.filterNot {
+            it is ThinkingNode && (it.turnId == turnId || it.key == thinkingKey)
+        }
+        return if (nextNodes.size == nodes.size) {
+            this
+        } else {
+            copy(nodes = nextNodes)
+        }
     }
 }
