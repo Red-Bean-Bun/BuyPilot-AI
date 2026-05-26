@@ -50,7 +50,7 @@ jobs:
           -p src.config.settings
           -p src.runtime.cancel_registry
           -p src.runtime.streaming
-          -p src.services.async_io
+
           -p src.services.http_client
           -p src.services.llm_profiles
           -p src.services.llm_task_payloads

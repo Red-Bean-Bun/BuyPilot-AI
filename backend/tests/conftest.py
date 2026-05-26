@@ -1,11 +1,17 @@
+import asyncio
 import json
 import re
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
 
 from src.api.app import app
+
+# Windows: psycopg async requires SelectorEventLoop
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = PROJECT_ROOT / "contracts"
@@ -47,10 +53,24 @@ def mock_external_ai(monkeypatch):
 
 
 @pytest.fixture
-async def seeded_products():
-    from src.services.product_ingest import seed_products_if_needed
+async def seeded_products(monkeypatch, tmp_path):
+    """Seed products with mock embeddings. Uses a temp SQLite DB so mock embedding
+    vectors are compared against identically-generated chunk vectors, not against
+    real semantic embeddings in the configured PostgreSQL database."""
+    import os
 
-    await seed_products_if_needed()
+    from src.config import settings as settings_module
+
+    if os.getenv("BAILIAN_API_KEY") == "test-key":
+        db_path = tmp_path / "test.db"
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+        settings_module._settings = None
+
+    from src.services.product_ingest import seed_products
+
+    await seed_products()
+    yield
+    settings_module._settings = None
 
 
 @pytest.fixture
@@ -178,7 +198,7 @@ def _fake_intent_payload(payload, system_content):
         return _intent("add_to_cart", message, constraints=constraints, target_product_id=target)
     if _contains(message, "购物车", "看看车", "查看车"):
         return _intent("view_cart", message)
-    if _contains(message, "不喜欢", "不要这个", "换一个"):
+    if _contains(message, "不喜欢", "不要这个", "不要刚才", "换一个", "排除", "去掉"):
         return _intent("feedback", message, constraints={"feedback_text": message})
 
     if _contains(message, "随便看看"):

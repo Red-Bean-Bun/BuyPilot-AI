@@ -95,7 +95,7 @@ async def retrieve_with_evidence(
                 recall_filters = relaxed_filters
                 break
     if not chunk_hits:
-        raise RuntimeError("DB vector retrieval returned no chunk hits; non-DB retrieval fallback is disabled.")
+        return RetrievalOutput(products=[], evidence_by_product={})
 
     candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
     ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
@@ -267,16 +267,12 @@ def _trace_hit_payload(hit: ProductHit, rank: int) -> dict[str, object]:
 def _relaxation_attempts(
     criteria: CriteriaPayload, filters: RetrievalFilters
 ) -> list[tuple[str, CriteriaPayload, RetrievalFilters, list[str]]]:
+    """Relax budget_max when strict returns empty, but never silently relax category or product_type.
+
+    category and product_type are hard constraints — showing a 防晒 for a 洁面 request is worse than showing nothing.
+    budget_max is a threshold constraint — showing a 220 CNY item for a 200 CNY budget is helpful with a note.
+    """
     attempts: list[tuple[str, CriteriaPayload, RetrievalFilters, list[str]]] = []
-    if criteria.constraints.product_type:
-        attempts.append(
-            (
-                "without_product_type",
-                _criteria_with_constraints(criteria, product_type=None),
-                filters,
-                ["product_type"],
-            )
-        )
     if criteria.constraints.budget_max is not None:
         attempts.append(
             (
@@ -284,15 +280,6 @@ def _relaxation_attempts(
                 _criteria_with_constraints(criteria, budget_max=None),
                 filters,
                 ["budget_max"],
-            )
-        )
-    if criteria.constraints.product_type and criteria.constraints.budget_max is not None:
-        attempts.append(
-            (
-                "without_product_type_and_budget_max",
-                _criteria_with_constraints(criteria, product_type=None, budget_max=None),
-                filters,
-                ["product_type", "budget_max"],
             )
         )
     if filters.avoid_traits:

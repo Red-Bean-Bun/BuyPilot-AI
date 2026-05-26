@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import uuid
 
@@ -17,10 +18,29 @@ from src.services.fallbacks import get_fallback_events
 from src.services.product_ingest import chunk_embedding_stats
 from src.types.schemas import ChatStreamRequest
 
+
+def _check_live_provider() -> None:
+    """Fail fast if smoke would use mock/fake providers."""
+    if "pytest" in sys.modules:
+        return
+    bailian_url = os.getenv("BAILIAN_BASE_URL")
+    bailian_key = os.getenv("BAILIAN_API_KEY")
+    if not bailian_url or not bailian_key:
+        raise SystemExit(
+            "SMOKE GATE FAILED: BAILIAN_BASE_URL/BAILIAN_API_KEY not configured. "
+            "Live smoke requires a real AI provider."
+        )
+    if bailian_key == "test-key":
+        raise SystemExit(
+            "SMOKE GATE FAILED: BAILIAN_API_KEY is set to mock value 'test-key'. "
+            "Use real credentials for live smoke."
+        )
+
 EXPECTED_EMBEDDING_DIMENSIONS = 1024
 
 
 async def run_checks() -> None:
+    _check_live_provider()
     index_stats = await chunk_embedding_stats()
     index_ok = (
         index_stats["embedded_chunks"] > 0 and index_stats["embedding_dimensions"] == EXPECTED_EMBEDDING_DIMENSIONS

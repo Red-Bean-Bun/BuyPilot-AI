@@ -171,6 +171,25 @@ async def handle_update_cart_quantity(
     yield ctx.done()
 
 
+async def handle_chitchat(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    del body, intent
+    yield ctx.thinking("understanding", "正在处理...")
+    yield TextDeltaEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"ai_text_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        message_id=f"msg_{ctx.turn_id}",
+        delta="我是电商导购助手，可以帮你推荐商品、添加购物车。请问你想买什么？",
+        done=True,
+    )
+    yield ctx.done()
+
+
 async def handle_clarification(ctx: StreamContext, missing_slots: list[str]) -> AsyncGenerator[SSEEventBase, None]:
     question, options = build_clarification_question(missing_slots)
     yield ctx.thinking("clarifying", "需要补充一个关键信息。")
@@ -213,7 +232,7 @@ async def handle_recommendation(
     yield _criteria_card_event(ctx, criteria)
     if not _should_continue_after_criteria(body):
         yield _criteria_confirmation_event(ctx)
-        await run_sync_io(save_recommendation_turn, ctx.session_id, criteria, [], user_message=body.message)
+        await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
         yield ctx.done()
         return
 
@@ -246,6 +265,22 @@ async def continue_recommendation_from_criteria(
     retrieval = retrieval_capture.require("retrieval")
 
     products = retrieval.products
+    if not products:
+        yield TextDeltaEvent(
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            seq=ctx.seq.next(),
+            event_id=ctx.seq.event_id(),
+            node_id=f"ai_text_{ctx.turn_id}",
+            created_at_ms=now_ms(),
+            message_id=f"msg_{ctx.turn_id}",
+            delta="在您给定的条件下暂时没有匹配的商品，可以放宽预算或品类试试。",
+            done=True,
+        )
+        await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
+        yield ctx.done()
+        return
+
     evidences_by_product = dict(retrieval.evidence_by_product)
     ctx.ensure_active()
     recommendation_task = start_stage_task(
@@ -430,7 +465,7 @@ def _should_continue_after_criteria(body: ChatStreamRequest) -> bool:
 
 def _is_continue_command(message: str) -> bool:
     text = message.strip().lower()
-    return any(
+    if any(
         token in text
         for token in (
             "继续",
@@ -443,7 +478,24 @@ def _is_continue_command(message: str) -> bool:
             "ok",
             "continue",
         )
+    ):
+        return True
+    return _has_shopping_constraints(text)
+
+
+def _has_shopping_constraints(text: str) -> bool:
+    """Auto-continue when the message already specifies concrete product requirements."""
+    constraint_markers = (
+        "以内", "以下", "预算", "元", "块", "推荐", "想要", "帮我", "适合",
+        "油皮", "干皮", "敏感肌", "混合", "日常",
+        "洁面", "防晒", "洗面奶", "面霜", "精华", "面膜",
+        "手机", "耳机", "电脑", "平板", "笔记本",
+        "跑鞋", "篮球鞋", "t恤", "运动裤", "瑜伽",
+        "茶饮", "咖啡", "零食", "酸奶", "方便",
+        # Follow-up / feedback cues
+        "不要", "排除", "去掉", "刚才", "第一个", "第二个", "换",
     )
+    return any(marker in text for marker in constraint_markers)
 
 
 def _drop_completed_background_tasks(ctx: StreamContext) -> None:
@@ -526,10 +578,14 @@ async def _persist_recommendation(
 
 
 INTENT_HANDLERS: dict[str, IntentHandler] = {
+    "recommend": handle_recommendation,
+    "clarify": handle_recommendation,
+    "feedback": handle_recommendation,
     "view_cart": handle_view_cart,
     "add_to_cart": handle_add_to_cart,
     "remove_from_cart": handle_remove_from_cart,
     "update_cart_quantity": handle_update_cart_quantity,
+    "chitchat": handle_chitchat,
 }
 
 

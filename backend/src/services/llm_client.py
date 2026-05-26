@@ -176,7 +176,12 @@ async def generate_decision(
     parsed = _require_json_object(live, "generate_decision")
     winner_id = parsed.get("winner_product_id", "")
     if winner_id not in valid_ids:
-        raise RuntimeError("Live decision payload selected an unknown product.")
+        logger.warning(
+            "Decision winner_id %s not in candidate list %s; falling back to first candidate.",
+            winner_id,
+            valid_ids,
+        )
+        winner_id = valid_ids[0]
     return DecisionResult(
         winner_product_id=winner_id,
         summary=parsed.get("summary", f"优先选{winner_id}。"),

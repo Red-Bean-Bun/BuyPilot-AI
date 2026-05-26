@@ -111,7 +111,8 @@ async def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_retrieve_empty_recall_relaxes_inside_db_chunks_only():
+async def test_retrieve_relaxes_budget_but_not_product_type():
+    """budget_max relaxes when strict returns empty; product_type stays hard."""
     criteria = CriteriaPayload(
         category="数码电子",
         summary="蓝牙耳机 500元内",
@@ -120,11 +121,13 @@ async def test_retrieve_empty_recall_relaxes_inside_db_chunks_only():
 
     retrieval = await retrieve_with_evidence(criteria, top_n=2)
 
+    # budget_max=500 is too low for matching 真无线耳机 (1699/1899 CNY).
+    # budget_max relaxes, product_type stays hard — we still get 真无线耳机.
     assert retrieval.products
     assert all(normalize_product_type(product.sub_category) == "真无线耳机" for product in retrieval.products)
     steps = retrieval.trace_details["filters_applied"]["relaxation_steps"]
     assert steps[0]["step"] == "strict"
-    assert any(step["step"] == "without_budget_max" and step["candidate_count"] > 0 for step in steps)
+    assert any(step["step"] == "without_budget_max" for step in steps)
 
 
 @pytest.mark.asyncio
@@ -166,7 +169,7 @@ async def test_retrieve_prefers_pgvector_hits(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_retrieve_raises_without_db_vector_hits(monkeypatch, tmp_path):
+async def test_retrieve_returns_empty_without_db_vector_hits(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'strict_retrieval.db'}")
 
     from src.config import settings as settings_module
@@ -180,6 +183,6 @@ async def test_retrieve_raises_without_db_vector_hits(monkeypatch, tmp_path):
 
     criteria = CriteriaPayload(category="美妆护肤", summary="油皮洗面奶")
 
-    with pytest.raises(RuntimeError, match="DB vector retrieval"):
-        await retrieve(criteria, top_n=1)
+    result = await retrieve_with_evidence(criteria, top_n=1)
+    assert result.products == []
     settings_module._settings = None

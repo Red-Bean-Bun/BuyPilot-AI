@@ -174,12 +174,9 @@ def test_request_accepts_max_length_message():
 
 
 @pytest.mark.asyncio
-async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, tmp_path):
+async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, seeded_products):
     """After a clarification turn, the next turn should see the pending category."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'clarity.db'}")
     import src.config.settings as settings_module
-
-    settings_module._settings = None
 
     async def mock_intent_round1(_session_id, _body):
         from src.types.schemas import IntentResult
@@ -189,7 +186,7 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, tmp_
     async def mock_intent_round2(_session_id, _body):
         from src.types.schemas import IntentResult
 
-        return IntentResult(intent="recommend", category="运动鞋", extracted_constraints={"budget_max": 500})
+        return IntentResult(intent="recommend", category="运动鞋", extracted_constraints={"budget_max": 500, "product_type": "跑步鞋"})
 
     async def fake_criteria(_session_id, _body, _intent):
         return CriteriaPayload(criteria_id="c_test", category="运动鞋", summary="测试")

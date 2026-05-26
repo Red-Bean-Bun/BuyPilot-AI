@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,11 +24,30 @@ from src.types.schemas import ChatStreamRequest
 from src.types.sse_events import SSEEventBase
 
 
+def _check_live_provider() -> None:
+    """Fail fast if demo smoke would use mock/fake providers."""
+    if "pytest" in sys.modules:
+        return
+    bailian_url = os.getenv("BAILIAN_BASE_URL")
+    bailian_key = os.getenv("BAILIAN_API_KEY")
+    if not bailian_url or not bailian_key:
+        raise SystemExit(
+            "DEMO SMOKE GATE FAILED: BAILIAN_BASE_URL/BAILIAN_API_KEY not configured. "
+            "Demo smoke requires a real AI provider."
+        )
+    if bailian_key == "test-key":
+        raise SystemExit(
+            "DEMO SMOKE GATE FAILED: BAILIAN_API_KEY is set to mock value 'test-key'. "
+            "Use real credentials for demo smoke."
+        )
+
+
 REPORTS_DIR = BACKEND_DIR / "reports"
 DEFAULT_IMAGE_PATH = "1_美妆护肤/images/p_beauty_012_live.jpg"
 
 
 async def main_async(write_report: bool = True) -> dict[str, Any]:
+    _check_live_provider()
     started = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     session_id = f"demo_smoke_{started.strftime('%Y%m%d_%H%M%S')}"
