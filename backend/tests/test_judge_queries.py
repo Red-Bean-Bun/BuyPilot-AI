@@ -34,9 +34,9 @@ JUDGE_QUERIES = [
     QueryExpectation("要一个256G的手机，主要打游戏，预算8000以内", "数码电子", "智能手机", 8000, storage="256G"),
     QueryExpectation("推荐一双跑鞋，预算1500以内，日常训练", "服饰运动", "跑步鞋", 1500),
     QueryExpectation("不要耐克的跑鞋，预算1500以内，日常训练", "服饰运动", "跑步鞋", 1500, ("耐克", "Nike")),
-    QueryExpectation("推荐无糖茶饮料，日常喝", "食品饮料", "茶饮", dietary=("无糖",)),
-    QueryExpectation("推荐低糖气泡水，预算80以内", "食品饮料", "碳酸饮料", 80, dietary=("低糖",)),
-    QueryExpectation("推荐早餐能吃的零食，预算120以内", "食品饮料", "坚果/零食", 120),
+    QueryExpectation("推荐无糖茶饮料，日常喝", "食品生活", "茶饮", dietary=("无糖",)),
+    QueryExpectation("推荐低糖气泡水，预算80以内", "食品生活", "碳酸饮料", 80, dietary=("低糖",)),
+    QueryExpectation("推荐早餐能吃的零食，预算120以内", "食品生活", "坚果/零食", 120),
 ]
 
 
@@ -109,7 +109,7 @@ async def test_judge_image_analysis_becomes_retrieval_constraints(monkeypatch):
     events = await _collect_chat("这个适合日常喝吗？", image_url="/uploads/test.png")
     criteria, products = _assert_successful_recommendation(events)
 
-    assert criteria.category == "食品饮料"
+    assert criteria.category == "食品生活"
     assert criteria.constraints.product_type == "茶饮"
     assert "无糖" in criteria.constraints.dietary
     assert all(product.sub_category == "茶饮" for product in products)
@@ -161,12 +161,13 @@ async def _collect_chat(
     *,
     session_id: str | None = None,
     image_url: str | None = None,
+    auto_run: bool = True,
 ) -> list[SSEEventBase]:
     return [
         event
         async for event in chat_stream(
             session_id or _session_id(),
-            ChatStreamRequest(message=message, image_url=image_url),
+            ChatStreamRequest(message=message, image_url=image_url, auto_run=auto_run),
         )
     ]
 
@@ -180,7 +181,6 @@ def _assert_successful_recommendation(
     product_cards = [event for event in events if event.event == "product_card"]
     assert len(product_cards) >= min_products
     assert all(event.evidence for event in product_cards)
-    assert any(event.event == "final_decision" for event in events)
     return criteria_cards[0].criteria, [event.product for event in product_cards]
 
 

@@ -47,6 +47,7 @@ class Conversation(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     session_id: str = Field(index=True)
     message_id: str
+    deck_id: str | None = Field(default=None, index=True)
     user_message: str
     criteria_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     ai_response: str | None = None
@@ -59,6 +60,7 @@ class Feedback(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     session_id: str = Field(index=True)
+    deck_id: str | None = Field(default=None, index=True)
     product_id: str | None = None
     action: str
     reason: str | None = None

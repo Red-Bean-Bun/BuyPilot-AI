@@ -37,10 +37,26 @@ def test_non_recommend_intent_returns_empty():
     assert check_required_slots("加入购物车", intent) == []
 
 
+def test_phone_requires_budget_before_recommendation():
+    intent = IntentResult(
+        intent="recommend",
+        category="数码电子",
+        extracted_constraints={"product_type": "手机", "use_scenario": "拍照"},
+    )
+    assert check_required_slots("我想买个手机，平时拍照多", intent) == ["budget"]
+
+
 def test_clarification_question_for_category():
     question, options = build_clarification_question(["category"])
     assert "哪一类" in question
     assert "美妆护肤" in options
+    assert "食品生活" in options
+
+
+def test_clarification_question_for_budget():
+    question, options = build_clarification_question(["budget"])
+    assert "预算" in question
+    assert "2000-4000元" in options
 
 
 def test_clarification_question_for_product_type():

@@ -14,6 +14,7 @@ from src.config.domain_terms import (
     WARNING_MARKERS,
     extract_terms,
     has_negation_prefix,
+    normalize_category,
 )
 from src.config.tuning import (
     ALIAS_MAX_COUNT,
@@ -86,7 +87,8 @@ def build_product_knowledge_package(raw: dict[str, Any]) -> dict[str, Any]:
     """Build a deterministic guide-facing package from one official product JSON."""
 
     text = _raw_text(raw)
-    category = str(raw.get("category") or "")
+    source_category = str(raw.get("category") or "")
+    category = normalize_category(source_category) or source_category
     sub_category = str(raw.get("sub_category") or "")
     brand = str(raw.get("brand") or "")
     title = str(raw.get("title") or "")
@@ -110,6 +112,7 @@ def build_product_knowledge_package(raw: dict[str, Any]) -> dict[str, Any]:
             "product_id": str(raw.get("product_id") or ""),
             "name": title,
             "category": category,
+            "source_category": source_category,
             "sub_category": sub_category,
             "brand": brand,
             "price": raw.get("base_price"),
@@ -141,6 +144,7 @@ def build_product_chunks(raw: dict[str, Any]) -> list[SemanticChunk]:
     base_meta = {
         "source": "ecommerce_agent_dataset",
         "category": package["basic"]["category"],
+        "source_category": package["basic"]["source_category"],
         "sub_category": package["basic"]["sub_category"],
         "brand": package["basic"]["brand"],
         "price": package["basic"]["price"],

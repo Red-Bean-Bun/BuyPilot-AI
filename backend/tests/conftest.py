@@ -217,6 +217,8 @@ def _fake_intent_payload(payload, system_content):
         return _intent("view_cart", message)
     if _contains(message, "不喜欢", "不要这个", "不要刚才", "换一个", "排除", "去掉"):
         return _intent("feedback", message, constraints={"feedback_text": message})
+    if _contains(message, "继续", "确认", "没问题", "可以", "开始推荐", "收敛"):
+        return _intent("continue", message)
 
     if _contains(message, "随便看看"):
         return _intent("recommend", message)
@@ -271,6 +273,10 @@ def _constraints(message):
         constraints["budget_max"] = budget
     if _contains(message, "油皮", "油性"):
         constraints["skin_type"] = "油性"
+    if _contains(message, "中性肌肤", "中性肌", "中性肤质", "中性"):
+        constraints["skin_type"] = "中性"
+    if _contains(message, "干性肌肤", "干性肌", "干性肤质", "干皮"):
+        constraints["skin_type"] = "干性"
     if _contains(message, "敏感肌", "敏感"):
         constraints["skin_type"] = "敏感"
     avoid = []
@@ -312,12 +318,26 @@ def _budget(message):
 def _category(text):
     if _contains(text, "洗面奶", "洁面", "防晒", "护肤", "油皮", "敏感肌"):
         return "美妆护肤"
-    if _contains(text, "手机", "耳机", "电脑", "笔记本"):
+    if _contains(text, "手机", "耳机", "电脑", "笔记本", "CD机", "CD 机", "cd机", "cd 机"):
         return "数码电子"
     if _contains(text, "跑鞋", "跑步", "训练", "瑜伽", "运动"):
         return "服饰运动"
-    if _contains(text, "零食", "咖啡", "麦片", "孩子", "茶饮料", "无糖茶", "日常喝", "气泡水", "酸奶"):
-        return "食品饮料"
+    if _contains(
+        text,
+        "零食",
+        "咖啡",
+        "麦片",
+        "孩子",
+        "饮料",
+        "茶饮料",
+        "无糖茶",
+        "日常喝",
+        "气泡水",
+        "酸奶",
+        "酱油",
+        "调味品",
+    ):
+        return "食品生活"
     return None
 
 
@@ -348,20 +368,24 @@ def _product_type(message, category):
         return "笔记本电脑"
     if "平板" in message:
         return "平板电脑"
-    if "跑鞋" in message:
+    if _contains(message, "跑鞋", "运动鞋"):
         return "跑步鞋"
     if "手机" in message:
         return "手机"
-    if category == "食品饮料" and _contains(message, "茶饮料", "茶饮", "无糖茶", "乌龙茶"):
+    if _contains(message, "CD机", "CD 机", "cd机", "cd 机"):
+        return "CD机"
+    if category == "食品生活" and _contains(message, "茶饮料", "茶饮", "无糖茶", "乌龙茶"):
         return "茶饮"
-    if category == "食品饮料" and _contains(message, "气泡水", "汽水", "可乐"):
+    if category == "食品生活" and _contains(message, "气泡水", "汽水", "可乐"):
         return "碳酸饮料"
-    if category == "食品饮料" and "咖啡" in message:
+    if category == "食品生活" and "咖啡" in message:
         return "咖啡"
-    if category == "食品饮料" and _contains(message, "方便面", "泡面", "速食"):
+    if category == "食品生活" and _contains(message, "方便面", "泡面", "速食"):
         return "方便食品"
-    if category == "食品饮料" and "零食" in message:
+    if category == "食品生活" and "零食" in message:
         return "零食"
+    if category == "食品生活" and _contains(message, "酱油", "生抽", "老抽", "调味品"):
+        return "调味品"
     return None
 
 

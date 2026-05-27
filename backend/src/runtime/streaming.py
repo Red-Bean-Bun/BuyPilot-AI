@@ -110,14 +110,16 @@ class StreamContext:
             message=message,
         )
 
-    def done(self) -> DoneEvent:
+    def done(self, finish_reason: str = "completed", deck_id: str | None = None) -> DoneEvent:
         return DoneEvent(
             session_id=self.session_id,
             turn_id=self.turn_id,
             seq=self.seq.next(),
             event_id=self.seq.event_id(),
             node_id=f"done_{self.turn_id}",
+            deck_id=deck_id,
             created_at_ms=now_ms(),
+            finish_reason=finish_reason,
         )
 
 

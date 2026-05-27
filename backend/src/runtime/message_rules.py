@@ -5,7 +5,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.config.domain_terms import PRODUCT_TYPE_ALIASES, category_from_text, extract_skin_types, normalize_product_type
+from src.config.domain_terms import (
+    PRODUCT_TYPE_ALIASES,
+    category_from_text,
+    extract_skin_types,
+    normalize_category,
+    normalize_product_type,
+)
 from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, CHEAPER_BUDGET_MIN_MAX, CHEAPER_BUDGET_RATIO
 from src.services.conversation_state import get_previous_criteria
 from src.types.schemas import ChatStreamRequest, IntentResult
@@ -86,7 +92,7 @@ def message_with_image_context(message: str, image_analysis: dict[str, Any] | No
 
 def image_analysis_to_retrieval_constraints(image_analysis: dict[str, Any]) -> dict[str, str]:
     text = _image_analysis_text(image_analysis)
-    category = _normalized_image_category(str(image_analysis.get("category_hint") or "")) or category_from_text(text)
+    category = normalize_category(image_analysis.get("category_hint")) or category_from_text(text)
     constraints: dict[str, str] = {}
     if category:
         constraints["category"] = category
@@ -146,17 +152,6 @@ def _image_analysis_text(image_analysis: dict[str, Any]) -> str:
         for part in (image_analysis.get("category_hint"), image_analysis.get("description"), trait_text)
         if part
     )
-
-
-def _normalized_image_category(value: str) -> str | None:
-    if not value:
-        return None
-    if "食品生活" in value:
-        return "食品饮料"
-    for category in ("美妆护肤", "数码电子", "服饰运动", "食品饮料"):
-        if category in value:
-            return category
-    return None
 
 
 def _product_type_from_image_text(text: str) -> str | None:

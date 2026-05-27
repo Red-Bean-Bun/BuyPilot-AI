@@ -22,6 +22,7 @@ async def submit_feedback(body: FeedbackRequest) -> FeedbackResponse:
         resource_type="feedback",
         resource_id=body.product_id,
         metadata={
+            "deck_id": body.deck_id,
             "feedback_type": body.feedback_type,
             "action": body.action,
             "reason": body.reason,

@@ -21,13 +21,17 @@ from src.runtime.stages.slot_checker import build_clarification_question
 from src.runtime.streaming import (
     StageResult,
     StreamContext,
-    run_timed_task_with_heartbeat,
     run_with_heartbeat,
-    start_stage_task,
 )
 from src.services.audit import record_audit_event
 from src.services.cart import add_product_to_cart, remove_product_from_cart, update_product_quantity
-from src.services.conversation_state import save_recommendation_turn
+from src.services.catalog import get_product
+from src.services.conversation_state import (
+    get_previous_criteria,
+    get_previous_deck_id,
+    get_previous_product_ids,
+    save_recommendation_turn,
+)
 from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events
 from src.services.feedback import get_feedback_context, record_feedback
@@ -256,7 +260,27 @@ async def handle_recommendation(
     if not _should_continue_after_criteria(body):
         yield _criteria_confirmation_event(ctx)
         await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
-        yield ctx.done()
+        yield ctx.done("awaiting_criteria_confirmation")
+        return
+
+    async for event in continue_recommendation_from_criteria(ctx, body, criteria):
+        yield event
+
+
+async def handle_continue(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    del intent
+    criteria = await get_previous_criteria(ctx.session_id)
+    if criteria is None:
+        async for event in handle_clarification(ctx, ["category"]):
+            yield event
+        return
+
+    product_ids = await get_previous_product_ids(ctx.session_id)
+    if product_ids:
+        async for event in continue_decision_from_current_deck(ctx, body, criteria, product_ids):
+            yield event
         return
 
     async for event in continue_recommendation_from_criteria(ctx, body, criteria):
@@ -305,42 +329,56 @@ async def continue_recommendation_from_criteria(
         return
 
     evidences_by_product = dict(retrieval.evidence_by_product)
-    ctx.ensure_active()
-    decision_task = start_stage_task(
-        ctx,
-        ctx.stages.run_decision(criteria, products, evidences_by_product),
-        timing_key="decision",
-        background=True,
-    )
-
     yield ctx.thinking("searching", f"找到{len(products)}个匹配商品...")
     async for event in _product_card_events(ctx, criteria, products, evidences_by_product):
         yield event
 
-    async for event in _stream_recommendation_text_events(
-        ctx,
-        ctx.stages.run_recommendation_text_stream(criteria, products, evidences_by_product),
-    ):
-        yield event
+    await _persist_recommendation(ctx, body, criteria, retrieval)
+    yield ctx.done("awaiting_product_feedback", deck_id=ctx.deck_id)
 
+
+async def continue_decision_from_current_deck(
+    ctx: StreamContext,
+    body: ChatStreamRequest,
+    criteria: CriteriaPayload,
+    product_ids: list[str],
+) -> AsyncGenerator[SSEEventBase, None]:
+    deck_id = await get_previous_deck_id(ctx.session_id)
+    feedback = await get_feedback_context(ctx.session_id, deck_id=deck_id)
+    avoided = set(feedback.get("avoid_products") or [])
+    products = [product for product_id in product_ids if (product := get_product(product_id)) is not None]
+    if not products:
+        async for event in handle_clarification(ctx, ["product_type"]):
+            yield event
+        return
+    filtered_products = [product for product in products if product.product_id not in avoided]
+    if filtered_products:
+        products = filtered_products
+    evidences_by_product = {product.product_id: await get_evidence(product) for product in products}
+    yield ctx.thinking("decision", "正在结合你的反馈生成最终建议...")
     decision_capture: CapturedStage[DecisionResult] = CapturedStage()
     async for event in _capture_stage_result(
         decision_capture,
-        run_timed_task_with_heartbeat(
+        run_with_heartbeat(
             ctx,
-            decision_task,
+            ctx.stages.run_decision(criteria, products, evidences_by_product),
             "decision",
-            "正在生成最终决策...",
+            "正在结合你的反馈生成最终建议...",
             timing_key="decision",
         ),
     ):
         yield event
     decision = decision_capture.require("decision")
-    _drop_completed_background_tasks(ctx)
 
-    yield _final_decision_event(ctx, criteria, products, decision)
-
-    await _persist_recommendation(ctx, body, criteria, retrieval)
+    yield _final_decision_event(ctx, criteria, products, decision, deck_id=deck_id)
+    await save_recommendation_turn(
+        ctx.session_id,
+        criteria,
+        [product.product_id for product in products],
+        deck_id=deck_id,
+        user_message=body.message,
+        ai_response=decision.summary,
+    )
     yield ctx.done()
 
 
@@ -349,11 +387,13 @@ async def _record_feedback_intent(ctx: StreamContext, intent: IntentResult, mess
     product_id = None
     if intent.target_product_id or message_refers_to_previous_product(message):
         product_id = await referenced_product_id(ctx.session_id, intent, message)
+    deck_id = await get_previous_deck_id(ctx.session_id)
     await record_feedback(
         ctx.session_id,
         action="not_interested" if product_id else "feedback",
         product_id=product_id,
         reason=reason,
+        deck_id=deck_id,
     )
     await record_audit_event(
         "feedback.created",
@@ -588,81 +628,7 @@ def _criteria_confirmation_event(ctx: StreamContext) -> TextDeltaEvent:
 
 
 def _should_continue_after_criteria(body: ChatStreamRequest) -> bool:
-    return "recommendation" in body.skip_stages or _is_continue_command(body.message)
-
-
-def _is_continue_command(message: str) -> bool:
-    text = message.strip().lower()
-    if any(
-        token in text
-        for token in (
-            "继续",
-            "可以",
-            "确认",
-            "没问题",
-            "开始推荐",
-            "推荐吧",
-            "go",
-            "ok",
-            "continue",
-        )
-    ):
-        return True
-    return _has_shopping_constraints(text)
-
-
-def _has_shopping_constraints(text: str) -> bool:
-    """Auto-continue when the message already specifies concrete product requirements."""
-    constraint_markers = (
-        "以内",
-        "以下",
-        "预算",
-        "元",
-        "块",
-        "推荐",
-        "想要",
-        "帮我",
-        "适合",
-        "油皮",
-        "干皮",
-        "敏感肌",
-        "混合",
-        "日常",
-        "洁面",
-        "防晒",
-        "洗面奶",
-        "面霜",
-        "精华",
-        "面膜",
-        "手机",
-        "耳机",
-        "电脑",
-        "平板",
-        "笔记本",
-        "跑鞋",
-        "篮球鞋",
-        "t恤",
-        "运动裤",
-        "瑜伽",
-        "茶饮",
-        "咖啡",
-        "零食",
-        "酸奶",
-        "方便",
-        # Follow-up / feedback cues
-        "不要",
-        "排除",
-        "去掉",
-        "刚才",
-        "第一个",
-        "第二个",
-        "换",
-    )
-    return any(marker in text for marker in constraint_markers)
-
-
-def _drop_completed_background_tasks(ctx: StreamContext) -> None:
-    ctx.background_tasks[:] = [timed_task for timed_task in ctx.background_tasks if not timed_task.task.done()]
+    return "recommendation" in body.skip_stages or body.auto_run
 
 
 def _final_decision_event(
@@ -670,6 +636,7 @@ def _final_decision_event(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     decision: DecisionResult,
+    deck_id: str | None = None,
 ) -> FinalDecisionEvent:
     alternatives = [
         AlternativePayload(product_id=p.product_id, name=p.name)
@@ -682,6 +649,7 @@ def _final_decision_event(
         seq=ctx.seq.next(),
         event_id=ctx.seq.event_id(),
         node_id=f"decision_{ctx.turn_id}",
+        deck_id=deck_id,
         created_at_ms=now_ms(),
         winner_product_id=decision.winner_product_id,
         summary=decision.summary,
@@ -712,6 +680,7 @@ async def _persist_recommendation(
         ctx.session_id,
         criteria,
         [product.product_id for product in products],
+        deck_id=ctx.deck_id,
         user_message=body.message,
     )
     await asyncio.gather(
@@ -743,6 +712,7 @@ async def _persist_recommendation(
 INTENT_HANDLERS: dict[str, IntentHandler] = {
     "recommend": handle_recommendation,
     "clarify": handle_recommendation,
+    "continue": handle_continue,
     "feedback": handle_recommendation,
     "view_cart": handle_view_cart,
     "add_to_cart": handle_add_to_cart,

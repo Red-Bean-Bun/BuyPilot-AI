@@ -25,7 +25,7 @@ async def test_pipeline_injects_multimodal_analysis_into_criteria(monkeypatch):
         event
         async for event in pipeline_module.chat_stream(
             "sess_multimodal",
-            ChatStreamRequest(message="这个适合日常喝吗？", image_url="/uploads/test.png"),
+            ChatStreamRequest(message="这个适合日常喝吗？", image_url="/uploads/test.png", auto_run=True),
         )
     ]
     tags = [event.event for event in events]
@@ -33,8 +33,8 @@ async def test_pipeline_injects_multimodal_analysis_into_criteria(monkeypatch):
 
     assert tags[0] == "thinking"
     assert events[0].stage == "analyzing_image"
-    assert criteria.category == "食品饮料"
-    assert "食品饮料" in criteria.chips
+    assert criteria.category == "食品生活"
+    assert "食品生活" in criteria.chips
     assert criteria.constraints.product_type == "茶饮"
     assert "无糖" in criteria.constraints.dietary
     products = [event.product for event in events if event.event == "product_card"]

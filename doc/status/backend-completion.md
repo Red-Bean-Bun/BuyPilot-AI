@@ -1,8 +1,8 @@
 # BuyPilot-AI 后端完成状态
 
-> 最后核实：2026-05-26
+> 最后核实：2026-05-28
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 核实命令：`uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过；`uv run ruff format --check src tests` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；smoke_live_rag 通过（1024 维 + pgvector + 真实 live provider）
+> 核实命令：2026-05-28 增量整改验证 `timeout 90s backend/.venv/bin/python -m pytest backend/tests/test_sse_events.py backend/tests/test_slot_checker.py backend/tests/test_pipeline.py backend/tests/test_contract_remediation.py -q`（28 passed）；`timeout 60s backend/.venv/bin/python -m ruff check backend/src backend/tests/test_pipeline.py backend/tests/test_slot_checker.py backend/tests/test_sse_events.py backend/tests/test_contract_remediation.py` 通过。历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过；`uv run ruff format --check src tests` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；smoke_live_rag 通过（1024 维 + pgvector + 真实 live provider）
 
 ---
 
@@ -11,14 +11,14 @@
 | # | 功能 | 状态 | PRD 章节 | 代码路径 | 备注 |
 |---|------|------|---------|---------|------|
 | 1 | SSE 流式对话端点 `/chat/stream` | ✅ 已完成 | 5.1, 5.2 | `api/chat.py` | StreamingResponse + format_sse，已验证可跑通；`ChatStreamRequest.message` 已加 `min_length=1, max_length=2000` 校验，空串/超长在请求层直接 422 |
-| 2 | SSE 事件协议（9 种事件类型） | ✅ 已完成 | 5.1 | `types/sse_events.py` | SSEEventBase + 9 个子类 + EventSeq + Constraints DSL，JSON Schema 已对齐 |
-| 3 | 意图识别（6 种意图） | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `services/llm_fallbacks.py` `stages/intent.py` | LLM primary + 关键词规则 fallback，含 `view_cart`/`add_to_cart`/`feedback`；`STRICT_RUNTIME=1` 下坏 JSON/无 provider 会显性失败 |
+| 2 | SSE 事件协议（9 种事件类型） | ✅ 已完成 | 5.1 | `types/sse_events.py` | SSEEventBase + 9 个子类 + EventSeq + Constraints DSL，JSON Schema 已对齐；2026-05-28 增加 `DoneEvent.finish_reason` 与 `CriteriaPayload.field_sources`，支持分阶段导购契约 |
+| 3 | 意图识别（7 种意图） | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `services/llm_fallbacks.py` `stages/intent.py` | LLM primary + 关键词规则 fallback，含 `continue`/`view_cart`/`add_to_cart`/`feedback`；`continue` 用于识别标准确认和候选后收敛；`STRICT_RUNTIME=1` 下坏 JSON/无 provider 会显性失败 |
 | 4 | 购买标准生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `stages/criteria.py` | LLM + 规则 fallback，含 `criteria_patch` 合并（列表约束如 ingredient_avoid/brand_avoid 累积去重）+ feedback 注入；strict 下不再静默兜底 |
 | 5 | 推荐解释生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `stages/recommendation.py` | LLM + 规则 fallback，流式 text_delta；strict 下要求有效 live 响应 |
 | 6 | 最终决策生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `stages/decision.py` | LLM + 规则 fallback，含 winner/why/not_for/alternatives；strict 下 winner/schema 不合法会失败 |
 | 7 | 数据入库（100 商品 × 1292 semantic chunk） | ✅ 已完成 | 3.5 | `services/product_ingest.py` `services/chunking.py` `scripts/reindex_embeddings.py` | seed 已按 profile/marketing/faq/review/warning/compare 语义 chunk 入库，并在 product_metadata 写入 `knowledge_package`；Postgres reindex 已通过；旧派生表清理必须显式传 `--drop-derived-tables` |
 | 8 | API 端点注册 | ✅ 已完成 | 5.2 | `api/app.py` | 7 个 router 已注册（chat/cancel/feedback/upload/cart/admin_eval/observability），upload 支持 multipart 图片上传；cancel 已接本进程 token + DB cancel request |
-| 9 | 管道编排 | ✅ 已完成 | 4.1 | `runtime/pipeline.py` `runtime/handlers.py` `runtime/streaming.py` | pipeline 只负责 turn 生命周期、图片/意图前置和 handler 路由；检索完成后立即发 product_card，推荐文案与最终决策后台并行，阶段耗时写入 retrieval trace |
+| 9 | 管道编排 | ✅ 已完成 | 4.1 | `runtime/pipeline.py` `runtime/handlers.py` `runtime/streaming.py` | pipeline 只负责 turn 生命周期、图片/意图前置和 handler 路由；2026-05-28 已改为 `criteria_card -> awaiting_criteria_confirmation`、`product_card* -> awaiting_product_feedback`、`final_decision -> completed` 三段式链路 |
 | 10 | 混合检索（硬过滤 + pgvector/SQLite 向量召回 + Rerank） | ✅ 已完成 | 4.2 | `services/retriever.py` `repos/documents.py` | PostgreSQL 下使用 pgvector `<=>` 库内 top-k + HNSW index，SQLite 下保留 JSON embedding + Python 余弦 fallback；`retrieval_role=risk` 的负评/风险 chunk 不进入主召回；硬过滤涵盖 category/budget/brand_avoid/origin_avoid/product_type/ingredient_avoid |
 
 ## P1：效果与可靠性（评审权重 20%）+ 加分项启动（20%）
@@ -30,8 +30,8 @@
 | 13 | Rerank 服务 | ✅ 已完成 | 2 | `services/reranker.py` | qwen3-rerank 接入，API 失败时 deterministic rerank；strict 下禁用 deterministic rerank |
 | 14 | 证据绑定 | ⚠️ 部分完成 | 4.2 | `services/evidence.py` `repos/documents.py` `services/llm_task_payloads.py` | product_card 带 evidence；DB/pgvector chunk 命中时 source_id 可关联真实 chunk；recommendation/decision LLM prompt 已注入 evidence snippets（`_format_evidence_context`）；fallback source_id 不可关联 `product_chunks` |
 | 15 | 检索追踪 + 证据链接 | ✅ 已完成 | 6.1 | `repos/traces.py` `services/fallbacks.py` | retrieval_traces + evidence_links 写入 SQLite，filters_applied 内记录 intent/criteria/retrieve/recommendation/decision 阶段耗时和 `_fallbacks` 降级事件 |
-| 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids 已持久化到 Conversations 表；澄清轮次现在保存完整 CriteriaPayload（`_intent_to_partial_criteria` 复用 `_constraint_chips` 覆盖所有约束维度），后续轮次通过 `get_conversation_summary`/`get_previous_criteria` 自动恢复上下文；完整消息历史尚未用于 LLM |
-| 17 | 反馈闭环 | ✅ 已完成 | 7 | `services/feedback.py` `repos/feedbacks.py` `services/retriever.py` | Feedbacks 表已持久化，avoid_products/avoid_traits 已进入 retrieval 硬过滤；反馈否定词/品牌规避词已集中到 `domain_terms.py`；内存兜底默认关闭；覆盖“不喜欢这个/除了耐克/不要含酒精” |
+| 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids/deck_id 已持久化到 Conversations 表；澄清/继续轮会合并上一轮 criteria，避免短回答或“继续”丢槽位；完整消息历史尚未用于 LLM |
+| 17 | 反馈闭环 | ✅ 已完成 | 7 | `services/feedback.py` `repos/feedbacks.py` `services/retriever.py` | Feedbacks 表已持久化，avoid_products/avoid_traits 已进入 retrieval 硬过滤；2026-05-28 增加 `deck_id` 绑定，候选后最终决策会读取当前 deck 反馈并排除不喜欢商品 |
 | 18 | 反选排除（⭐⭐） | ✅ 已完成 | — | `stages/criteria.py` | criteria_patch + ingredient_avoid + DB 会话恢复已覆盖 Demo 3 |
 | 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；JSON legacy mock 已移除，非 multipart 请求返回 415 |
 | 20 | 对话式加购（⭐入门） | ✅ 已完成 | — | `services/cart.py` `repos/cart_items.py` `api/cart.py` `runtime/handlers.py` | add/view/remove/update 已持久化到 cart_items 表并覆盖 Demo 4；内存兜底为显式 dev adapter（默认关闭）；无可指代商品时发 ClarificationEvent 而非静默兜底；quantity=0 在 intent 解析层视为无效输入（返回 default），不走 repo 层隐式删除；product_id 不存在时返回 status=failed |

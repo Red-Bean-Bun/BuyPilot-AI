@@ -66,6 +66,22 @@ MOCK_ALLOWED_INTERNAL = {
     "src.runtime.pipeline.run_decision",
     "src.runtime.pipeline.run_multimodal",
     "src.runtime.pipeline.HEARTBEAT_INTERVAL_SECONDS",
+    "src.runtime.pipeline.register_chat_turn",
+    "src.runtime.pipeline.clear_chat_turn",
+    "src.runtime.pipeline.record_audit_event",
+    "src.runtime.pipeline.get_previous_criteria",
+    "src.runtime.pipeline.maybe_intercept_budget_patch",
+    "src.runtime.handlers.record_audit_event",
+    "src.runtime.handlers.record_retrieval_trace",
+    "src.runtime.handlers.record_evidence_links",
+    "src.runtime.handlers.save_recommendation_turn",
+    "src.runtime.handlers.get_previous_criteria",
+    "src.runtime.handlers.get_previous_product_ids",
+    "src.runtime.handlers.get_previous_deck_id",
+    "src.runtime.handlers.get_feedback_context",
+    "src.runtime.handlers.get_evidence",
+    "src.runtime.handlers.get_product",
+    "src.runtime.streaming.is_chat_turn_cancellation_requested",
 }
 
 _MODULE_MAP = {
@@ -74,6 +90,8 @@ _MODULE_MAP = {
     "embedding": "src.services.embedding",
     "reranker": "src.services.reranker",
     "pipeline_module": "src.runtime.pipeline",
+    "handlers_module": "src.runtime.handlers",
+    "streaming_module": "src.runtime.streaming",
     "retriever": "src.services.retriever",
 }
 

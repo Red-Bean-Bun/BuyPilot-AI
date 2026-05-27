@@ -18,6 +18,7 @@ from src.config.domain_terms import (
     extract_skin_types,
     extract_terms,
     has_negation_prefix,
+    normalize_category,
 )
 from src.config.settings import get_settings
 from src.types.sse_events import ProductPayload
@@ -95,13 +96,14 @@ def evidence_snippet(product_id: str, max_chars: int = 180) -> str | None:
 
 def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
     text = build_product_text(raw)
+    source_category = str(raw.get("category") or "")
     return ProductPayload(
         product_id=str(raw["product_id"]),
         name=str(raw["title"]),
         price=float(raw["base_price"]) if raw.get("base_price") is not None else None,
         currency="CNY",
         image_url=public_product_image_url(raw.get("image_path")),
-        category=str(raw.get("category") or ""),
+        category=normalize_category(source_category) or source_category,
         sub_category=raw.get("sub_category"),
         brand=raw.get("brand"),
         skin_type_match=_extract_skin_types(text),

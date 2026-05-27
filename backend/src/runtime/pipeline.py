@@ -17,22 +17,24 @@ from src.runtime.message_rules import (
     maybe_intercept_budget_patch,
     message_with_image_context,
 )
-from src.runtime.stages.criteria import _constraint_chips, run_criteria
+from src.runtime.stages.criteria import _constraint_chips, criteria_quick_actions, run_criteria
 from src.runtime.stages.decision import run_decision
 from src.runtime.stages.intent import run_intent
 from src.runtime.stages.multimodal import run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
+from src.config.domain_terms import KNOWN_CATEGORIES, is_supported_product_type
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
-from src.services.conversation_state import save_recommendation_turn
+from src.services.conversation_state import get_previous_criteria, save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
     Constraints,
     CriteriaPayload,
+    CriteriaCardEvent,
     ErrorEvent,
     EventSeq,
     EvidencePayload,
@@ -134,7 +136,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
             resource_id=turn_id,
             metadata={"stage_timings_ms": ctx.stage_timings_ms},
         )
-        yield ctx.done()
+        yield ctx.done("cancelled")
     except Exception as exc:
         cancel_background_tasks(ctx.background_tasks)
         logger.exception("chat_stream failed: session_id=%s turn_id=%s", session_id, turn_id)
@@ -158,7 +160,7 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
             message=f"{PUBLIC_PIPELINE_ERROR_MESSAGE} trace_id={turn_id}",
             retryable=True,
         )
-        yield ctx.done()
+        yield ctx.done("error")
     finally:
         guard.detach()
         await clear_chat_turn(session_id, turn_id)
@@ -188,6 +190,12 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
             yield item
     if resolved is None:
         raise RuntimeError("intent stage completed without a result.")
+    resolved = await _merge_followup_context(ctx.session_id, resolved)
+
+    if _unsupported_product_type(resolved.intent):
+        async for event in _emit_unsupported_product_type(ctx, resolved.intent):
+            yield event
+        return
 
     missing_slots = _missing_slots(resolved.body, resolved.intent)
     if missing_slots:
@@ -257,9 +265,11 @@ def _missing_slots(pipeline_body: ChatStreamRequest, intent: IntentResult) -> li
 async def _emit_clarification(
     ctx: StreamContext, pipeline_body: ChatStreamRequest, intent: IntentResult, missing_slots: list[str]
 ) -> AsyncGenerator[SSEEventBase, None]:
+    partial = _intent_to_partial_criteria(intent, pipeline_body.message)
+    if _should_emit_partial_criteria(missing_slots, partial):
+        yield _partial_criteria_card_event(ctx, partial)
     async for event in handle_clarification(ctx, missing_slots):
         yield event
-    partial = _intent_to_partial_criteria(intent, pipeline_body.message)
     await save_recommendation_turn(ctx.session_id, partial, [], user_message=pipeline_body.message)
 
 
@@ -274,6 +284,82 @@ async def _dispatch_intent_handler(
         return
     async for event in handler(ctx, pipeline_body, intent):
         yield event
+
+
+async def _merge_followup_context(session_id: str, resolved: _ResolvedIntent) -> _ResolvedIntent:
+    intent = resolved.intent
+    if not _should_merge_previous_context(intent):
+        return resolved
+    previous = await get_previous_criteria(session_id)
+    if previous is None:
+        return resolved
+    constraints = dict(intent.extracted_constraints or {})
+    for key, value in previous.constraints.model_dump().items():
+        if key not in constraints and _has_context_value(value):
+            constraints[key] = value
+    category = intent.category or previous.category or None
+    return _ResolvedIntent(
+        body=resolved.body,
+        intent=intent.model_copy(update={"category": category, "extracted_constraints": constraints}),
+    )
+
+
+def _should_merge_previous_context(intent: IntentResult) -> bool:
+    if intent.intent in {"clarify", "continue"}:
+        return True
+    if intent.intent != "recommend" or intent.category:
+        return False
+    return any(_has_context_value(value) for value in (intent.extracted_constraints or {}).values())
+
+
+def _unsupported_product_type(intent: IntentResult) -> bool:
+    if intent.intent not in {"recommend", "clarify"}:
+        return False
+    if intent.category and intent.category not in KNOWN_CATEGORIES:
+        return True
+    product_type = (intent.extracted_constraints or {}).get("product_type")
+    return bool(product_type and not is_supported_product_type(str(product_type)))
+
+
+def _should_emit_partial_criteria(missing_slots: list[str], criteria: CriteriaPayload) -> bool:
+    return "category" not in missing_slots and bool(criteria.category)
+
+
+def _partial_criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> CriteriaCardEvent:
+    return CriteriaCardEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"criteria_{criteria.criteria_id}",
+        created_at_ms=now_ms(),
+        criteria=criteria,
+        quick_actions=criteria_quick_actions(),
+    )
+
+
+async def _emit_unsupported_product_type(ctx: StreamContext, intent: IntentResult) -> AsyncGenerator[SSEEventBase, None]:
+    product_type = (intent.extracted_constraints or {}).get("product_type") or intent.category or "这类商品"
+    yield TextDeltaEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"unsupported_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        message_id=f"unsupported_{ctx.turn_id}",
+        delta=f"当前商品库暂不覆盖{product_type}，我不能基于现有数据给出可靠推荐。",
+        done=True,
+    )
+    yield ctx.done()
+
+
+def _has_context_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, list | tuple | set | dict):
+        return bool(value)
+    return True
 
 
 def _current_stages() -> PipelineStages:
@@ -327,4 +413,8 @@ def _intent_to_partial_criteria(intent: IntentResult, message: str) -> CriteriaP
         summary="，".join(chips) if chips else "",
         chips=chips,
         constraints=constraints,
+        field_sources={
+            **({"category": "user"} if category else {}),
+            **{f"constraints.{key}": "user" for key in constraint_kwargs},
+        },
     )

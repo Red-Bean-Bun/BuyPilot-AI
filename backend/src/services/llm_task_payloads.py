@@ -8,14 +8,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.config.domain_terms import normalize_product_type
+from src.config.domain_terms import infer_category_from_product_type, normalize_category, normalize_product_type
 from src.services.prompts import get_prompt_store
 from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload, ReasonAtomPayload
 
 INTENT_SYSTEM_SCHEMA = (
     "你是电商导购意图识别器。只输出 JSON，字段为 intent、confidence、category、"
     "extracted_constraints、soft_preferences、target_product_id。intent 只能是 "
-    "recommend/clarify/feedback/add_to_cart/remove_from_cart/update_cart_quantity/view_cart/chitchat。"
+    "recommend/clarify/continue/feedback/add_to_cart/remove_from_cart/update_cart_quantity/view_cart/chitchat。"
 )
 
 CRITERIA_SYSTEM_SCHEMA = (
@@ -249,12 +249,18 @@ def normalize_intent_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized.get("is_shopping_related"),
     )
     normalized["confidence"] = _normalize_confidence(normalized.get("confidence"))
-    normalized["category"] = _normalize_nullable_string(normalized.get("category"))
+    normalized["category"] = normalize_category(normalized.get("category"))
 
     constraints = normalized.get("extracted_constraints")
     if constraints is None and isinstance(normalized.get("constraints"), dict):
         constraints = normalized["constraints"]
-    normalized["extracted_constraints"] = constraints if isinstance(constraints, dict) else {}
+    normalized["extracted_constraints"] = _normalize_intent_constraints(
+        constraints if isinstance(constraints, dict) else {}
+    )
+    if not normalized["category"]:
+        normalized["category"] = infer_category_from_product_type(
+            normalized["extracted_constraints"].get("product_type")
+        )
 
     preferences = normalized.get("soft_preferences")
     if preferences is None and isinstance(normalized.get("user_intent_summary"), str):
@@ -281,6 +287,10 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "clarify": "clarify",
             "unclear": "clarify",
             "question": "clarify",
+            "continue": "continue",
+            "confirm": "continue",
+            "confirmed": "continue",
+            "proceed": "continue",
             "add_to_cart": "add_to_cart",
             "add_cart": "add_to_cart",
             "cart_add": "add_to_cart",
@@ -307,6 +317,12 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "对比": "recommend",
             "澄清": "clarify",
             "追问": "clarify",
+            "继续": "continue",
+            "确认": "continue",
+            "没问题": "continue",
+            "可以": "continue",
+            "开始推荐": "continue",
+            "收敛": "continue",
             "加购": "add_to_cart",
             "加入购物车": "add_to_cart",
             "移出购物车": "remove_from_cart",
@@ -405,7 +421,11 @@ def criteria_from_live_payload(
             **raw_constraints,
             "product_type": normalize_product_type(_normalize_nullable_string(raw_constraints.get("product_type"))),
         }
-    category = _normalize_category(payload.get("category")) or base.category
+    category = (
+        normalize_category(payload.get("category"))
+        or infer_category_from_product_type(raw_constraints.get("product_type"))
+        or base.category
+    )
     if not category:
         return None
     try:
@@ -433,11 +453,13 @@ def criteria_from_live_payload(
     return criteria
 
 
-def _normalize_category(value: Any) -> str | None:
-    category = _normalize_nullable_string(value)
-    if category == "食品生活":
-        return "食品饮料"
-    return category
+def _normalize_intent_constraints(constraints: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(constraints)
+    if "product_type" in normalized:
+        normalized["product_type"] = normalize_product_type(
+            _normalize_nullable_string(normalized.get("product_type"))
+        )
+    return normalized
 
 
 def _format_evidence_context(evidence_by_product: dict[str, list[EvidencePayload]]) -> str:

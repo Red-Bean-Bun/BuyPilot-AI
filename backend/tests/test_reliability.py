@@ -186,10 +186,14 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, seed
     async def mock_intent_round2(_session_id, _body):
         from src.types.schemas import IntentResult
 
-        return IntentResult(intent="recommend", category="运动鞋", extracted_constraints={"budget_max": 500, "product_type": "跑步鞋"})
+        return IntentResult(
+            intent="recommend",
+            category="服饰运动",
+            extracted_constraints={"budget_max": 500, "product_type": "跑步鞋"},
+        )
 
     async def fake_criteria(_session_id, _body, _intent):
-        return CriteriaPayload(criteria_id="c_test", category="运动鞋", summary="测试")
+        return CriteriaPayload(criteria_id="c_test", category="服饰运动", summary="测试")
 
     async def fake_retrieval(criteria, feedback=None):
         product = ProductPayload(product_id="p_shoe_001", name="测试跑鞋", category="服饰运动", price=300, brand="安踏")
@@ -221,7 +225,7 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, seed
 
     # Round 2: intent with budget, should proceed through recommendation
     monkeypatch.setattr(pipeline_module, "run_intent", mock_intent_round2)
-    events2 = [e async for e in chat_stream("sess_multi", ChatStreamRequest(message="预算500以内"))]
+    events2 = [e async for e in chat_stream("sess_multi", ChatStreamRequest(message="预算500以内", auto_run=True))]
     tags2 = [e.event for e in events2]
     assert "product_card" in tags2, f"Expected product_card, got: {tags2}"
 

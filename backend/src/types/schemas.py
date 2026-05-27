@@ -24,6 +24,7 @@ class ChatStreamRequest(BaseModel):
     image_url: str | None = None
     criteria_patch: dict[str, Any] | None = None
     skip_stages: list[str] = Field(default_factory=list)
+    auto_run: bool = False
     client_turn_id: str | None = None
     client_trace_id: str | None = None
 
@@ -50,6 +51,7 @@ class ImageUploadResponse(BaseModel):
 
 class FeedbackRequest(BaseModel):
     session_id: str
+    deck_id: str | None = None
     feedback_type: str | None = None
     action: str | None = None
     product_id: str | None = None
@@ -86,6 +88,7 @@ class IntentResult(BaseModel):
     intent: Literal[
         "recommend",
         "clarify",
+        "continue",
         "feedback",
         "add_to_cart",
         "remove_from_cart",

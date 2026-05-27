@@ -98,12 +98,12 @@
     "ground_truth": {
       "intent_type": "recommend",
       "constraints": {
-        "category": "食品饮料",
+        "category": "食品生活",
         "use_case": "送礼",
         "must_have_features": ["坚果"]
       },
       "relevant_product_ids": ["p_food_009", "p_food_019"],
-      "expected_criteria_chips": ["食品饮料", "送礼", "坚果"],
+      "expected_criteria_chips": ["食品生活", "送礼", "坚果"],
       "forbidden_in_answer": []
     }
   },
@@ -116,11 +116,11 @@
     "ground_truth": {
       "intent_type": "recommend",
       "constraints": {
-        "category": "食品饮料",
+        "category": "食品生活",
         "must_have_features": ["无糖", "茶"]
       },
       "relevant_product_ids": ["p_food_003", "p_food_014"],
-      "expected_criteria_chips": ["食品饮料", "无糖", "茶"],
+      "expected_criteria_chips": ["食品生活", "无糖", "茶"],
       "forbidden_in_answer": []
     }
   },
@@ -133,7 +133,7 @@
     "ground_truth": {
       "intent_type": "recommend",
       "constraints": {
-        "category": "食品饮料"
+        "category": "食品生活"
       },
       "relevant_product_ids": [],
       "expected_criteria_chips": [],
@@ -167,11 +167,11 @@
     "ground_truth": {
       "intent_type": "recommend",
       "constraints": {
-        "category": "食品饮料",
+        "category": "食品生活",
         "use_case": "运动"
       },
       "relevant_product_ids": ["p_food_005", "p_food_006"],
-      "expected_criteria_chips": ["食品饮料", "运动", "功能饮料"],
+      "expected_criteria_chips": ["食品生活", "运动", "功能饮料"],
       "forbidden_in_answer": []
     }
   },

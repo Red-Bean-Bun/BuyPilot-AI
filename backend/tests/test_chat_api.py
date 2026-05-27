@@ -65,9 +65,10 @@ class TestChatStreamEndpoint:
         assert "thinking" in tags
         assert "criteria_card" in tags
         assert "text_delta" in tags
-        assert "product_card" in tags
-        assert "final_decision" in tags
         assert "done" in tags
+        assert "product_card" not in tags
+        assert "final_decision" not in tags
+        assert events[-1][1]["finish_reason"] == "awaiting_criteria_confirmation"
 
     @pytest.mark.asyncio
     async def test_product_card_has_required_fields(self, test_client):
@@ -75,7 +76,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤", "auto_run": True},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -95,7 +96,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤", "auto_run": True},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -104,15 +105,13 @@ class TestChatStreamEndpoint:
         first_criteria = tags.index("criteria_card")
         first_text_delta = tags.index("text_delta")
         first_product = tags.index("product_card")
-        first_decision = tags.index("final_decision")
         first_done = tags.index("done")
 
-        assert first_thinking < first_criteria
+        assert first_thinking < first_text_delta
+        assert first_text_delta < first_criteria
         assert first_criteria < first_product
-        assert first_product < first_text_delta
-        assert first_product < first_decision
-        assert first_text_delta < first_decision
-        assert first_decision < first_done
+        assert first_product < first_done
+        assert "final_decision" not in tags
 
     @pytest.mark.asyncio
     async def test_text_delta_done_marker(self, test_client):
@@ -133,7 +132,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶"},
+                json={"message": "推荐适合油皮的洗面奶", "auto_run": True},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -147,7 +146,17 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
+                json={
+                    "message": "推荐适合油皮的洗面奶，200元以内，日常护肤",
+                    "session_id": "sess_chat_api_decision",
+                    "auto_run": True,
+                },
+            ) as resp:
+                await collect_sse_stream(resp)
+            async with c.stream(
+                "POST",
+                "/chat/stream",
+                json={"message": "继续", "session_id": "sess_chat_api_decision"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 

@@ -10,6 +10,7 @@ from sqlalchemy import delete, func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from src.config.domain_terms import normalize_category
 from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import Product, ProductChunk
 from src.repos.products import list_raw_products
@@ -42,18 +43,20 @@ async def seed_products(
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         for raw in products:
             product_id = str(raw["product_id"])
+            source_category = str(raw.get("category") or "")
             knowledge_package = build_product_knowledge_package(raw)
             await session.exec(delete(ProductChunk).where(ProductChunk.product_id == product_id))
             await session.merge(
                 Product(
                     id=product_id,
                     name=str(raw["title"]),
-                    category=str(raw.get("category") or ""),
+                    category=normalize_category(source_category) or source_category,
                     sub_category=raw.get("sub_category"),
                     price=float(raw["base_price"]) if raw.get("base_price") is not None else None,
                     brand=raw.get("brand"),
                     image_urls=[str(raw.get("image_path") or "")],
                     product_metadata={
+                        "source_category": source_category,
                         "source_file": raw.get("_source_file"),
                         "skus": raw.get("skus") or [],
                         "rag_knowledge": raw.get("rag_knowledge") or {},

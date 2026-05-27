@@ -18,9 +18,10 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
         return apply_criteria_patch(existing or CriteriaPayload(criteria_id="c_auto_001"), body.criteria_patch)
     feedback = await get_feedback_context(session_id)
     ctx_summary = await get_conversation_summary(session_id)
-    return await generate_criteria(
+    criteria = await generate_criteria(
         body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
     )
+    return annotate_criteria_sources(criteria, intent, existing)
 
 
 _MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "origin_avoid", "dietary"}
@@ -40,7 +41,83 @@ def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> Cr
         chips.insert(0, criteria.category)
     chips.extend(_constraint_chips(constraints))
 
-    return criteria.model_copy(update={"constraints": constraints, "chips": chips, "summary": "，".join(chips)})
+    field_sources = dict(criteria.field_sources)
+    for key in updates:
+        field_sources[f"constraints.{key}"] = "user"
+    return criteria.model_copy(
+        update={"constraints": constraints, "chips": chips, "summary": "，".join(chips), "field_sources": field_sources}
+    )
+
+
+def annotate_criteria_sources(
+    criteria: CriteriaPayload,
+    intent: IntentResult,
+    existing: CriteriaPayload | None,
+) -> CriteriaPayload:
+    explicit_fields = _explicit_source_fields(intent)
+    history_fields = _history_source_fields(criteria, existing)
+    field_sources: dict[str, str] = {}
+    if criteria.category:
+        field_sources["category"] = "user" if "category" in explicit_fields else "history" if "category" in history_fields else "inferred"
+
+    constraints_update: dict[str, Any] = {}
+    for key in Constraints.model_fields:
+        field = f"constraints.{key}"
+        value = getattr(criteria.constraints, key)
+        if not _has_value(value):
+            continue
+        if field in explicit_fields:
+            field_sources[field] = "user"
+            continue
+        if field in history_fields:
+            field_sources[field] = "history"
+            continue
+        if key in _HARD_CONSTRAINT_FIELDS:
+            constraints_update[key] = [] if isinstance(value, list) else None
+            continue
+        field_sources[field] = "inferred"
+
+    if constraints_update:
+        constraints = criteria.constraints.model_copy(update=constraints_update)
+        criteria = criteria.model_copy(update={"constraints": constraints})
+    chips = [criteria.category] if criteria.category else []
+    chips.extend(_constraint_chips(criteria.constraints))
+    return criteria.model_copy(update={"field_sources": field_sources, "chips": chips, "summary": "，".join(chips)})
+
+
+_HARD_CONSTRAINT_FIELDS = {"budget_min", "budget_max", "brand_avoid", "origin_avoid", "ingredient_avoid"}
+
+
+def _explicit_source_fields(intent: IntentResult) -> set[str]:
+    fields: set[str] = set()
+    if intent.category:
+        fields.add("category")
+    for key, value in (intent.extracted_constraints or {}).items():
+        if key in Constraints.model_fields and _has_value(value):
+            fields.add(f"constraints.{key}")
+    return fields
+
+
+def _history_source_fields(criteria: CriteriaPayload, existing: CriteriaPayload | None) -> set[str]:
+    if existing is None:
+        return set()
+    fields: set[str] = set()
+    if criteria.category and criteria.category == existing.category:
+        fields.add("category")
+    for key in Constraints.model_fields:
+        value = getattr(criteria.constraints, key)
+        old_value = getattr(existing.constraints, key)
+        if _has_value(value) and value == old_value:
+            fields.add(f"constraints.{key}")
+    return fields
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, list | tuple | set | dict):
+        return bool(value)
+    return True
 
 
 def _constraint_chips(constraints: Constraints) -> list[str]:

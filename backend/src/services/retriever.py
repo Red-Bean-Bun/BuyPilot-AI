@@ -7,7 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from src.config.domain_terms import avoid_trait_matches_text, normalize_product_type, product_type_aliases
+from src.config.domain_terms import (
+    avoid_trait_matches_text,
+    normalize_category,
+    normalize_product_type,
+    product_type_aliases,
+)
 from src.config.tuning import (
     FILTER_SCORE_BUDGET,
     FILTER_SCORE_CATEGORY,
@@ -365,7 +370,9 @@ def _passes_feedback_product_filter(
 
 def _passes_category_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
     del filters
-    return not criteria.category or product.category == criteria.category
+    criteria_category = normalize_category(criteria.category)
+    product_category = normalize_category(product.category)
+    return not criteria_category or product_category == criteria_category
 
 
 def _passes_budget_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:

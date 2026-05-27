@@ -80,6 +80,7 @@ async def test_chat_turn_audit_can_be_queried_by_observability_api(test_client, 
                 "session_id": "sess_chat_obs",
                 "client_turn_id": "turn_chat_obs",
                 "client_trace_id": "trace_chat_obs",
+                "auto_run": True,
             },
         ) as response:
             assert response.status_code == 200

@@ -61,7 +61,14 @@
         "category": { "type": "string" },
         "summary": { "type": "string" },
         "chips": { "type": "array", "items": { "type": "string" } },
-        "constraints": { "$ref": "#/$defs/constraints" }
+        "constraints": { "$ref": "#/$defs/constraints" },
+        "field_sources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["user", "inferred", "history"]
+          }
+        }
       },
       "required": ["criteria_id", "category"]
     },
@@ -248,9 +255,13 @@
           "type": "object",
           "properties": {
             "event": { "const": "done" },
-            "display_mode": { "const": "none" }
+            "display_mode": { "const": "none" },
+            "finish_reason": {
+              "type": "string",
+              "enum": ["awaiting_criteria_confirmation", "awaiting_product_feedback", "completed", "cancelled", "error"]
+            }
           },
-          "required": ["event"]
+          "required": ["event", "finish_reason"]
         }
       ]
     },

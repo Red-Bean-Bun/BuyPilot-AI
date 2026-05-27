@@ -7,6 +7,14 @@ from typing import Any, Literal, Union
 from pydantic import BaseModel, Field
 
 SCHEMA_VERSION = "2026-05-20"
+CriteriaFieldSource = Literal["user", "inferred", "history"]
+DoneFinishReason = Literal[
+    "awaiting_criteria_confirmation",
+    "awaiting_product_feedback",
+    "completed",
+    "cancelled",
+    "error",
+]
 
 DisplayMode = Literal[
     "inline_thinking",
@@ -71,7 +79,7 @@ class Constraints(BaseModel):
     # 服饰运动专属
     sport_type: str | None = None
     season: str | None = None
-    # 食品饮料专属
+    # 食品生活专属
     dietary: list[str] = Field(default_factory=list)
 
 
@@ -81,6 +89,7 @@ class CriteriaPayload(BaseModel):
     summary: str = ""
     chips: list[str] = Field(default_factory=list)
     constraints: Constraints = Field(default_factory=Constraints)
+    field_sources: dict[str, CriteriaFieldSource] = Field(default_factory=dict)
 
 
 class ProductPayload(BaseModel):
@@ -191,6 +200,7 @@ class FinalDecisionEvent(SSEEventBase):
 class DoneEvent(SSEEventBase):
     event: Literal["done"] = "done"
     display_mode: DisplayMode = "none"
+    finish_reason: DoneFinishReason = "completed"
 
 
 class ErrorEvent(SSEEventBase):

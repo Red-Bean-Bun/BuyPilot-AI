@@ -5,4 +5,4 @@ event: clarification
 data: {"schema_version": "2026-05-20", "event": "clarification", "session_id": "demo_clarify_001", "turn_id": "turn_demo_clarify", "seq": 2, "event_id": "demo_clarify_001:2", "node_id": "clarification_clarify_001", "display_mode": "inline_card", "question": "请告诉我你的肤质类型和预算范围？", "required_slots": ["skin_type", "budget_max"], "suggested_options": ["油性", "干性", "混合", "敏感"]}
 
 event: done
-data: {"schema_version": "2026-05-20", "event": "done", "session_id": "demo_clarify_001", "turn_id": "turn_demo_clarify", "seq": 3, "event_id": "demo_clarify_001:3", "node_id": "done_clarify_001", "display_mode": "none"}
+data: {"schema_version": "2026-05-20", "event": "done", "session_id": "demo_clarify_001", "turn_id": "turn_demo_clarify", "seq": 3, "event_id": "demo_clarify_001:3", "node_id": "done_clarify_001", "display_mode": "none", "finish_reason": "completed"}

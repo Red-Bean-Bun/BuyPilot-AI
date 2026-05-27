@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.config.domain_terms import normalize_category
 from src.types.sse_events import CriteriaPayload, ProductPayload
 
 
@@ -50,7 +51,7 @@ def product_match_score(
     scenario_weight: float = 0.0,
 ) -> float:
     score = 0.0
-    if product.category == criteria.category:
+    if normalize_category(product.category) == normalize_category(criteria.category):
         score += category_weight
     if criteria.constraints.skin_type and criteria.constraints.skin_type in product.skin_type_match:
         score += skin_type_weight

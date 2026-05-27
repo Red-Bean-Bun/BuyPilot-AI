@@ -18,6 +18,7 @@ async def save_turn(
     criteria: CriteriaPayload | None,
     product_ids: list[str],
     message_id: str | None = None,
+    deck_id: str | None = None,
     user_message: str = "",
     ai_response: str | None = None,
 ) -> str | None:
@@ -25,6 +26,7 @@ async def save_turn(
     row = Conversation(
         session_id=session_id,
         message_id=message_id or f"msg_{uuid.uuid4().hex[:8]}",
+        deck_id=deck_id,
         user_message=user_message,
         criteria_json=criteria.model_dump(mode="json") if criteria is not None else None,
         ai_response=ai_response,
@@ -96,3 +98,18 @@ async def get_last_product_ids(session_id: str) -> list[str]:
             )
         ).first()
     return list(row.product_ids) if row else []
+
+
+async def get_last_deck_id(session_id: str) -> str | None:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        row = (
+            await session.exec(
+                select(Conversation)
+                .where(Conversation.session_id == session_id)
+                .where(Conversation.deck_id.is_not(None))
+                .order_by(Conversation.created_at.desc())
+                .limit(1)
+            )
+        ).first()
+    return row.deck_id if row else None

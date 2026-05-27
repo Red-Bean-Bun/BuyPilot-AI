@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.repos.conversations import get_last_criteria, get_last_product_ids, list_recent_turns, save_turn
+from src.repos.conversations import get_last_criteria, get_last_deck_id, get_last_product_ids, list_recent_turns, save_turn
 from src.types.sse_events import CriteriaPayload
 
 
@@ -11,6 +11,7 @@ async def save_recommendation_turn(
     criteria: CriteriaPayload | None,
     product_ids: list[str],
     message_id: str | None = None,
+    deck_id: str | None = None,
     user_message: str = "",
     ai_response: str | None = None,
 ) -> str | None:
@@ -19,6 +20,7 @@ async def save_recommendation_turn(
         criteria,
         product_ids,
         message_id=message_id,
+        deck_id=deck_id,
         user_message=user_message,
         ai_response=ai_response,
     )
@@ -30,6 +32,10 @@ async def get_previous_criteria(session_id: str) -> CriteriaPayload | None:
 
 async def get_previous_product_ids(session_id: str) -> list[str]:
     return await get_last_product_ids(session_id)
+
+
+async def get_previous_deck_id(session_id: str) -> str | None:
+    return await get_last_deck_id(session_id)
 
 
 async def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
