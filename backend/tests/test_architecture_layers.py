@@ -62,6 +62,7 @@ MOCK_ALLOWED_INTERNAL = {
     "src.runtime.pipeline.run_intent",
     "src.runtime.pipeline.run_retrieval",
     "src.runtime.pipeline.run_recommendation_text",
+    "src.runtime.pipeline.run_recommendation_text_stream",
     "src.runtime.pipeline.run_decision",
     "src.runtime.pipeline.run_multimodal",
     "src.runtime.pipeline.HEARTBEAT_INTERVAL_SECONDS",
@@ -78,6 +79,7 @@ _MODULE_MAP = {
 
 _MOCK_KNOWN_VIOLATIONS = {
     "tests/conftest.py::mock_external_ai -> src.services.llm_gateway._chat_completion",
+    "tests/conftest.py::mock_external_ai -> src.services.llm_gateway._chat_completion_stream",
     "tests/conftest.py::mock_external_ai -> src.services.embedding._embedding_request",
     "tests/conftest.py::mock_external_ai -> src.services.reranker._rerank_request",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_vector_chunks_by_similarity",

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -53,6 +55,10 @@ T = TypeVar("T")
 CRITERIA_CONFIRMATION_PROMPT = "你可以先确认或修改这些标准。没问题的话回复「继续」，我再开始推荐。"
 CLARIFICATION_ANALYSIS_TEXT = "我先看了一下你的需求，已经能判断大方向，但还缺一个会影响推荐标准的关键信息。补齐后再生成购买标准会更稳。"
 CRITERIA_ANALYSIS_TEXT = "我先把你的需求拆成可执行的购买标准，包含品类、预算、适用对象、使用场景和排除项。你可以先确认这版标准。"
+RECOMMENDATION_STREAM_FALLBACK_TEXT = "我先把匹配商品列出来，方便你快速比较。"
+RECOMMENDATION_STREAM_MIN_CHARS = 3
+RECOMMENDATION_STREAM_MAX_CHARS = 8
+RECOMMENDATION_STREAM_BOUNDARIES = set("，。！？；、,.!?;:\n")
 
 
 @dataclass
@@ -300,12 +306,6 @@ async def continue_recommendation_from_criteria(
 
     evidences_by_product = dict(retrieval.evidence_by_product)
     ctx.ensure_active()
-    recommendation_task = start_stage_task(
-        ctx,
-        ctx.stages.run_recommendation_text(criteria, products, evidences_by_product),
-        timing_key="recommendation",
-        background=True,
-    )
     decision_task = start_stage_task(
         ctx,
         ctx.stages.run_decision(criteria, products, evidences_by_product),
@@ -317,21 +317,10 @@ async def continue_recommendation_from_criteria(
     async for event in _product_card_events(ctx, criteria, products, evidences_by_product):
         yield event
 
-    recommendation_capture: CapturedStage[RecommendationResult] = CapturedStage()
-    async for event in _capture_stage_result(
-        recommendation_capture,
-        run_timed_task_with_heartbeat(
-            ctx,
-            recommendation_task,
-            "recommending",
-            "正在生成推荐解释...",
-            timing_key="recommendation",
-        ),
+    async for event in _stream_recommendation_text_events(
+        ctx,
+        ctx.stages.run_recommendation_text_stream(criteria, products, evidences_by_product),
     ):
-        yield event
-    recommendation = recommendation_capture.require("recommendation")
-
-    for event in _text_delta_events(ctx, recommendation):
         yield event
 
     decision_capture: CapturedStage[DecisionResult] = CapturedStage()
@@ -460,6 +449,100 @@ def _text_delta_events(ctx: StreamContext, recommendation: RecommendationResult)
             )
         )
     return events
+
+
+async def _stream_recommendation_text_events(
+    ctx: StreamContext,
+    deltas: AsyncGenerator[str, None],
+) -> AsyncGenerator[TextDeltaEvent | SSEEventBase, None]:
+    message_id = f"msg_{ctx.turn_id}"
+    node_id = f"ai_text_{ctx.turn_id}"
+    queue: asyncio.Queue[tuple[str, str | BaseException | None]] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for delta in deltas:
+                await queue.put(("delta", delta))
+            await queue.put(("done", None))
+        except BaseException as exc:
+            await queue.put(("error", exc))
+
+    started_at = time.perf_counter()
+    pump_task = asyncio.create_task(pump())
+    buffer = ""
+    emitted = False
+    try:
+        while True:
+            ctx.ensure_active()
+            try:
+                kind, value = await asyncio.wait_for(queue.get(), timeout=ctx.heartbeat_interval_seconds)
+            except asyncio.TimeoutError:
+                yield ctx.thinking("recommending", "正在生成推荐解释...")
+                continue
+
+            if kind == "delta":
+                buffer += str(value or "")
+                while True:
+                    chunk, buffer = _pop_recommendation_stream_chunk(buffer)
+                    if chunk is None:
+                        break
+                    emitted = True
+                    yield _text_delta_event(ctx, message_id=message_id, node_id=node_id, delta=chunk, done=False)
+                continue
+
+            if kind == "error":
+                error = value if isinstance(value, BaseException) else RuntimeError("Recommendation stream failed.")
+                raise error
+
+            break
+
+        final_delta = buffer
+        if not emitted and not final_delta:
+            final_delta = RECOMMENDATION_STREAM_FALLBACK_TEXT
+        yield _text_delta_event(ctx, message_id=message_id, node_id=node_id, delta=final_delta, done=True)
+        ctx.stage_timings_ms.setdefault("recommendation", round((time.perf_counter() - started_at) * 1000, 2))
+    finally:
+        if not pump_task.done():
+            pump_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await pump_task
+
+
+def _pop_recommendation_stream_chunk(buffer: str, *, final: bool = False) -> tuple[str | None, str]:
+    if not buffer:
+        return None, buffer
+    if final:
+        return buffer, ""
+
+    scan_limit = min(len(buffer), RECOMMENDATION_STREAM_MAX_CHARS)
+    for index, char in enumerate(buffer[:scan_limit], start=1):
+        if index >= RECOMMENDATION_STREAM_MIN_CHARS and char in RECOMMENDATION_STREAM_BOUNDARIES:
+            return buffer[:index], buffer[index:]
+    if len(buffer) >= RECOMMENDATION_STREAM_MAX_CHARS:
+        return buffer[:RECOMMENDATION_STREAM_MAX_CHARS], buffer[RECOMMENDATION_STREAM_MAX_CHARS:]
+    return None, buffer
+
+
+def _text_delta_event(
+    ctx: StreamContext,
+    *,
+    message_id: str,
+    node_id: str,
+    delta: str,
+    done: bool,
+) -> TextDeltaEvent:
+    ctx.ensure_active()
+    return TextDeltaEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=node_id,
+        created_at_ms=now_ms(),
+        message_id=message_id,
+        delta=delta,
+        done=done,
+    )
 
 
 def _text_delta_from_text(

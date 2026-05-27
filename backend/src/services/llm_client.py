@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from pydantic import ValidationError
@@ -18,6 +19,7 @@ from src.services.image_upload import image_url_to_provider_url
 from src.services.llm_gateway import (
     LiveLLMUnavailable,
     _call_chat_task,
+    _stream_chat_task,
 )
 from src.services.llm_task_payloads import (
     criteria_from_live_payload as _criteria_from_live_payload,
@@ -28,6 +30,7 @@ from src.services.llm_task_payloads import (
     normalize_intent_payload as _normalize_intent_payload,
     parse_json_object as _parse_json_object,
     recommendation_messages,
+    recommendation_stream_messages,
 )
 from src.services.recommendation_reasons import build_reason_atoms
 from src.types.schemas import DecisionResult, IntentResult, RecommendationResult
@@ -64,6 +67,7 @@ __all__ = [
     "generate_criteria",
     "generate_decision",
     "generate_recommendation",
+    "stream_recommendation",
 ]
 
 
@@ -146,6 +150,48 @@ async def generate_recommendation(
         _validate_recommendation_chunks(validated_chunks, products)
         return RecommendationResult(text_chunks=validated_chunks, products=products)
     raise RuntimeError("Live recommendation payload failed schema validation.")
+
+
+async def stream_recommendation(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> AsyncGenerator[str, None]:
+    if not products:
+        yield "暂时没有找到合适商品。"
+        return
+    reason_atoms_by_product = {
+        product.product_id: build_reason_atoms(
+            criteria,
+            product,
+            (evidence_by_product or {}).get(product.product_id, []),
+        )
+        for product in products
+    }
+    messages = recommendation_stream_messages(
+        criteria,
+        products,
+        evidence_by_product,
+        reason_atoms_by_product,
+    )
+    emitted = False
+    try:
+        async for delta in _stream_chat_task("generate_recommendation", messages):
+            if not delta:
+                continue
+            emitted = True
+            yield delta
+    except Exception:
+        if emitted:
+            raise
+        logger.warning(
+            "Live recommendation stream failed before first delta; falling back to non-stream response.",
+            exc_info=True,
+        )
+        fallback = await generate_recommendation(criteria, products, evidence_by_product)
+        for chunk in fallback.text_chunks:
+            if chunk:
+                yield chunk
 
 
 async def analyze_image(image_url: str) -> dict[str, Any]:

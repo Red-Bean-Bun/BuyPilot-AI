@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from src.services.llm_client import generate_recommendation
+from src.services.llm_client import generate_recommendation, stream_recommendation
 from src.services.retriever import retrieve_with_evidence
 from src.types.schemas import RecommendationResult
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
@@ -38,6 +39,15 @@ async def run_recommendation_text(
 ) -> RecommendationResult:
     result = await generate_recommendation(criteria, products, evidence_by_product)
     return result.model_copy(update={"products": products})
+
+
+async def run_recommendation_text_stream(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+) -> AsyncGenerator[str, None]:
+    async for delta in stream_recommendation(criteria, products, evidence_by_product):
+        yield delta
 
 
 async def run_recommendation(

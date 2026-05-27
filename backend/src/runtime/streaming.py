@@ -56,6 +56,14 @@ class StageBundle(Protocol):
     ]: ...
 
     @property
+    def run_recommendation_text_stream(
+        self,
+    ) -> Callable[
+        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None],
+        AsyncGenerator[str, None],
+    ]: ...
+
+    @property
     def run_decision(
         self,
     ) -> Callable[

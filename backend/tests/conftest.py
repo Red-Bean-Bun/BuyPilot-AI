@@ -33,6 +33,14 @@ def mock_external_ai(monkeypatch):
         del profile, json_object
         return json.dumps(_fake_chat_payload(messages), ensure_ascii=False)
 
+    async def fake_chat_completion_stream(profile, messages):
+        del profile
+        payload = _fake_chat_payload(messages)
+        chunks = payload.get("text_chunks") if isinstance(payload, dict) else None
+        text = "\n".join(chunks) if isinstance(chunks, list) else "测试流式响应。"
+        for index in range(0, len(text), 6):
+            yield text[index : index + 6]
+
     async def fake_embedding_request(profile, texts):
         dimensions = profile.dimensions or 1024
         vectors = []
@@ -48,6 +56,7 @@ def mock_external_ai(monkeypatch):
     from src.services import embedding, llm_gateway, reranker
 
     monkeypatch.setattr(llm_gateway, "_chat_completion", fake_chat_completion)
+    monkeypatch.setattr(llm_gateway, "_chat_completion_stream", fake_chat_completion_stream)
     monkeypatch.setattr(embedding, "_embedding_request", fake_embedding_request)
     monkeypatch.setattr(reranker, "_rerank_request", fake_rerank_request)
 

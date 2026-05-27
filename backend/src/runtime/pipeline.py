@@ -21,7 +21,7 @@ from src.runtime.stages.criteria import _constraint_chips, run_criteria
 from src.runtime.stages.decision import run_decision
 from src.runtime.stages.intent import run_intent
 from src.runtime.stages.multimodal import run_multimodal
-from src.runtime.stages.recommendation import run_recommendation_text, run_retrieval
+from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
@@ -69,6 +69,10 @@ class PipelineStages:
     run_recommendation_text: Callable[
         [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None],
         Awaitable[RecommendationResult],
+    ]
+    run_recommendation_text_stream: Callable[
+        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None],
+        AsyncGenerator[str, None],
     ]
     run_decision: Callable[
         [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]
@@ -280,6 +284,7 @@ def _current_stages() -> PipelineStages:
         run_criteria=run_criteria,
         run_retrieval=run_retrieval,
         run_recommendation_text=run_recommendation_text,
+        run_recommendation_text_stream=run_recommendation_text_stream,
         run_decision=run_decision,
     )
 

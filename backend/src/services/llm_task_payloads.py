@@ -29,6 +29,11 @@ RECOMMENDATION_SYSTEM_SCHEMA = (
     "你是电商导购推荐解释生成器。只输出 JSON，字段为 text_chunks。只能解释传入商品，不得编造商品、价格、优惠或库存。"
 )
 
+RECOMMENDATION_STREAM_SYSTEM_SCHEMA = (
+    "你是电商导购推荐解释生成器。直接输出自然语言正文，不要输出 JSON、Markdown 表格或代码块。"
+    "只能解释传入商品和已校验事实原子，不得编造商品、价格、优惠或库存。"
+)
+
 DECISION_SYSTEM_SCHEMA = (
     "你是电商导购决策器。只输出 JSON，字段为 winner_product_id、summary、why、not_for。"
     "winner_product_id 必须是传入商品之一，不得编造。"
@@ -133,6 +138,41 @@ def recommendation_messages(
                     },
                 },
                 RECOMMENDATION_SYSTEM_SCHEMA,
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+def recommendation_stream_messages(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    reason_atoms_by_product: dict[str, list[ReasonAtomPayload]] | None = None,
+) -> list[dict[str, Any]]:
+    payload = {
+        "criteria": criteria.model_dump(),
+        "products": [product.model_dump() for product in products],
+        "reason_atoms_by_product": {
+            product_id: [atom.model_dump() for atom in atoms]
+            for product_id, atoms in (reason_atoms_by_product or {}).items()
+        },
+    }
+    return [
+        {
+            "role": "system",
+            "content": _prompt_content(
+                "recommendation_stream",
+                {
+                    "criteria": criteria.model_dump(),
+                    "ranked_products": [product.model_dump() for product in products],
+                    "evidence_chunks": _format_evidence_context(evidence_by_product or {}),
+                    "reason_atoms_by_product": {
+                        product_id: [atom.model_dump() for atom in atoms]
+                        for product_id, atoms in (reason_atoms_by_product or {}).items()
+                    },
+                },
+                RECOMMENDATION_STREAM_SYSTEM_SCHEMA,
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

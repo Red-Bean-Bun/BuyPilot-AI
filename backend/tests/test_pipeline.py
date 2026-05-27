@@ -6,7 +6,7 @@ from src.runtime import pipeline as pipeline_module
 from src.runtime.cancel_registry import active_turn_count, cancel_turn
 from src.runtime.pipeline import chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
-from src.types.schemas import ChatStreamRequest, DecisionResult, RecommendationResult
+from src.types.schemas import ChatStreamRequest, DecisionResult
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 
@@ -55,15 +55,11 @@ async def test_pipeline_emits_heartbeat_during_slow_stage(monkeypatch):
     async def fast_retrieval(criteria, feedback=None):
         return RetrievalResult(products=[], evidence_by_product={})
 
-    async def fast_recommendation_text(criteria, products, evidence_by_product=None):
-        return RecommendationResult(text_chunks=["已生成推荐。"], products=products)
-
     async def fast_decision(criteria, products, evidence_by_product=None):
         return DecisionResult(winner_product_id="", summary="暂无匹配商品。")
 
     monkeypatch.setattr(pipeline_module, "run_criteria", slow_run_criteria)
     monkeypatch.setattr(pipeline_module, "run_retrieval", fast_retrieval)
-    monkeypatch.setattr(pipeline_module, "run_recommendation_text", fast_recommendation_text)
     monkeypatch.setattr(pipeline_module, "run_decision", fast_decision)
 
     events = [
@@ -100,15 +96,15 @@ async def test_pipeline_emits_product_card_before_slow_recommendation_text(monke
             },
         )
 
-    async def slow_recommendation_text(criteria, products, evidence_by_product=None):
+    async def slow_recommendation_text_stream(criteria, products, evidence_by_product=None):
         await asyncio.sleep(0.035)
-        return RecommendationResult(text_chunks=["这款更适合油皮日常使用。"], products=products)
+        yield "这款更适合油皮日常使用。"
 
     async def fast_decision(criteria, products, evidence_by_product=None):
         return DecisionResult(winner_product_id=product.product_id, summary="优先选测试洁面乳。")
 
     monkeypatch.setattr(pipeline_module, "run_retrieval", fast_retrieval)
-    monkeypatch.setattr(pipeline_module, "run_recommendation_text", slow_recommendation_text)
+    monkeypatch.setattr(pipeline_module, "run_recommendation_text_stream", slow_recommendation_text_stream)
     monkeypatch.setattr(pipeline_module, "run_decision", fast_decision)
 
     events = [

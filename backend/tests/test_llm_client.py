@@ -3,7 +3,11 @@ import pytest
 import src.config.settings as settings_module
 from src.services import llm_client
 from src.services.llm_gateway import LiveLLMUnavailable
-from src.services.llm_task_payloads import normalize_intent_payload, recommendation_messages
+from src.services.llm_task_payloads import (
+    normalize_intent_payload,
+    recommendation_messages,
+    recommendation_stream_messages,
+)
 from src.services.prompts import PromptStore, PromptTemplateMissing
 from src.repos.products import list_products
 from src.types.schemas import IntentResult
@@ -153,4 +157,25 @@ def test_recommendation_prompt_includes_reason_atoms():
     )
 
     assert "已校验推荐理由事实原子" in messages[0]["content"]
+    assert "油性肤质匹配" in messages[-1]["content"]
+
+
+def test_recommendation_stream_prompt_requests_plain_text():
+    messages = recommendation_stream_messages(
+        CriteriaPayload(category="美妆护肤"),
+        [ProductPayload(product_id="p1", name="测试洁面", category="美妆护肤")],
+        reason_atoms_by_product={
+            "p1": [
+                ReasonAtomPayload(
+                    dimension="skin_type",
+                    value="油性",
+                    text="油性肤质匹配",
+                    evidence_id="chunk_1",
+                )
+            ]
+        },
+    )
+
+    assert "直接输出自然语言正文" in messages[0]["content"]
+    assert "不要输出 JSON" in messages[0]["content"]
     assert "油性肤质匹配" in messages[-1]["content"]
