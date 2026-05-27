@@ -19,7 +19,10 @@ import com.buypilot.feature.chat.model.ClarificationNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
+import com.buypilot.feature.chat.model.PendingDecision
 import com.buypilot.feature.chat.model.ProductDeckNode
+import com.buypilot.feature.chat.model.ProductSwipeAction
+import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
 
@@ -29,6 +32,7 @@ object ChatReducer {
         key: String,
         content: String,
         imageUrl: String? = null,
+        fromEditResubmit: Boolean = false,
     ): ChatUiState =
         state.copy(
             nodes = state.nodes + UserMessageNode(
@@ -41,6 +45,11 @@ object ChatReducer {
             lastError = null,
             lastUserMessage = content,
             lastUserMessageKey = key,
+            lastRetryableRequest = ChatRetryRequest(
+                message = content,
+                imageUrl = imageUrl,
+                fromEditResubmit = fromEditResubmit,
+            ),
             streamingTextKey = null,
             streamingTextLength = 0,
         )
@@ -73,9 +82,7 @@ object ChatReducer {
 
             AgentEventType.Clarification -> reduceClarification(contentBase, envelope)
 
-            AgentEventType.CriteriaCard -> contentBase.upsertNode(
-                CriteriaNode(envelope.nodeId, envelope.payload as CriteriaCardPayload),
-            )
+            AgentEventType.CriteriaCard -> reduceCriteriaCard(contentBase, envelope)
 
             AgentEventType.TextDelta -> reduceTextDelta(base, envelope)
 
@@ -85,13 +92,20 @@ object ChatReducer {
                 CartActionNode(envelope.nodeId, envelope.payload as CartActionPayload),
             )
 
-            AgentEventType.FinalDecision -> contentBase.upsertNode(
-                FinalDecisionNode(envelope.nodeId, envelope.payload as FinalDecisionPayload),
-            )
+            AgentEventType.FinalDecision -> reduceFinalDecision(contentBase, envelope)
 
             AgentEventType.Done -> {
                 val payload = envelope.payload as DonePayload
-                contentBase.copy(
+                val awaitingDeckId = payload.deckId?.takeIf { it.isNotBlank() }
+                val doneBase = if (
+                    payload.finishReason == "awaiting_product_feedback" &&
+                    awaitingDeckId != null
+                ) {
+                    contentBase.markDeckAwaitingConvergence(awaitingDeckId)
+                } else {
+                    contentBase
+                }
+                doneBase.copy(
                     inputState = if (payload.finishReason == "canceled") {
                         ChatInputState.Canceled
                     } else if (contentBase.inputState == ChatInputState.Clarifying ||
@@ -140,6 +154,85 @@ object ChatReducer {
             },
         )
 
+    fun selectProduct(
+        state: ChatUiState,
+        deckId: String,
+        productId: String?,
+    ): ChatUiState {
+        val products = state.productIdsForDeck(deckId)
+        val selectedProductId = productId
+            ?.takeIf { it in products }
+            ?: products.firstOrNull { it !in state.productSwipeStates[deckId].orEmpty().swipedProductIds }
+            ?: products.firstOrNull()
+        val swipeState = state.productSwipeStates[deckId].orEmpty()
+        return state.copy(
+            productSwipeStates = state.productSwipeStates + (
+                deckId to swipeState.copy(currentProductId = selectedProductId)
+                ),
+        )
+    }
+
+    fun swipeProduct(
+        state: ChatUiState,
+        deckId: String,
+        productId: String,
+        feedbackType: String,
+        action: String,
+    ): ChatUiState {
+        val products = state.productIdsForDeck(deckId)
+        if (productId !in products) return state
+
+        val swipeState = state.productSwipeStates[deckId].orEmpty()
+        if (feedbackType == "view_detail" || action == "view_detail" || action == "open_evidence") {
+            val nextSwipeState = swipeState.copy(
+                currentProductId = productId,
+                viewedProductIds = (swipeState.viewedProductIds + productId).distinct(),
+            )
+            return state.copy(productSwipeStates = state.productSwipeStates + (deckId to nextSwipeState))
+        }
+        val swiped = (swipeState.swipedProductIds + productId).distinct()
+        val nextProductId = products.firstOrNull { it !in swiped }
+            ?: products.firstOrNull { it != productId }
+            ?: productId
+        val nextSwipeState = swipeState.copy(
+            currentProductId = nextProductId,
+            viewedProductIds = (swipeState.viewedProductIds + productId).distinct(),
+            swipedProductIds = swiped,
+            undoStack = swipeState.undoStack + ProductSwipeAction(
+                productId = productId,
+                feedbackType = feedbackType,
+                action = action,
+            ),
+        )
+        return state.copy(productSwipeStates = state.productSwipeStates + (deckId to nextSwipeState))
+    }
+
+    fun undoSwipe(state: ChatUiState, deckId: String): ChatUiState {
+        val swipeState = state.productSwipeStates[deckId] ?: return state
+        val restored = swipeState.undoStack.lastOrNull() ?: return state
+        val nextSwipeState = swipeState.copy(
+            currentProductId = restored.productId,
+            swipedProductIds = swipeState.swipedProductIds.filterNot { it == restored.productId },
+            undoStack = swipeState.undoStack.dropLast(1),
+        )
+        return state.copy(productSwipeStates = state.productSwipeStates + (deckId to nextSwipeState))
+    }
+
+    fun convergeDeck(state: ChatUiState, deckId: String): ChatUiState {
+        val pending = state.pendingDecisions[deckId]
+        val withoutWaiting = state.copy(
+            awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds - deckId,
+            pendingDecisions = state.pendingDecisions - deckId,
+            inputState = ChatInputState.Idle,
+            isStreaming = false,
+        )
+        return if (pending == null) {
+            withoutWaiting
+        } else {
+            withoutWaiting.upsertNode(FinalDecisionNode(pending.key, pending.payload))
+        }
+    }
+
     private fun reduceTextDelta(
         state: ChatUiState,
         envelope: AgentUiEnvelope<AgentPayload>,
@@ -148,19 +241,30 @@ object ChatReducer {
         val messageKey = payload.messageId.ifBlank { envelope.nodeId }
         val existing = state.nodes.filterIsInstance<AiStreamNode>()
             .firstOrNull { it.messageId == payload.messageId || it.key == messageKey }
-        val replacedThinkingKey = existing?.key ?: state.nodes
-            .filterIsInstance<ThinkingNode>()
-            .lastOrNull { it.turnId == envelope.turnId }
-            ?.key
+        val textBase = state.withoutThinking(envelope.turnId)
         val node = AiStreamNode(
-            key = replacedThinkingKey ?: messageKey,
+            key = existing?.key ?: messageKey,
             messageId = payload.messageId,
             content = (existing?.content.orEmpty()) + payload.delta,
             done = payload.done,
+            turnId = envelope.turnId,
         )
-        return state.upsertNode(node).copy(
+        return textBase.upsertNode(node).copy(
+            inputState = ChatInputState.Streaming,
+            isStreaming = true,
+            lastError = null,
+            lastAssistantMessageKey = node.key,
             streamingTextKey = node.key,
             streamingTextLength = node.content.length,
+        )
+    }
+
+    private fun reduceCriteriaCard(
+        state: ChatUiState,
+        envelope: AgentUiEnvelope<AgentPayload>,
+    ): ChatUiState {
+        return state.upsertNode(
+            CriteriaNode(envelope.nodeId, envelope.payload as CriteriaCardPayload),
         )
     }
 
@@ -169,38 +273,20 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as ClarificationPayload
-        val intro = clarificationIntroText(payload)
-        val thinkingKey = state.nodes
-            .filterIsInstance<ThinkingNode>()
-            .lastOrNull { it.turnId == envelope.turnId }
-            ?.key
-        val introNode = AiStreamNode(
-            key = thinkingKey ?: "clarification_intro_${envelope.turnId}",
-            messageId = "clarification_intro_${envelope.turnId}",
-            content = intro,
-            done = true,
-        )
         return state
-            .upsertNode(introNode)
             .upsertNode(
                 ClarificationNode(
                     key = envelope.nodeId,
                     payload = payload,
                     turnId = envelope.turnId,
-                    anchorMessageKey = introNode.key,
                 ),
             )
             .copy(
                 inputState = ChatInputState.Clarifying,
                 isStreaming = true,
-                streamingTextKey = introNode.key,
-                streamingTextLength = introNode.content.length,
+                streamingTextKey = null,
+                streamingTextLength = 0,
             )
-    }
-
-    private fun clarificationIntroText(payload: ClarificationPayload): String {
-        val question = payload.question.ifBlank { "请补充一个关键信息" }
-        return "为了能为您推荐最合适的产品，我还需要了解一下**${question.trimEnd('？', '?')}**。"
     }
 
     private fun reduceProductCard(
@@ -220,8 +306,43 @@ object ChatReducer {
                 deckId = deckId,
                 products = products,
             ),
-        )
+        ).markDeckAwaitingConvergence(deckId)
     }
+
+    private fun reduceFinalDecision(
+        state: ChatUiState,
+        envelope: AgentUiEnvelope<AgentPayload>,
+    ): ChatUiState {
+        val payload = envelope.payload as FinalDecisionPayload
+        val latestDeck = state.nodes.filterIsInstance<ProductDeckNode>().lastOrNull()
+        val deckId = latestDeck?.deckId
+        return if (deckId != null && deckId in state.awaitingConvergenceDeckIds) {
+            state.copy(
+                pendingDecisions = state.pendingDecisions + (
+                    deckId to PendingDecision(
+                        key = envelope.nodeId,
+                        payload = payload,
+                        turnId = envelope.turnId,
+                    )
+                    ),
+            )
+        } else {
+            state.upsertNode(FinalDecisionNode(envelope.nodeId, payload))
+        }
+    }
+
+    private fun ChatUiState.productIdsForDeck(deckId: String): List<String> =
+        nodes.filterIsInstance<ProductDeckNode>()
+            .firstOrNull { it.deckId == deckId }
+            ?.products
+            .orEmpty()
+            .map { it.product.productId }
+            .filter { it.isNotBlank() }
+
+    private fun ProductSwipeState?.orEmpty(): ProductSwipeState = this ?: ProductSwipeState()
+
+    private fun ChatUiState.markDeckAwaitingConvergence(deckId: String): ChatUiState =
+        copy(awaitingConvergenceDeckIds = awaitingConvergenceDeckIds + deckId)
 
     private fun ChatUiState.upsertNode(node: ChatUiNode): ChatUiState {
         val index = nodes.indexOfFirst { it.key == node.key }
@@ -236,9 +357,9 @@ object ChatReducer {
     private fun AgentEventType.shouldClearTransientThinking(state: ChatUiState, turnId: String): Boolean =
         when (this) {
             AgentEventType.Thinking,
-            AgentEventType.Clarification,
             AgentEventType.TextDelta,
             AgentEventType.Unknown -> false
+            AgentEventType.Clarification -> true
             AgentEventType.Done -> !state.hasClarificationForTurn(turnId)
             else -> true
         }

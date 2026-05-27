@@ -20,8 +20,10 @@ data class ImageUploadResponse(
 
 @Serializable
 data class FeedbackResponse(
-    val ok: Boolean = true,
-    @SerialName("feedback_id") val feedbackId: String? = null,
+    val status: String = "received",
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("feedback_type") val feedbackType: String? = null,
+    val action: String? = null,
 )
 
 @Serializable

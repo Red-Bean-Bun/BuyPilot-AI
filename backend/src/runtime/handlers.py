@@ -51,6 +51,8 @@ from src.types.sse_events import (
 IntentHandler = Callable[[StreamContext, ChatStreamRequest, IntentResult], AsyncGenerator[SSEEventBase, None]]
 T = TypeVar("T")
 CRITERIA_CONFIRMATION_PROMPT = "你可以先确认或修改这些标准。没问题的话回复「继续」，我再开始推荐。"
+CLARIFICATION_ANALYSIS_TEXT = "我先看了一下你的需求，已经能判断大方向，但还缺一个会影响推荐标准的关键信息。补齐后再生成购买标准会更稳。"
+CRITERIA_ANALYSIS_TEXT = "我先把你的需求拆成可执行的购买标准，包含品类、预算、适用对象、使用场景和排除项。你可以先确认这版标准。"
 
 
 @dataclass
@@ -193,6 +195,13 @@ async def handle_chitchat(
 async def handle_clarification(ctx: StreamContext, missing_slots: list[str]) -> AsyncGenerator[SSEEventBase, None]:
     question, options = build_clarification_question(missing_slots)
     yield ctx.thinking("clarifying", "需要补充一个关键信息。")
+    for event in _text_delta_from_text(
+        ctx,
+        message_id=f"clarification_analysis_{ctx.turn_id}",
+        node_id=f"clarification_analysis_{ctx.turn_id}",
+        text=CLARIFICATION_ANALYSIS_TEXT,
+    ):
+        yield event
     yield ClarificationEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -228,6 +237,14 @@ async def handle_recommendation(
     ):
         yield event
     criteria = criteria_capture.require("criteria")
+
+    for event in _text_delta_from_text(
+        ctx,
+        message_id=f"criteria_analysis_{ctx.turn_id}",
+        node_id=f"criteria_analysis_{ctx.turn_id}",
+        text=CRITERIA_ANALYSIS_TEXT,
+    ):
+        yield event
 
     yield _criteria_card_event(ctx, criteria)
     if not _should_continue_after_criteria(body):
@@ -440,6 +457,34 @@ def _text_delta_events(ctx: StreamContext, recommendation: RecommendationResult)
                 message_id=message_id,
                 delta=chunk,
                 done=index == len(text_chunks) - 1,
+            )
+        )
+    return events
+
+
+def _text_delta_from_text(
+    ctx: StreamContext,
+    *,
+    message_id: str,
+    node_id: str,
+    text: str,
+    chunk_size: int = 18,
+) -> list[TextDeltaEvent]:
+    chunks = [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)] or [""]
+    events: list[TextDeltaEvent] = []
+    for index, chunk in enumerate(chunks):
+        ctx.ensure_active()
+        events.append(
+            TextDeltaEvent(
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
+                seq=ctx.seq.next(),
+                event_id=ctx.seq.event_id(),
+                node_id=node_id,
+                created_at_ms=now_ms(),
+                message_id=message_id,
+                delta=chunk,
+                done=index == len(chunks) - 1,
             )
         )
     return events

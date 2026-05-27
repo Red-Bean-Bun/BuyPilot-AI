@@ -1,6 +1,14 @@
 package com.buypilot.feature.chat.ui
 
 import androidx.annotation.DrawableRes
+import android.text.method.LinkMovementMethod
+import android.util.TypedValue
+import android.view.View
+import android.view.ViewGroup
+import android.view.animation.PathInterpolator
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -28,6 +36,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -40,24 +53,30 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,10 +86,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconButton
@@ -82,33 +101,41 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
@@ -116,23 +143,23 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -143,21 +170,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.toArgb
+import androidx.recyclerview.widget.RecyclerView
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
+import coil.load
+import coil.compose.AsyncImage
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.EvidencePayload
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
+import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.QuickActionPayload
 import com.buypilot.feature.chat.R
 import com.buypilot.feature.chat.model.AiStreamNode
@@ -168,17 +202,32 @@ import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
+import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
+import com.yuyakaido.android.cardstackview.CardStackLayoutManager
+import com.yuyakaido.android.cardstackview.CardStackListener
+import com.yuyakaido.android.cardstackview.CardStackView
+import com.yuyakaido.android.cardstackview.Direction
+import com.yuyakaido.android.cardstackview.RewindAnimationSetting
+import com.yuyakaido.android.cardstackview.StackFrom
+import com.yuyakaido.android.cardstackview.SwipeAnimationSetting
+import com.yuyakaido.android.cardstackview.SwipeableMethod
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import io.noties.markwon.Markwon
+import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
+import io.noties.markwon.ext.tables.TablePlugin
+import io.noties.markwon.html.HtmlPlugin
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -186,6 +235,8 @@ private val MenuEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private val MenuEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 private val ClarificationEaseOut = CubicBezierEasing(0.1f, 1f, 0.1f, 1f)
 private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+private val ProductDetailRevealDistance = 220.dp
+private const val ProductDetailSnapThreshold = 0.36f
 private val CriteriaLeadingNumberRegex = Regex("""^(\d+(?:\.\d+)?)(.*)$""")
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
 private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
@@ -195,20 +246,13 @@ private const val ClarificationExitMs = 110
 private const val ClarificationFlightMs = 360
 private const val ClarificationTargetSettleMs = 24L
 private const val ClarificationTargetFallbackMs = 760L
-private const val StreamRevealCharsPerFrame = 1
-private const val StreamRevealFrameDelayMs = 24L
-
-private enum class MarkdownInlineStyle {
-    Normal,
-    Bold,
-    Italic,
-    Code,
-}
-
-private data class MarkdownInlineSegment(
-    val text: String,
-    val style: MarkdownInlineStyle,
-)
+private val TimelineNearEndThreshold = 96.dp
+private val TimelineFollowCorrectionTolerance = 8.dp
+private val TimelineSafeGap = 20.dp
+private val TimelineAnchorTopGap = 8.dp
+private val TimelineAnchorBottomReserve = 420.dp
+private val TimelineKeyboardScrimHeight = 64.dp
+private val TimelineJumpButtonBottomGap = 18.dp
 
 private data class PendingClarificationAnswer(
     val nodeKey: String,
@@ -250,6 +294,7 @@ private data class CriteriaTileSpec(
     @DrawableRes val iconRes: Int,
     val accent: Color,
     val glow: Color,
+    val prominent: Boolean = false,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -260,6 +305,9 @@ fun BuyPilotChatScreen(
     onSendMessage: (String, String?) -> Unit,
     onCriteriaPatch: (JsonObject) -> Unit,
     onCancel: () -> Unit,
+    onOpenProductDeck: (String, String?) -> Unit,
+    onRetryLastMessage: () -> Unit,
+    onEditLastMessage: (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
@@ -277,6 +325,10 @@ fun BuyPilotChatScreen(
     var flightSequence by remember { mutableStateOf(0) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
     var timelineTopPx by remember { mutableStateOf(0f) }
+    var composerHeightPx by remember { mutableIntStateOf(0) }
+    var composerFocused by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val products = state.nodes.filterIsInstance<ProductDeckNode>().flatMap { it.products }
     val focusManager = LocalFocusManager.current
@@ -308,10 +360,8 @@ fun BuyPilotChatScreen(
         keyboardController?.show()
     }
 
-    fun dismissComposerFocus() {
+    fun closeTransientComposerUi() {
         showAttachmentMenu = false
-        focusManager.clearFocus(force = true)
-        keyboardController?.hide()
     }
 
     fun openSheet(content: ChatSheetContent) {
@@ -346,6 +396,20 @@ fun BuyPilotChatScreen(
         onInputChanged("", false)
         showAttachmentMenu = false
         focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    fun editAndFocus(message: String) {
+        val next = message.trim()
+        if (next.isEmpty()) return
+
+        welcomeDismissed = true
+        showAttachmentMenu = false
+        input = next
+        onInputChanged(next, false)
+        onEditLastMessage(next)
+        composerFocusRequester.requestFocus()
+        keyboardController?.show()
     }
 
     fun answerClarification(
@@ -373,6 +437,7 @@ fun BuyPilotChatScreen(
         input = ""
         onInputChanged("", false)
         focusManager.clearFocus()
+        keyboardController?.hide()
         val shouldFly = selectedOption != null && chipSnapshot != null
         val previousUserMessageKey = state.lastUserMessageKey
         val flightId = if (shouldFly) ++flightSequence else null
@@ -461,9 +526,10 @@ fun BuyPilotChatScreen(
                         )
                     },
                     onCriteriaEdit = { openSheet(ChatSheetContent.Criteria(it)) },
-                    onProductOpen = { openSheet(ChatSheetContent.Product(it)) },
-                    onProductEvidence = { openSheet(ChatSheetContent.ProductEvidence(it)) },
+                    onProductOpen = onOpenProductDeck,
                     onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
+                    onRetryLastMessage = onRetryLastMessage,
+                    onEditLastMessage = { editAndFocus(it) },
                     onQuickAction = { action ->
                         val patch = action.criteriaPatch
                         if (patch != null) {
@@ -473,7 +539,10 @@ fun BuyPilotChatScreen(
                         }
                     },
                     onClarificationManualInput = { focusComposer() },
-                    onTimelineDrag = { dismissComposerFocus() },
+                    onTimelineDrag = { closeTransientComposerUi() },
+                    composerHeightPx = composerHeightPx,
+                    imeBottomPx = imeBottomPx,
+                    isComposerFocused = composerFocused,
                     dismissingClarificationKey = dismissingClarificationKey,
                     dismissedClarificationKeys = dismissedClarificationKeys,
                     selectedClarificationOption = pendingClarificationAnswer?.selectedOption,
@@ -506,8 +575,7 @@ fun BuyPilotChatScreen(
             isAttachmentMenuOpen = showAttachmentMenu,
             focusRequester = composerFocusRequester,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .imePadding(),
+                .align(Alignment.BottomCenter),
             onAttachmentClick = {
                 welcomeDismissed = true
                 showAttachmentMenu = !showAttachmentMenu
@@ -521,6 +589,8 @@ fun BuyPilotChatScreen(
                 welcomeDismissed = true
                 showAttachmentMenu = false
             },
+            onFocusChanged = { composerFocused = it },
+            onHeightChanged = { composerHeightPx = it },
             onSubmit = {
                 if (state.isStreaming) {
                     onCancel()
@@ -602,14 +672,6 @@ fun BuyPilotChatScreen(
                             dismissSheet { onCriteriaPatch(patch) }
                         },
                     )
-                    is ChatSheetContent.Product -> ProductDetailSheet(
-                        payload = targetContent.payload,
-                        onEvidence = { openSheet(ChatSheetContent.ProductEvidence(targetContent.payload)) },
-                        onAction = { action ->
-                            dismissSheet { sendAndClear(action.label) }
-                        },
-                    )
-                    is ChatSheetContent.ProductEvidence -> ProductEvidenceSheet(targetContent.payload)
                     is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(targetContent.payload)
                 }
             }
@@ -686,11 +748,15 @@ private fun ConversationStage(
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
-    onProductOpen: (ProductCardPayload) -> Unit,
-    onProductEvidence: (ProductCardPayload) -> Unit,
+    onProductOpen: (String, String?) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
+    onRetryLastMessage: () -> Unit,
+    onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
     onTimelineDrag: () -> Unit,
+    composerHeightPx: Int,
+    imeBottomPx: Int,
+    isComposerFocused: Boolean,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
     selectedClarificationOption: String?,
@@ -748,10 +814,14 @@ private fun ConversationStage(
                 onClarificationManualInput = onClarificationManualInput,
                 onCriteriaEdit = onCriteriaEdit,
                 onProductOpen = onProductOpen,
-                onProductEvidence = onProductEvidence,
                 onDecisionEvidence = onDecisionEvidence,
+                onRetryLastMessage = onRetryLastMessage,
+                onEditLastMessage = onEditLastMessage,
                 onQuickAction = onQuickAction,
                 onTimelineDrag = onTimelineDrag,
+                composerHeightPx = composerHeightPx,
+                imeBottomPx = imeBottomPx,
+                isComposerFocused = isComposerFocused,
                 dismissingClarificationKey = dismissingClarificationKey,
                 dismissedClarificationKeys = dismissedClarificationKeys,
                 selectedClarificationOption = selectedClarificationOption,
@@ -806,51 +876,136 @@ private fun TopBar(
     showBack: Boolean,
     showHistory: Boolean,
 ) {
-    CenterAlignedTopAppBar(
-        modifier = Modifier.fillMaxWidth(),
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = BuyPilotColors.SurfaceCard,
-            scrolledContainerColor = BuyPilotColors.SurfaceCard,
-            navigationIconContentColor = BuyPilotColors.TextPrimary,
-            titleContentColor = BuyPilotColors.TextPrimary,
-            actionIconContentColor = BuyPilotColors.PrimaryDark,
-        ),
-        title = {
-            Text(
-                text = if (centered) "BuyPilot AI" else "BuyPilot",
-                color = BuyPilotColors.TextPrimary,
-                fontSize = 22.sp,
-                lineHeight = 28.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        navigationIcon = {
-            IconButton(onClick = {}) {
-                Icon(
-                    painter = painterResource(
-                        if (showBack) R.drawable.ic_arrow_back_24 else R.drawable.ic_menu_24,
-                    ),
-                    contentDescription = if (showBack) "返回" else "打开菜单",
-                    modifier = Modifier.size(24.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BuyPilotColors.SurfaceCard)
+            .statusBarsPadding(),
+    ) {
+        M3TopAppBarRow(
+            title = if (centered) "BuyPilot AI" else "BuyPilot",
+            titleCentered = centered,
+            navigationIcon = if (showBack) R.drawable.ic_arrow_back_24 else R.drawable.ic_menu_24,
+            navigationDescription = if (showBack) "返回" else "打开菜单",
+            navigationTint = if (showBack) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
+            actionIcon = R.drawable.ic_history_24.takeIf { showHistory },
+            actionDescription = "查看推荐历史",
+            actionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.72f),
+            onNavigationClick = {},
+            onActionClick = {},
+        )
+        HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
+    }
+}
+
+@Composable
+private fun M3TopAppBarRow(
+    title: String,
+    modifier: Modifier = Modifier,
+    titleCentered: Boolean = true,
+    navigationIcon: Int? = null,
+    navigationDescription: String? = null,
+    navigationTint: Color = BuyPilotColors.TextPrimary,
+    actionIcon: Int? = null,
+    actionDescription: String? = null,
+    actionTint: Color = BuyPilotColors.TextSecondary,
+    actionEnabled: Boolean = true,
+    containerColor: Color = Color.Transparent,
+    contentColor: Color = BuyPilotColors.TextPrimary,
+    onNavigationClick: () -> Unit = {},
+    onActionClick: () -> Unit = {},
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .background(containerColor)
+            .padding(horizontal = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(56.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (navigationIcon != null) {
+                M3IconButton(
+                    iconRes = navigationIcon,
+                    contentDescription = navigationDescription.orEmpty(),
+                    tint = navigationTint,
+                    onClick = onNavigationClick,
                 )
             }
-        },
-        actions = {
-            if (showHistory) {
-                IconButton(onClick = {}) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_history_24),
-                        contentDescription = "查看推荐历史",
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-            } else {
-                Spacer(Modifier.size(48.dp))
+        }
+        Box(
+            modifier = Modifier
+                .align(if (titleCentered) Alignment.Center else Alignment.CenterStart)
+                .then(
+                    if (titleCentered) {
+                        Modifier.padding(horizontal = 72.dp)
+                    } else {
+                        Modifier.padding(start = 64.dp, end = 72.dp)
+                    },
+                ),
+            contentAlignment = if (titleCentered) Alignment.Center else Alignment.CenterStart,
+        ) {
+            Text(
+                text = title,
+                color = contentColor,
+                fontSize = 21.sp,
+                lineHeight = 28.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = if (titleCentered) TextAlign.Center else TextAlign.Start,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(56.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (actionIcon != null) {
+                M3IconButton(
+                    iconRes = actionIcon,
+                    contentDescription = actionDescription.orEmpty(),
+                    tint = actionTint,
+                    onClick = onActionClick,
+                    enabled = actionEnabled,
+                )
             }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun M3IconButton(
+    @DrawableRes iconRes: Int,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    containerColor: Color = Color.Transparent,
+    enabled: Boolean = true,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(48.dp),
+        colors = IconButtonDefaults.iconButtonColors(
+            containerColor = containerColor,
+            contentColor = tint,
+            disabledContentColor = tint.copy(alpha = 0.38f),
+            disabledContainerColor = Color.Transparent,
+        ),
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.size(24.dp),
+        )
+    }
 }
 
 @Composable
@@ -962,11 +1117,15 @@ private fun ChatTimeline(
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
-    onProductOpen: (ProductCardPayload) -> Unit,
-    onProductEvidence: (ProductCardPayload) -> Unit,
+    onProductOpen: (String, String?) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
+    onRetryLastMessage: () -> Unit,
+    onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
     onTimelineDrag: () -> Unit,
+    composerHeightPx: Int,
+    imeBottomPx: Int,
+    isComposerFocused: Boolean,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
     selectedClarificationOption: String?,
@@ -978,15 +1137,46 @@ private fun ChatTimeline(
     onClarificationCardDismissed: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     var followStreamingText by remember { mutableStateOf(true) }
     var lastHandledUserMessageKey by remember { mutableStateOf<String?>(null) }
-    val isNearTimelineEnd by remember(state.nodes.size, state.lastError) {
+    var activeTurnAnchored by remember { mutableStateOf(false) }
+    val hasTimelineError = state.nodes.any { it is ErrorNode }
+    val timelineBottomPadding = calculateTimelineBottomPadding(
+        density = density,
+        composerHeightPx = composerHeightPx,
+        imeBottomPx = imeBottomPx,
+    )
+    val jumpButtonBottomPadding = with(density) {
+        (composerHeightPx + imeBottomPx + TimelineJumpButtonBottomGap.toPx()).toDp()
+    }
+    val activeTurnBottomReserve = with(density) {
+        maxOf(
+            TimelineAnchorBottomReserve.toPx(),
+            composerHeightPx + imeBottomPx + 72.dp.toPx(),
+        ).toDp()
+    }
+    val nearEndThresholdPx = with(density) { TimelineNearEndThreshold.toPx() }
+    val followCorrectionTolerancePx = with(density) { TimelineFollowCorrectionTolerance.toPx() }
+    val timelineBottomPaddingPx = with(density) { timelineBottomPadding.toPx() }
+    val anchorTopOffsetPx = with(density) { TimelineAnchorTopGap.toPx().roundToInt() }
+    val shouldShowKeyboardScrim = isComposerFocused && imeBottomPx > 0 && !followStreamingText
+    val isNearTimelineEnd by remember(
+        state.nodes.size,
+        state.lastError,
+        hasTimelineError,
+        timelineBottomPadding,
+        nearEndThresholdPx,
+    ) {
         derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf true
-            val lastContentIndex = state.nodes.lastIndex + if (state.lastError != null) 1 else 0
-            lastVisibleIndex >= lastContentIndex - 1
+            isTimelineNearEnd(
+                listState = listState,
+                lastContentIndex = state.lastContentIndex(hasTimelineError),
+                bottomPaddingPx = timelineBottomPaddingPx,
+                thresholdPx = nearEndThresholdPx,
+            )
         }
     }
 
@@ -996,14 +1186,22 @@ private fun ChatTimeline(
         val index = state.nodes.indexOfFirst { it.key == key }
         if (index >= 0 && key != lastHandledUserMessageKey) {
             lastHandledUserMessageKey = key
+            activeTurnAnchored = true
             followStreamingText = true
-            listState.scrollToItem(index = index, scrollOffset = 0)
+            listState.scrollToItem(index = index, scrollOffset = -anchorTopOffsetPx)
+            scrollActiveTurnIfNeeded(
+                listState = listState,
+                lastContentIndex = state.lastContentIndex(hasTimelineError),
+                bottomPaddingPx = timelineBottomPaddingPx,
+                tolerancePx = followCorrectionTolerancePx,
+            )
         }
     }
 
     LaunchedEffect(isNearTimelineEnd, isUserDragging) {
         if (isUserDragging && !isNearTimelineEnd) {
             followStreamingText = false
+            activeTurnAnchored = false
         } else if (isNearTimelineEnd) {
             followStreamingText = true
         }
@@ -1015,9 +1213,32 @@ private fun ChatTimeline(
         }
     }
 
+    LaunchedEffect(state.isStreaming) {
+        if (!state.isStreaming) {
+            activeTurnAnchored = false
+        }
+    }
+
     LaunchedEffect(state.streamingTextKey, state.streamingTextLength) {
         if (followStreamingText && state.streamingTextKey != null && state.nodes.isNotEmpty()) {
-            listState.animateScrollToItem(state.nodes.lastIndex)
+            scrollActiveTurnIfNeeded(
+                listState = listState,
+                lastContentIndex = state.lastContentIndex(hasTimelineError),
+                bottomPaddingPx = timelineBottomPaddingPx,
+                tolerancePx = followCorrectionTolerancePx,
+            )
+        }
+    }
+
+    LaunchedEffect(state.nodes.size, state.streamingTextKey, state.isStreaming, timelineBottomPadding) {
+        if (followStreamingText && state.nodes.isNotEmpty()) {
+            scrollActiveTurnIfNeeded(
+                listState = listState,
+                lastContentIndex = state.lastContentIndex(hasTimelineError),
+                bottomPaddingPx = timelineBottomPaddingPx,
+                tolerancePx = followCorrectionTolerancePx,
+                settleFrames = 2,
+            )
         }
     }
 
@@ -1029,7 +1250,7 @@ private fun ChatTimeline(
             start = 16.dp,
             top = 16.dp,
             end = 16.dp,
-            bottom = 136.dp,
+            bottom = timelineBottomPadding,
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -1042,15 +1263,14 @@ private fun ChatTimeline(
                         hidden = hiddenUserMessage,
                         onPositioned = { onUserBubblePositioned(node.key, it) },
                     )
-                    is ThinkingNode -> ThinkingBubble(
-                        message = node.payload.message.ifBlank { "正在思考中..." },
-                    )
-                    is AiStreamNode -> StreamingAssistantText(
-                        content = node.content,
-                        done = node.done,
-                        revealed = node.key in revealedMessageKeys,
-                        onRevealComplete = { onMessageRevealComplete(node.key) },
-                    )
+                    is ThinkingNode -> ThinkingBubble(message = node.payload.message)
+                    is AiStreamNode -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StreamingAssistantText(
+                            content = node.content,
+                            done = node.done,
+                            onRevealComplete = { onMessageRevealComplete(node.key) },
+                        )
+                    }
                     is ClarificationNode -> ClarificationBlock(
                         nodeKey = node.key,
                         payload = node.payload,
@@ -1066,25 +1286,152 @@ private fun ChatTimeline(
                         onCardDismissed = onClarificationCardDismissed,
                     )
                     is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
-                    is ProductDeckNode -> ProductSwipeDeck(node, onOpen = onProductOpen, onEvidence = onProductEvidence)
-                    is FinalDecisionNode -> DecisionSummaryCard(
-                        payload = node.payload,
-                        products = products,
-                        onEvidence = { onDecisionEvidence(node.payload) },
-                        onQuickAction = onQuickAction,
+                    is ProductDeckNode -> ProductRecommendationStrip(
+                        node = node,
+                        backendBaseUrl = state.backendBaseUrl,
+                        swipeState = state.productSwipeStates[node.deckId],
+                        awaitingConvergence = node.deckId in state.awaitingConvergenceDeckIds,
+                        hasPendingDecision = node.deckId in state.pendingDecisions,
+                        onOpen = onProductOpen,
                     )
+                    is FinalDecisionNode -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DecisionSummaryCard(
+                            payload = node.payload,
+                            products = products,
+                            backendBaseUrl = state.backendBaseUrl,
+                            onEvidence = { onDecisionEvidence(node.payload) },
+                            onQuickAction = onQuickAction,
+                        )
+                    }
                     is CartActionNode -> CartActionCard(node.payload)
-                    is ErrorNode -> ErrorCard(node)
+                    is ErrorNode -> ErrorCard(
+                        node = node,
+                        latestUserMessage = state.lastUserMessage,
+                        onRetry = onRetryLastMessage,
+                        onEditMessage = onEditLastMessage,
+                    )
                 }
             }
         }
 
-        state.lastError?.let {
+        if (state.lastError != null && !hasTimelineError) {
             item("last_error") {
                 Box {
-                    InlineSystemNotice(it)
+                    InlineSystemNotice(state.lastError)
                 }
             }
+        }
+
+        if (activeTurnAnchored) {
+            item("active_turn_anchor_spacer") {
+                Spacer(Modifier.height(activeTurnBottomReserve))
+            }
+        }
+    }
+
+    AnimatedVisibility(
+        visible = shouldShowKeyboardScrim,
+        enter = fadeIn(animationSpec = tween(durationMillis = 150, easing = MenuEaseOut)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = with(density) { (composerHeightPx + imeBottomPx).toDp() })
+            .zIndex(1f),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(TimelineKeyboardScrimHeight)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                BuyPilotColors.SurfaceBg.copy(alpha = 0f),
+                                BuyPilotColors.SurfaceBg.copy(alpha = 0.9f),
+                            ),
+                        ),
+                    ),
+            )
+        }
+    }
+
+    AnimatedVisibility(
+        visible = !isNearTimelineEnd,
+        enter = fadeIn(animationSpec = tween(durationMillis = 160, easing = MenuEaseOut)) +
+            slideInVertically(
+                animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
+                initialOffsetY = { it / 3 },
+            ),
+        exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)) +
+            slideOutVertically(
+                animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
+                targetOffsetY = { it / 3 },
+            ),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = jumpButtonBottomPadding, end = 16.dp)
+            .zIndex(2f),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+            JumpToLatestButton(
+                streaming = state.isStreaming,
+                onClick = {
+                    followStreamingText = true
+                    activeTurnAnchored = false
+                    coroutineScope.launch {
+                        val lastContentIndex = state.lastContentIndex(hasTimelineError).coerceAtLeast(0)
+                        listState.animateScrollToItem(index = lastContentIndex)
+                        scrollActiveTurnIfNeeded(
+                            listState = listState,
+                            lastContentIndex = lastContentIndex,
+                            bottomPaddingPx = timelineBottomPaddingPx,
+                            tolerancePx = followCorrectionTolerancePx,
+                            settleFrames = 2,
+                        )
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun JumpToLatestButton(
+    streaming: Boolean,
+    onClick: () -> Unit,
+) {
+    FloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier.height(42.dp),
+        containerColor = BuyPilotColors.SurfaceCard,
+        contentColor = BuyPilotColors.TextPrimary,
+        elevation = FloatingActionButtonDefaults.elevation(
+            defaultElevation = 4.dp,
+            pressedElevation = 2.dp,
+        ),
+        shape = CircleShape,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_arrow_upward_24),
+                contentDescription = null,
+                tint = BuyPilotColors.PrimaryDark,
+                modifier = Modifier
+                    .size(17.dp)
+                    .rotate(180f),
+            )
+            Text(
+                text = if (streaming) "新回复生成中" else "回到底部",
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1123,11 +1470,12 @@ private fun UserBubble(
 ) {
     val bubbleShape = RoundedCornerShape(18.dp)
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (hidden) 0f else 1f),
-        horizontalArrangement = Arrangement.End,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
             modifier = Modifier
@@ -1151,7 +1499,7 @@ private fun UserBubble(
 private fun ThinkingBubble(
     message: String,
 ) {
-    val displayMessage = message.ifBlank { "正在思考中..." }.withoutTrailingDots()
+    val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() } ?: return
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1264,85 +1612,48 @@ private fun String.withoutTrailingDots(): String =
     trim().replace(Regex("""[.。…]+$"""), "")
 
 private fun String.withoutMarkdownMarkup(): String =
-    parseMarkdownInlineSegments().joinToString("") { it.text }
-
-private fun String.parseMarkdownInlineSegments(): List<MarkdownInlineSegment> {
-    val source = replace(Regex("""^\s*[-*>]\s*""", RegexOption.MULTILINE), "")
-    val segments = mutableListOf<MarkdownInlineSegment>()
-    val plain = StringBuilder()
-    var index = 0
-
-    fun flushPlain() {
-        if (plain.isNotEmpty()) {
-            segments += MarkdownInlineSegment(plain.toString(), MarkdownInlineStyle.Normal)
-            plain.clear()
-        }
+    replace(Regex("""(?s)```.*?```""")) { match ->
+        match.value.removeSurrounding("```").lineSequence().drop(1).joinToString("\n")
     }
+        .replace(Regex("""`([^`]*)`"""), "$1")
+        .replace(Regex("""(\*\*|__)(.*?)\1"""), "$2")
+        .replace(Regex("""(\*|_)(.*?)\1"""), "$2")
+        .replace(Regex("""!\[([^]]*)]\([^)]+\)"""), "$1")
+        .replace(Regex("""\[([^]]+)]\([^)]+\)"""), "$1")
+        .replace(Regex("""^\s{0,3}>\s?""", RegexOption.MULTILINE), "")
+        .trim()
 
-    while (index < source.length) {
-        val marker = when {
-            source.startsWith("**", index) -> "**"
-            source.startsWith("__", index) -> "__"
-            source[index] == '`' -> "`"
-            source[index] == '*' -> "*"
-            source[index] == '_' -> "_"
-            else -> null
-        }
-        if (marker == null) {
-            plain.append(source[index])
-            index += 1
-            continue
-        }
+private fun String.needsPlainStreamingRender(): Boolean =
+    hasUnclosedFence() ||
+        hasPartialTable() ||
+        hasUnclosedInlineCode() ||
+        hasUnclosedStrongEmphasis()
 
-        val end = source.indexOf(marker, startIndex = index + marker.length)
-        if (end < 0) {
-            plain.append(marker)
-            index += marker.length
-            continue
-        }
+private fun String.hasUnclosedFence(): Boolean =
+    Regex("""(?m)^```""").findAll(this).count() % 2 == 1
 
-        val inner = source.substring(index + marker.length, end)
-        if (inner.isBlank()) {
-            plain.append(source.substring(index, end + marker.length))
-            index = end + marker.length
-            continue
-        }
-
-        flushPlain()
-        val style = when (marker) {
-            "**", "__" -> MarkdownInlineStyle.Bold
-            "`" -> MarkdownInlineStyle.Code
-            else -> MarkdownInlineStyle.Italic
-        }
-        segments += MarkdownInlineSegment(inner, style)
-        index = end + marker.length
-    }
-    flushPlain()
-    return segments
+private fun String.hasUnclosedInlineCode(): Boolean {
+    val withoutFences = replace(Regex("""(?s)```.*?(?:```|$)"""), "")
+    return Regex("""(?<!`)`(?!`)""").findAll(withoutFences).count() % 2 == 1
 }
 
-private fun String.toMarkdownAnnotatedString(
-    baseColor: Color,
-): AnnotatedString {
-    val segments = parseMarkdownInlineSegments()
-    return buildAnnotatedString {
-        segments.forEach { segment ->
-            val start = length
-            append(segment.text)
-            val style = when (segment.style) {
-                MarkdownInlineStyle.Normal -> null
-                MarkdownInlineStyle.Bold -> SpanStyle(fontWeight = FontWeight.Bold)
-                MarkdownInlineStyle.Italic -> SpanStyle(fontStyle = FontStyle.Italic)
-                MarkdownInlineStyle.Code -> SpanStyle(
-                    color = baseColor.copy(alpha = 0.86f),
-                    fontWeight = FontWeight.Medium,
-                    background = BuyPilotColors.SurfaceMuted,
-                )
-            }
-            if (style != null) {
-                addStyle(style, start, length)
-            }
-        }
+private fun String.hasUnclosedStrongEmphasis(): Boolean {
+    val withoutCode = replace(Regex("""(?s)```.*?(?:```|$)"""), "")
+        .replace(Regex("""`[^`]*(?:`|$)"""), "")
+    return Regex("""(?<!\*)\*\*(?!\*)""").findAll(withoutCode).count() % 2 == 1
+}
+
+private fun String.hasPartialTable(): Boolean {
+    val lines = lineSequence().toList()
+    val lastTableStart = lines.indexOfLast { it.trim().startsWith("|") && it.trim().endsWith("|") }
+    if (lastTableStart < 0) return false
+    val trailing = lines.drop(lastTableStart)
+    val lastNonBlank = lines.lastOrNull { it.isNotBlank() }?.trim()
+    if (lastNonBlank?.startsWith("|") == true) return true
+    if (trailing.size <= 1) return true
+    return trailing.any { line ->
+        val trimmed = line.trim()
+        trimmed.startsWith("|") && !trimmed.endsWith("|")
     }
 }
 
@@ -1363,61 +1674,43 @@ private fun AssistantText(content: String) {
 private fun StreamingAssistantText(
     content: String,
     done: Boolean = false,
-    revealed: Boolean = false,
     onRevealComplete: (() -> Unit)? = null,
 ) {
-    if (content.isBlank()) {
-        LaunchedEffect(done, revealed, onRevealComplete) {
-            if (done || revealed) {
-                onRevealComplete?.invoke()
-            }
-        }
-        return
-    }
-    val plainContent = remember(content) { content.withoutMarkdownMarkup() }
-    if (plainContent.isBlank()) {
-        LaunchedEffect(done, revealed, onRevealComplete) {
-            if (done || revealed) {
-                onRevealComplete?.invoke()
-            }
-        }
-        return
-    }
-    var visibleLength by rememberSaveable {
-        mutableStateOf(if (revealed) plainContent.length else 0)
-    }
-
-    LaunchedEffect(plainContent, done, revealed) {
-        val targetLength = plainContent.length
-        if (revealed) {
-            visibleLength = targetLength
-            onRevealComplete?.invoke()
-            return@LaunchedEffect
-        }
-        if (targetLength <= visibleLength) {
-            visibleLength = targetLength
-            if (done) {
-                onRevealComplete?.invoke()
-            }
-            return@LaunchedEffect
-        }
-        while (visibleLength < targetLength) {
-            visibleLength = (visibleLength + StreamRevealCharsPerFrame).coerceAtMost(targetLength)
-            kotlinx.coroutines.delay(StreamRevealFrameDelayMs)
-        }
+    LaunchedEffect(done) {
         if (done) {
             onRevealComplete?.invoke()
         }
     }
+    if (content.isBlank()) return
 
-    MarkdownTextBlock(content.takeMarkdownPlainChars(visibleLength))
+    val showPlainStreaming = !done && content.needsPlainStreamingRender()
+    if (showPlainStreaming) {
+        PlainStreamingTextBlock(content)
+    } else {
+        MarkdownTextBlock(content)
+    }
 }
 
 @Composable
 private fun StreamingAssistantText(
     content: String,
 ) {
-    StreamingAssistantText(content = content, done = false, revealed = true)
+    StreamingAssistantText(content = content, done = true)
+}
+
+@Composable
+private fun PlainStreamingTextBlock(
+    content: String,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    if (content.isBlank()) return
+    Text(
+        text = content,
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.LargeBody,
+        lineHeight = 26.sp,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -1431,32 +1724,46 @@ private fun MarkdownTextBlock(
     ),
 ) {
     if (content.isBlank()) return
-    Text(
-        text = remember(content, style.color) { content.toMarkdownAnnotatedString(style.color) },
-        style = style,
-        modifier = modifier,
-    )
-}
-
-private fun String.takeMarkdownPlainChars(count: Int): String {
-    if (count <= 0) return ""
-    val result = StringBuilder()
-    var remaining = count
-    parseMarkdownInlineSegments().forEach { segment ->
-        if (remaining <= 0) return@forEach
-        val takeCount = segment.text.length.coerceAtMost(remaining)
-        val text = segment.text.take(takeCount)
-        result.append(
-            when (segment.style) {
-                MarkdownInlineStyle.Bold -> "**$text**"
-                MarkdownInlineStyle.Italic -> "*$text*"
-                MarkdownInlineStyle.Code -> "`$text`"
-                MarkdownInlineStyle.Normal -> text
-            },
-        )
-        remaining -= takeCount
+    val context = LocalContext.current
+    val markwon = remember(context) {
+        Markwon.builder(context)
+            .usePlugin(StrikethroughPlugin.create())
+            .usePlugin(TablePlugin.create(context))
+            .usePlugin(HtmlPlugin.create())
+            .build()
     }
-    return result.toString()
+    val textColor = style.color.takeOrElse { BuyPilotColors.TextPrimary }
+    val fontSizePx = with(LocalDensity.current) { style.fontSize.toPx() }
+    val lineHeightPx = with(LocalDensity.current) { style.lineHeight.toPx() }
+    val typefaceStyle = when (style.fontWeight) {
+        FontWeight.Bold,
+        FontWeight.ExtraBold,
+        FontWeight.Black,
+        FontWeight.SemiBold -> android.graphics.Typeface.BOLD
+        else -> android.graphics.Typeface.NORMAL
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { viewContext ->
+            TextView(viewContext).apply {
+                includeFontPadding = false
+                setTextColor(textColor.toArgb())
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizePx)
+                setLineSpacing((lineHeightPx - fontSizePx).coerceAtLeast(0f), 1f)
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+                movementMethod = LinkMovementMethod.getInstance()
+                linksClickable = true
+            }
+        },
+        update = { textView ->
+            textView.setTextColor(textColor.toArgb())
+            textView.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizePx)
+            textView.setLineSpacing((lineHeightPx - fontSizePx).coerceAtLeast(0f), 1f)
+            textView.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+            markwon.setMarkdown(textView, content)
+        },
+    )
 }
 
 private fun String.toClarificationUserMessage(): String {
@@ -1467,6 +1774,62 @@ private fun String.toClarificationUserMessage(): String {
         clean == "不确定" -> "我还不确定肤质"
         clean in DefaultSkinTypeOptions || clean.contains("肌") || clean.contains("肤") -> "我是${skinLabel}肌肤"
         else -> clean
+    }
+}
+
+private fun calculateTimelineBottomPadding(
+    density: Density,
+    composerHeightPx: Int,
+    imeBottomPx: Int,
+): Dp = with(density) {
+    val baselineComposerPx = 136.dp.toPx()
+    val safeGapPx = TimelineSafeGap.toPx()
+    (maxOf(composerHeightPx.toFloat(), baselineComposerPx) + imeBottomPx + safeGapPx).toDp()
+}
+
+private fun ChatUiState.lastContentIndex(hasTimelineError: Boolean): Int =
+    nodes.lastIndex + if (lastError != null && !hasTimelineError) 1 else 0
+
+private fun isTimelineNearEnd(
+    listState: LazyListState,
+    lastContentIndex: Int,
+    bottomPaddingPx: Float,
+    thresholdPx: Float,
+): Boolean {
+    if (lastContentIndex < 0) return true
+
+    val layoutInfo = listState.layoutInfo
+    val viewportBottom = layoutInfo.viewportEndOffset - bottomPaddingPx.roundToInt()
+    val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull { it.index == lastContentIndex }
+        ?: return false
+    val distanceToBottom = viewportBottom - (lastVisibleItem.offset + lastVisibleItem.size)
+    return distanceToBottom >= -thresholdPx
+}
+
+private suspend fun scrollActiveTurnIfNeeded(
+    listState: LazyListState,
+    lastContentIndex: Int,
+    bottomPaddingPx: Float,
+    tolerancePx: Float,
+    settleFrames: Int = 1,
+) {
+    if (lastContentIndex < 0) return
+
+    repeat(settleFrames.coerceAtLeast(1)) {
+        val layoutInfo = listState.layoutInfo
+        val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull { it.index == lastContentIndex }
+        if (lastVisibleItem == null) {
+            val visibleHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset - bottomPaddingPx)
+                .coerceAtLeast(tolerancePx)
+            listState.scrollBy(visibleHeight * 0.72f)
+        } else {
+            val viewportBottom = layoutInfo.viewportEndOffset - bottomPaddingPx.roundToInt()
+            val overflow = (lastVisibleItem.offset + lastVisibleItem.size) - viewportBottom
+            if (overflow > tolerancePx) {
+                listState.scrollBy(overflow.toFloat())
+            }
+        }
+        kotlinx.coroutines.delay(16L)
     }
 }
 
@@ -1493,8 +1856,8 @@ private fun ClarificationBlock(
     onManualInput: () -> Unit,
     onCardDismissed: (String) -> Unit,
 ) {
-    val question = payload.question.ifBlank { "请补充一个关键信息" }
-    val options = payload.suggestedOptions.ifEmpty { payload.requiredSlots }
+    val question = payload.question
+    val options = payload.suggestedOptions
     var dismissNotified by remember(nodeKey) { mutableStateOf(false) }
     var exitReady by remember(nodeKey) { mutableStateOf(false) }
     val hasSelection = selectedOption != null
@@ -1564,13 +1927,15 @@ private fun ClarificationBlock(
                             lineHeight = 21.sp,
                         ),
                     )
-                    ClarificationOptionScroller(
-                        labels = options.ifEmpty { DefaultSkinTypeOptions },
-                        selectedLabel = selectedOption,
-                        enabled = !dismissing,
-                        onClick = onOption,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
+                    if (options.isNotEmpty()) {
+                        ClarificationOptionScroller(
+                            labels = options,
+                            selectedLabel = selectedOption,
+                            enabled = !dismissing,
+                            onClick = onOption,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
                     ClarificationManualInputRow(
                         modifier = Modifier
                             .padding(top = 2.dp)
@@ -1992,11 +2357,11 @@ private fun CriteriaSummaryCard(
 ) {
     val criteria = payload.criteria
     val tiles = criteria.summaryTiles()
-    val exclusions = criteria.exclusionLabels()
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        StreamingAssistantText("已理解你的需求")
-        CriteriaBentoGrid(tiles = tiles, exclusions = exclusions)
+        if (tiles.isNotEmpty()) {
+            CriteriaBentoGrid(tiles = tiles)
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             GhostButton(label = "修改标准", leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
         }
@@ -2006,94 +2371,41 @@ private fun CriteriaSummaryCard(
 @Composable
 private fun CriteriaBentoGrid(
     tiles: List<CriteriaTileSpec>,
-    exclusions: List<String>,
 ) {
-    val exclusionTile = CriteriaTileSpec(
-        label = "排除项",
-        value = exclusions.joinToString("、").ifBlank { "暂无排除" },
-        iconRes = R.drawable.ic_block_24,
-        accent = Color(0xFFB56B76),
-        glow = Color(0xFFFFEEF1),
-    )
-
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(112.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            CriteriaTile(
-                label = tiles[0].label,
-                value = tiles[0].value,
-                iconRes = tiles[0].iconRes,
-                accent = tiles[0].accent,
-                glow = tiles[0].glow,
-                prominent = true,
+        tiles.chunked(2).forEachIndexed { rowIndex, rowTiles ->
+            Row(
                 modifier = Modifier
-                    .weight(1.12f)
-                    .fillMaxHeight(),
-            )
-            CriteriaTile(
-                label = tiles[1].label,
-                value = tiles[1].value,
-                iconRes = tiles[1].iconRes,
-                accent = tiles[1].accent,
-                glow = tiles[1].glow,
-                prominent = true,
-                modifier = Modifier
-                    .weight(0.88f)
-                    .fillMaxHeight(),
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(142.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            CriteriaTile(
-                label = tiles[2].label,
-                value = tiles[2].value,
-                iconRes = tiles[2].iconRes,
-                accent = tiles[2].accent,
-                glow = tiles[2].glow,
-                prominent = true,
-                modifier = Modifier
-                    .weight(0.92f)
-                    .fillMaxHeight(),
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1.08f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
+                    .fillMaxWidth()
+                    .height(if (rowTiles.any { it.prominent }) 112.dp else 82.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                CriteriaTile(
-                    label = tiles[3].label,
-                    value = tiles[3].value,
-                    iconRes = tiles[3].iconRes,
-                    accent = tiles[3].accent,
-                    glow = tiles[3].glow,
-                    compact = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                )
-                CriteriaTile(
-                    label = exclusionTile.label,
-                    value = exclusionTile.value,
-                    iconRes = exclusionTile.iconRes,
-                    accent = exclusionTile.accent,
-                    glow = exclusionTile.glow,
-                    compact = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                )
+                rowTiles.forEachIndexed { tileIndex, tile ->
+                    val prominent = tile.prominent
+                    val compact = !prominent
+                    val isFullWidthSingle = rowTiles.size == 1
+                    val weight = when {
+                        isFullWidthSingle -> 1f
+                        rowIndex == 0 && tileIndex == 0 -> 1.12f
+                        rowIndex == 0 -> 0.88f
+                        else -> 1f
+                    }
+                    CriteriaTile(
+                        label = tile.label,
+                        value = tile.value,
+                        iconRes = tile.iconRes,
+                        accent = tile.accent,
+                        glow = tile.glow,
+                        prominent = prominent,
+                        compact = compact,
+                        modifier = Modifier
+                            .weight(weight)
+                            .fillMaxHeight(),
+                    )
+                }
             }
         }
     }
@@ -2148,6 +2460,7 @@ private fun CriteriaTile(
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2242,46 +2555,72 @@ private fun CriteriaTileValueText(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProductSwipeDeck(
+private fun ProductRecommendationStrip(
     node: ProductDeckNode,
-    onOpen: (ProductCardPayload) -> Unit,
-    onEvidence: (ProductCardPayload) -> Unit,
+    backendBaseUrl: String,
+    swipeState: ProductSwipeState?,
+    awaitingConvergence: Boolean,
+    hasPendingDecision: Boolean,
+    onOpen: (String, String?) -> Unit,
 ) {
-    val product = node.products.firstOrNull() ?: return
-    val count = node.products.size
+    val products = node.products
+    if (products.isEmpty()) return
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(
-            text = "找到最佳匹配",
-            color = BuyPilotColors.TextPrimary,
-            fontSize = 26.sp,
-            lineHeight = 31.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "右滑心动，左滑无感，我正在努力懂你。",
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 20.sp,
-        )
-        Box(
+    val pagerState = rememberPagerState(pageCount = { products.size })
+    val activeIndex = pagerState.currentPage.coerceIn(0, products.lastIndex)
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "候选商品",
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Title,
+                    lineHeight = 23.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = "${products.size} 个",
+                color = BuyPilotColors.PrimaryDark,
+                fontSize = BuyPilotType.Label,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.7f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(430.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (count > 1) {
-                DeckShadowCard(Modifier.offset(x = 20.dp, y = 18.dp).rotate(5f))
-            }
-            if (count > 2) {
-                DeckShadowCard(Modifier.offset(x = (-20).dp, y = 26.dp).rotate(-6f))
-            }
-            ProductHeroCard(
-                payload = product,
-                modifier = Modifier.fillMaxWidth(),
-                onOpen = { onOpen(product) },
-                onEvidence = { onEvidence(product) },
+                .height(238.dp),
+            contentPadding = PaddingValues(horizontal = 44.dp),
+            pageSpacing = 14.dp,
+            beyondViewportPageCount = 1,
+        ) { page ->
+            val payload = products[page]
+            val pageOffset = (
+                (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                ).coerceIn(-1f, 1f)
+            val distance = kotlin.math.abs(pageOffset)
+            ProductRecommendationThumb(
+                payload = payload,
+                backendBaseUrl = backendBaseUrl,
+                selected = page == activeIndex,
+                onClick = { onOpen(node.deckId, payload.product.productId.takeIf { it.isNotBlank() }) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        scaleX = 1f - distance * 0.055f
+                        scaleY = 1f - distance * 0.075f
+                        alpha = 1f - distance * 0.18f
+                    },
             )
         }
         Row(
@@ -2289,124 +2628,353 @@ private fun ProductSwipeDeck(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SwipeRoundButton(label = "×", active = false)
-            Spacer(Modifier.width(32.dp))
-            SwipeRoundButton(label = "♥", active = true)
+            products.take(6).forEachIndexed { index, _ ->
+                val active = index == activeIndex.coerceAtMost(5)
+                val indicatorWidth by animateDpAsState(
+                    targetValue = if (active) 18.dp else 5.dp,
+                    animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+                    label = "product_carousel_indicator_width",
+                )
+                val indicatorColor by animateColorAsState(
+                    targetValue = if (active) BuyPilotColors.Primary.copy(alpha = 0.82f) else BuyPilotColors.Border.copy(alpha = 0.9f),
+                    animationSpec = tween(durationMillis = 180),
+                    label = "product_carousel_indicator_color",
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(width = indicatorWidth, height = 5.dp)
+                        .background(indicatorColor, CircleShape),
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = awaitingConvergence,
+            enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) +
+                slideInVertically(
+                    animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+                    initialOffsetY = { it / 4 },
+                ),
+            exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)),
+        ) {
+            ProductConvergenceHint(
+                readyFromBackend = hasPendingDecision,
+            )
         }
     }
 }
 
 @Composable
-private fun DeckShadowCard(modifier: Modifier) {
-    Box(
+private fun ProductConvergenceHint(
+    readyFromBackend: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(5.dp)
+                .background(
+                    if (readyFromBackend) BuyPilotColors.Primary else BuyPilotColors.TextMuted.copy(alpha = 0.45f),
+                    CircleShape,
+                ),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "回复「继续」我再收敛建议",
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 17.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ProductRecommendationThumb(
+    payload: ProductCardPayload,
+    backendBaseUrl: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val product = payload.product
+    val tags = payload.displayTags().take(2)
+    val reason = payload.reason
+        .withoutMarkdownMarkup()
+        .trim()
+        .takeIf { it.isNotBlank() }
+    val cardShape = RoundedCornerShape(18.dp)
+    val lift by animateDpAsState(
+        targetValue = if (selected) 2.dp else 0.dp,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "product_thumb_lift",
+    )
+
+    Surface(
         modifier = modifier
-            .width(268.dp)
-            .height(360.dp)
-            .background(Color.White.copy(alpha = 0.68f), RoundedCornerShape(28.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(28.dp)),
+            .height(218.dp)
+            .clip(cardShape)
+            .clickable(onClick = onClick),
+        color = BuyPilotColors.SurfaceCard,
+        shape = cardShape,
+        shadowElevation = lift,
+        tonalElevation = if (selected) 1.dp else 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .premiumProductCardBackground(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(106.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFFFAFBFC),
+                                    Color(0xFFF1F5F8),
+                                    Color(0xFFF9FAFB),
+                                ),
+                            ),
+                        )
+                        .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.36f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ProductImage(
+                        product = product,
+                        backendBaseUrl = backendBaseUrl,
+                        modifier = Modifier
+                            .width(92.dp)
+                            .height(132.dp)
+                            .padding(horizontal = 3.dp, vertical = 6.dp),
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(start = 13.dp, top = 4.dp, end = 3.dp, bottom = 3.dp),
+                ) {
+                    Text(
+                        text = product.brandLabel(),
+                        color = BuyPilotColors.TextMuted.copy(alpha = 0.86f),
+                        fontSize = BuyPilotType.Tiny,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = product.name.ifBlank { "推荐商品" },
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = 14.5f.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (reason != null) {
+                        Spacer(Modifier.height(7.dp))
+                        Text(
+                            text = reason,
+                            color = BuyPilotColors.TextSecondary.copy(alpha = 0.76f),
+                            fontSize = 11.5f.sp,
+                            lineHeight = 16.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    ProductPriceLabel(price = product.priceLabel())
+                    Spacer(Modifier.height(9.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        tags.forEach { tag ->
+                            ProductMiniTag(
+                                label = tag,
+                                compact = true,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun Modifier.premiumProductCardBackground(): Modifier =
+    drawBehind {
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFFFCFDFE),
+                    BuyPilotColors.SurfaceCard,
+                    Color(0xFFF8FAFC),
+                ),
+            ),
+            cornerRadius = CornerRadius(18.dp.toPx(), 18.dp.toPx()),
+        )
+    }
+
+@Composable
+private fun ProductPriceLabel(
+    price: String,
+    modifier: Modifier = Modifier,
+) {
+    val match = remember(price) { Regex("""^([¥￥$]?)(\d+(?:\.\d+)?)(.*)$""").find(price) }
+    if (match == null) {
+        Text(
+            text = price,
+            color = BuyPilotColors.PrimaryDark,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier,
+        )
+        return
+    }
+
+    val (currency, amount, suffix) = match.destructured
+    Text(
+        text = buildAnnotatedString {
+            if (currency.isNotBlank()) {
+                withStyle(
+                    SpanStyle(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                ) {
+                    append(currency)
+                }
+            }
+            withStyle(
+                SpanStyle(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            ) {
+                append(amount)
+            }
+            if (suffix.isNotBlank()) {
+                withStyle(
+                    SpanStyle(
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = BuyPilotColors.TextMuted,
+                    ),
+                ) {
+                    append(suffix)
+                }
+            }
+        },
+        color = BuyPilotColors.PrimaryDark,
+        lineHeight = 20.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
     )
 }
 
 @Composable
 private fun ProductHeroCard(
     payload: ProductCardPayload,
+    backendBaseUrl: String,
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
-    onEvidence: () -> Unit,
 ) {
     val product = payload.product
-    val tags = (product.ingredientTags + product.skinTypeMatch + product.useScenario).distinct().take(3)
+    val tags = payload.displayTags().take(3)
 
-    Column(
-        modifier = modifier
-            .shadow(18.dp, RoundedCornerShape(32.dp), ambientColor = Color.Black.copy(alpha = 0.12f))
-            .background(BuyPilotColors.SurfaceCard, RoundedCornerShape(32.dp))
-            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.5f), RoundedCornerShape(32.dp))
-            .clickable(onClick = onOpen)
-            .padding(bottom = 22.dp),
+    Surface(
+        modifier = modifier.clickable(onClick = onOpen),
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(28.dp),
+        shadowElevation = 5.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.76f)),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(242.dp)
-                .background(
-                    Brush.linearGradient(
-                        listOf(Color(0xFFD7D8D2), Color(0xFFF1F1EC), Color(0xFFCBCDCA)),
-                    ),
-                    RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-                ),
-        ) {
-            ProductMockImage(
+        Column(Modifier.padding(bottom = 20.dp)) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .width(176.dp)
-                    .height(214.dp),
-            )
-            Text(
-                text = "PREMIUM CHOICE",
-                color = BuyPilotColors.PrimaryDark,
-                fontSize = BuyPilotType.Tiny,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(14.dp)
-                    .background(Color.White.copy(alpha = 0.74f), CircleShape)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            text = (product.brand ?: "LA ROCHE-POSAY").uppercase(),
-            color = BuyPilotColors.TextMuted,
-            fontSize = 18.sp,
-            lineHeight = 24.sp,
-            letterSpacing = 3.5.sp,
-            modifier = Modifier.padding(horizontal = 18.dp),
-        )
-        Text(
-            text = product.name.ifBlank { "推荐商品" },
-            color = BuyPilotColors.TextPrimary,
-            fontSize = 22.sp,
-            lineHeight = 28.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 18.dp),
-        )
-        Spacer(Modifier.height(32.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = product.priceLabel(),
-                color = BuyPilotColors.Primary,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 40.sp,
-            )
-            Spacer(Modifier.weight(1f))
-            ProductTag("控油王者", active = true)
-            Spacer(Modifier.width(6.dp))
-            ProductTag("温和")
-        }
-        Spacer(Modifier.height(56.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ProductTag(tags.firstOrNull { it.contains("敏感") } ?: "敏感肌可用")
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "✿ Verified ${payload.evidence.size.coerceAtLeast(2)}k+",
-                color = BuyPilotColors.TextSecondary,
-                fontSize = BuyPilotType.LargeBody,
-                lineHeight = 22.sp,
-            )
+                    .fillMaxWidth()
+                    .height(266.dp)
+                    .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f), RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                ProductImage(
+                    product = product,
+                    backendBaseUrl = backendBaseUrl,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(244.dp),
+                )
+                PillLabel(
+                    text = "#${payload.rank.takeIf { it > 0 } ?: 1}",
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = product.brandLabel(),
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = product.name.ifBlank { "推荐商品" },
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = 24.sp,
+                    lineHeight = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = product.priceLabel(),
+                        color = BuyPilotColors.Primary,
+                        fontSize = 24.sp,
+                        lineHeight = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "${payload.evidence.size} 条证据",
+                        color = BuyPilotColors.TextSecondary,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 16.sp,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    tags.forEach { ProductMiniTag(it, active = it == tags.firstOrNull()) }
+                }
+            }
         }
     }
 }
@@ -2415,93 +2983,1657 @@ private fun ProductHeroCard(
 private fun DecisionSummaryCard(
     payload: FinalDecisionPayload,
     products: List<ProductCardPayload>,
+    backendBaseUrl: String,
     onEvidence: () -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
-    val winner = products.firstOrNull { it.product.productId == payload.winnerProductId } ?: products.firstOrNull()
+    val winner = payload.winnerProductId
+        ?.takeIf { it.isNotBlank() }
+        ?.let { winnerId -> products.firstOrNull { it.product.productId == winnerId } }
     val product = winner?.product
+    val whyItems = payload.why.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
+    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
+    val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        StreamingAssistantText(
-            payload.summary.ifBlank {
-                "综合考量你的需求，并对比候选商品后，我为你得出了最终购买建议。"
-            },
-        )
-        Surface(
-            color = BuyPilotColors.SurfaceCard,
-            shape = RoundedCornerShape(18.dp),
-            shadowElevation = 4.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border),
-        ) {
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.7f))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("✪", color = BuyPilotColors.PrimaryDark, fontSize = BuyPilotType.Body)
-                    Spacer(Modifier.width(8.dp))
-                    Text("首选推荐", color = BuyPilotColors.PrimaryDark, fontSize = BuyPilotType.Label, fontWeight = FontWeight.Bold)
-                }
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Box(
+        AssistantText(payload.summary)
+        if (winner != null || !payload.winnerProductId.isNullOrBlank() || whyItems.isNotEmpty() || notForItems.isNotEmpty()) {
+            Surface(
+                modifier = Modifier.shadow(
+                    elevation = 8.dp,
+                    shape = RoundedCornerShape(22.dp),
+                    ambientColor = Color(0xFF8E97A4).copy(alpha = 0.07f),
+                    spotColor = Color.Black.copy(alpha = 0.04f),
+                ),
+                color = BuyPilotColors.SurfaceCard,
+                shape = RoundedCornerShape(22.dp),
+                shadowElevation = 0.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
+            ) {
+                Column {
+                    if (winner != null || !payload.winnerProductId.isNullOrBlank()) {
+                        Row(
                             modifier = Modifier
-                                .size(80.dp)
-                                .background(BuyPilotColors.SurfaceMuted, RoundedCornerShape(16.dp)),
-                            contentAlignment = Alignment.Center,
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            BuyPilotColors.PrimarySoft.copy(alpha = 0.78f),
+                                            Color(0xFFFFF7F0),
+                                        ),
+                                    ),
+                                )
+                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ProductMockImage(Modifier.width(52.dp).height(68.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .background(BuyPilotColors.Primary.copy(alpha = 0.12f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("✪", color = BuyPilotColors.PrimaryDark, fontSize = BuyPilotType.Label)
+                            }
+                            Spacer(Modifier.width(8.dp))
                             Text(
-                                text = product?.name ?: payload.winnerProductId ?: "首选商品",
-                                color = BuyPilotColors.TextPrimary,
-                                fontSize = BuyPilotType.Title,
-                                lineHeight = 23.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            MarkdownTextBlock(
-                                content = winner?.reason ?: "匹配当前购买标准，综合风险和预算后更值得优先考虑。",
-                                style = TextStyle(
-                                    color = BuyPilotColors.TextSecondary,
-                                    fontSize = BuyPilotType.Body,
-                                    lineHeight = 21.sp,
-                                ),
-                            )
-                            Text(
-                                text = product?.priceLabel() ?: "价格待确认",
-                                color = BuyPilotColors.Primary,
-                                fontSize = BuyPilotType.Title,
+                                "首选推荐",
+                                color = BuyPilotColors.PrimaryDark,
+                                fontSize = BuyPilotType.Body,
+                                lineHeight = 18.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                         }
                     }
-                    SectionTitle("推荐理由", leading = "✓")
-                    ChipRows(labels = payload.why.ifEmpty { listOf("需求匹配", "预算合适", "证据充分", "风险可控") }.take(4))
-                    if (payload.notFor.isNotEmpty()) {
-                        WarningBox(payload.notFor.joinToString("；"))
-                    }
-                    TextButton(onClick = onEvidence, contentPadding = PaddingValues(0.dp)) {
-                        Text("查看决策依据 ›", color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
+                    Column(
+                        Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        if (winner != null || !payload.winnerProductId.isNullOrBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                if (product != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(88.dp)
+                                            .background(Color(0xFFF6F8FB), RoundedCornerShape(20.dp))
+                                            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.48f), RoundedCornerShape(20.dp))
+                                            .padding(6.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        ProductImage(
+                                            product = product,
+                                            backendBaseUrl = backendBaseUrl,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(16.dp)),
+                                        )
+                                    }
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    product?.name?.takeIf { it.isNotBlank() }?.let { name ->
+                                        Text(
+                                            text = name,
+                                            color = BuyPilotColors.TextPrimary,
+                                            fontSize = 19.sp,
+                                            lineHeight = 24.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    payload.winnerProductId?.takeIf { it.isNotBlank() }?.let { winnerId ->
+                                        Text(
+                                            text = winnerId,
+                                            color = BuyPilotColors.TextMuted,
+                                            fontSize = BuyPilotType.Tiny,
+                                            lineHeight = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    winner?.reason?.takeIf { it.isNotBlank() }?.let { reason ->
+                                        MarkdownTextBlock(
+                                            content = reason,
+                                            style = TextStyle(
+                                                color = BuyPilotColors.TextSecondary,
+                                                fontSize = BuyPilotType.Body,
+                                                lineHeight = 21.sp,
+                                            ),
+                                        )
+                                    }
+                                    product?.priceLabelOrNull()?.let { priceLabel ->
+                                        Text(
+                                            text = priceLabel,
+                                            color = BuyPilotColors.Primary,
+                                            fontSize = 21.sp,
+                                            lineHeight = 25.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (whyItems.isNotEmpty()) {
+                            SectionTitle("推荐理由", leading = "✓")
+                            ScrollableChipRow(
+                                labels = whyItems,
+                                colorful = true,
+                                contentPadding = PaddingValues(end = 18.dp),
+                            )
+                        }
+                        if (notForItems.isNotEmpty()) {
+                            WarningBox(notForItems.joinToString("；"))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(onClick = onEvidence, contentPadding = PaddingValues(0.dp)) {
+                                Text("查看决策依据 ›", color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
+                            }
+                        }
                     }
                 }
             }
         }
-        if (payload.nextActions.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                payload.nextActions.take(3).forEachIndexed { index, action ->
-                    if (index > 0) Spacer(Modifier.width(8.dp))
-                    SmallActionChip(action.label) { onQuickAction(action) }
+        if (nextActions.isNotEmpty()) {
+            ScrollableQuickActionRow(
+                actions = nextActions,
+                onQuickAction = onQuickAction,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProductSwipeModeScreen(
+    state: ChatUiState,
+    deckId: String,
+    initialProductId: String?,
+    onBack: () -> Unit,
+    onOpenDetail: (String, String) -> Unit,
+    onSwipe: (String, String, String, String, String?) -> Unit,
+    onUndo: (String) -> Unit,
+) {
+    val deck = state.findProductDeck(deckId)
+    val products = deck?.products.orEmpty()
+    val swipeState = state.productSwipeStates[deckId] ?: ProductSwipeState()
+    val currentProductId = swipeState.currentProductId
+        ?: initialProductId?.takeIf { id -> products.any { it.product.productId == id } }
+        ?: products.firstOrNull { it.product.productId !in swipeState.swipedProductIds }?.product?.productId
+        ?: products.firstOrNull()?.product?.productId
+    val payload = products.firstOrNull { it.product.productId == currentProductId }
+    val haptics = LocalHapticFeedback.current
+    val cardStackBridge = remember(deckId) { CardStackBridge() }
+
+    Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            ProductSwipeTopBar(
+                onBack = onBack,
+                canUndo = swipeState.undoStack.isNotEmpty(),
+                onUndo = {
+                    cardStackBridge.rewind()
+                    onUndo(deckId)
+                },
+            )
+
+            if (deck == null || payload == null) {
+                ExpiredRecommendationState(onBack = onBack)
+                return@Column
+            }
+
+            ProductSwipeHeroCopy()
+            ProductSwipeModeContent(
+                products = products,
+                currentProductId = payload.product.productId,
+                backendBaseUrl = state.backendBaseUrl,
+                cardStackBridge = cardStackBridge,
+                onOpenDetail = { productId -> onOpenDetail(deckId, productId) },
+                onDislike = { productId ->
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSwipe(deckId, productId, "not_interested", "not_interested", null)
+                },
+                onLike = { productId ->
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSwipe(deckId, productId, "like", "like", null)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductSwipeTopBar(
+    onBack: () -> Unit,
+    canUndo: Boolean,
+    onUndo: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BuyPilotColors.SurfaceCard)
+            .statusBarsPadding(),
+    ) {
+        M3TopAppBarRow(
+            title = "BuyPilot AI",
+            titleCentered = true,
+            navigationIcon = R.drawable.ic_arrow_back_24,
+            navigationDescription = "返回",
+            navigationTint = BuyPilotColors.PrimaryDark,
+            actionIcon = R.drawable.ic_history_24,
+            actionDescription = "撤销上一次选择",
+            actionTint = if (canUndo) BuyPilotColors.TextSecondary.copy(alpha = 0.72f) else BuyPilotColors.TextMuted,
+            actionEnabled = canUndo,
+            onNavigationClick = onBack,
+            onActionClick = onUndo,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
+    }
+}
+
+@Composable
+private fun ProductSwipeHeroCopy() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 22.dp),
+    ) {
+        Text(
+            text = "找到最佳匹配",
+            color = BuyPilotColors.TextPrimary,
+            fontSize = 29.sp,
+            lineHeight = 36.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "右滑心动，左滑无感，我正在努力懂你。",
+            color = BuyPilotColors.TextSecondary,
+            fontSize = 18.sp,
+            lineHeight = 25.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ProductSwipeModeContent(
+    products: List<ProductCardPayload>,
+    currentProductId: String,
+    backendBaseUrl: String,
+    cardStackBridge: CardStackBridge,
+    onOpenDetail: (String) -> Unit,
+    onDislike: (String) -> Unit,
+    onLike: (String) -> Unit,
+) {
+    val productIds = remember(products) { products.map { it.product.productId } }
+    val initialProductId = remember(productIds) {
+        currentProductId.takeIf { id -> productIds.any { it == id } }
+    }
+    val orderedProducts = remember(productIds, initialProductId) {
+        val currentIndex = products.indexOfFirst { it.product.productId == initialProductId }.coerceAtLeast(0)
+        products.drop(currentIndex) + products.take(currentIndex)
+    }
+    var activeStackIndex by remember(productIds, initialProductId) { mutableIntStateOf(0) }
+    val topPayload = orderedProducts.getOrNull(activeStackIndex)
+    val hasActiveCard = topPayload != null
+    val latestProducts by rememberUpdatedState(orderedProducts)
+    val latestOnLike by rememberUpdatedState(onLike)
+    val latestOnDislike by rememberUpdatedState(onDislike)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp)
+            .padding(bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            ProductCardStackView(
+                products = orderedProducts,
+                backendBaseUrl = backendBaseUrl,
+                bridge = cardStackBridge,
+                onOpenDetail = onOpenDetail,
+                onSwiped = { direction, position ->
+                    val swiped = latestProducts.getOrNull(position) ?: return@ProductCardStackView
+                    when (direction) {
+                        Direction.Left -> latestOnDislike(swiped.product.productId)
+                        Direction.Right -> latestOnLike(swiped.product.productId)
+                        else -> Unit
+                    }
+                },
+                onStackPositionChanged = { position ->
+                    activeStackIndex = position.coerceIn(0, orderedProducts.size)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SwipeRoundButton(
+                iconRes = R.drawable.ic_close_24,
+                contentDescription = "不感兴趣",
+                active = false,
+                enabled = hasActiveCard,
+                onClick = { cardStackBridge.swipe(Direction.Left) },
+            )
+            Spacer(Modifier.width(22.dp))
+            SwipeRoundButton(
+                iconRes = R.drawable.ic_favorite_24,
+                contentDescription = "感兴趣",
+                active = true,
+                enabled = hasActiveCard,
+                onClick = { cardStackBridge.swipe(Direction.Right) },
+            )
+        }
+    }
+}
+
+private class CardStackBridge {
+    var view: CardStackView? = null
+    var manager: CardStackLayoutManager? = null
+
+    fun swipe(direction: Direction) {
+        val stackView = view ?: return
+        val stackManager = manager ?: return
+        stackManager.setSwipeAnimationSetting(
+            SwipeAnimationSetting.Builder()
+                .setDirection(direction)
+                .setDuration(300)
+                .setInterpolator(PathInterpolator(0.3f, 0f, 1f, 1f))
+                .build(),
+        )
+        stackView.swipe()
+    }
+
+    fun rewind() {
+        val stackView = view ?: return
+        val stackManager = manager ?: return
+        stackManager.setRewindAnimationSetting(
+            RewindAnimationSetting.Builder()
+                .setDirection(Direction.Bottom)
+                .setDuration(320)
+                .setInterpolator(PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                .build(),
+        )
+        stackView.rewind()
+    }
+}
+
+@Composable
+private fun ProductCardStackView(
+    products: List<ProductCardPayload>,
+    backendBaseUrl: String,
+    bridge: CardStackBridge,
+    onOpenDetail: (String) -> Unit,
+    onSwiped: (Direction, Int) -> Unit,
+    onStackPositionChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val density = LocalDensity.current
+    val cardCornerPx = with(density) { 28.dp.toPx() }
+    val borderColor = android.graphics.Color.argb(178, 226, 231, 238)
+    val surfaceColor = android.graphics.Color.rgb(255, 254, 252)
+    val mutedSurfaceColor = android.graphics.Color.rgb(247, 249, 251)
+    val primaryColor = android.graphics.Color.rgb(255, 106, 61)
+    val primaryDarkColor = android.graphics.Color.rgb(174, 49, 4)
+    val textPrimaryColor = android.graphics.Color.rgb(24, 28, 34)
+    val textSecondaryColor = android.graphics.Color.rgb(100, 106, 115)
+    val textMutedColor = android.graphics.Color.rgb(138, 145, 159)
+    val tagBgColor = android.graphics.Color.rgb(242, 247, 250)
+    val tagBorderColor = android.graphics.Color.rgb(220, 232, 240)
+
+    AndroidView(
+        modifier = modifier,
+        factory = { viewContext ->
+            val adapter = ProductCardStackAdapter(
+                backendBaseUrl = backendBaseUrl,
+                cardCornerPx = cardCornerPx,
+                borderColor = borderColor,
+                surfaceColor = surfaceColor,
+                mutedSurfaceColor = mutedSurfaceColor,
+                primaryColor = primaryColor,
+                primaryDarkColor = primaryDarkColor,
+                textPrimaryColor = textPrimaryColor,
+                textSecondaryColor = textSecondaryColor,
+                textMutedColor = textMutedColor,
+                tagBgColor = tagBgColor,
+                tagBorderColor = tagBorderColor,
+                onOpenDetail = onOpenDetail,
+            )
+            val listener = object : CardStackListener {
+                override fun onCardDragging(direction: Direction, ratio: Float) = Unit
+                override fun onCardSwiped(direction: Direction) {
+                    val topPosition = bridge.manager?.getTopPosition() ?: return
+                    val position = topPosition - 1
+                    onStackPositionChanged(topPosition)
+                    onSwiped(direction, position)
                 }
+                override fun onCardRewound() {
+                    onStackPositionChanged(bridge.manager?.getTopPosition() ?: 0)
+                }
+                override fun onCardCanceled() = Unit
+                override fun onCardAppeared(view: View, position: Int) {
+                    onStackPositionChanged(position)
+                }
+                override fun onCardDisappeared(view: View, position: Int) = Unit
+            }
+            val manager = CardStackLayoutManager(viewContext, listener).apply {
+                setStackFrom(StackFrom.None)
+                setVisibleCount(3)
+                setTranslationInterval(8f)
+                setScaleInterval(0.97f)
+                setSwipeThreshold(0.26f)
+                setMaxDegree(11f)
+                setDirections(Direction.HORIZONTAL)
+                setCanScrollHorizontal(true)
+                setCanScrollVertical(false)
+                setSwipeableMethod(SwipeableMethod.AutomaticAndManual)
+                setSwipeAnimationSetting(
+                    SwipeAnimationSetting.Builder()
+                        .setDirection(Direction.Right)
+                        .setDuration(300)
+                        .setInterpolator(PathInterpolator(0.3f, 0f, 1f, 1f))
+                        .build(),
+                )
+                setRewindAnimationSetting(
+                    RewindAnimationSetting.Builder()
+                        .setDirection(Direction.Bottom)
+                        .setDuration(320)
+                        .setInterpolator(PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                        .build(),
+                )
+            }
+            CardStackView(viewContext).apply {
+                clipToPadding = false
+                clipChildren = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                layoutManager = manager
+                this.adapter = adapter
+                bridge.view = this
+                bridge.manager = manager
+                adapter.submit(products)
+            }
+        },
+        update = { stackView ->
+            val adapter = stackView.adapter as? ProductCardStackAdapter ?: return@AndroidView
+            adapter.backendBaseUrl = backendBaseUrl
+            adapter.onOpenDetail = onOpenDetail
+            if (adapter.productIds != products.map { it.product.productId }) {
+                adapter.submit(products)
+                stackView.scrollToPosition(0)
+                onStackPositionChanged(0)
+            } else {
+                adapter.submit(products)
+            }
+            bridge.view = stackView
+            bridge.manager = stackView.layoutManager as? CardStackLayoutManager
+        },
+    )
+}
+
+private class ProductCardStackAdapter(
+    var backendBaseUrl: String,
+    private val cardCornerPx: Float,
+    private val borderColor: Int,
+    private val surfaceColor: Int,
+    private val mutedSurfaceColor: Int,
+    private val primaryColor: Int,
+    private val primaryDarkColor: Int,
+    private val textPrimaryColor: Int,
+    private val textSecondaryColor: Int,
+    private val textMutedColor: Int,
+    private val tagBgColor: Int,
+    private val tagBorderColor: Int,
+    var onOpenDetail: (String) -> Unit,
+) : RecyclerView.Adapter<ProductCardStackAdapter.ProductCardViewHolder>() {
+    private val items = mutableListOf<ProductCardPayload>()
+    val productIds: List<String>
+        get() = items.map { it.product.productId }
+
+    fun submit(nextItems: List<ProductCardPayload>) {
+        items.clear()
+        items.addAll(nextItems)
+        notifyDataSetChanged()
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ProductCardViewHolder {
+        val context = parent.context
+        val density = context.resources.displayMetrics.density
+        val root = FrameLayout(context).apply {
+            clipToPadding = false
+            clipChildren = false
+            layoutParams = ViewGroup.MarginLayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ).apply {
+                val horizontal = (7 * density).roundToInt()
+                val vertical = (6 * density).roundToInt()
+                setMargins(horizontal, vertical, horizontal, vertical)
+            }
+        }
+        val card = FrameLayout(context).apply {
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, cardCornerPx)
+                }
+            }
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = cardCornerPx
+                setColor(surfaceColor)
+                setStroke((1 * density).roundToInt().coerceAtLeast(1), borderColor)
+            }
+            elevation = 2.5f * density
+        }
+        root.addView(
+            card,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
+        val contentHeight = 214
+        val imageStage = FrameLayout(context).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                setColor(mutedSurfaceColor)
+                cornerRadii = floatArrayOf(cardCornerPx, cardCornerPx, cardCornerPx, cardCornerPx, 0f, 0f, 0f, 0f)
+            }
+        }
+        card.addView(
+            imageStage,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                (244 * density).roundToInt(),
+            ),
+        )
+
+        val image = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        imageStage.addView(
+            image,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                (218 * density).roundToInt(),
+                android.view.Gravity.CENTER,
+            ).apply {
+                leftMargin = (16 * density).roundToInt()
+                rightMargin = (16 * density).roundToInt()
+                topMargin = (13 * density).roundToInt()
+                bottomMargin = (13 * density).roundToInt()
+            },
+        )
+
+        val content = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((18 * density).roundToInt(), (15 * density).roundToInt(), (18 * density).roundToInt(), (16 * density).roundToInt())
+        }
+        card.addView(
+            content,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                (contentHeight * density).roundToInt(),
+            ).apply {
+                topMargin = (244 * density).roundToInt()
+            },
+        )
+
+        val brand = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(textMutedColor)
+            textSize = 12f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        content.addView(brand, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val name = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(textPrimaryColor)
+            textSize = 21f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            maxLines = 2
+            this.setLineSpacing(0.0f, 1.06f)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        content.addView(
+            name,
+            android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (10 * density).roundToInt()
+            },
+        )
+
+        val metaRow = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        content.addView(
+            metaRow,
+            android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (12 * density).roundToInt()
+            },
+        )
+
+        val price = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(primaryColor)
+            textSize = 21f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            maxLines = 1
+        }
+        metaRow.addView(price, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        val evidence = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(textSecondaryColor)
+            textSize = 12f
+            maxLines = 1
+        }
+        metaRow.addView(evidence, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val tagRow = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        content.addView(
+            tagRow,
+            android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (12 * density).roundToInt()
+            },
+        )
+
+        val reasonRow = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 14 * density
+                setColor(android.graphics.Color.rgb(248, 250, 252))
+                setStroke((1 * density).roundToInt().coerceAtLeast(1), android.graphics.Color.argb(150, 226, 231, 238))
+            }
+            setPadding((10 * density).roundToInt(), (8 * density).roundToInt(), (10 * density).roundToInt(), (8 * density).roundToInt())
+        }
+        content.addView(
+            reasonRow,
+            android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (12 * density).roundToInt()
+            },
+        )
+
+        val reasonIndex = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(primaryDarkColor)
+            textSize = 12f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = android.view.Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 999 * density
+                setColor(android.graphics.Color.rgb(255, 239, 232))
+            }
+        }
+        reasonRow.addView(
+            reasonIndex,
+            android.widget.LinearLayout.LayoutParams((46 * density).roundToInt(), (28 * density).roundToInt()),
+        )
+
+        val reasonText = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(textSecondaryColor)
+            textSize = 14f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        reasonRow.addView(
+            reasonText,
+            android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                leftMargin = (10 * density).roundToInt()
+            },
+        )
+
+        val overlays = createSwipeOverlays(context, primaryColor, textPrimaryColor, density)
+        root.addView(overlays.first)
+        root.addView(overlays.second)
+
+        return ProductCardViewHolder(root, image, reasonIndex, reasonText, brand, name, price, evidence, tagRow, tagBgColor, tagBorderColor, textSecondaryColor, primaryDarkColor)
+    }
+
+    override fun onBindViewHolder(holder: ProductCardViewHolder, position: Int) {
+        val payload = items[position]
+        holder.bind(payload, backendBaseUrl, onOpenDetail)
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    private fun createSwipeOverlays(
+        context: android.content.Context,
+        primaryColor: Int,
+        textPrimaryColor: Int,
+        density: Float,
+    ): Pair<View, View> {
+        fun overlay(id: Int, label: String, color: Int, gravity: Int): FrameLayout =
+            FrameLayout(context).apply {
+                this.id = id
+                alpha = 0f
+                addView(
+                    TextView(context).apply {
+                        text = label
+                        includeFontPadding = false
+                        setTextColor(color)
+                        textSize = 24f
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        rotation = if (label == "LIKE") -10f else 10f
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                            cornerRadius = 999 * density
+                            setColor(android.graphics.Color.argb(238, 255, 254, 252))
+                            setStroke((2 * density).roundToInt(), color)
+                        }
+                        setPadding((18 * density).roundToInt(), (8 * density).roundToInt(), (18 * density).roundToInt(), (8 * density).roundToInt())
+                    },
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        gravity,
+                    ).apply {
+                        topMargin = (34 * density).roundToInt()
+                        leftMargin = (28 * density).roundToInt()
+                        rightMargin = (28 * density).roundToInt()
+                    },
+                )
+            }
+        return overlay(com.yuyakaido.android.cardstackview.R.id.left_overlay, "PASS", textPrimaryColor, android.view.Gravity.TOP or android.view.Gravity.END) to
+            overlay(com.yuyakaido.android.cardstackview.R.id.right_overlay, "LIKE", primaryColor, android.view.Gravity.TOP or android.view.Gravity.START)
+    }
+
+    class ProductCardViewHolder(
+        itemView: View,
+        private val image: ImageView,
+        private val reasonIndex: TextView,
+        private val reasonText: TextView,
+        private val brand: TextView,
+        private val name: TextView,
+        private val price: TextView,
+        private val evidence: TextView,
+        private val tagRow: android.widget.LinearLayout,
+        private val tagBgColor: Int,
+        private val tagBorderColor: Int,
+        private val textSecondaryColor: Int,
+        private val primaryDarkColor: Int,
+    ) : RecyclerView.ViewHolder(itemView) {
+        fun bind(
+            payload: ProductCardPayload,
+            backendBaseUrl: String,
+            onOpenDetail: (String) -> Unit,
+        ) {
+            val product = payload.product
+            itemView.setOnClickListener {
+                product.productId.takeIf { it.isNotBlank() }?.let(onOpenDetail)
+            }
+            image.load(product.imageUrl.resolveProductImageUrl(backendBaseUrl)) {
+                placeholder(R.drawable.product_cleanser_sample)
+                error(R.drawable.product_cleanser_sample)
+                fallback(R.drawable.product_cleanser_sample)
+            }
+            val displayRank = payload.rank.takeIf { it > 0 } ?: bindingAdapterPosition + 1
+            reasonIndex.text = "$displayRank/${bindingAdapter?.itemCount?.takeIf { it > 0 } ?: 1}"
+            reasonText.text = payload.reason
+                .withoutMarkdownMarkup()
+                .ifBlank { "与当前需求匹配，适合作为本轮候选。" }
+            brand.text = product.brandLabel()
+            name.text = product.name.ifBlank { "推荐商品" }
+            price.text = product.priceLabel()
+            evidence.text = if (payload.evidence.isNotEmpty()) {
+                "Verified ${payload.evidence.size}"
+            } else {
+                "Evidence pending"
+            }
+            tagRow.removeAllViews()
+            payload.displayTags().take(3).forEachIndexed { index, tag ->
+                tagRow.addView(createTagView(tagRow.context, tag, active = index == 0))
+            }
+        }
+
+        private fun createTagView(
+            context: android.content.Context,
+            label: String,
+            active: Boolean,
+        ): TextView {
+            val density = context.resources.displayMetrics.density
+            return TextView(context).apply {
+                text = label.withoutMarkdownMarkup()
+                includeFontPadding = false
+                setTextColor(if (active) primaryDarkColor else textSecondaryColor)
+                textSize = 12f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = 999 * density
+                    setColor(if (active) android.graphics.Color.rgb(255, 229, 218) else tagBgColor)
+                    setStroke((1 * density).roundToInt().coerceAtLeast(1), if (active) android.graphics.Color.rgb(255, 229, 218) else tagBorderColor)
+                }
+                setPadding((10 * density).roundToInt(), (5 * density).roundToInt(), (10 * density).roundToInt(), (5 * density).roundToInt())
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    rightMargin = (6 * density).roundToInt()
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProductHeroDetailScreen(
+    state: ChatUiState,
+    deckId: String,
+    productId: String,
+    onBack: () -> Unit,
+    onOpenEvidence: (String, String) -> Unit,
+    onSwipe: (String, String, String, String, String?) -> Unit,
+) {
+    val payload = state.findProduct(deckId, productId)
+    val haptics = LocalHapticFeedback.current
+
+    if (payload == null) {
+        Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                ProductPageTopBar(title = "商品详情", onBack = onBack)
+                ExpiredRecommendationState(onBack = onBack)
+            }
+        }
+        return
+    }
+
+    val product = payload.product
+    val detailListState = rememberLazyListState()
+    val density = LocalDensity.current
+    val revealDistancePx = with(density) { ProductDetailRevealDistance.toPx() }
+    val scrollProgress by remember {
+        derivedStateOf {
+            val offset = detailListState.firstVisibleItemScrollOffset.toFloat()
+            (offset / revealDistancePx).coerceIn(0f, 1f)
+        }
+    }
+    val actionAlpha by animateFloatAsState(
+        targetValue = if (scrollProgress < 0.38f) 1f else 0f,
+        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+        label = "product_detail_action_alpha",
+    )
+    val actionsVisible = actionAlpha > 0.05f
+
+    LaunchedEffect(product.productId) {
+        snapshotFlow { detailListState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { isScrolling ->
+                if (isScrolling) return@collect
+
+                val currentOffset = detailListState.firstVisibleItemScrollOffset.toFloat()
+                val isTransitionRange = currentOffset > 8f && currentOffset < revealDistancePx - 8f
+                if (!isTransitionRange) return@collect
+
+                val targetOffset = if (scrollProgress >= ProductDetailSnapThreshold) revealDistancePx else 0f
+                detailListState.animateScrollBy(
+                    value = targetOffset - currentOffset,
+                    animationSpec = tween(durationMillis = 280, easing = MenuEaseOut),
+                )
+            }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        ProductCinematicBackdrop(
+            product = product,
+            backendBaseUrl = state.backendBaseUrl,
+            progress = scrollProgress,
+            modifier = Modifier
+                .fillMaxSize(),
+        )
+        ImmersiveCircleButton(
+            iconRes = R.drawable.ic_arrow_back_24,
+            contentDescription = "返回",
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 16.dp, top = 8.dp)
+                .zIndex(2f),
+        )
+        ImmersiveCircleButton(
+            iconRes = R.drawable.ic_article_24,
+            contentDescription = "推荐证据",
+            onClick = { onOpenEvidence(deckId, productId) },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(end = 16.dp, top = 8.dp)
+                .zIndex(2f),
+        )
+        LazyColumn(
+            state = detailListState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 462.dp, bottom = 34.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            item("detail_panel") {
+                CinematicProductDetailPanel(
+                    payload = payload,
+                    progress = scrollProgress,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .alpha(actionAlpha)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0xCC111111),
+                            Color(0xF2111111),
+                        ),
+                    ),
+                )
+                .navigationBarsPadding()
+                .padding(horizontal = 52.dp, vertical = 22.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SwipeRoundButton(
+                iconRes = R.drawable.ic_close_24,
+                contentDescription = "不感兴趣",
+                active = false,
+                enabled = actionsVisible,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSwipe(deckId, productId, "not_interested", "not_interested", null)
+                },
+            )
+            SwipeRoundButton(
+                iconRes = R.drawable.ic_favorite_24,
+                contentDescription = "感兴趣",
+                active = true,
+                enabled = actionsVisible,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSwipe(deckId, productId, "like", "like", null)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductCinematicBackdrop(
+    product: ProductPayload,
+    backendBaseUrl: String,
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val scale = lerp(1.08f, 1.22f, progress)
+    val offsetY = lerp(0f, -82f, progress)
+    val imageAlpha = lerp(0.88f, 0.48f, progress)
+    val imageBlur = lerp(0f, 18f, progress).dp
+    val midDim = lerp(0.48f, 0.78f, progress)
+    Box(modifier = modifier.background(Color(0xFF11110F))) {
+        ProductImage(
+            product = product,
+            backendBaseUrl = backendBaseUrl,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(690.dp)
+                .align(Alignment.TopCenter)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationY = offsetY
+                    alpha = imageAlpha
+                }
+                .blur(imageBlur),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFEEEDE8).copy(alpha = lerp(0.18f, 0.04f, progress)),
+                            Color(0xFF4D534F).copy(alpha = midDim),
+                            Color(0xFF10100F).copy(alpha = lerp(0.92f, 0.98f, progress)),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0xFF10100F).copy(alpha = 0.86f),
+                            Color(0xFF10100F),
+                        ),
+                    ),
+                ),
+        )
+    }
+}
+
+@Composable
+private fun ProductImmersiveBackdrop(
+    product: ProductPayload,
+    backendBaseUrl: String,
+    dimAlpha: Float,
+) {
+    Box(Modifier.fillMaxSize()) {
+        ProductImage(
+            product = product,
+            backendBaseUrl = backendBaseUrl,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(650.dp)
+                .align(Alignment.TopCenter)
+                .graphicsLayer {
+                    scaleX = 1.12f
+                    scaleY = 1.12f
+                },
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF777771).copy(alpha = dimAlpha),
+                            Color(0xFF585C59).copy(alpha = (dimAlpha + 0.06f).coerceAtMost(0.86f)),
+                            Color(0xFF151515).copy(alpha = 0.94f),
+                        ),
+                    ),
+                ),
+        )
+    }
+}
+
+@Composable
+private fun ImmersiveCircleButton(
+    @DrawableRes iconRes: Int,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(48.dp)
+            .background(Color(0xFF1F2329).copy(alpha = 0.38f), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape),
+        colors = IconButtonDefaults.iconButtonColors(
+            contentColor = Color.White.copy(alpha = 0.94f),
+        ),
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+@Composable
+private fun CinematicProductDetailPanel(
+    payload: ProductCardPayload,
+    progress: Float,
+) {
+    val product = payload.product
+    val tags = payload.displayTags().take(4)
+    val shape = RoundedCornerShape(
+        topStart = lerp(34f, 22f, progress).dp,
+        topEnd = lerp(34f, 22f, progress).dp,
+        bottomStart = lerp(28f, 18f, progress).dp,
+        bottomEnd = lerp(28f, 18f, progress).dp,
+    )
+    val panelAlpha = lerp(0.64f, 0.94f, progress)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0xFF111111).copy(alpha = panelAlpha), shape)
+            .border(1.dp, Color.White.copy(alpha = lerp(0.12f, 0.18f, progress)), shape)
+            .padding(horizontal = 24.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if ((payload.rank.takeIf { it > 0 } ?: 1) == 1) "PREMIUM CHOICE" else "#${payload.rank} MATCH",
+                color = BuyPilotColors.Primary,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "${payload.evidence.size} 条证据",
+                color = Color.White.copy(alpha = 0.62f),
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+            )
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = product.name.ifBlank { "推荐商品" },
+                color = Color(0xFFFFFEFC),
+                fontSize = 32.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = product.priceLabel(),
+                    color = BuyPilotColors.Primary,
+                    fontSize = 28.sp,
+                    lineHeight = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = product.subCategory ?: product.category,
+                    color = Color.White.copy(alpha = 0.52f),
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "⌖",
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 20.sp,
+                lineHeight = 20.sp,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = product.brandLabel(),
+                color = Color.White.copy(alpha = 0.78f),
+                fontSize = BuyPilotType.Body,
+                lineHeight = 21.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (tags.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(tags, key = { it }) { tag ->
+                    ImmersiveTag(label = tag)
+                }
+            }
+        }
+        ImmersiveSectionTitle("BuyPilot AI 核心推荐")
+        MarkdownTextBlock(
+            content = payload.reason.ifBlank { "后端已返回该商品为本轮候选，推荐解释待补充。" },
+            style = TextStyle(
+                color = Color.White.copy(alpha = 0.78f),
+                fontSize = 17.sp,
+                lineHeight = 28.sp,
+            ),
+        )
+        Spacer(Modifier.height(20.dp))
+        CinematicDetailDivider(progress)
+        ImmersiveSectionTitle("详细信息")
+        if (payload.riskNotes.isNotEmpty()) {
+            ImmersiveWarningBox(payload.riskNotes.joinToString("；"))
+        }
+        ProductAttributeRowsDark(product = product, payload = payload)
+        Spacer(Modifier.height(14.dp))
+    }
+}
+
+@Composable
+private fun CinematicDetailDivider(progress: Float) {
+    val widthFraction = lerp(0.22f, 1f, progress)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(26.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(widthFraction)
+                .height(1.dp)
+                .background(Color.White.copy(alpha = 0.12f), CircleShape),
+        )
+    }
+}
+
+@Composable
+private fun ImmersiveSectionTitle(title: String) {
+    Text(
+        text = title,
+        color = Color(0xFFFFFEFC),
+        fontSize = 20.sp,
+        lineHeight = 25.sp,
+        fontWeight = FontWeight.Bold,
+    )
+}
+
+@Composable
+private fun ImmersiveTag(label: String) {
+    Text(
+        text = label.withoutMarkdownMarkup(),
+        color = Color.White.copy(alpha = 0.92f),
+        fontSize = BuyPilotType.Label,
+        lineHeight = 16.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .background(Color.White.copy(alpha = 0.11f), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    )
+}
+
+@Composable
+private fun ImmersiveWarningBox(text: String) {
+    Surface(
+        color = BuyPilotColors.Primary.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Primary.copy(alpha = 0.22f)),
+    ) {
+        MarkdownTextBlock(
+            content = "**注意：**$text",
+            style = TextStyle(
+                color = Color.White.copy(alpha = 0.76f),
+                fontSize = BuyPilotType.Body,
+                lineHeight = 22.sp,
+            ),
+            modifier = Modifier.padding(14.dp),
+        )
+    }
+}
+
+@Composable
+private fun ProductAttributeRowsDark(product: ProductPayload, payload: ProductCardPayload) {
+    val rows = listOf(
+        "适用对象" to product.skinTypeMatch.ifEmpty { listOf("后端暂未返回") }.joinToString("、"),
+        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.joinToString("、"),
+        "使用场景" to product.useScenario.ifEmpty { listOf("按当前需求匹配") }.joinToString("、"),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        rows.forEach { (label, value) ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = label,
+                    color = Color.White.copy(alpha = 0.44f),
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.width(74.dp),
+                )
+                Text(
+                    text = value,
+                    color = Color.White.copy(alpha = 0.74f),
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProductEvidenceOverlayScreen(
+    state: ChatUiState,
+    deckId: String,
+    productId: String,
+    onBack: () -> Unit,
+) {
+    val payload = state.findProduct(deckId, productId)
+
+    if (payload == null) {
+        Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                ProductPageTopBar(title = "推荐证据", onBack = onBack)
+                ExpiredRecommendationState(onBack = onBack)
+            }
+        }
+        return
+    }
+
+    val evidenceItems = payload.evidence.ifEmpty {
+        listOf(
+            EvidencePayload(
+                sourceType = "推荐理由",
+                trustLabel = "fallback",
+                snippet = payload.reason.ifBlank { "后端暂未返回独立证据，当前仅展示推荐解释。" },
+            ),
+        )
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        ProductImmersiveBackdrop(
+            product = payload.product,
+            backendBaseUrl = state.backendBaseUrl,
+            dimAlpha = 0.76f,
+        )
+        ImmersiveCircleButton(
+            iconRes = R.drawable.ic_arrow_back_24,
+            contentDescription = "返回",
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 16.dp, top = 8.dp)
+                .zIndex(2f),
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 30.dp, end = 30.dp, top = 224.dp, bottom = 52.dp),
+            verticalArrangement = Arrangement.spacedBy(30.dp),
+        ) {
+            item("evidence_product") {
+                EvidenceProductBadge(payload = payload)
+            }
+            if (payload.evidence.isEmpty()) {
+                item("evidence_fallback_notice") {
+                    Text(
+                        text = "后端暂未返回独立证据，当前展示推荐理由 fallback。",
+                        color = Color.White.copy(alpha = 0.62f),
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 18.sp,
+                    )
+                }
+            }
+            itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { index, evidence ->
+                ImmersiveEvidenceQuote(
+                    evidence = evidence,
+                    index = index + 1,
+                    total = evidenceItems.size,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EvidenceProductBadge(payload: ProductCardPayload) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(Color.White.copy(alpha = 0.12f), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = payload.evidence.firstOrNull()?.sourceType?.takeIf { it.isNotBlank() } ?: "推荐证据",
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = BuyPilotType.Body,
+            lineHeight = 20.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = "${payload.evidence.size} 条",
+            color = BuyPilotColors.Primary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun ImmersiveEvidenceQuote(
+    evidence: EvidencePayload,
+    index: Int,
+    total: Int,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        Text(
+            text = "EVIDENCE_ID | SNIPPET",
+            color = Color.White.copy(alpha = 0.48f),
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = "“${evidence.snippet.ifBlank { "暂无证据片段" }}”",
+            color = Color(0xFFFFFEFC),
+            fontSize = 31.sp,
+            lineHeight = 42.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            text = evidence.evidenceSummary(index, total),
+            color = Color.White.copy(alpha = 0.68f),
+            fontSize = 16.sp,
+            lineHeight = 24.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = Color.White.copy(alpha = 0.18f),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "◉",
+                color = Color.White.copy(alpha = 0.58f),
+                fontSize = 16.sp,
+                lineHeight = 16.sp,
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "数据来源：${evidence.trustLabel?.takeIf { it.isNotBlank() } ?: evidence.sourceType.ifBlank { "后端证据片段" }}",
+                color = Color.White.copy(alpha = 0.54f),
+                fontSize = BuyPilotType.Body,
+                lineHeight = 22.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private fun EvidencePayload.evidenceSummary(index: Int, total: Int): String {
+    val id = evidenceId?.takeIf { it.isNotBlank() }
+        ?: sourceId?.takeIf { it.isNotBlank() }
+        ?: "第 $index/$total 条证据"
+    val source = sourceType.ifBlank { "后端证据" }
+    return "基于 $source 汇总：$id"
+}
+
+@Composable
+private fun ProductEvidenceHeader(payload: ProductCardPayload, backendBaseUrl: String) {
+    Surface(
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .background(BuyPilotColors.SurfaceMuted, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                ProductImage(
+                    product = payload.product,
+                    backendBaseUrl = backendBaseUrl,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp)),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = payload.product.name.ifBlank { "推荐商品" },
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${payload.evidence.size} 条后端证据",
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProductPageTopBar(
+    title: String,
+    onBack: () -> Unit,
+    action: @Composable () -> Unit = {},
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BuyPilotColors.SurfaceCard)
+            .statusBarsPadding(),
+    ) {
+        M3TopAppBarRow(
+            title = title,
+            titleCentered = true,
+            navigationIcon = R.drawable.ic_arrow_back_24,
+            navigationDescription = "返回",
+            navigationTint = BuyPilotColors.TextPrimary.copy(alpha = 0.92f),
+            onNavigationClick = onBack,
+        )
+        action()
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = BuyPilotColors.Border.copy(alpha = 0.46f),
+        )
+    }
+}
+
+@Composable
+private fun ExpiredRecommendationState(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "推荐已过期，请返回聊天重新生成",
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Title,
+            lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onBack,
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = BuyPilotColors.Primary,
+                contentColor = BuyPilotColors.OnPrimary,
+            ),
+        ) {
+            Text("返回聊天")
+        }
+    }
+}
+
+@Composable
+private fun DetailSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle(title)
+        Surface(
+            color = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductAttributeRows(product: ProductPayload, payload: ProductCardPayload) {
+    val rows = listOf(
+        "适用对象" to product.skinTypeMatch.ifEmpty { listOf("后端暂未返回") }.joinToString("、"),
+        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.joinToString("、"),
+        "使用场景" to product.useScenario.ifEmpty { listOf("按当前需求匹配") }.joinToString("、"),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        rows.forEach { (label, value) ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = label,
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.width(72.dp),
+                )
+                Text(
+                    text = value,
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -2509,19 +4641,104 @@ private fun DecisionSummaryCard(
 
 @Composable
 private fun CartActionCard(payload: CartActionPayload) {
-    InlineSystemNotice("购物车${payload.status.ifBlank { "已更新" }}：${payload.productId}")
+    val parts = listOf(payload.action, payload.status, payload.productId)
+        .filter { it.isNotBlank() }
+    if (parts.isEmpty()) return
+    InlineSystemNotice(parts.joinToString(" · "))
+}
+
+private data class ErrorPresentation(
+    val title: String,
+    val reason: String,
+    val action: String,
+)
+
+private fun ErrorNode.presentation(): ErrorPresentation {
+    val normalized = code.uppercase()
+    return when {
+        "NETWORK" in normalized || "TIMEOUT" in normalized || "CONNECTION" in normalized -> ErrorPresentation(
+            title = "网络连接失败",
+            reason = message.ifBlank { "当前连接不稳定，商品证据或模型回复没有完整返回。" },
+            action = "可以直接重试，或先编辑问题让条件更短。",
+        )
+        "MODEL" in normalized || "LLM" in normalized || "GENERATION" in normalized -> ErrorPresentation(
+            title = "模型生成失败",
+            reason = message.ifBlank { "模型这轮没有生成出可用答案。" },
+            action = "保留了最近的问题，可以重新生成。",
+        )
+        "EVIDENCE" in normalized || "INSUFFICIENT" in normalized -> ErrorPresentation(
+            title = "证据不足",
+            reason = message.ifBlank { "当前商品资料不足以支撑可靠推荐。" },
+            action = "建议编辑问题，补充预算、肤质或排除项。",
+        )
+        "IMAGE" in normalized || "VISION" in normalized -> ErrorPresentation(
+            title = "图片识别失败",
+            reason = message.ifBlank { "图片主体可能不够清晰，暂时无法稳定识别商品。" },
+            action = "可以换一张更清晰的图，或改用文字描述。",
+        )
+        else -> ErrorPresentation(
+            title = "这轮回复中断了",
+            reason = message.ifBlank { "系统没有拿到完整结果。" },
+            action = "你可以重试，或编辑最近问题后重新发送。",
+        )
+    }
 }
 
 @Composable
-private fun ErrorCard(node: ErrorNode) {
+private fun ErrorCard(
+    node: ErrorNode,
+    latestUserMessage: String?,
+    onRetry: () -> Unit,
+    onEditMessage: (String) -> Unit,
+) {
+    if (node.message.isBlank() && node.code.isBlank()) return
+    val presentation = node.presentation()
     Surface(
         color = BuyPilotColors.Attention,
         shape = RoundedCornerShape(14.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.PrimarySoft),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text("连接遇到问题", color = BuyPilotColors.TextPrimary, fontSize = BuyPilotType.Body, fontWeight = FontWeight.Bold)
-            Text(node.message, color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Body, lineHeight = 20.sp)
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                presentation.title,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            node.code.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Label, lineHeight = 18.sp)
+            }
+            Text(
+                presentation.reason,
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 20.sp,
+            )
+            Text(
+                presentation.action,
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 18.sp,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (node.retryable) {
+                    GhostButton(label = "重试", onClick = onRetry)
+                }
+                latestUserMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                    GhostButton(
+                        label = "编辑问题",
+                        leadingIconRes = R.drawable.ic_edit_24,
+                        onClick = { onEditMessage(message) },
+                    )
+                }
+            }
         }
     }
 }
@@ -2551,6 +4768,8 @@ private fun BottomComposer(
     onAttachmentClick: () -> Unit,
     onTextChange: (String) -> Unit,
     onTextFocus: () -> Unit,
+    onFocusChanged: (Boolean) -> Unit,
+    onHeightChanged: (Int) -> Unit,
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -2591,94 +4810,102 @@ private fun BottomComposer(
         label = "attachment_icon_rotation",
     )
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.92f))
-            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.75f))
-            .navigationBarsPadding()
-            .padding(start = 12.dp, top = 13.dp, end = 12.dp, bottom = 28.dp),
+            .imePadding(),
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 56.dp)
-                .background(containerColor, CircleShape)
-                .border(borderWidth, borderColor, CircleShape)
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .onSizeChanged { onHeightChanged(it.height) }
+                .background(BuyPilotColors.SurfaceCard)
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.88f))
+                .navigationBarsPadding()
+                .padding(start = 12.dp, top = 13.dp, end = 12.dp, bottom = 28.dp),
         ) {
-            IconButton(
-                onClick = onAttachmentClick,
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_add_24),
-                    contentDescription = if (isAttachmentMenuOpen) "收起更多输入方式" else "打开更多输入方式",
-                    tint = BuyPilotColors.TextSecondary,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .rotate(attachmentIconRotation),
-                )
-            }
-            BasicTextField(
-                value = text,
-                onValueChange = onTextChange,
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester)
-                    .onFocusChanged {
-                        isFocused = it.isFocused
-                        if (it.isFocused) onTextFocus()
-                    }
-                    .padding(horizontal = 8.dp),
-                textStyle = TextStyle(
-                    color = BuyPilotColors.TextPrimary,
-                    fontSize = BuyPilotType.Body,
-                    lineHeight = 20.sp,
-                ),
-                cursorBrush = SolidColor(BuyPilotColors.Primary),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (canSubmit) onSubmit() }),
-                maxLines = 3,
-                decorationBox = { innerTextField ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 28.dp)
-                            .padding(vertical = 4.dp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        if (text.isEmpty()) {
-                            Text(
-                                text = placeholder,
-                                color = BuyPilotColors.TextMuted,
-                                fontSize = BuyPilotType.Body,
-                                lineHeight = 20.sp,
-                            )
-                        }
-                        innerTextField()
-                    }
-                },
-            )
-            FilledIconButton(
-                onClick = onSubmit,
-                enabled = canSubmit,
-                modifier = Modifier.size(48.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = if (isStreaming) BuyPilotColors.TextPrimary else BuyPilotColors.Primary,
-                    contentColor = BuyPilotColors.OnPrimary,
-                    disabledContainerColor = BuyPilotColors.Border.copy(alpha = 0.65f),
-                    disabledContentColor = BuyPilotColors.TextMuted,
-                ),
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .background(containerColor, CircleShape)
+                    .border(borderWidth, borderColor, CircleShape)
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    painter = painterResource(
-                        if (isStreaming) R.drawable.ic_stop_24 else R.drawable.ic_arrow_upward_24,
+                IconButton(
+                    onClick = onAttachmentClick,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_add_24),
+                        contentDescription = if (isAttachmentMenuOpen) "收起更多输入方式" else "打开更多输入方式",
+                        tint = BuyPilotColors.TextSecondary,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .rotate(attachmentIconRotation),
+                    )
+                }
+                BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester)
+                        .onFocusChanged {
+                            isFocused = it.isFocused
+                            onFocusChanged(it.isFocused)
+                            if (it.isFocused) onTextFocus()
+                        }
+                        .padding(horizontal = 8.dp),
+                    textStyle = TextStyle(
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 20.sp,
                     ),
-                    contentDescription = if (isStreaming) "停止生成" else "发送",
-                    modifier = Modifier.size(if (isStreaming) 17.dp else 21.dp),
+                    cursorBrush = SolidColor(BuyPilotColors.Primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (canSubmit) onSubmit() }),
+                    maxLines = 3,
+                    decorationBox = { innerTextField ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 28.dp)
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (text.isEmpty()) {
+                                Text(
+                                    text = placeholder,
+                                    color = BuyPilotColors.TextMuted,
+                                    fontSize = BuyPilotType.Body,
+                                    lineHeight = 20.sp,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
                 )
+                FilledIconButton(
+                    onClick = onSubmit,
+                    enabled = canSubmit,
+                    modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (isStreaming) BuyPilotColors.TextPrimary else BuyPilotColors.Primary,
+                        contentColor = BuyPilotColors.OnPrimary,
+                        disabledContainerColor = BuyPilotColors.Border.copy(alpha = 0.65f),
+                        disabledContentColor = BuyPilotColors.TextMuted,
+                    ),
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            if (isStreaming) R.drawable.ic_stop_24 else R.drawable.ic_arrow_upward_24,
+                        ),
+                        contentDescription = if (isStreaming) "停止生成" else "发送",
+                        modifier = Modifier.size(if (isStreaming) 17.dp else 21.dp),
+                    )
+                }
             }
         }
     }
@@ -2792,13 +5019,15 @@ private fun CriteriaEditSheet(
                 imeAction = ImeAction.Done,
             )
         }
-        CriteriaSuggestionSection(
-            labels = payload.quickActions.map { it.label }
-                .ifEmpty { listOf("再便宜一点", "温和亲肤", "大容量", "注重品牌") },
-            onClick = { label ->
-                payload.quickActions.firstOrNull { it.label == label }?.let(onQuickAction)
-            },
-        )
+        val quickActionLabels = payload.quickActions.map { it.label.trim() }.filter { it.isNotBlank() }
+        if (quickActionLabels.isNotEmpty()) {
+            CriteriaSuggestionSection(
+                labels = quickActionLabels,
+                onClick = { label ->
+                    payload.quickActions.firstOrNull { it.label == label }?.let(onQuickAction)
+                },
+            )
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -2851,112 +5080,335 @@ private fun CriteriaEditSheet(
 }
 
 @Composable
-private fun ProductDetailSheet(
-    payload: ProductCardPayload,
-    onEvidence: () -> Unit,
-    onAction: (QuickActionPayload) -> Unit,
+private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
+    val whyItems = payload.why.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
+    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
+    val alternatives = payload.alternatives.filter {
+        it.name.isNotBlank() || it.productId.isNotBlank()
+    }
+    val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
+
+    SheetContentColumn(expandToMaxHeight = false) {
+        SheetTitle("决策依据")
+
+        if (payload.summary.isNotBlank() || !payload.winnerProductId.isNullOrBlank()) {
+            DecisionEvidenceSummary(
+                summary = payload.summary,
+                winnerProductId = payload.winnerProductId,
+            )
+        }
+
+        if (whyItems.isNotEmpty()) {
+            DecisionEvidenceListSection(
+                title = "为什么选它",
+                items = whyItems,
+                numbered = true,
+                accentColor = BuyPilotColors.Primary,
+                surfaceColor = BuyPilotColors.PrimarySoft.copy(alpha = 0.28f),
+            )
+        }
+
+        if (notForItems.isNotEmpty()) {
+            DecisionEvidenceListSection(
+                title = "不适合这些情况",
+                items = notForItems,
+                numbered = false,
+                accentColor = BuyPilotColors.Warning,
+                surfaceColor = Color(0xFFFFF7E8),
+            )
+        }
+
+        if (alternatives.isNotEmpty()) {
+            DecisionAlternativesSection(alternatives)
+        }
+
+        if (nextActions.isNotEmpty()) {
+            DecisionNextActionsSection(nextActions)
+        }
+    }
+}
+
+@Composable
+private fun DecisionEvidenceSummary(
+    summary: String,
+    winnerProductId: String?,
 ) {
-    val product = payload.product
-    SheetContentColumn {
-        Box(
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
-                .background(
-                    Brush.verticalGradient(listOf(Color(0xFFFFE1D4), Color(0xFFFFFAF7))),
-                    RoundedCornerShape(28.dp),
-                ),
+                .decisionEvidenceSurfaceGlow()
+                .padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ProductMockImage(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .width(132.dp)
-                    .height(176.dp),
-            )
-            PillLabel(
-                text = "最佳匹配",
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(18.dp),
-            )
-        }
-        Text(
-            product.name.ifBlank { "商品详情" },
-            color = BuyPilotColors.TextPrimary,
-            fontSize = 28.sp,
-            lineHeight = 34.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(product.priceLabel(), color = BuyPilotColors.Primary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        ChipRows((product.ingredientTags + product.skinTypeMatch + product.useScenario).distinct().take(5).ifEmpty { listOf("控油", "温和", "日常洁面") })
-        MarkdownTextBlock(
-            content = payload.reason.ifBlank { "这款商品与当前需求高度匹配，适合作为优先比较对象。" },
-            style = TextStyle(
-                color = BuyPilotColors.TextSecondary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 22.sp,
-            ),
-        )
-        if (payload.riskNotes.isNotEmpty()) {
-            WarningBox(payload.riskNotes.joinToString("；"))
-        }
-        TextButton(onClick = onEvidence, contentPadding = PaddingValues(0.dp)) {
-            Text("查看为什么推荐这个商品 ›", color = BuyPilotColors.Info)
-        }
-        payload.actions.take(3).forEach { action ->
-            SmallActionChip(action.label) { onAction(action) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DecisionEvidenceEyebrow("最终判断")
+                winnerProductId?.takeIf { it.isNotBlank() }?.let { id ->
+                    Text(
+                        text = id,
+                        color = BuyPilotColors.TextMuted,
+                        fontSize = BuyPilotType.Tiny,
+                        lineHeight = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .widthIn(max = 156.dp)
+                            .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.62f), CircleShape)
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+            }
+            if (summary.isNotBlank()) {
+                MarkdownTextBlock(
+                    content = summary,
+                    style = TextStyle(
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = BuyPilotType.LargeBody,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ProductEvidenceSheet(payload: ProductCardPayload) {
-    SheetContentColumn {
-        SheetTitle("推荐证据")
-        if (payload.evidence.isEmpty()) {
-            EvidenceBlock(
-                EvidencePayload(
-                    sourceType = "商品资料",
-                    trustLabel = "待后端补充",
-                    snippet = payload.reason.ifBlank { "当前推荐理由来自商品结构化资料与用户需求匹配。" },
-                ),
-            )
-        } else {
-            payload.evidence.forEach { EvidenceBlock(it) }
-        }
-    }
-}
-
-@Composable
-private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
-    SheetContentColumn {
-        SheetTitle("决策依据")
-        EvidenceSection("为什么选它", payload.why.ifEmpty { listOf("匹配当前需求", "预算与风险更均衡", "推荐证据更完整") }, numbered = true)
-        EvidenceSection("不适合这些情况", payload.notFor.ifEmpty { listOf("极度敏感或完全不接受相关成分时，需要进一步确认。") })
-        if (payload.alternatives.isNotEmpty()) {
-            SectionTitle("备选方案")
-            payload.alternatives.forEach {
-                Surface(
-                    color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.65f),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
-                    Text(it.name, color = BuyPilotColors.TextPrimary, modifier = Modifier.padding(16.dp))
+private fun DecisionEvidenceListSection(
+    title: String,
+    items: List<String>,
+    numbered: Boolean,
+    accentColor: Color,
+    surfaceColor: Color,
+) {
+    if (items.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        DecisionEvidenceSectionHeader(title, items.size)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(18.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items.forEachIndexed { index, item ->
+                    DecisionEvidenceListRow(
+                        marker = if (numbered) "${index + 1}" else "!",
+                        text = item,
+                        accentColor = accentColor,
+                        markerSurface = surfaceColor,
+                    )
+                    if (index != items.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 42.dp),
+                            color = BuyPilotColors.Border.copy(alpha = 0.54f),
+                        )
+                    }
                 }
             }
         }
-        Surface(color = BuyPilotColors.SurfaceMuted, shape = RoundedCornerShape(14.dp)) {
-            MarkdownTextBlock(
-                content = payload.summary.ifBlank { "决策详情会根据本轮商品、证据和约束生成。" },
-                style = TextStyle(
-                    color = BuyPilotColors.TextSecondary,
-                    fontSize = BuyPilotType.Body,
-                    lineHeight = 22.sp,
-                ),
-                modifier = Modifier.padding(16.dp),
+    }
+}
+
+@Composable
+private fun DecisionEvidenceListRow(
+    marker: String,
+    text: String,
+    accentColor: Color,
+    markerSurface: Color,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .background(markerSurface, CircleShape)
+                .border(1.dp, accentColor.copy(alpha = 0.18f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = marker,
+                color = accentColor,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
             )
+        }
+        MarkdownTextBlock(
+            content = text,
+            style = TextStyle(
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 22.sp,
+            ),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun DecisionAlternativesSection(alternatives: List<com.buypilot.core.model.AlternativePayload>) {
+    if (alternatives.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        DecisionEvidenceSectionHeader("备选方案", alternatives.size)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(18.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                alternatives.forEachIndexed { index, alternative ->
+                    DecisionAlternativeRow(index = index, name = alternative.name, productId = alternative.productId)
+                    if (index != alternatives.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 42.dp),
+                            color = BuyPilotColors.Border.copy(alpha = 0.54f),
+                        )
+                    }
+                }
+            }
         }
     }
 }
+
+@Composable
+private fun DecisionAlternativeRow(
+    index: Int,
+    name: String,
+    productId: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .background(BuyPilotColors.Info.copy(alpha = 0.09f), RoundedCornerShape(10.dp))
+                .border(1.dp, BuyPilotColors.Info.copy(alpha = 0.14f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "A${index + 1}",
+                color = BuyPilotColors.Info,
+                fontSize = BuyPilotType.Tiny,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            name.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            productId.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DecisionNextActionsSection(actions: List<QuickActionPayload>) {
+    val labels = actions.mapNotNull { it.label.takeIf { label -> label.isNotBlank() } }
+    if (labels.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        DecisionEvidenceSectionHeader("下一步动作", actions.size)
+        ChipRows(labels = labels)
+    }
+}
+
+@Composable
+private fun DecisionEvidenceSectionHeader(title: String, count: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "$count 项",
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Tiny,
+            lineHeight = 14.sp,
+        )
+    }
+}
+
+@Composable
+private fun DecisionEvidenceEyebrow(text: String) {
+    Text(
+        text = text,
+        color = BuyPilotColors.PrimaryDark,
+        fontSize = BuyPilotType.Label,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.72f), CircleShape)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+private fun Modifier.decisionEvidenceSurfaceGlow(): Modifier =
+    drawBehind {
+        val corner = 20.dp.toPx()
+        drawRoundRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    BuyPilotColors.Primary.copy(alpha = 0.075f),
+                    Color.Transparent,
+                ),
+                center = Offset(size.width * 0.92f, size.height * 0.05f),
+                radius = size.minDimension * 0.92f,
+            ),
+            cornerRadius = CornerRadius(corner, corner),
+        )
+    }
 
 @Composable
 private fun SheetContentColumn(
@@ -3530,6 +5982,98 @@ private fun ChipRows(
 }
 
 @Composable
+private fun ScrollableChipRow(
+    labels: List<String>,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    colorful: Boolean = false,
+    onClick: ((String) -> Unit)? = null,
+) {
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = contentPadding,
+    ) {
+        itemsIndexed(labels) { index, label ->
+            if (colorful) {
+                DecisionReasonChip(label = label, colorIndex = index) { onClick?.invoke(label) }
+            } else {
+                SmallActionChip(label = label) { onClick?.invoke(label) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScrollableQuickActionRow(
+    actions: List<QuickActionPayload>,
+    onQuickAction: (QuickActionPayload) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 28.dp),
+    ) {
+        items(actions) { action ->
+            SmallActionChip(action.label) { onQuickAction(action) }
+        }
+    }
+}
+
+private data class ChipColorSet(
+    val background: Color,
+    val border: Color,
+    val content: Color,
+)
+
+private val DecisionReasonChipColors = listOf(
+    ChipColorSet(
+        background = Color(0xFFFFF2EA),
+        border = Color(0xFFFFCFBA),
+        content = Color(0xFFB24617),
+    ),
+    ChipColorSet(
+        background = Color(0xFFEDF5FF),
+        border = Color(0xFFCFE3FF),
+        content = Color(0xFF245CBA),
+    ),
+    ChipColorSet(
+        background = Color(0xFFEFFBF8),
+        border = Color(0xFFCBEFE7),
+        content = Color(0xFF16745F),
+    ),
+    ChipColorSet(
+        background = Color(0xFFFFF1F6),
+        border = Color(0xFFFAD4E1),
+        content = Color(0xFF9C315F),
+    ),
+)
+
+@Composable
+private fun DecisionReasonChip(
+    label: String,
+    colorIndex: Int,
+    onClick: () -> Unit = {},
+) {
+    val colors = DecisionReasonChipColors[colorIndex % DecisionReasonChipColors.size]
+    Text(
+        text = label.withoutMarkdownMarkup(),
+        color = colors.content,
+        fontSize = BuyPilotType.Label,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(colors.background, CircleShape)
+            .border(1.dp, colors.border, CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
 private fun SmallActionChip(
     label: String,
     onClick: () -> Unit = {},
@@ -3545,6 +6089,40 @@ private fun SmallActionChip(
             .border(1.dp, BuyPilotColors.Border, CircleShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 13.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun ProductMiniTag(
+    label: String,
+    active: Boolean = false,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val tagShape = RoundedCornerShape(if (compact) 7.dp else 999.dp)
+    Text(
+        text = label.withoutMarkdownMarkup(),
+        color = if (active) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary.copy(alpha = 0.92f),
+        fontSize = BuyPilotType.Tiny,
+        lineHeight = 14.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .background(
+                if (active) {
+                    BuyPilotColors.PrimarySoft.copy(alpha = 0.7f)
+                } else {
+                    Color(0xFFF2F7FA)
+                },
+                tagShape,
+            )
+            .border(
+                1.dp,
+                if (active) BuyPilotColors.PrimarySoft.copy(alpha = 0.82f) else Color(0xFFDCE8F0),
+                tagShape,
+            )
+            .padding(horizontal = if (compact) 6.dp else 8.dp, vertical = if (compact) 3.dp else 4.dp),
     )
 }
 
@@ -3565,24 +6143,56 @@ private fun SwipeAction(
 
 @Composable
 private fun SwipeRoundButton(
-    label: String,
+    @DrawableRes iconRes: Int,
+    contentDescription: String,
     active: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit = {},
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.96f else 1f,
+        animationSpec = tween(durationMillis = 140, easing = MenuEaseOut),
+        label = "swipe_round_button_press",
+    )
+    val containerColor = when {
+        !enabled -> BuyPilotColors.SurfaceMuted.copy(alpha = 0.42f)
+        active -> BuyPilotColors.PrimarySoft.copy(alpha = 0.82f)
+        else -> BuyPilotColors.SurfaceCard
+    }
+    val contentColor = when {
+        !enabled -> BuyPilotColors.TextMuted.copy(alpha = 0.54f)
+        active -> BuyPilotColors.PrimaryDark
+        else -> BuyPilotColors.TextSecondary
+    }
+    val borderColor = when {
+        !enabled -> BuyPilotColors.Border.copy(alpha = 0.36f)
+        active -> BuyPilotColors.Primary.copy(alpha = 0.22f)
+        else -> BuyPilotColors.Border.copy(alpha = 0.74f)
+    }
     Box(
         modifier = Modifier
-            .size(if (active) 72.dp else 60.dp)
-            .shadow(10.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.12f))
-            .background(if (active) BuyPilotColors.Primary else BuyPilotColors.SurfaceMuted, CircleShape)
-            .border(1.dp, if (active) BuyPilotColors.PrimaryDark.copy(alpha = 0.16f) else BuyPilotColors.Border, CircleShape),
+            .size(58.dp)
+            .scale(scale)
+            .shadow(3.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.04f))
+            .background(containerColor, CircleShape)
+            .border(1.dp, borderColor, CircleShape)
+            .clip(CircleShape)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = if (active) Color.White else BuyPilotColors.TextSecondary,
-            fontSize = if (active) 42.sp else 44.sp,
-            lineHeight = 44.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = contentDescription,
+            tint = contentColor,
+            modifier = Modifier.size(24.dp),
         )
     }
 }
@@ -3616,7 +6226,7 @@ private fun GhostButton(
             .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.78f), CircleShape)
             .clip(CircleShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leadingIconRes?.let {
@@ -3628,7 +6238,14 @@ private fun GhostButton(
             )
             Spacer(Modifier.width(8.dp))
         }
-        Text(label, color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
+        Text(
+            label,
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -3704,6 +6321,34 @@ private fun ProductMockImage(modifier: Modifier = Modifier) {
     }
 }
 
+@Composable
+private fun ProductImage(
+    product: ProductPayload,
+    backendBaseUrl: String,
+    modifier: Modifier = Modifier,
+) {
+    val imageUrl = product.imageUrl.resolveProductImageUrl(backendBaseUrl)
+    if (imageUrl == null) {
+        ProductMockImage(modifier)
+        return
+    }
+    AsyncImage(
+        model = imageUrl,
+        contentDescription = product.name.ifBlank { "商品图片" },
+        modifier = modifier,
+        contentScale = ContentScale.Fit,
+        error = painterResource(R.drawable.product_cleanser_sample),
+        fallback = painterResource(R.drawable.product_cleanser_sample),
+        placeholder = painterResource(R.drawable.product_cleanser_sample),
+    )
+}
+
+private fun ChatUiState.findProductDeck(deckId: String): ProductDeckNode? =
+    nodes.filterIsInstance<ProductDeckNode>().firstOrNull { it.deckId == deckId }
+
+private fun ChatUiState.findProduct(deckId: String, productId: String): ProductCardPayload? =
+    findProductDeck(deckId)?.products?.firstOrNull { it.product.productId == productId }
+
 private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {
     val max = budgetMax ?: constraints?.budgetMax
     val min = budgetMin ?: constraints?.budgetMin
@@ -3711,41 +6356,91 @@ private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {
         min != null && max != null -> "¥${min.clean()}-${max.clean()}"
         max != null -> "${max.clean()}元以内"
         min != null -> "¥${min.clean()}以上"
-        else -> "预算待确认"
+        else -> ""
     }
 }
 
 private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<CriteriaTileSpec> =
-    listOf(
-        CriteriaTileSpec(
-            label = "核心诉求",
-            value = productTypeLabel().ifBlank { category.ifBlank { summary.withoutMarkdownMarkup().ifBlank { "待确认" } } },
+    buildList {
+        fun addTile(
+            label: String,
+            value: String,
+            @DrawableRes iconRes: Int,
+            accent: Color,
+            glow: Color,
+            prominent: Boolean = false,
+        ) {
+            val cleanValue = value.withoutMarkdownMarkup().trim()
+            if (cleanValue.isBlank()) return
+            add(
+                CriteriaTileSpec(
+                    label = label,
+                    value = cleanValue,
+                    iconRes = iconRes,
+                    accent = accent,
+                    glow = glow,
+                    prominent = prominent,
+                ),
+            )
+        }
+
+        addTile(
+            label = "摘要",
+            value = summary,
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
             glow = Color(0xFFFFEFE8),
-        ),
-        CriteriaTileSpec(
+            prominent = true,
+        )
+        addTile(
+            label = "品类",
+            value = category,
+            iconRes = R.drawable.ic_search_24,
+            accent = Color(0xFFE0643B),
+            glow = Color(0xFFFFEFE8),
+            prominent = isEmpty(),
+        )
+        addTile(
+            label = "核心诉求",
+            value = productTypeLabel(),
+            iconRes = R.drawable.ic_search_24,
+            accent = Color(0xFFE0643B),
+            glow = Color(0xFFFFEFE8),
+            prominent = isEmpty(),
+        )
+        addTile(
             label = "适用对象",
-            value = skinTypeLabel().ifBlank { "按需求匹配" },
+            value = skinTypeLabel(),
             iconRes = R.drawable.ic_shield_24,
             accent = Color(0xFF4F86D8),
             glow = Color(0xFFEEF5FF),
-        ),
-        CriteriaTileSpec(
+            prominent = isEmpty(),
+        )
+        addTile(
             label = "预算",
             value = budgetLabel(),
             iconRes = R.drawable.ic_payments_24,
             accent = Color(0xFFB87920),
             glow = Color(0xFFFFF4DE),
-        ),
-        CriteriaTileSpec(
+            prominent = isEmpty(),
+        )
+        addTile(
             label = "场景/用途",
-            value = useScenarioLabel().ifBlank { "日常使用" },
+            value = useScenarioLabel(),
             iconRes = R.drawable.ic_history_24,
             accent = Color(0xFF8B96A5),
             glow = Color(0xFFF2F4F7),
-        ),
-    )
+            prominent = isEmpty(),
+        )
+        addTile(
+            label = "排除项",
+            value = exclusionLabels().joinToString("、"),
+            iconRes = R.drawable.ic_block_24,
+            accent = Color(0xFFC75B76),
+            glow = Color(0xFFFFF0F4),
+            prominent = isEmpty(),
+        )
+    }
 
 private fun com.buypilot.core.model.CriteriaPayload.productTypeLabel(): String =
     productType.orEmpty().ifBlank { constraints?.productType.orEmpty() }
@@ -3866,14 +6561,59 @@ private fun String.looksLikeBrandAvoidance(): Boolean =
     any { it in 'A'..'Z' || it in 'a'..'z' } || contains("-") || contains("·")
 
 private fun com.buypilot.core.model.ProductPayload.priceLabel(): String =
-    price?.let { "${currency.orEmpty().ifBlank { "¥" }}${it.clean()}" } ?: "价格待确认"
+    price?.let { "${currency.priceSymbol()}${it.clean()}" } ?: "价格待确认"
+
+private fun com.buypilot.core.model.ProductPayload.priceLabelOrNull(): String? =
+    price?.let { "${currency.priceSymbol()}${it.clean()}" }
+
+private fun String?.priceSymbol(): String =
+    when (this?.trim()?.uppercase()) {
+        null, "", "CNY", "RMB", "CN¥", "￥", "¥" -> "¥"
+        "USD", "$" -> "$"
+        else -> this.trim()
+    }
+
+private fun ProductPayload.brandLabel(): String =
+    brand?.takeIf { it.isNotBlank() }
+        ?: subCategory?.takeIf { it.isNotBlank() }
+        ?: category.takeIf { it.isNotBlank() }
+        ?: "BuyPilot 推荐"
+
+private fun ProductCardPayload.displayTags(): List<String> =
+    (product.ingredientTags + product.skinTypeMatch + product.useScenario)
+        .map { it.withoutMarkdownMarkup().trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .ifEmpty { tagsFromText() }
+        .take(6)
+
+private fun ProductCardPayload.tagsFromText(): List<String> {
+    val text = listOf(reason, riskNotes.joinToString(" ")).joinToString(" ")
+    return listOf(
+        "预算友好" to listOf("预算", "价格", "便宜", "性价比"),
+        "温和" to listOf("温和", "敏感", "不刺激"),
+        "控油" to listOf("控油", "油皮", "清爽"),
+        "证据充分" to listOf("证据", "评价", "资料"),
+        "风险可控" to listOf("风险", "注意", "谨慎"),
+    ).filter { (_, needles) -> needles.any { it in text } }
+        .map { it.first }
+        .ifEmpty { listOf("需求匹配", "可进一步确认") }
+        .take(2)
+}
+
+private fun String?.resolveProductImageUrl(backendBaseUrl: String): String? {
+    val raw = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
+    if (raw.startsWith("/assets/products/") || raw.startsWith("/uploads/")) {
+        return backendBaseUrl.trimEnd('/') + raw
+    }
+    return raw
+}
 
 private fun Double.clean(): String =
     if (this % 1.0 == 0.0) toInt().toString() else String.format("%.2f", this)
 
 private sealed interface ChatSheetContent {
     data class Criteria(val payload: CriteriaCardPayload) : ChatSheetContent
-    data class Product(val payload: ProductCardPayload) : ChatSheetContent
-    data class ProductEvidence(val payload: ProductCardPayload) : ChatSheetContent
     data class DecisionEvidence(val payload: FinalDecisionPayload) : ChatSheetContent
 }

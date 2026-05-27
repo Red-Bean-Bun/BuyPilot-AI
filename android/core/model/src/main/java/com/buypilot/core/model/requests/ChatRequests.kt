@@ -31,10 +31,8 @@ data class ChatCancelRequest(
 @Serializable
 data class FeedbackRequest(
     @SerialName("session_id") val sessionId: String,
-    @SerialName("turn_id") val turnId: String,
     @SerialName("product_id") val productId: String? = null,
-    @SerialName("feedback_type") val feedbackType: String,
-    @SerialName("criteria_patch") val criteriaPatch: JsonObject? = null,
-    val comment: String? = null,
-    @SerialName("client_trace_id") val clientTraceId: String? = null,
+    @SerialName("feedback_type") val feedbackType: String? = null,
+    val action: String? = null,
+    val reason: String? = null,
 )

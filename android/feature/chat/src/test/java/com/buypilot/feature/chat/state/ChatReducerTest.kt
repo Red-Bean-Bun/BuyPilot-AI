@@ -4,14 +4,20 @@ import com.buypilot.core.model.AgentEventType
 import com.buypilot.core.model.AgentPayload
 import com.buypilot.core.model.AgentUiEnvelope
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CriteriaCardPayload
+import com.buypilot.core.model.CriteriaPayload
 import com.buypilot.core.model.DonePayload
 import com.buypilot.core.model.ErrorPayload
+import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.TextDeltaPayload
 import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CriteriaNode
+import com.buypilot.feature.chat.model.ErrorNode
+import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ThinkingNode
 import org.junit.Assert.assertEquals
@@ -66,12 +72,30 @@ class ChatReducerTest {
 
         assertEquals("user_1", state.lastUserMessageKey)
         assertEquals("推荐适合油皮的洗面奶", state.lastUserMessage)
+        assertEquals("推荐适合油皮的洗面奶", state.lastRetryableRequest?.message)
+        assertEquals(null, state.lastRetryableRequest?.imageUrl)
+        assertFalse(state.lastRetryableRequest?.fromEditResubmit ?: true)
         assertEquals(null, state.streamingTextKey)
         assertEquals(0, state.streamingTextLength)
     }
 
     @Test
-    fun clarificationReplacesThinkingLineWithIntroTextAndThenShowsCard() {
+    fun addUserMessageStoresEditedRetryRequest() {
+        val state = ChatReducer.addUserMessage(
+            state = ChatUiState(),
+            key = "user_edited",
+            content = "预算降到150，不要香精",
+            imageUrl = "mock://image",
+            fromEditResubmit = true,
+        )
+
+        assertEquals("预算降到150，不要香精", state.lastRetryableRequest?.message)
+        assertEquals("mock://image", state.lastRetryableRequest?.imageUrl)
+        assertTrue(state.lastRetryableRequest?.fromEditResubmit == true)
+    }
+
+    @Test
+    fun clarificationClearsThinkingAndShowsOnlyClarificationCardWhenNoTextDeltaArrived() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -90,14 +114,44 @@ class ChatReducerTest {
             ),
         )
 
-        assertEquals(2, state.nodes.size)
+        assertEquals(1, state.nodes.size)
         assertFalse(state.nodes.any { it is ThinkingNode })
-        val intro = state.nodes.first() as AiStreamNode
-        val card = state.nodes.last() as ClarificationNode
-        assertEquals("thinking_turn_1", intro.key)
-        assertEquals("thinking_turn_1", card.anchorMessageKey)
-        assertTrue(intro.content.contains("请问你的肤质"))
-        assertEquals("thinking_turn_1", state.streamingTextKey)
+        assertFalse(state.nodes.any { it is AiStreamNode })
+        val card = state.nodes.single() as ClarificationNode
+        assertEquals("clarify_turn_1", card.key)
+        assertEquals("", card.anchorMessageKey)
+        assertEquals("请问你的肤质是？", card.payload.question)
+        assertEquals(null, state.streamingTextKey)
+        assertEquals(0, state.streamingTextLength)
+    }
+
+    @Test
+    fun clarificationKeepsPriorStreamingAnalysisTextFromEventSource() {
+        val withText = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "assistant_intro_turn_1",
+                payload = TextDeltaPayload(
+                    messageId = "assistant_intro_turn_1",
+                    delta = "我先问一个关键信息。",
+                    done = true,
+                ),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            withText,
+            envelope(
+                event = AgentEventType.Clarification,
+                nodeId = "clarify_turn_1",
+                payload = ClarificationPayload(question = "请问你的肤质是？"),
+            ),
+        )
+
+        assertEquals(1, state.nodes.filterIsInstance<AiStreamNode>().size)
+        assertEquals("我先问一个关键信息。", (state.nodes[0] as AiStreamNode).content)
+        assertTrue(state.nodes[1] is ClarificationNode)
     }
 
     @Test
@@ -123,7 +177,7 @@ class ChatReducerTest {
         }
 
         val node = state.nodes.single() as AiStreamNode
-        assertEquals("thinking_turn_1", node.key)
+        assertEquals("assistant_intro_turn_1", node.key)
         assertEquals("敏感肌面霜，我会先避开酒精和香精。", node.content)
         assertFalse(state.nodes.any { it is ThinkingNode })
     }
@@ -204,6 +258,35 @@ class ChatReducerTest {
     }
 
     @Test
+    fun errorPayloadAddsTimelineErrorAndKeepsRetryRequest() {
+        val withUser = ChatReducer.addUserMessage(
+            state = ChatUiState(),
+            key = "user_1",
+            content = "模拟错误，推荐油皮洁面",
+        )
+
+        val state = ChatReducer.reduce(
+            withUser,
+            envelope(
+                event = AgentEventType.Error,
+                nodeId = "error_turn_1",
+                payload = ErrorPayload(
+                    code = "NETWORK_ERROR",
+                    message = "network down",
+                    retryable = true,
+                ),
+            ),
+        )
+
+        val node = state.nodes.last() as ErrorNode
+        assertEquals(ChatInputState.Error, state.inputState)
+        assertFalse(state.isStreaming)
+        assertEquals("模拟错误，推荐油皮洁面", state.lastRetryableRequest?.message)
+        assertEquals("NETWORK_ERROR", node.code)
+        assertTrue(node.retryable)
+    }
+
+    @Test
     fun clarificationKeepsStreamingUntilDone() {
         val state = ChatReducer.reduce(
             ChatUiState(),
@@ -223,7 +306,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun doneKeepsClarificationIntroAndCard() {
+    fun doneKeepsClarificationCardWithoutReducerInjectedText() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -251,10 +334,180 @@ class ChatReducerTest {
         )
 
         assertFalse(state.nodes.any { it is ThinkingNode })
-        assertTrue(state.nodes.any { it is AiStreamNode })
-        assertTrue(state.nodes.any { it is ClarificationNode })
+        assertFalse(state.nodes.any { it is AiStreamNode })
+        assertEquals(1, state.nodes.size)
+        assertTrue(state.nodes.single() is ClarificationNode)
         assertFalse(state.isStreaming)
         assertEquals(ChatInputState.Clarifying, state.inputState)
+    }
+
+    @Test
+    fun criteriaCardClearsThinkingAndStoresPayloadWithoutReducerInjectedText() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+        val payload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_1",
+                category = "美妆护肤",
+                summary = "油皮洁面，200 元以内",
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_1",
+                payload = payload,
+            ),
+        )
+
+        assertFalse(state.nodes.any { it is ThinkingNode })
+        assertFalse(state.nodes.any { it is AiStreamNode })
+        val node = state.nodes.single() as CriteriaNode
+        assertEquals(payload, node.payload)
+    }
+
+    @Test
+    fun criteriaCardKeepsPriorStreamingAnalysisTextFromEventSource() {
+        val withText = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "assistant_intro_turn_1",
+                payload = TextDeltaPayload(
+                    messageId = "assistant_intro_turn_1",
+                    delta = "我会先整理标准。",
+                    done = true,
+                ),
+            ),
+        )
+        val payload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_1",
+                category = "美妆护肤",
+                summary = "油皮洁面，200 元以内",
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            withText,
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_1",
+                payload = payload,
+            ),
+        )
+
+        assertEquals(1, state.nodes.filterIsInstance<AiStreamNode>().size)
+        assertEquals("我会先整理标准。", (state.nodes[0] as AiStreamNode).content)
+        assertTrue(state.nodes[1] is CriteriaNode)
+    }
+
+    @Test
+    fun finalDecisionClearsThinkingAndStoresPayloadWithoutTextNode() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+        val payload = FinalDecisionPayload(winnerProductId = "p1", summary = "首选 p1")
+
+        val state = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = payload,
+            ),
+        )
+
+        assertFalse(state.nodes.any { it is ThinkingNode })
+        assertFalse(state.nodes.any { it is AiStreamNode })
+        val node = state.nodes.single() as FinalDecisionNode
+        assertEquals(payload, node.payload)
+    }
+
+    @Test
+    fun swipeStateSelectsSwipesAndUndoWithoutMutatingDeckProducts() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+            product(rank = 3, productId = "p3"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+
+        val selected = ChatReducer.selectProduct(deckState, deckId = "deck_1", productId = "p2")
+        val swiped = ChatReducer.swipeProduct(
+            state = selected,
+            deckId = "deck_1",
+            productId = "p2",
+            feedbackType = "like",
+            action = "like",
+        )
+        val undone = ChatReducer.undoSwipe(swiped, deckId = "deck_1")
+
+        assertEquals("p2", selected.productSwipeStates["deck_1"]?.currentProductId)
+        assertEquals(listOf("p2"), swiped.productSwipeStates["deck_1"]?.swipedProductIds)
+        assertEquals("p1", swiped.productSwipeStates["deck_1"]?.currentProductId)
+        assertEquals("p2", undone.productSwipeStates["deck_1"]?.currentProductId)
+        assertTrue(undone.productSwipeStates["deck_1"]?.swipedProductIds.orEmpty().isEmpty())
+
+        val deck = undone.nodes.single { it is ProductDeckNode } as ProductDeckNode
+        assertEquals(listOf("p1", "p2", "p3"), deck.products.map { it.product.productId })
+    }
+
+    @Test
+    fun productCardsAwaitConvergenceAndCacheEarlyDecisionUntilUserConverges() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+
+        val earlyDecision = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = FinalDecisionPayload(winnerProductId = "p1", summary = "首选 p1"),
+            ),
+        )
+        val converged = ChatReducer.convergeDeck(earlyDecision, "deck_1")
+
+        assertTrue("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertFalse(earlyDecision.nodes.any { it is FinalDecisionNode })
+        assertTrue("deck_1" in earlyDecision.pendingDecisions)
+        assertFalse("deck_1" in converged.awaitingConvergenceDeckIds)
+        assertTrue(converged.nodes.any { it is FinalDecisionNode })
+    }
+
+    @Test
+    fun viewDetailMarksViewedWithoutAdvancingSwipeDeck() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+
+        val viewed = ChatReducer.swipeProduct(
+            state = deckState,
+            deckId = "deck_1",
+            productId = "p1",
+            feedbackType = "view_detail",
+            action = "view_detail",
+        )
+
+        val swipeState = viewed.productSwipeStates["deck_1"]
+        assertEquals(listOf("p1"), swipeState?.viewedProductIds)
+        assertTrue(swipeState?.swipedProductIds.orEmpty().isEmpty())
+        assertEquals("p1", swipeState?.currentProductId)
     }
 
     private fun product(rank: Int, productId: String) = envelope(

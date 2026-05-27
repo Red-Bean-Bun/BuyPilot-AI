@@ -32,6 +32,7 @@ data class AiStreamNode(
     val messageId: String,
     val content: String,
     val done: Boolean,
+    val turnId: String = "",
 ) : ChatUiNode
 
 data class ClarificationNode(
@@ -74,4 +75,10 @@ data class ErrorNode(
 
 data class EvidenceBundle(
     val refs: List<EvidencePayload>,
+)
+
+data class PendingDecision(
+    val key: String,
+    val payload: FinalDecisionPayload,
+    val turnId: String,
 )

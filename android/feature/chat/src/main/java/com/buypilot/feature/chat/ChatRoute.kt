@@ -9,6 +9,7 @@ import com.buypilot.feature.chat.ui.BuyPilotChatScreen
 @Composable
 fun ChatRoute(
     viewModel: ChatViewModel = hiltViewModel(),
+    onOpenProductDeck: (String, String?) -> Unit = { _, _ -> },
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -18,5 +19,8 @@ fun ChatRoute(
         onSendMessage = viewModel::sendMessage,
         onCriteriaPatch = viewModel::sendCriteriaPatch,
         onCancel = viewModel::cancel,
+        onOpenProductDeck = onOpenProductDeck,
+        onRetryLastMessage = viewModel::retryLastMessage,
+        onEditLastMessage = viewModel::editLastMessage,
     )
 }

@@ -7,6 +7,11 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+val useMockChat = providers.gradleProperty("USE_MOCK_CHAT")
+    .map { it.equals("true", ignoreCase = true).toString() }
+    .orElse("true")
+    .get()
+
 android {
     namespace = "com.buypilot.feature.chat"
     compileSdk = 35
@@ -14,10 +19,12 @@ android {
     defaultConfig {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("boolean", "USE_MOCK_CHAT", useMockChat)
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -48,7 +55,15 @@ dependencies {
     implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.card.stack.view)
+    implementation(libs.coil)
+    implementation(libs.coil.compose)
     implementation(libs.lottie.compose)
+    implementation(libs.markwon.core)
+    implementation(libs.markwon.ext.strikethrough)
+    implementation(libs.markwon.ext.tables)
+    implementation(libs.markwon.html)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
