@@ -1,6 +1,19 @@
 package com.buypilot.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -16,7 +29,6 @@ import com.buypilot.feature.chat.ChatViewModel
 import com.buypilot.feature.chat.ui.ProductEvidenceOverlayScreen
 import com.buypilot.feature.chat.ui.ProductHeroDetailScreen
 import com.buypilot.feature.chat.ui.ProductSwipeModeScreen
-import androidx.compose.runtime.collectAsState
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -56,6 +68,10 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                         defaultValue = null
                     },
                 ),
+                enterTransition = { productForwardEnter() },
+                exitTransition = { productForwardExit() },
+                popEnterTransition = { productUnderlayReturnEnter() },
+                popExitTransition = { productPopExit() },
             ) { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(Routes.ChatGraph)
@@ -88,6 +104,22 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navArgument("deckId") { type = NavType.StringType },
                     navArgument("productId") { type = NavType.StringType },
                 ),
+                enterTransition = { productForwardEnter() },
+                exitTransition = {
+                    if (targetState.destination.route == Routes.ChatProductEvidence) {
+                        productUnderlayExit()
+                    } else {
+                        productForwardExit()
+                    }
+                },
+                popEnterTransition = {
+                    if (initialState.destination.route == Routes.ChatProductEvidence) {
+                        productUnderlayReturnEnter()
+                    } else {
+                        productPopEnter()
+                    }
+                },
+                popExitTransition = { productPopExit() },
             ) { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(Routes.ChatGraph)
@@ -116,6 +148,10 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navArgument("deckId") { type = NavType.StringType },
                     navArgument("productId") { type = NavType.StringType },
                 ),
+                enterTransition = { productEvidenceEnter() },
+                exitTransition = { productEvidenceExit() },
+                popEnterTransition = { productUnderlayReturnEnter() },
+                popExitTransition = { productEvidencePopExit() },
             ) { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(Routes.ChatGraph)
@@ -159,3 +195,131 @@ private fun String.routeDecode(): String =
 
 private fun androidx.navigation.NavBackStackEntry.decodedArg(name: String): String =
     arguments?.getString(name).orEmpty().routeDecode()
+
+private const val ProductRouteEnterMs = 460
+private const val ProductRouteExitMs = 260
+private const val ProductEvidenceEnterMs = 420
+private const val ProductEvidenceExitMs = 240
+private val ProductRouteEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val ProductRouteEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
+
+private fun productForwardEnter(): EnterTransition =
+    fadeIn(
+        animationSpec = tween(
+            durationMillis = ProductRouteEnterMs,
+            delayMillis = 35,
+            easing = ProductRouteEaseOut,
+        ),
+    ) +
+        slideInHorizontally(
+            animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
+            initialOffsetX = { width -> width / 5 },
+        ) +
+        scaleIn(
+            animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
+            initialScale = 0.985f,
+        )
+
+private fun productForwardExit(): ExitTransition =
+    fadeOut(
+        animationSpec = tween(durationMillis = 180, easing = ProductRouteEaseIn),
+    ) +
+        slideOutHorizontally(
+            animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
+            targetOffsetX = { width -> -width / 13 },
+        ) +
+        scaleOut(
+            animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
+            targetScale = 0.992f,
+        )
+
+private fun productPopEnter(): EnterTransition =
+    fadeIn(
+        animationSpec = tween(
+            durationMillis = ProductRouteEnterMs,
+            delayMillis = 45,
+            easing = ProductRouteEaseOut,
+        ),
+    ) +
+        slideInHorizontally(
+            animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
+            initialOffsetX = { width -> -width / 8 },
+        ) +
+        scaleIn(
+            animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
+            initialScale = 0.992f,
+        )
+
+private fun productPopExit(): ExitTransition =
+    fadeOut(
+        animationSpec = tween(durationMillis = 170, easing = ProductRouteEaseIn),
+    ) +
+        slideOutHorizontally(
+            animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
+            targetOffsetX = { width -> width / 4 },
+        ) +
+        scaleOut(
+            animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
+            targetScale = 0.985f,
+        )
+
+private fun productUnderlayExit(): ExitTransition =
+    fadeOut(
+        animationSpec = tween(durationMillis = ProductEvidenceExitMs, easing = ProductRouteEaseIn),
+    ) +
+        scaleOut(
+            animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseIn),
+            targetScale = 0.978f,
+        )
+
+private fun productUnderlayReturnEnter(): EnterTransition =
+    fadeIn(
+        animationSpec = tween(
+            durationMillis = ProductEvidenceEnterMs,
+            delayMillis = 30,
+            easing = ProductRouteEaseOut,
+        ),
+    ) +
+        scaleIn(
+            animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseOut),
+            initialScale = 0.985f,
+        )
+
+private fun productEvidenceEnter(): EnterTransition =
+    fadeIn(
+        animationSpec = tween(
+            durationMillis = ProductEvidenceEnterMs,
+            delayMillis = 45,
+            easing = ProductRouteEaseOut,
+        ),
+    ) +
+        slideInVertically(
+            animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseOut),
+            initialOffsetY = { height -> height / 10 },
+        ) +
+        scaleIn(
+            animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseOut),
+            initialScale = 0.975f,
+        )
+
+private fun productEvidenceExit(): ExitTransition =
+    fadeOut(
+        animationSpec = tween(durationMillis = ProductEvidenceExitMs, easing = ProductRouteEaseIn),
+    ) +
+        scaleOut(
+            animationSpec = tween(durationMillis = ProductEvidenceExitMs, easing = ProductRouteEaseIn),
+            targetScale = 0.985f,
+        )
+
+private fun productEvidencePopExit(): ExitTransition =
+    fadeOut(
+        animationSpec = tween(durationMillis = ProductEvidenceExitMs, easing = ProductRouteEaseIn),
+    ) +
+        slideOutVertically(
+            animationSpec = tween(durationMillis = ProductEvidenceExitMs, easing = ProductRouteEaseIn),
+            targetOffsetY = { height -> height / 8 },
+        ) +
+        scaleOut(
+            animationSpec = tween(durationMillis = ProductEvidenceExitMs, easing = ProductRouteEaseIn),
+            targetScale = 0.985f,
+        )

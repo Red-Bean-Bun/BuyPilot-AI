@@ -224,6 +224,17 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import org.commonmark.node.AbstractVisitor
+import org.commonmark.node.Code
+import org.commonmark.node.FencedCodeBlock
+import org.commonmark.node.HardLineBreak
+import org.commonmark.node.Image
+import org.commonmark.node.IndentedCodeBlock
+import org.commonmark.node.Link
+import org.commonmark.node.Paragraph
+import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.Text as MarkdownText
+import org.commonmark.parser.Parser
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
@@ -237,6 +248,8 @@ private val ClarificationEaseOut = CubicBezierEasing(0.1f, 1f, 0.1f, 1f)
 private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 private val ProductDetailRevealDistance = 220.dp
 private const val ProductDetailSnapThreshold = 0.36f
+private const val ProductDetailEnterMs = 520
+private const val ProductEvidenceEnterMs = 480
 private val CriteriaLeadingNumberRegex = Regex("""^(\d+(?:\.\d+)?)(.*)$""")
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
 private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
@@ -244,6 +257,7 @@ private const val DefaultBudgetPreset = 200
 private const val ClarificationSelectionHoldMs = 0
 private const val ClarificationExitMs = 110
 private const val ClarificationFlightMs = 360
+private const val ClarificationKeyboardBirthMs = 150
 private const val ClarificationTargetSettleMs = 24L
 private const val ClarificationTargetFallbackMs = 760L
 private val TimelineNearEndThreshold = 96.dp
@@ -253,6 +267,7 @@ private val TimelineAnchorTopGap = 8.dp
 private val TimelineAnchorBottomReserve = 420.dp
 private val TimelineKeyboardScrimHeight = 64.dp
 private val TimelineJumpButtonBottomGap = 18.dp
+private val ChipEdgeFadeWidth = 46.dp
 
 private data class PendingClarificationAnswer(
     val nodeKey: String,
@@ -266,6 +281,11 @@ private data class PendingClarificationAnswer(
 private data class ClarificationChipSnapshot(
     val position: Offset,
     val size: Size,
+)
+
+private data class ClarificationManualSource(
+    val nodeKey: String,
+    val snapshot: ClarificationChipSnapshot,
 )
 
 private fun LayoutCoordinates.toClarificationSnapshot(): ClarificationChipSnapshot {
@@ -284,6 +304,7 @@ private data class ClarificationFlight(
     val startPosition: Offset,
     val startSize: Size,
     val previousUserMessageKey: String?,
+    val fromKeyboard: Boolean = false,
     val targetMessageKey: String? = null,
     val messageSent: Boolean = false,
 )
@@ -294,8 +315,15 @@ private data class CriteriaTileSpec(
     @DrawableRes val iconRes: Int,
     val accent: Color,
     val glow: Color,
+    val background: Color,
     val prominent: Boolean = false,
+    val span: CriteriaTileSpan = CriteriaTileSpan.Half,
 )
+
+private enum class CriteriaTileSpan {
+    Half,
+    Full,
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -322,6 +350,8 @@ fun BuyPilotChatScreen(
     var activeClarificationFlight by remember { mutableStateOf<ClarificationFlight?>(null) }
     var hiddenFlightMessageKeys by remember { mutableStateOf(emptySet<String>()) }
     var userBubbleSnapshots by remember { mutableStateOf(emptyMap<String, ClarificationChipSnapshot>()) }
+    var clarificationManualSource by remember { mutableStateOf<ClarificationManualSource?>(null) }
+    var keyboardFlightSnapshot by remember { mutableStateOf<ClarificationChipSnapshot?>(null) }
     var flightSequence by remember { mutableStateOf(0) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
     var timelineTopPx by remember { mutableStateOf(0f) }
@@ -416,6 +446,7 @@ fun BuyPilotChatScreen(
         message: String,
         selectedOption: String? = null,
         chipSnapshot: ClarificationChipSnapshot? = null,
+        manualSnapshot: ClarificationChipSnapshot? = null,
     ) {
         val next = message.trim()
         if (next.isEmpty()) return
@@ -438,7 +469,9 @@ fun BuyPilotChatScreen(
         onInputChanged("", false)
         focusManager.clearFocus()
         keyboardController?.hide()
-        val shouldFly = selectedOption != null && chipSnapshot != null
+        val sourceSnapshot = chipSnapshot ?: manualSnapshot
+        val shouldFly = sourceSnapshot != null
+        val fromKeyboard = selectedOption == null && manualSnapshot != null
         val previousUserMessageKey = state.lastUserMessageKey
         val flightId = if (shouldFly) ++flightSequence else null
         pendingClarificationAnswer = PendingClarificationAnswer(
@@ -449,7 +482,7 @@ fun BuyPilotChatScreen(
             previousUserMessageKey = previousUserMessageKey,
             flightId = flightId,
         )
-        val snapshot = chipSnapshot
+        val snapshot = sourceSnapshot
         if (snapshot != null && flightId != null) {
             activeClarificationFlight = ClarificationFlight(
                 id = flightId,
@@ -459,6 +492,7 @@ fun BuyPilotChatScreen(
                 startPosition = snapshot.position,
                 startSize = snapshot.size,
                 previousUserMessageKey = previousUserMessageKey,
+                fromKeyboard = fromKeyboard,
             )
         }
         dismissingClarificationKey = nodeKey
@@ -466,6 +500,9 @@ fun BuyPilotChatScreen(
 
     fun finishClarificationDismissal(nodeKey: String) {
         dismissedClarificationKeys = dismissedClarificationKeys + nodeKey
+        if (clarificationManualSource?.nodeKey == nodeKey) {
+            clarificationManualSource = null
+        }
         if (dismissingClarificationKey == nodeKey) {
             dismissingClarificationKey = null
         }
@@ -539,6 +576,9 @@ fun BuyPilotChatScreen(
                         }
                     },
                     onClarificationManualInput = { focusComposer() },
+                    onClarificationManualSource = { nodeKey, snapshot ->
+                        clarificationManualSource = ClarificationManualSource(nodeKey, snapshot)
+                    },
                     onTimelineDrag = { closeTransientComposerUi() },
                     composerHeightPx = composerHeightPx,
                     imeBottomPx = imeBottomPx,
@@ -591,6 +631,9 @@ fun BuyPilotChatScreen(
             },
             onFocusChanged = { composerFocused = it },
             onHeightChanged = { composerHeightPx = it },
+            onKeyboardFlightSourceChanged = {
+                keyboardFlightSnapshot = it
+            },
             onSubmit = {
                 if (state.isStreaming) {
                     onCancel()
@@ -599,7 +642,24 @@ fun BuyPilotChatScreen(
                 val next = input.trim()
                 if (next.isNotEmpty()) {
                     if (activeClarificationKey != null) {
-                        answerClarification(next)
+                        val keyboardSnapshot = if (
+                            imeBottomPx > 0 &&
+                            rootSize.width > 0 &&
+                            rootSize.height > imeBottomPx
+                        ) {
+                            ClarificationChipSnapshot(
+                                position = Offset(0f, rootSize.height - imeBottomPx.toFloat()),
+                                size = Size(rootSize.width.toFloat(), imeBottomPx.toFloat()),
+                            )
+                        } else {
+                            null
+                        }
+                        val manualSnapshot = clarificationManualSource
+                            ?.takeIf { it.nodeKey == activeClarificationKey }
+                            ?.let { keyboardSnapshot ?: keyboardFlightSnapshot ?: it.snapshot }
+                            ?: keyboardSnapshot
+                            ?: keyboardFlightSnapshot
+                        answerClarification(next, manualSnapshot = manualSnapshot)
                     } else {
                         sendAndClear(next)
                     }
@@ -747,6 +807,7 @@ private fun ConversationStage(
     products: List<ProductCardPayload>,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
+    onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
@@ -812,6 +873,7 @@ private fun ConversationStage(
                 products = products,
                 onClarificationOption = onClarificationOption,
                 onClarificationManualInput = onClarificationManualInput,
+                onClarificationManualSource = onClarificationManualSource,
                 onCriteriaEdit = onCriteriaEdit,
                 onProductOpen = onProductOpen,
                 onDecisionEvidence = onDecisionEvidence,
@@ -1116,6 +1178,7 @@ private fun ChatTimeline(
     products: List<ProductCardPayload>,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
+    onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
@@ -1261,7 +1324,11 @@ private fun ChatTimeline(
                     is UserMessageNode -> UserBubble(
                         node = node,
                         hidden = hiddenUserMessage,
-                        onPositioned = { onUserBubblePositioned(node.key, it) },
+                        onPositioned = if (node.key == activeFlightMessageKey) {
+                            { onUserBubblePositioned(node.key, it) }
+                        } else {
+                            null
+                        },
                     )
                     is ThinkingNode -> ThinkingBubble(message = node.payload.message)
                     is AiStreamNode -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1283,6 +1350,7 @@ private fun ChatTimeline(
                         },
                         onOption = onClarificationOption,
                         onManualInput = onClarificationManualInput,
+                        onManualSource = { snapshot -> onClarificationManualSource(node.key, snapshot) },
                         onCardDismissed = onClarificationCardDismissed,
                     )
                     is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
@@ -1369,12 +1437,11 @@ private fun ChatTimeline(
             ),
         modifier = Modifier
             .fillMaxSize()
-            .padding(bottom = jumpButtonBottomPadding, end = 16.dp)
+            .padding(bottom = jumpButtonBottomPadding)
             .zIndex(2f),
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
             JumpToLatestButton(
-                streaming = state.isStreaming,
                 onClick = {
                     followStreamingText = true
                     activeTurnAnchored = false
@@ -1397,12 +1464,11 @@ private fun ChatTimeline(
 
 @Composable
 private fun JumpToLatestButton(
-    streaming: Boolean,
     onClick: () -> Unit,
 ) {
     FloatingActionButton(
         onClick = onClick,
-        modifier = Modifier.height(42.dp),
+        modifier = Modifier.size(46.dp),
         containerColor = BuyPilotColors.SurfaceCard,
         contentColor = BuyPilotColors.TextPrimary,
         elevation = FloatingActionButtonDefaults.elevation(
@@ -1411,28 +1477,14 @@ private fun JumpToLatestButton(
         ),
         shape = CircleShape,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 13.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_arrow_upward_24),
-                contentDescription = null,
-                tint = BuyPilotColors.PrimaryDark,
-                modifier = Modifier
-                    .size(17.dp)
-                    .rotate(180f),
-            )
-            Text(
-                text = if (streaming) "新回复生成中" else "回到底部",
-                color = BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-            )
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_upward_24),
+            contentDescription = "回到底部",
+            tint = BuyPilotColors.PrimaryDark,
+            modifier = Modifier
+                .size(20.dp)
+                .rotate(180f),
+        )
     }
 }
 
@@ -1611,17 +1663,73 @@ private fun ThinkingShimmerText(
 private fun String.withoutTrailingDots(): String =
     trim().replace(Regex("""[.。…]+$"""), "")
 
-private fun String.withoutMarkdownMarkup(): String =
-    replace(Regex("""(?s)```.*?```""")) { match ->
-        match.value.removeSurrounding("```").lineSequence().drop(1).joinToString("\n")
+private val PlainMarkdownParser: Parser = Parser.builder().build()
+
+private fun String.withoutMarkdownMarkup(): String {
+    val source = trim()
+    if (source.isBlank()) return ""
+
+    val builder = StringBuilder()
+    val visitor = object : AbstractVisitor() {
+        override fun visit(text: MarkdownText) {
+            builder.append(text.literal)
+        }
+
+        override fun visit(code: Code) {
+            builder.append(code.literal)
+        }
+
+        override fun visit(codeBlock: FencedCodeBlock) {
+            appendSeparated(codeBlock.literal)
+        }
+
+        override fun visit(codeBlock: IndentedCodeBlock) {
+            appendSeparated(codeBlock.literal)
+        }
+
+        override fun visit(link: Link) {
+            visitChildren(link)
+        }
+
+        override fun visit(image: Image) {
+            visitChildren(image)
+        }
+
+        override fun visit(softLineBreak: SoftLineBreak) {
+            builder.append(' ')
+        }
+
+        override fun visit(hardLineBreak: HardLineBreak) {
+            builder.append('\n')
+        }
+
+        override fun visit(paragraph: Paragraph) {
+            appendBlockSeparator()
+            visitChildren(paragraph)
+        }
+
+        private fun appendSeparated(value: String?) {
+            val clean = value?.trim().orEmpty()
+            if (clean.isBlank()) return
+            appendBlockSeparator()
+            builder.append(clean)
+        }
+
+        private fun appendBlockSeparator() {
+            if (builder.isNotEmpty() && !builder.endsWithWhitespace()) {
+                builder.append('\n')
+            }
+        }
     }
-        .replace(Regex("""`([^`]*)`"""), "$1")
-        .replace(Regex("""(\*\*|__)(.*?)\1"""), "$2")
-        .replace(Regex("""(\*|_)(.*?)\1"""), "$2")
-        .replace(Regex("""!\[([^]]*)]\([^)]+\)"""), "$1")
-        .replace(Regex("""\[([^]]+)]\([^)]+\)"""), "$1")
-        .replace(Regex("""^\s{0,3}>\s?""", RegexOption.MULTILINE), "")
+    PlainMarkdownParser.parse(source).accept(visitor)
+    return builder.toString()
+        .replace(Regex("""[ \t]+\n"""), "\n")
+        .replace(Regex("""\n{3,}"""), "\n\n")
         .trim()
+}
+
+private fun StringBuilder.endsWithWhitespace(): Boolean =
+    isNotEmpty() && last().isWhitespace()
 
 private fun String.needsPlainStreamingRender(): Boolean =
     hasUnclosedFence() ||
@@ -1845,6 +1953,27 @@ private fun segmentProgress(value: Float, start: Float, end: Float): Float =
     ((value - start) / (end - start)).coerceIn(0f, 1f)
 
 @Composable
+private fun rememberRouteEnterProgress(
+    key: Any?,
+    durationMillis: Int,
+    delayMillis: Int = 0,
+): Float {
+    val progress = remember(key) { Animatable(0f) }
+    LaunchedEffect(key) {
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                delayMillis = delayMillis,
+                easing = MenuEaseOut,
+            ),
+        )
+    }
+    return progress.value
+}
+
+@Composable
 private fun ClarificationBlock(
     nodeKey: String,
     payload: ClarificationPayload,
@@ -1854,6 +1983,7 @@ private fun ClarificationBlock(
     selectedOption: String?,
     onOption: (String, ClarificationChipSnapshot?) -> Unit,
     onManualInput: () -> Unit,
+    onManualSource: (ClarificationChipSnapshot) -> Unit,
     onCardDismissed: (String) -> Unit,
 ) {
     val question = payload.question
@@ -1942,6 +2072,7 @@ private fun ClarificationBlock(
                             .alpha(if (hasSelection) 0f else 1f),
                         enabled = !dismissing,
                         onClick = onManualInput,
+                        onPositioned = onManualSource,
                     )
                 }
             }
@@ -1993,12 +2124,17 @@ private fun ClarificationOptionScroller(
         label = "clarification_options_trailing_edge",
     )
 
-    Box(modifier = modifier.fillMaxWidth()) {
+    EdgeFadedLazyRow(
+        modifier = modifier,
+        leadingAlpha = leadingEdgeAlpha,
+        trailingAlpha = trailingEdgeAlpha,
+        height = 38.dp,
+    ) {
         LazyRow(
             state = listState,
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(start = 2.dp, end = 36.dp),
+            contentPadding = PaddingValues(start = 8.dp, end = 40.dp),
         ) {
             itemsIndexed(labels, key = { _, label -> label }) { index, label ->
                 AnimatedVisibility(
@@ -2034,37 +2170,61 @@ private fun ClarificationOptionScroller(
                 }
             }
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(42.dp)
-                .height(38.dp)
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            BuyPilotColors.SurfaceCard.copy(alpha = 0f),
-                            BuyPilotColors.SurfaceCard.copy(alpha = 0.62f * trailingEdgeAlpha),
-                            BuyPilotColors.SurfaceCard.copy(alpha = 0.96f * trailingEdgeAlpha),
-                        ),
-                    ),
-                ),
+    }
+}
+
+@Composable
+private fun EdgeFadedLazyRow(
+    modifier: Modifier = Modifier,
+    leadingAlpha: Float,
+    trailingAlpha: Float,
+    height: Dp,
+    content: @Composable () -> Unit,
+) {
+    Box(modifier = modifier.fillMaxWidth()) {
+        content()
+        ChipEdgeFade(
+            leading = false,
+            alpha = trailingAlpha,
+            height = height,
+            modifier = Modifier.align(Alignment.CenterEnd),
         )
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .width(30.dp)
-                .height(38.dp)
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            BuyPilotColors.SurfaceCard.copy(alpha = 0.96f * leadingEdgeAlpha),
-                            BuyPilotColors.SurfaceCard.copy(alpha = 0.56f * leadingEdgeAlpha),
-                            BuyPilotColors.SurfaceCard.copy(alpha = 0f),
-                        ),
-                    ),
-                ),
+        ChipEdgeFade(
+            leading = true,
+            alpha = leadingAlpha,
+            height = height,
+            modifier = Modifier.align(Alignment.CenterStart),
         )
     }
+}
+
+@Composable
+private fun ChipEdgeFade(
+    leading: Boolean,
+    alpha: Float,
+    height: Dp,
+    modifier: Modifier = Modifier,
+) {
+    if (alpha <= 0.01f) return
+    val colors = if (leading) {
+        listOf(
+            BuyPilotColors.SurfaceCard.copy(alpha = 0.98f * alpha),
+            BuyPilotColors.SurfaceCard.copy(alpha = 0.7f * alpha),
+            BuyPilotColors.SurfaceCard.copy(alpha = 0f),
+        )
+    } else {
+        listOf(
+            BuyPilotColors.SurfaceCard.copy(alpha = 0f),
+            BuyPilotColors.SurfaceCard.copy(alpha = 0.7f * alpha),
+            BuyPilotColors.SurfaceCard.copy(alpha = 0.98f * alpha),
+        )
+    }
+    Box(
+        modifier = modifier
+            .width(ChipEdgeFadeWidth)
+            .height(height)
+            .background(Brush.horizontalGradient(colors)),
+    )
 }
 
 @Composable
@@ -2092,6 +2252,7 @@ private fun ClarificationFlightOverlay(
     if (flight == null || rootSize.width == 0 || rootSize.height == 0) return
 
     val progress = remember(flight.id) { Animatable(0f) }
+    val birthProgress = remember(flight.id) { Animatable(if (flight.fromKeyboard) 0f else 1f) }
     val density = LocalDensity.current
     val latestFlight by rememberUpdatedState(flight)
     val latestOnFinished by rememberUpdatedState(onFinished)
@@ -2108,11 +2269,21 @@ private fun ClarificationFlightOverlay(
         .coerceAtLeast(4) *
         with(density) { 14.sp.toPx() } *
         0.92f
-    val targetWidthPx = lockedTarget?.size?.width ?: (estimatedTextWidthPx + with(density) { 32.dp.toPx() })
-        .coerceIn(
-            minimumValue = maxOf(flight.startSize.width, with(density) { 132.dp.toPx() }),
-            maximumValue = maxBubbleWidthPx,
-        )
+    val minTargetWidthPx = minOf(
+        if (flight.fromKeyboard) {
+            with(density) { 148.dp.toPx() }
+        } else {
+            maxOf(flight.startSize.width, with(density) { 132.dp.toPx() })
+        },
+        maxBubbleWidthPx,
+    )
+    val targetWidthPx = lockedTarget?.size?.width
+        ?.coerceIn(0f, maxBubbleWidthPx)
+        ?: (estimatedTextWidthPx + with(density) { 32.dp.toPx() })
+            .coerceIn(
+                minimumValue = minTargetWidthPx,
+                maximumValue = maxBubbleWidthPx,
+            )
     val targetHeightPx = lockedTarget?.size?.height ?: with(density) { 45.dp.toPx() }
     val endX = lockedTarget?.position?.x
         ?.coerceIn(0f, rootSize.width - targetWidthPx)
@@ -2125,6 +2296,21 @@ private fun ClarificationFlightOverlay(
         if (targetSnapshot == null || settledTargetSnapshot != null) return@LaunchedEffect
         kotlinx.coroutines.delay(ClarificationTargetSettleMs)
         settledTargetSnapshot = targetSnapshot
+    }
+
+    LaunchedEffect(flight.id) {
+        if (flight.fromKeyboard) {
+            birthProgress.snapTo(0f)
+            birthProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = ClarificationKeyboardBirthMs,
+                    easing = MenuEaseOut,
+                ),
+            )
+        } else {
+            birthProgress.snapTo(1f)
+        }
     }
 
     LaunchedEffect(flight.id, settledTargetSnapshot) {
@@ -2149,11 +2335,26 @@ private fun ClarificationFlightOverlay(
     }
 
     val t = progress.value
+    val birthT = birthProgress.value
     val flyT = t
     val settleT = segmentProgress(t, 0.78f, 1f)
     val morphT = segmentProgress(t, 0.04f, 0.88f)
-    val width = lerp(flight.startSize.width, targetWidthPx, morphT)
-    val height = lerp(flight.startSize.height, targetHeightPx, morphT)
+    val startWidthPx = if (flight.fromKeyboard) {
+        (estimatedTextWidthPx + with(density) { 36.dp.toPx() })
+            .coerceIn(
+                minimumValue = with(density) { 148.dp.toPx() },
+                maximumValue = maxBubbleWidthPx,
+            )
+    } else {
+        flight.startSize.width
+    }
+    val startHeightPx = if (flight.fromKeyboard) {
+        with(density) { 46.dp.toPx() }
+    } else {
+        flight.startSize.height
+    }
+    val width = lerp(startWidthPx, targetWidthPx, morphT)
+    val height = lerp(startHeightPx, targetHeightPx, morphT)
     val startCenterX = flight.startPosition.x + flight.startSize.width / 2f
     val startCenterY = flight.startPosition.y + flight.startSize.height / 2f
     val endCenterX = endX + targetWidthPx / 2f
@@ -2178,11 +2379,16 @@ private fun ClarificationFlightOverlay(
     }
     val x = centerX - width / 2f
     val y = centerY - height / 2f
-    val oldTextAlpha = (1f - segmentProgress(t, 0.18f, 0.34f)).coerceIn(0f, 1f)
-    val newTextAlpha = segmentProgress(t, 0.26f, 0.48f)
+    val oldTextAlpha = if (flight.fromKeyboard) 0f else (1f - segmentProgress(t, 0.18f, 0.34f)).coerceIn(0f, 1f)
+    val newTextAlpha = if (flight.fromKeyboard) {
+        birthT
+    } else {
+        segmentProgress(t, 0.26f, 0.48f)
+    }
     val settlePulse = (1f - settleT) * settleT * 4f
-    val scaleX = 1f + 0.014f * settlePulse
-    val scaleY = 1f + 0.008f * settlePulse
+    val birthScale = if (flight.fromKeyboard) lerp(0.78f, 1f, birthT) else 1f
+    val scaleX = birthScale * (1f + 0.014f * settlePulse)
+    val scaleY = birthScale * (1f + 0.008f * settlePulse)
     val cornerRadius = with(density) { lerp(22.dp.toPx(), 18.dp.toPx(), segmentProgress(t, 0.48f, 1f)).toDp() }
     val bubbleShape = RoundedCornerShape(cornerRadius)
 
@@ -2199,6 +2405,7 @@ private fun ClarificationFlightOverlay(
                 .width(with(density) { width.toDp() })
                 .height(with(density) { height.toDp() })
                 .scale(scaleX = scaleX, scaleY = scaleY)
+                .alpha(if (flight.fromKeyboard) segmentProgress(t, 0f, 0.1f) else 1f)
                 .shadow(
                     elevation = if (t < 0.86f) 12.dp else 8.dp,
                     shape = bubbleShape,
@@ -2300,11 +2507,15 @@ private fun ClarificationManualInputRow(
     modifier: Modifier = Modifier,
     enabled: Boolean,
     onClick: () -> Unit,
+    onPositioned: (ClarificationChipSnapshot) -> Unit,
 ) {
     Row(
         modifier = modifier
             .heightIn(min = 38.dp)
             .clip(CircleShape)
+            .onGloballyPositioned { coordinates ->
+                onPositioned(coordinates.toClarificationSnapshot())
+            }
             .clickable(
                 enabled = enabled,
                 onClickLabel = "聚焦输入框",
@@ -2372,37 +2583,39 @@ private fun CriteriaSummaryCard(
 private fun CriteriaBentoGrid(
     tiles: List<CriteriaTileSpec>,
 ) {
+    val rows = remember(tiles) { planCriteriaTileRows(tiles) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        tiles.chunked(2).forEachIndexed { rowIndex, rowTiles ->
+        rows.forEach { rowTiles ->
+            val fullWidth = rowTiles.size == 1
+            val prominent = rowTiles.any { it.prominent }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (rowTiles.any { it.prominent }) 112.dp else 82.dp),
+                    .height(
+                        when {
+                            prominent -> 112.dp
+                            fullWidth -> 88.dp
+                            else -> 82.dp
+                        },
+                    ),
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                rowTiles.forEachIndexed { tileIndex, tile ->
-                    val prominent = tile.prominent
-                    val compact = !prominent
-                    val isFullWidthSingle = rowTiles.size == 1
-                    val weight = when {
-                        isFullWidthSingle -> 1f
-                        rowIndex == 0 && tileIndex == 0 -> 1.12f
-                        rowIndex == 0 -> 0.88f
-                        else -> 1f
-                    }
+                rowTiles.forEach { tile ->
+                    val compact = !tile.prominent && !fullWidth
                     CriteriaTile(
                         label = tile.label,
                         value = tile.value,
                         iconRes = tile.iconRes,
                         accent = tile.accent,
                         glow = tile.glow,
-                        prominent = prominent,
+                        background = tile.background,
+                        prominent = tile.prominent,
                         compact = compact,
                         modifier = Modifier
-                            .weight(weight)
+                            .weight(1f)
                             .fillMaxHeight(),
                     )
                 }
@@ -2411,6 +2624,36 @@ private fun CriteriaBentoGrid(
     }
 }
 
+private fun planCriteriaTileRows(tiles: List<CriteriaTileSpec>): List<List<CriteriaTileSpec>> {
+    val rows = mutableListOf<List<CriteriaTileSpec>>()
+    val pendingHalf = mutableListOf<CriteriaTileSpec>()
+
+    fun flushHalfRows() {
+        var index = 0
+        while (index < pendingHalf.size) {
+            val remaining = pendingHalf.size - index
+            val rowSize = if (remaining == 3) 1 else minOf(2, remaining)
+            rows += pendingHalf.subList(index, index + rowSize).toList()
+            index += rowSize
+        }
+        pendingHalf.clear()
+    }
+
+    tiles.forEach { tile ->
+        if (tile.span == CriteriaTileSpan.Full || tile.shouldUseFullCriteriaRow()) {
+            flushHalfRows()
+            rows += listOf(tile)
+        } else {
+            pendingHalf += tile
+        }
+    }
+    flushHalfRows()
+    return rows
+}
+
+private fun CriteriaTileSpec.shouldUseFullCriteriaRow(): Boolean =
+    prominent || label == "摘要" || label == "排除项" || value.length >= 16
+
 @Composable
 private fun CriteriaTile(
     label: String,
@@ -2418,6 +2661,7 @@ private fun CriteriaTile(
     @DrawableRes iconRes: Int,
     accent: Color,
     glow: Color,
+    background: Color,
     prominent: Boolean = false,
     compact: Boolean = false,
     modifier: Modifier = Modifier,
@@ -2437,6 +2681,8 @@ private fun CriteriaTile(
     }
     val iconSize = if (prominent) 16.dp else 15.dp
     val iconContainerSize = if (prominent) 29.dp else 27.dp
+    val cardBackground = background.copy(alpha = if (prominent) 0.62f else 0.5f)
+    val borderColor = accent.copy(alpha = if (prominent) 0.13f else 0.09f)
 
     Box(
         modifier = modifier
@@ -2447,10 +2693,10 @@ private fun CriteriaTile(
                 spotColor = Color(0xFF8E97A4).copy(alpha = 0.035f),
             )
             .clip(shape)
-            .background(BuyPilotColors.SurfaceCard)
+            .background(cardBackground)
             .border(
                 width = 1.dp,
-                color = BuyPilotColors.Border.copy(alpha = 0.62f),
+                color = borderColor,
                 shape = shape,
             )
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
@@ -2963,13 +3209,6 @@ private fun ProductHeroCard(
                         lineHeight = 30.sp,
                         fontWeight = FontWeight.Bold,
                     )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        text = "${payload.evidence.size} 条证据",
-                        color = BuyPilotColors.TextSecondary,
-                        fontSize = BuyPilotType.Label,
-                        lineHeight = 16.sp,
-                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     tags.forEach { ProductMiniTag(it, active = it == tags.firstOrNull()) }
@@ -3120,11 +3359,7 @@ private fun DecisionSummaryCard(
                         }
                         if (whyItems.isNotEmpty()) {
                             SectionTitle("推荐理由", leading = "✓")
-                            ScrollableChipRow(
-                                labels = whyItems,
-                                colorful = true,
-                                contentPadding = PaddingValues(end = 18.dp),
-                            )
+                            DecisionReasonList(items = whyItems)
                         }
                         if (notForItems.isNotEmpty()) {
                             WarningBox(notForItems.joinToString("；"))
@@ -3551,7 +3786,18 @@ private class ProductCardStackAdapter(
             ),
         )
 
-        val contentHeight = 214
+        val shell = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            clipChildren = false
+        }
+        card.addView(
+            shell,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
         val imageStage = FrameLayout(context).apply {
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.RECTANGLE
@@ -3559,11 +3805,12 @@ private class ProductCardStackAdapter(
                 cornerRadii = floatArrayOf(cardCornerPx, cardCornerPx, cardCornerPx, cardCornerPx, 0f, 0f, 0f, 0f)
             }
         }
-        card.addView(
+        shell.addView(
             imageStage,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                (244 * density).roundToInt(),
+            android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
             ),
         )
 
@@ -3574,28 +3821,26 @@ private class ProductCardStackAdapter(
             image,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                (218 * density).roundToInt(),
+                FrameLayout.LayoutParams.MATCH_PARENT,
                 android.view.Gravity.CENTER,
             ).apply {
                 leftMargin = (16 * density).roundToInt()
                 rightMargin = (16 * density).roundToInt()
-                topMargin = (13 * density).roundToInt()
-                bottomMargin = (13 * density).roundToInt()
+                topMargin = (18 * density).roundToInt()
+                bottomMargin = (18 * density).roundToInt()
             },
         )
 
         val content = android.widget.LinearLayout(context).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding((18 * density).roundToInt(), (15 * density).roundToInt(), (18 * density).roundToInt(), (16 * density).roundToInt())
+            setPadding((18 * density).roundToInt(), (15 * density).roundToInt(), (18 * density).roundToInt(), (17 * density).roundToInt())
         }
-        card.addView(
+        shell.addView(
             content,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                (contentHeight * density).roundToInt(),
-            ).apply {
-                topMargin = (244 * density).roundToInt()
-            },
+            android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
         )
 
         val brand = TextView(context).apply {
@@ -3681,10 +3926,11 @@ private class ProductCardStackAdapter(
             },
         )
 
-        val reasonIndex = TextView(context).apply {
+        val reasonLabel = TextView(context).apply {
+            text = "推荐理由"
             includeFontPadding = false
             setTextColor(primaryDarkColor)
-            textSize = 12f
+            textSize = 11f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = android.view.Gravity.CENTER
             background = android.graphics.drawable.GradientDrawable().apply {
@@ -3692,17 +3938,22 @@ private class ProductCardStackAdapter(
                 cornerRadius = 999 * density
                 setColor(android.graphics.Color.rgb(255, 239, 232))
             }
+            setPadding((8 * density).roundToInt(), (5 * density).roundToInt(), (8 * density).roundToInt(), (5 * density).roundToInt())
         }
         reasonRow.addView(
-            reasonIndex,
-            android.widget.LinearLayout.LayoutParams((46 * density).roundToInt(), (28 * density).roundToInt()),
+            reasonLabel,
+            android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
         )
 
         val reasonText = TextView(context).apply {
             includeFontPadding = false
             setTextColor(textSecondaryColor)
             textSize = 14f
-            maxLines = 1
+            maxLines = 2
+            setLineSpacing((2 * density), 1f)
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         reasonRow.addView(
@@ -3716,7 +3967,7 @@ private class ProductCardStackAdapter(
         root.addView(overlays.first)
         root.addView(overlays.second)
 
-        return ProductCardViewHolder(root, image, reasonIndex, reasonText, brand, name, price, evidence, tagRow, tagBgColor, tagBorderColor, textSecondaryColor, primaryDarkColor)
+        return ProductCardViewHolder(root, image, reasonRow, reasonText, brand, name, price, evidence, tagRow, tagBgColor, tagBorderColor, textSecondaryColor, primaryDarkColor)
     }
 
     override fun onBindViewHolder(holder: ProductCardViewHolder, position: Int) {
@@ -3770,7 +4021,7 @@ private class ProductCardStackAdapter(
     class ProductCardViewHolder(
         itemView: View,
         private val image: ImageView,
-        private val reasonIndex: TextView,
+        private val reasonRow: android.widget.LinearLayout,
         private val reasonText: TextView,
         private val brand: TextView,
         private val name: TextView,
@@ -3796,21 +4047,25 @@ private class ProductCardStackAdapter(
                 error(R.drawable.product_cleanser_sample)
                 fallback(R.drawable.product_cleanser_sample)
             }
-            val displayRank = payload.rank.takeIf { it > 0 } ?: bindingAdapterPosition + 1
-            reasonIndex.text = "$displayRank/${bindingAdapter?.itemCount?.takeIf { it > 0 } ?: 1}"
-            reasonText.text = payload.reason
+            val reason = payload.reason
                 .withoutMarkdownMarkup()
-                .ifBlank { "与当前需求匹配，适合作为本轮候选。" }
+                .trim()
+                .takeIf { it.isNotBlank() }
+            reasonRow.visibility = if (reason == null) View.GONE else View.VISIBLE
+            reasonText.text = reason.orEmpty()
             brand.text = product.brandLabel()
             name.text = product.name.ifBlank { "推荐商品" }
             price.text = product.priceLabel()
-            evidence.text = if (payload.evidence.isNotEmpty()) {
-                "Verified ${payload.evidence.size}"
-            } else {
-                "Evidence pending"
-            }
+            evidence.visibility = View.GONE
+            evidence.text = ""
             tagRow.removeAllViews()
-            payload.displayTags().take(3).forEachIndexed { index, tag ->
+            val tags = (product.ingredientTags + product.skinTypeMatch + product.useScenario)
+                .map { it.withoutMarkdownMarkup().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(3)
+            tagRow.visibility = if (tags.isEmpty()) View.GONE else View.VISIBLE
+            tags.forEachIndexed { index, tag ->
                 tagRow.addView(createTagView(tagRow.context, tag, active = index == 0))
             }
         }
@@ -3885,6 +4140,13 @@ fun ProductHeroDetailScreen(
         label = "product_detail_action_alpha",
     )
     val actionsVisible = actionAlpha > 0.05f
+    val routeProgress = rememberRouteEnterProgress(
+        key = "detail_${deckId}_${productId}",
+        durationMillis = ProductDetailEnterMs,
+    )
+    val backdropEnter = segmentProgress(routeProgress, 0f, 0.82f)
+    val contentEnter = segmentProgress(routeProgress, 0.18f, 1f)
+    val chromeEnter = segmentProgress(routeProgress, 0.28f, 1f)
 
     LaunchedEffect(product.productId) {
         snapshotFlow { detailListState.isScrollInProgress }
@@ -3909,6 +4171,7 @@ fun ProductHeroDetailScreen(
             product = product,
             backendBaseUrl = state.backendBaseUrl,
             progress = scrollProgress,
+            enterProgress = backdropEnter,
             modifier = Modifier
                 .fillMaxSize(),
         )
@@ -3920,6 +4183,12 @@ fun ProductHeroDetailScreen(
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(start = 16.dp, top = 8.dp)
+                .graphicsLayer {
+                    alpha = chromeEnter
+                    translationY = (1f - chromeEnter) * -18f
+                    scaleX = lerp(0.92f, 1f, chromeEnter)
+                    scaleY = lerp(0.92f, 1f, chromeEnter)
+                }
                 .zIndex(2f),
         )
         ImmersiveCircleButton(
@@ -3930,11 +4199,24 @@ fun ProductHeroDetailScreen(
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
                 .padding(end = 16.dp, top = 8.dp)
+                .graphicsLayer {
+                    alpha = chromeEnter
+                    translationY = (1f - chromeEnter) * -18f
+                    scaleX = lerp(0.92f, 1f, chromeEnter)
+                    scaleY = lerp(0.92f, 1f, chromeEnter)
+                }
                 .zIndex(2f),
         )
         LazyColumn(
             state = detailListState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = contentEnter
+                    translationY = (1f - contentEnter) * 42f
+                    scaleX = lerp(0.975f, 1f, contentEnter)
+                    scaleY = lerp(0.975f, 1f, contentEnter)
+                },
             contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 462.dp, bottom = 34.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -3950,6 +4232,11 @@ fun ProductHeroDetailScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .alpha(actionAlpha)
+                .graphicsLayer {
+                    translationY = (1f - chromeEnter) * 26f
+                    scaleX = lerp(0.96f, 1f, chromeEnter)
+                    scaleY = lerp(0.96f, 1f, chromeEnter)
+                }
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
@@ -3993,13 +4280,14 @@ private fun ProductCinematicBackdrop(
     product: ProductPayload,
     backendBaseUrl: String,
     progress: Float,
+    enterProgress: Float,
     modifier: Modifier = Modifier,
 ) {
-    val scale = lerp(1.08f, 1.22f, progress)
-    val offsetY = lerp(0f, -82f, progress)
+    val scale = lerp(1.02f, lerp(1.08f, 1.22f, progress), enterProgress)
+    val offsetY = lerp(34f, lerp(0f, -82f, progress), enterProgress)
     val imageAlpha = lerp(0.88f, 0.48f, progress)
-    val imageBlur = lerp(0f, 18f, progress).dp
-    val midDim = lerp(0.48f, 0.78f, progress)
+    val imageBlur = lerp(10f, lerp(0f, 18f, progress), enterProgress).dp
+    val midDim = lerp(0.62f, lerp(0.48f, 0.78f, progress), enterProgress)
     Box(modifier = modifier.background(Color(0xFF11110F))) {
         ProductImage(
             product = product,
@@ -4012,7 +4300,7 @@ private fun ProductCinematicBackdrop(
                     scaleX = scale
                     scaleY = scale
                     translationY = offsetY
-                    alpha = imageAlpha
+                    alpha = imageAlpha * lerp(0.54f, 1f, enterProgress)
                 }
                 .blur(imageBlur),
         )
@@ -4052,6 +4340,7 @@ private fun ProductImmersiveBackdrop(
     product: ProductPayload,
     backendBaseUrl: String,
     dimAlpha: Float,
+    enterProgress: Float,
 ) {
     Box(Modifier.fillMaxSize()) {
         ProductImage(
@@ -4062,8 +4351,10 @@ private fun ProductImmersiveBackdrop(
                 .height(650.dp)
                 .align(Alignment.TopCenter)
                 .graphicsLayer {
-                    scaleX = 1.12f
-                    scaleY = 1.12f
+                    scaleX = lerp(1.04f, 1.12f, enterProgress)
+                    scaleY = lerp(1.04f, 1.12f, enterProgress)
+                    translationY = (1f - enterProgress) * 30f
+                    alpha = lerp(0.58f, 1f, enterProgress)
                 },
         )
         Box(
@@ -4072,8 +4363,8 @@ private fun ProductImmersiveBackdrop(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF777771).copy(alpha = dimAlpha),
-                            Color(0xFF585C59).copy(alpha = (dimAlpha + 0.06f).coerceAtMost(0.86f)),
+                            Color(0xFF777771).copy(alpha = lerp(0.92f, dimAlpha, enterProgress)),
+                            Color(0xFF585C59).copy(alpha = lerp(0.94f, (dimAlpha + 0.06f).coerceAtMost(0.86f), enterProgress)),
                             Color(0xFF151515).copy(alpha = 0.94f),
                         ),
                     ),
@@ -4138,13 +4429,6 @@ private fun CinematicProductDetailPanel(
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "${payload.evidence.size} 条证据",
-                color = Color.White.copy(alpha = 0.62f),
-                fontSize = BuyPilotType.Label,
-                lineHeight = 16.sp,
             )
         }
         Row(verticalAlignment = Alignment.Bottom) {
@@ -4269,20 +4553,36 @@ private fun ImmersiveTag(label: String) {
 
 @Composable
 private fun ImmersiveWarningBox(text: String) {
+    val warningMarkdown = text.trim()
+        .removePrefix("注意：")
+        .removePrefix("注意:")
+        .trim()
     Surface(
         color = BuyPilotColors.Primary.copy(alpha = 0.12f),
         shape = RoundedCornerShape(18.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Primary.copy(alpha = 0.22f)),
     ) {
-        MarkdownTextBlock(
-            content = "**注意：**$text",
-            style = TextStyle(
-                color = Color.White.copy(alpha = 0.76f),
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = "注意：",
+                color = Color.White.copy(alpha = 0.86f),
                 fontSize = BuyPilotType.Body,
                 lineHeight = 22.sp,
-            ),
-            modifier = Modifier.padding(14.dp),
-        )
+                fontWeight = FontWeight.SemiBold,
+            )
+            MarkdownTextBlock(
+                content = warningMarkdown,
+                modifier = Modifier.weight(1f),
+                style = TextStyle(
+                    color = Color.White.copy(alpha = 0.76f),
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 22.sp,
+                ),
+            )
+        }
     }
 }
 
@@ -4344,11 +4644,19 @@ fun ProductEvidenceOverlayScreen(
             ),
         )
     }
+    val routeProgress = rememberRouteEnterProgress(
+        key = "evidence_${deckId}_${productId}",
+        durationMillis = ProductEvidenceEnterMs,
+    )
+    val backdropEnter = segmentProgress(routeProgress, 0f, 0.82f)
+    val chromeEnter = segmentProgress(routeProgress, 0.18f, 1f)
+    val contentEnter = segmentProgress(routeProgress, 0.22f, 1f)
     Box(modifier = Modifier.fillMaxSize()) {
         ProductImmersiveBackdrop(
             product = payload.product,
             backendBaseUrl = state.backendBaseUrl,
             dimAlpha = 0.76f,
+            enterProgress = backdropEnter,
         )
         ImmersiveCircleButton(
             iconRes = R.drawable.ic_arrow_back_24,
@@ -4358,16 +4666,26 @@ fun ProductEvidenceOverlayScreen(
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(start = 16.dp, top = 8.dp)
+                .graphicsLayer {
+                    alpha = chromeEnter
+                    translationY = (1f - chromeEnter) * -16f
+                    scaleX = lerp(0.92f, 1f, chromeEnter)
+                    scaleY = lerp(0.92f, 1f, chromeEnter)
+                }
                 .zIndex(2f),
         )
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = contentEnter
+                    translationY = (1f - contentEnter) * 54f
+                    scaleX = lerp(0.975f, 1f, contentEnter)
+                    scaleY = lerp(0.975f, 1f, contentEnter)
+                },
             contentPadding = PaddingValues(start = 30.dp, end = 30.dp, top = 224.dp, bottom = 52.dp),
             verticalArrangement = Arrangement.spacedBy(30.dp),
         ) {
-            item("evidence_product") {
-                EvidenceProductBadge(payload = payload)
-            }
             if (payload.evidence.isEmpty()) {
                 item("evidence_fallback_notice") {
                     Text(
@@ -4381,8 +4699,6 @@ fun ProductEvidenceOverlayScreen(
             itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { index, evidence ->
                 ImmersiveEvidenceQuote(
                     evidence = evidence,
-                    index = index + 1,
-                    total = evidenceItems.size,
                 )
             }
         }
@@ -4390,51 +4706,10 @@ fun ProductEvidenceOverlayScreen(
 }
 
 @Composable
-private fun EvidenceProductBadge(payload: ProductCardPayload) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .background(Color.White.copy(alpha = 0.12f), CircleShape)
-            .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
-    ) {
-        Text(
-            text = payload.evidence.firstOrNull()?.sourceType?.takeIf { it.isNotBlank() } ?: "推荐证据",
-            color = Color.White.copy(alpha = 0.92f),
-            fontSize = BuyPilotType.Body,
-            lineHeight = 20.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = "${payload.evidence.size} 条",
-            color = BuyPilotColors.Primary,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
-}
-
-@Composable
 private fun ImmersiveEvidenceQuote(
     evidence: EvidencePayload,
-    index: Int,
-    total: Int,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        Text(
-            text = "EVIDENCE_ID | SNIPPET",
-            color = Color.White.copy(alpha = 0.48f),
-            fontSize = 14.sp,
-            lineHeight = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         Text(
             text = "“${evidence.snippet.ifBlank { "暂无证据片段" }}”",
             color = Color(0xFFFFFEFC),
@@ -4442,44 +4717,12 @@ private fun ImmersiveEvidenceQuote(
             lineHeight = 42.sp,
             fontWeight = FontWeight.Medium,
         )
-        Text(
-            text = evidence.evidenceSummary(index, total),
-            color = Color.White.copy(alpha = 0.68f),
-            fontSize = 16.sp,
-            lineHeight = 24.sp,
-            fontWeight = FontWeight.Medium,
-        )
         HorizontalDivider(
             thickness = 1.dp,
             color = Color.White.copy(alpha = 0.18f),
             modifier = Modifier.padding(top = 8.dp),
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "◉",
-                color = Color.White.copy(alpha = 0.58f),
-                fontSize = 16.sp,
-                lineHeight = 16.sp,
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "数据来源：${evidence.trustLabel?.takeIf { it.isNotBlank() } ?: evidence.sourceType.ifBlank { "后端证据片段" }}",
-                color = Color.White.copy(alpha = 0.54f),
-                fontSize = BuyPilotType.Body,
-                lineHeight = 22.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
-}
-
-private fun EvidencePayload.evidenceSummary(index: Int, total: Int): String {
-    val id = evidenceId?.takeIf { it.isNotBlank() }
-        ?: sourceId?.takeIf { it.isNotBlank() }
-        ?: "第 $index/$total 条证据"
-    val source = sourceType.ifBlank { "后端证据" }
-    return "基于 $source 汇总：$id"
 }
 
 @Composable
@@ -4517,12 +4760,6 @@ private fun ProductEvidenceHeader(payload: ProductCardPayload, backendBaseUrl: S
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "${payload.evidence.size} 条后端证据",
-                    color = BuyPilotColors.TextMuted,
-                    fontSize = BuyPilotType.Label,
-                    lineHeight = 16.sp,
                 )
             }
         }
@@ -4770,6 +5007,7 @@ private fun BottomComposer(
     onTextFocus: () -> Unit,
     onFocusChanged: (Boolean) -> Unit,
     onHeightChanged: (Int) -> Unit,
+    onKeyboardFlightSourceChanged: (ClarificationChipSnapshot) -> Unit,
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -4819,6 +5057,9 @@ private fun BottomComposer(
             modifier = Modifier
                 .fillMaxWidth()
                 .onSizeChanged { onHeightChanged(it.height) }
+                .onGloballyPositioned { coordinates ->
+                    onKeyboardFlightSourceChanged(coordinates.toClarificationSnapshot())
+                }
                 .background(BuyPilotColors.SurfaceCard)
                 .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.88f))
                 .navigationBarsPadding()
@@ -5927,6 +6168,10 @@ private fun EvidenceBlock(evidence: EvidencePayload) {
 
 @Composable
 private fun WarningBox(text: String) {
+    val warningMarkdown = text.trim()
+        .removePrefix("注意：")
+        .removePrefix("注意:")
+        .trim()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -5936,14 +6181,26 @@ private fun WarningBox(text: String) {
     ) {
         Text("!", color = BuyPilotColors.PrimaryDark, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(8.dp))
-        MarkdownTextBlock(
-            content = "**注意：**$text",
-            style = TextStyle(
-                color = BuyPilotColors.TextSecondary,
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = "注意：",
+                color = BuyPilotColors.PrimaryDark,
                 fontSize = BuyPilotType.Body,
-                lineHeight = 21.sp,
-            ),
-        )
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            MarkdownTextBlock(
+                content = warningMarkdown,
+                style = TextStyle(
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 21.sp,
+                ),
+            )
+        }
     }
 }
 
@@ -5989,16 +6246,33 @@ private fun ScrollableChipRow(
     colorful: Boolean = false,
     onClick: ((String) -> Unit)? = null,
 ) {
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = contentPadding,
+    val listState = rememberLazyListState()
+    val canScrollBackward by remember(labels.size) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+        }
+    }
+    val canScrollForward by remember(labels.size) {
+        derivedStateOf { listState.canScrollForward }
+    }
+    EdgeFadedLazyRow(
+        modifier = modifier,
+        leadingAlpha = if (canScrollBackward) 1f else 0f,
+        trailingAlpha = if (canScrollForward) 1f else 0f,
+        height = 36.dp,
     ) {
-        itemsIndexed(labels) { index, label ->
-            if (colorful) {
-                DecisionReasonChip(label = label, colorIndex = index) { onClick?.invoke(label) }
-            } else {
-                SmallActionChip(label = label) { onClick?.invoke(label) }
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = contentPadding,
+        ) {
+            itemsIndexed(labels) { index, label ->
+                if (colorful) {
+                    DecisionReasonChip(label = label, colorIndex = index) { onClick?.invoke(label) }
+                } else {
+                    SmallActionChip(label = label) { onClick?.invoke(label) }
+                }
             }
         }
     }
@@ -6009,13 +6283,29 @@ private fun ScrollableQuickActionRow(
     actions: List<QuickActionPayload>,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 28.dp),
+    val listState = rememberLazyListState()
+    val canScrollBackward by remember(actions.size) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+        }
+    }
+    val canScrollForward by remember(actions.size) {
+        derivedStateOf { listState.canScrollForward }
+    }
+    EdgeFadedLazyRow(
+        leadingAlpha = if (canScrollBackward) 1f else 0f,
+        trailingAlpha = if (canScrollForward) 1f else 0f,
+        height = 36.dp,
     ) {
-        items(actions) { action ->
-            SmallActionChip(action.label) { onQuickAction(action) }
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 28.dp),
+        ) {
+            items(actions) { action ->
+                SmallActionChip(action.label) { onQuickAction(action) }
+            }
         }
     }
 }
@@ -6048,6 +6338,64 @@ private val DecisionReasonChipColors = listOf(
         content = Color(0xFF9C315F),
     ),
 )
+
+@Composable
+private fun DecisionReasonList(
+    items: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items.take(4).forEachIndexed { index, item ->
+            DecisionReasonItem(text = item, colorIndex = index)
+        }
+    }
+}
+
+@Composable
+private fun DecisionReasonItem(
+    text: String,
+    colorIndex: Int,
+) {
+    val colors = DecisionReasonChipColors[colorIndex % DecisionReasonChipColors.size]
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.background.copy(alpha = 0.62f), RoundedCornerShape(13.dp))
+            .border(1.dp, colors.border.copy(alpha = 0.72f), RoundedCornerShape(13.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(18.dp)
+                .background(colors.content.copy(alpha = 0.1f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "${colorIndex + 1}",
+                color = colors.content,
+                fontSize = BuyPilotType.Tiny,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(9.dp))
+        MarkdownTextBlock(
+            content = text,
+            modifier = Modifier.weight(1f),
+            style = TextStyle(
+                color = colors.content,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+        )
+    }
+}
 
 @Composable
 private fun DecisionReasonChip(
@@ -6368,7 +6716,9 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             @DrawableRes iconRes: Int,
             accent: Color,
             glow: Color,
+            background: Color,
             prominent: Boolean = false,
+            span: CriteriaTileSpan = CriteriaTileSpan.Half,
         ) {
             val cleanValue = value.withoutMarkdownMarkup().trim()
             if (cleanValue.isBlank()) return
@@ -6379,7 +6729,9 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
                     iconRes = iconRes,
                     accent = accent,
                     glow = glow,
+                    background = background,
                     prominent = prominent,
+                    span = span,
                 ),
             )
         }
@@ -6390,7 +6742,9 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
             glow = Color(0xFFFFEFE8),
+            background = Color(0xFFFFFAF6),
             prominent = true,
+            span = CriteriaTileSpan.Full,
         )
         addTile(
             label = "品类",
@@ -6398,6 +6752,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
             glow = Color(0xFFFFEFE8),
+            background = Color(0xFFFFFAF6),
             prominent = isEmpty(),
         )
         addTile(
@@ -6406,6 +6761,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
             glow = Color(0xFFFFEFE8),
+            background = Color(0xFFFFFAF6),
             prominent = isEmpty(),
         )
         addTile(
@@ -6414,6 +6770,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_shield_24,
             accent = Color(0xFF4F86D8),
             glow = Color(0xFFEEF5FF),
+            background = Color(0xFFF8FBFF),
             prominent = isEmpty(),
         )
         addTile(
@@ -6422,6 +6779,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_payments_24,
             accent = Color(0xFFB87920),
             glow = Color(0xFFFFF4DE),
+            background = Color(0xFFFFFBF2),
             prominent = isEmpty(),
         )
         addTile(
@@ -6430,6 +6788,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_history_24,
             accent = Color(0xFF8B96A5),
             glow = Color(0xFFF2F4F7),
+            background = Color(0xFFFAFBFC),
             prominent = isEmpty(),
         )
         addTile(
@@ -6438,7 +6797,9 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             iconRes = R.drawable.ic_block_24,
             accent = Color(0xFFC75B76),
             glow = Color(0xFFFFF0F4),
+            background = Color(0xFFFFFAFC),
             prominent = isEmpty(),
+            span = CriteriaTileSpan.Full,
         )
     }
 
