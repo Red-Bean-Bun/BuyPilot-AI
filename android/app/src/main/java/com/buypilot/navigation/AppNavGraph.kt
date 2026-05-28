@@ -196,24 +196,23 @@ private fun String.routeDecode(): String =
 private fun androidx.navigation.NavBackStackEntry.decodedArg(name: String): String =
     arguments?.getString(name).orEmpty().routeDecode()
 
-private const val ProductRouteEnterMs = 460
-private const val ProductRouteExitMs = 260
-private const val ProductEvidenceEnterMs = 420
-private const val ProductEvidenceExitMs = 240
-private val ProductRouteEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private const val ProductRouteEnterMs = 360
+private const val ProductRouteExitMs = 220
+private const val ProductEvidenceEnterMs = 340
+private const val ProductEvidenceExitMs = 210
+private val ProductRouteEaseOut = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val ProductRouteEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 
 private fun productForwardEnter(): EnterTransition =
     fadeIn(
         animationSpec = tween(
             durationMillis = ProductRouteEnterMs,
-            delayMillis = 35,
             easing = ProductRouteEaseOut,
         ),
     ) +
-        slideInHorizontally(
+        slideInVertically(
             animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
-            initialOffsetX = { width -> width / 5 },
+            initialOffsetY = { height -> height / 14 },
         ) +
         scaleIn(
             animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
@@ -222,28 +221,23 @@ private fun productForwardEnter(): EnterTransition =
 
 private fun productForwardExit(): ExitTransition =
     fadeOut(
-        animationSpec = tween(durationMillis = 180, easing = ProductRouteEaseIn),
+        animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
     ) +
-        slideOutHorizontally(
-            animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
-            targetOffsetX = { width -> -width / 13 },
-        ) +
         scaleOut(
             animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
-            targetScale = 0.992f,
+            targetScale = 0.988f,
         )
 
 private fun productPopEnter(): EnterTransition =
     fadeIn(
         animationSpec = tween(
             durationMillis = ProductRouteEnterMs,
-            delayMillis = 45,
             easing = ProductRouteEaseOut,
         ),
     ) +
-        slideInHorizontally(
+        slideInVertically(
             animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
-            initialOffsetX = { width -> -width / 8 },
+            initialOffsetY = { height -> -height / 18 },
         ) +
         scaleIn(
             animationSpec = tween(durationMillis = ProductRouteEnterMs, easing = ProductRouteEaseOut),
@@ -254,9 +248,9 @@ private fun productPopExit(): ExitTransition =
     fadeOut(
         animationSpec = tween(durationMillis = 170, easing = ProductRouteEaseIn),
     ) +
-        slideOutHorizontally(
+        slideOutVertically(
             animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
-            targetOffsetX = { width -> width / 4 },
+            targetOffsetY = { height -> height / 10 },
         ) +
         scaleOut(
             animationSpec = tween(durationMillis = ProductRouteExitMs, easing = ProductRouteEaseIn),
@@ -269,14 +263,13 @@ private fun productUnderlayExit(): ExitTransition =
     ) +
         scaleOut(
             animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseIn),
-            targetScale = 0.978f,
+            targetScale = 0.99f,
         )
 
 private fun productUnderlayReturnEnter(): EnterTransition =
     fadeIn(
         animationSpec = tween(
             durationMillis = ProductEvidenceEnterMs,
-            delayMillis = 30,
             easing = ProductRouteEaseOut,
         ),
     ) +
@@ -289,17 +282,16 @@ private fun productEvidenceEnter(): EnterTransition =
     fadeIn(
         animationSpec = tween(
             durationMillis = ProductEvidenceEnterMs,
-            delayMillis = 45,
             easing = ProductRouteEaseOut,
         ),
     ) +
         slideInVertically(
-            animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseOut),
-            initialOffsetY = { height -> height / 10 },
+        animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseOut),
+            initialOffsetY = { height -> height / 9 },
         ) +
         scaleIn(
             animationSpec = tween(durationMillis = ProductEvidenceEnterMs, easing = ProductRouteEaseOut),
-            initialScale = 0.975f,
+            initialScale = 0.992f,
         )
 
 private fun productEvidenceExit(): ExitTransition =

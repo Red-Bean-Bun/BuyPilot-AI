@@ -84,10 +84,19 @@ data class ProductPayload(
 )
 
 @Serializable
+data class ReasonAtomPayload(
+    val dimension: String = "",
+    val value: String = "",
+    val text: String = "",
+    @SerialName("evidence_id") val evidenceId: String? = null,
+)
+
+@Serializable
 data class ProductCardPayload(
     val rank: Int = 0,
     val product: ProductPayload = ProductPayload(),
     val reason: String = "",
+    @SerialName("reason_atoms") val reasonAtoms: List<ReasonAtomPayload> = emptyList(),
     @SerialName("risk_notes") val riskNotes: List<String> = emptyList(),
     val evidence: List<EvidencePayload> = emptyList(),
     val actions: List<QuickActionPayload> = emptyList(),

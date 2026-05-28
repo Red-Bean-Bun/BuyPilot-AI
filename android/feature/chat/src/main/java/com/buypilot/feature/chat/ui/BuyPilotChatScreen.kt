@@ -248,8 +248,8 @@ private val ClarificationEaseOut = CubicBezierEasing(0.1f, 1f, 0.1f, 1f)
 private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 private val ProductDetailRevealDistance = 220.dp
 private const val ProductDetailSnapThreshold = 0.36f
-private const val ProductDetailEnterMs = 520
-private const val ProductEvidenceEnterMs = 480
+private const val ProductDetailEnterMs = 560
+private const val ProductEvidenceEnterMs = 520
 private val CriteriaLeadingNumberRegex = Regex("""^(\d+(?:\.\d+)?)(.*)$""")
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
 private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
@@ -4217,7 +4217,7 @@ fun ProductHeroDetailScreen(
                     scaleX = lerp(0.975f, 1f, contentEnter)
                     scaleY = lerp(0.975f, 1f, contentEnter)
                 },
-            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 462.dp, bottom = 34.dp),
+            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 418.dp, bottom = 118.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             item("detail_panel") {
@@ -4241,8 +4241,8 @@ fun ProductHeroDetailScreen(
                     Brush.verticalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            Color(0xCC111111),
-                            Color(0xF2111111),
+                            BuyPilotColors.SurfaceBg.copy(alpha = 0.88f),
+                            BuyPilotColors.SurfaceBg,
                         ),
                     ),
                 )
@@ -4283,26 +4283,24 @@ private fun ProductCinematicBackdrop(
     enterProgress: Float,
     modifier: Modifier = Modifier,
 ) {
-    val scale = lerp(1.02f, lerp(1.08f, 1.22f, progress), enterProgress)
-    val offsetY = lerp(34f, lerp(0f, -82f, progress), enterProgress)
-    val imageAlpha = lerp(0.88f, 0.48f, progress)
-    val imageBlur = lerp(10f, lerp(0f, 18f, progress), enterProgress).dp
-    val midDim = lerp(0.62f, lerp(0.48f, 0.78f, progress), enterProgress)
-    Box(modifier = modifier.background(Color(0xFF11110F))) {
+    val scale = lerp(0.92f, lerp(1.02f, 1.08f, progress), enterProgress)
+    val offsetY = lerp(42f, lerp(0f, -54f, progress), enterProgress)
+    val imageAlpha = lerp(0.94f, 0.56f, progress)
+    Box(modifier = modifier.background(BuyPilotColors.SurfaceBg)) {
         ProductImage(
             product = product,
             backendBaseUrl = backendBaseUrl,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(690.dp)
+                .height(560.dp)
                 .align(Alignment.TopCenter)
+                .padding(top = 86.dp, start = 20.dp, end = 20.dp)
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
                     translationY = offsetY
-                    alpha = imageAlpha * lerp(0.54f, 1f, enterProgress)
+                    alpha = imageAlpha * lerp(0.42f, 1f, enterProgress)
                 }
-                .blur(imageBlur),
         )
         Box(
             modifier = Modifier
@@ -4310,24 +4308,26 @@ private fun ProductCinematicBackdrop(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFFEEEDE8).copy(alpha = lerp(0.18f, 0.04f, progress)),
-                            Color(0xFF4D534F).copy(alpha = midDim),
-                            Color(0xFF10100F).copy(alpha = lerp(0.92f, 0.98f, progress)),
+                            BuyPilotColors.SurfaceBg.copy(alpha = 0.02f),
+                            BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.04f, 0.28f, progress)),
+                            BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.9f, 1f, progress)),
                         ),
+                        startY = 0f,
+                        endY = 1180f,
                     ),
                 ),
         )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(240.dp)
+                .height(210.dp)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            Color(0xFF10100F).copy(alpha = 0.86f),
-                            Color(0xFF10100F),
+                            BuyPilotColors.SurfaceBg.copy(alpha = 0.9f),
+                            BuyPilotColors.SurfaceBg,
                         ),
                     ),
                 ),
@@ -4348,13 +4348,14 @@ private fun ProductImmersiveBackdrop(
             backendBaseUrl = backendBaseUrl,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(650.dp)
+                .height(520.dp)
                 .align(Alignment.TopCenter)
+                .padding(top = 72.dp, start = 20.dp, end = 20.dp)
                 .graphicsLayer {
-                    scaleX = lerp(1.04f, 1.12f, enterProgress)
-                    scaleY = lerp(1.04f, 1.12f, enterProgress)
-                    translationY = (1f - enterProgress) * 30f
-                    alpha = lerp(0.58f, 1f, enterProgress)
+                    scaleX = lerp(0.96f, 1.04f, enterProgress)
+                    scaleY = lerp(0.96f, 1.04f, enterProgress)
+                    translationY = (1f - enterProgress) * 24f
+                    alpha = lerp(0.42f, 0.82f, enterProgress)
                 },
         )
         Box(
@@ -4363,9 +4364,9 @@ private fun ProductImmersiveBackdrop(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF777771).copy(alpha = lerp(0.92f, dimAlpha, enterProgress)),
-                            Color(0xFF585C59).copy(alpha = lerp(0.94f, (dimAlpha + 0.06f).coerceAtMost(0.86f), enterProgress)),
-                            Color(0xFF151515).copy(alpha = 0.94f),
+                            BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.16f, 0.2f, enterProgress)),
+                            BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.72f, dimAlpha, enterProgress)),
+                            BuyPilotColors.SurfaceBg,
                         ),
                     ),
                 ),
@@ -4384,10 +4385,11 @@ private fun ImmersiveCircleButton(
         onClick = onClick,
         modifier = modifier
             .size(48.dp)
-            .background(Color(0xFF1F2329).copy(alpha = 0.38f), CircleShape)
-            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape),
+            .shadow(8.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.08f), spotColor = Color.Black.copy(alpha = 0.12f))
+            .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.92f), CircleShape)
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f), CircleShape),
         colors = IconButtonDefaults.iconButtonColors(
-            contentColor = Color.White.copy(alpha = 0.94f),
+            contentColor = BuyPilotColors.TextPrimary,
         ),
     ) {
         Icon(
@@ -4406,25 +4408,30 @@ private fun CinematicProductDetailPanel(
     val product = payload.product
     val tags = payload.displayTags().take(4)
     val shape = RoundedCornerShape(
-        topStart = lerp(34f, 22f, progress).dp,
-        topEnd = lerp(34f, 22f, progress).dp,
-        bottomStart = lerp(28f, 18f, progress).dp,
-        bottomEnd = lerp(28f, 18f, progress).dp,
+        topStart = lerp(30f, 22f, progress).dp,
+        topEnd = lerp(30f, 22f, progress).dp,
+        bottomStart = lerp(28f, 20f, progress).dp,
+        bottomEnd = lerp(28f, 20f, progress).dp,
     )
-    val panelAlpha = lerp(0.64f, 0.94f, progress)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = lerp(8f, 3f, progress).dp,
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.08f),
+                spotColor = Color.Black.copy(alpha = 0.1f),
+            )
             .clip(shape)
-            .background(Color(0xFF111111).copy(alpha = panelAlpha), shape)
-            .border(1.dp, Color.White.copy(alpha = lerp(0.12f, 0.18f, progress)), shape)
+            .background(BuyPilotColors.SurfaceCard.copy(alpha = lerp(0.96f, 1f, progress)), shape)
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = lerp(0.72f, 1f, progress)), shape)
             .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if ((payload.rank.takeIf { it > 0 } ?: 1) == 1) "PREMIUM CHOICE" else "#${payload.rank} MATCH",
+                text = if ((payload.rank.takeIf { it > 0 } ?: 1) == 1) "核心匹配" else "#${payload.rank} 匹配",
                 color = BuyPilotColors.Primary,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
@@ -4434,9 +4441,9 @@ private fun CinematicProductDetailPanel(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = product.name.ifBlank { "推荐商品" },
-                color = Color(0xFFFFFEFC),
-                fontSize = 32.sp,
-                lineHeight = 38.sp,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = 28.sp,
+                lineHeight = 35.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
@@ -4454,7 +4461,7 @@ private fun CinematicProductDetailPanel(
                 )
                 Text(
                     text = product.subCategory ?: product.category,
-                    color = Color.White.copy(alpha = 0.52f),
+                    color = BuyPilotColors.TextMuted,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 16.sp,
                     maxLines = 1,
@@ -4465,14 +4472,14 @@ private fun CinematicProductDetailPanel(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "⌖",
-                color = Color.White.copy(alpha = 0.72f),
+                color = BuyPilotColors.TextMuted,
                 fontSize = 20.sp,
                 lineHeight = 20.sp,
             )
             Spacer(Modifier.width(10.dp))
             Text(
                 text = product.brandLabel(),
-                color = Color.White.copy(alpha = 0.78f),
+                color = BuyPilotColors.TextSecondary,
                 fontSize = BuyPilotType.Body,
                 lineHeight = 21.sp,
                 maxLines = 1,
@@ -4490,9 +4497,9 @@ private fun CinematicProductDetailPanel(
         MarkdownTextBlock(
             content = payload.reason.ifBlank { "后端已返回该商品为本轮候选，推荐解释待补充。" },
             style = TextStyle(
-                color = Color.White.copy(alpha = 0.78f),
-                fontSize = 17.sp,
-                lineHeight = 28.sp,
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 23.sp,
             ),
         )
         Spacer(Modifier.height(20.dp))
@@ -4519,7 +4526,7 @@ private fun CinematicDetailDivider(progress: Float) {
             modifier = Modifier
                 .fillMaxWidth(widthFraction)
                 .height(1.dp)
-                .background(Color.White.copy(alpha = 0.12f), CircleShape),
+                .background(BuyPilotColors.Border.copy(alpha = 0.92f), CircleShape),
         )
     }
 }
@@ -4528,9 +4535,9 @@ private fun CinematicDetailDivider(progress: Float) {
 private fun ImmersiveSectionTitle(title: String) {
     Text(
         text = title,
-        color = Color(0xFFFFFEFC),
-        fontSize = 20.sp,
-        lineHeight = 25.sp,
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.Title,
+        lineHeight = 24.sp,
         fontWeight = FontWeight.Bold,
     )
 }
@@ -4539,14 +4546,14 @@ private fun ImmersiveSectionTitle(title: String) {
 private fun ImmersiveTag(label: String) {
     Text(
         text = label.withoutMarkdownMarkup(),
-        color = Color.White.copy(alpha = 0.92f),
+        color = BuyPilotColors.PrimaryDark,
         fontSize = BuyPilotType.Label,
         lineHeight = 16.sp,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
-            .background(Color.White.copy(alpha = 0.11f), CircleShape)
-            .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape)
+            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.72f), CircleShape)
+            .border(1.dp, BuyPilotColors.PrimarySoft, CircleShape)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     )
 }
@@ -4558,9 +4565,9 @@ private fun ImmersiveWarningBox(text: String) {
         .removePrefix("注意:")
         .trim()
     Surface(
-        color = BuyPilotColors.Primary.copy(alpha = 0.12f),
+        color = BuyPilotColors.Attention,
         shape = RoundedCornerShape(18.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Primary.copy(alpha = 0.22f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.PrimarySoft),
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -4568,7 +4575,7 @@ private fun ImmersiveWarningBox(text: String) {
         ) {
             Text(
                 text = "注意：",
-                color = Color.White.copy(alpha = 0.86f),
+                color = BuyPilotColors.PrimaryDark,
                 fontSize = BuyPilotType.Body,
                 lineHeight = 22.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -4577,7 +4584,7 @@ private fun ImmersiveWarningBox(text: String) {
                 content = warningMarkdown,
                 modifier = Modifier.weight(1f),
                 style = TextStyle(
-                    color = Color.White.copy(alpha = 0.76f),
+                    color = BuyPilotColors.TextSecondary,
                     fontSize = BuyPilotType.Body,
                     lineHeight = 22.sp,
                 ),
@@ -4598,14 +4605,14 @@ private fun ProductAttributeRowsDark(product: ProductPayload, payload: ProductCa
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = label,
-                    color = Color.White.copy(alpha = 0.44f),
+                    color = BuyPilotColors.TextMuted,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 18.sp,
                     modifier = Modifier.width(74.dp),
                 )
                 Text(
                     text = value,
-                    color = Color.White.copy(alpha = 0.74f),
+                    color = BuyPilotColors.TextPrimary,
                     fontSize = BuyPilotType.Body,
                     lineHeight = 20.sp,
                     modifier = Modifier.weight(1f),
@@ -4650,12 +4657,12 @@ fun ProductEvidenceOverlayScreen(
     )
     val backdropEnter = segmentProgress(routeProgress, 0f, 0.82f)
     val chromeEnter = segmentProgress(routeProgress, 0.18f, 1f)
-    val contentEnter = segmentProgress(routeProgress, 0.22f, 1f)
+    val contentEnter = segmentProgress(routeProgress, 0.16f, 1f)
     Box(modifier = Modifier.fillMaxSize()) {
         ProductImmersiveBackdrop(
             product = payload.product,
             backendBaseUrl = state.backendBaseUrl,
-            dimAlpha = 0.76f,
+            dimAlpha = 0.78f,
             enterProgress = backdropEnter,
         )
         ImmersiveCircleButton(
@@ -4679,48 +4686,242 @@ fun ProductEvidenceOverlayScreen(
                 .fillMaxSize()
                 .graphicsLayer {
                     alpha = contentEnter
-                    translationY = (1f - contentEnter) * 54f
-                    scaleX = lerp(0.975f, 1f, contentEnter)
-                    scaleY = lerp(0.975f, 1f, contentEnter)
-                },
+                    translationY = (1f - contentEnter) * 42f
+                }
+                .navigationBarsPadding(),
             contentPadding = PaddingValues(start = 30.dp, end = 30.dp, top = 224.dp, bottom = 52.dp),
-            verticalArrangement = Arrangement.spacedBy(30.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
+            item("product_snapshot") {
+                ProductEvidenceHeader(payload = payload, backendBaseUrl = state.backendBaseUrl)
+            }
+            item("recommendation_reason") {
+                FullEvidenceSection(title = "推荐理由") {
+                    Text(
+                        text = payload.reason.ifBlank { "后端暂未返回推荐理由。" },
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = 25.sp,
+                        lineHeight = 36.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            item("product_fields") {
+                ProductBackendSnapshot(payload)
+            }
+            if (payload.reasonAtoms.isNotEmpty()) {
+                item("reason_atoms") {
+                    FullEvidenceSection(title = "结构化匹配维度") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            payload.reasonAtoms.forEachIndexed { index, atom ->
+                                EvidenceKeyValue(
+                                    label = "${index + 1}. ${atom.dimension.ifBlank { "dimension" }}",
+                                    value = listOf(
+                                        atom.value.takeIf { it.isNotBlank() },
+                                        atom.text.takeIf { it.isNotBlank() },
+                                        atom.evidenceId?.takeIf { it.isNotBlank() }?.let { "证据：$it" },
+                                    ).filterNotNull().joinToString("\n"),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (payload.riskNotes.isNotEmpty()) {
+                item("risk_notes") {
+                    FullEvidenceSection(title = "风险与不适用提醒") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            payload.riskNotes.forEachIndexed { index, note ->
+                                EvidenceBulletText(index = index + 1, text = note)
+                            }
+                        }
+                    }
+                }
+            }
             if (payload.evidence.isEmpty()) {
                 item("evidence_fallback_notice") {
                     Text(
                         text = "后端暂未返回独立证据，当前展示推荐理由 fallback。",
-                        color = Color.White.copy(alpha = 0.62f),
+                        color = BuyPilotColors.TextMuted,
                         fontSize = BuyPilotType.Label,
                         lineHeight = 18.sp,
                     )
                 }
             }
+            item("evidence_title") {
+                EvidenceEyebrowTitle("原始证据片段", "${evidenceItems.size} 条")
+            }
             itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { index, evidence ->
                 ImmersiveEvidenceQuote(
                     evidence = evidence,
+                    index = index + 1,
                 )
+            }
+            if (payload.actions.isNotEmpty()) {
+                item("actions") {
+                    FullEvidenceSection(title = "后端返回动作") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            payload.actions.forEachIndexed { index, action ->
+                                EvidenceKeyValue(
+                                    label = "${index + 1}. ${action.label.ifBlank { action.action.ifBlank { "action" } }}",
+                                    value = listOf(
+                                        action.actionId.takeIf { it.isNotBlank() }?.let { "action_id: $it" },
+                                        action.action.takeIf { it.isNotBlank() }?.let { "action: $it" },
+                                        action.feedbackType?.takeIf { it.isNotBlank() }?.let { "feedback_type: $it" },
+                                        action.criteriaPatch?.toString()?.let { "criteria_patch: $it" },
+                                    ).filterNotNull().joinToString("\n"),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
+private fun ProductBackendSnapshot(payload: ProductCardPayload) {
+    val product = payload.product
+    FullEvidenceSection(title = "商品字段快照") {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            EvidenceKeyValue("rank", payload.rank.takeIf { it > 0 }?.toString() ?: "未返回")
+            EvidenceKeyValue("product_id", product.productId.ifBlank { "未返回" })
+            EvidenceKeyValue("商品名", product.name.ifBlank { "未返回" })
+            EvidenceKeyValue("价格", product.priceLabel())
+            EvidenceKeyValue("currency", product.currency ?: "未返回")
+            EvidenceKeyValue("category", product.category.ifBlank { "未返回" })
+            EvidenceKeyValue("sub_category", product.subCategory ?: "未返回")
+            EvidenceKeyValue("brand", product.brand ?: "未返回")
+            EvidenceKeyValue("image_url", product.imageUrl ?: "未返回")
+            EvidenceKeyValue("skin_type_match", product.skinTypeMatch.ifEmpty { listOf("未返回") }.joinToString("、"))
+            EvidenceKeyValue("ingredient_tags", product.ingredientTags.ifEmpty { listOf("未返回") }.joinToString("、"))
+            EvidenceKeyValue("ingredient_avoid", product.ingredientAvoid.ifEmpty { listOf("未返回") }.joinToString("、"))
+            EvidenceKeyValue("use_scenario", product.useScenario.ifEmpty { listOf("未返回") }.joinToString("、"))
+        }
+    }
+}
+
+@Composable
+private fun FullEvidenceSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        EvidenceEyebrowTitle(title)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+@Composable
+private fun EvidenceEyebrowTitle(title: String, trailing: String? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = title,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Title,
+            lineHeight = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.let {
+            Text(
+                text = it,
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EvidenceKeyValue(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = label,
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = value.ifBlank { "未返回" },
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 22.sp,
+        )
+    }
+}
+
+@Composable
+private fun EvidenceBulletText(index: Int, text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            text = index.toString(),
+            color = BuyPilotColors.Primary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(24.dp),
+        )
+        Text(
+            text = text,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 22.sp,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
 private fun ImmersiveEvidenceQuote(
     evidence: EvidencePayload,
+    index: Int,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "#${index.toString().padStart(2, '0')}",
+                color = BuyPilotColors.Primary,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = evidence.sourceType.ifBlank { "商品资料" },
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            evidence.trustLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                Text(
+                    text = label,
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                )
+            }
+        }
         Text(
             text = "“${evidence.snippet.ifBlank { "暂无证据片段" }}”",
-            color = Color(0xFFFFFEFC),
-            fontSize = 31.sp,
-            lineHeight = 42.sp,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = 28.sp,
+            lineHeight = 40.sp,
             fontWeight = FontWeight.Medium,
         )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            EvidenceKeyValue("source_id", evidence.sourceId ?: "未返回")
+            EvidenceKeyValue("evidence_id", evidence.evidenceId ?: "未返回")
+        }
         HorizontalDivider(
             thickness = 1.dp,
-            color = Color.White.copy(alpha = 0.18f),
-            modifier = Modifier.padding(top = 8.dp),
+            color = BuyPilotColors.Border.copy(alpha = 0.92f),
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }
@@ -5128,26 +5329,125 @@ private fun BottomComposer(
                         }
                     },
                 )
-                FilledIconButton(
-                    onClick = onSubmit,
+                ComposerActionButton(
+                    isStreaming = isStreaming,
                     enabled = canSubmit,
-                    modifier = Modifier.size(48.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = if (isStreaming) BuyPilotColors.TextPrimary else BuyPilotColors.Primary,
-                        contentColor = BuyPilotColors.OnPrimary,
-                        disabledContainerColor = BuyPilotColors.Border.copy(alpha = 0.65f),
-                        disabledContentColor = BuyPilotColors.TextMuted,
-                    ),
-                ) {
-                    Icon(
-                        painter = painterResource(
-                            if (isStreaming) R.drawable.ic_stop_24 else R.drawable.ic_arrow_upward_24,
-                        ),
-                        contentDescription = if (isStreaming) "停止生成" else "发送",
-                        modifier = Modifier.size(if (isStreaming) 17.dp else 21.dp),
-                    )
-                }
+                    onClick = onSubmit,
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun ComposerActionButton(
+    isStreaming: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> BuyPilotColors.Border.copy(alpha = 0.64f)
+            isStreaming -> BuyPilotColors.PrimarySoft.copy(alpha = 0.94f)
+            else -> BuyPilotColors.Primary
+        },
+        animationSpec = tween(durationMillis = 240, easing = MenuEaseOut),
+        label = "composer_action_container_color",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> BuyPilotColors.TextMuted
+            isStreaming -> BuyPilotColors.PrimaryDark
+            else -> BuyPilotColors.OnPrimary
+        },
+        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+        label = "composer_action_content_color",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> BuyPilotColors.Border.copy(alpha = 0.2f)
+            isStreaming -> BuyPilotColors.Primary.copy(alpha = 0.32f)
+            else -> BuyPilotColors.Primary.copy(alpha = 0.0f)
+        },
+        animationSpec = tween(durationMillis = 240, easing = MenuEaseOut),
+        label = "composer_action_border_color",
+    )
+    val scale by animateFloatAsState(
+        targetValue = when {
+            pressed -> 0.94f
+            isStreaming -> 1.02f
+            else -> 1f
+        },
+        animationSpec = tween(durationMillis = if (pressed) 90 else 240, easing = MenuEaseOut),
+        label = "composer_action_scale",
+    )
+    val shadowAlpha by animateFloatAsState(
+        targetValue = when {
+            !enabled -> 0f
+            isStreaming -> 0.06f
+            else -> 0.14f
+        },
+        animationSpec = tween(durationMillis = 240, easing = MenuEaseOut),
+        label = "composer_action_shadow",
+    )
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (enabled) 8.dp else 0.dp,
+                shape = CircleShape,
+                ambientColor = BuyPilotColors.Primary.copy(alpha = shadowAlpha),
+                spotColor = BuyPilotColors.Primary.copy(alpha = shadowAlpha),
+            )
+            .clip(CircleShape)
+            .background(containerColor)
+            .border(1.dp, borderColor, CircleShape)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        AnimatedContent(
+            targetState = isStreaming,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(durationMillis = 170, easing = MenuEaseOut)) +
+                    scaleIn(
+                        initialScale = 0.78f,
+                        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+                    ))
+                    .togetherWith(
+                        fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)) +
+                            scaleOut(
+                                targetScale = 0.82f,
+                                animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+                            ),
+                    )
+            },
+            label = "composer_action_icon",
+        ) { streaming ->
+            Icon(
+                painter = painterResource(
+                    if (streaming) R.drawable.ic_stop_24 else R.drawable.ic_arrow_upward_24,
+                ),
+                contentDescription = if (streaming) "停止生成" else "发送",
+                tint = contentColor,
+                modifier = Modifier
+                    .size(if (streaming) 16.dp else 21.dp)
+                    .graphicsLayer {
+                        rotationZ = if (streaming) 0f else 0f
+                    },
+            )
         }
     }
 }
