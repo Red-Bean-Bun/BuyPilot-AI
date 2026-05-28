@@ -210,17 +210,34 @@ async def generate_decision(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    *,
+    locked_winner_product_id: str | None = None,
+    score_breakdown: dict[str, Any] | None = None,
 ) -> DecisionResult:
     if not products:
         return DecisionResult(winner_product_id="", summary="暂时没有找到合适商品。")
     valid_ids = [p.product_id for p in products]
+    authoritative_winner = locked_winner_product_id if locked_winner_product_id in valid_ids else None
     live = await _call_chat_task(
         "generate_decision",
-        decision_messages(criteria, products, evidence_by_product),
+        decision_messages(
+            criteria,
+            products,
+            evidence_by_product,
+            locked_winner_product_id=authoritative_winner,
+            score_breakdown=score_breakdown,
+        ),
         json_object=True,
     )
     parsed = _require_json_object(live, "generate_decision")
     winner_id = parsed.get("winner_product_id", "")
+    if authoritative_winner is not None and winner_id != authoritative_winner:
+        logger.warning(
+            "Decision LLM winner_id %s differed from locked winner %s; using deterministic locked decision.",
+            winner_id,
+            authoritative_winner,
+        )
+        return _deterministic_locked_decision(authoritative_winner, products, score_breakdown)
     if winner_id not in valid_ids:
         logger.warning(
             "Decision winner_id %s not in candidate list %s; falling back to first candidate.",
@@ -235,6 +252,26 @@ async def generate_decision(
         not_for=parsed.get("not_for", []) if isinstance(parsed.get("not_for"), list) else [],
     )
     return _sanitize_decision(decision, valid_ids, products)
+
+
+def _deterministic_locked_decision(
+    winner_product_id: str,
+    products: list[ProductPayload],
+    score_breakdown: dict[str, Any] | None = None,
+) -> DecisionResult:
+    winner = next((product for product in products if product.product_id == winner_product_id), products[0])
+    score = (score_breakdown or {}).get("final_score")
+    score_text = f"，综合评分 {score}" if isinstance(score, int | float) else ""
+    reasons = [
+        f"{winner.name} 是当前候选中综合匹配度最高的商品{score_text}。",
+        "这个结论来自检索相关性、标准匹配、用户反馈和证据质量的综合评分。",
+    ]
+    return DecisionResult(
+        winner_product_id=winner.product_id,
+        summary=f"优先推荐{winner.name}，它是当前候选里综合评分最高的一款。",
+        why=reasons,
+        not_for=[],
+    )
 
 
 def _require_json_object(text: str, task: str) -> dict[str, Any]:

@@ -158,7 +158,7 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
         action_id="replace_deck",
         label="换一组",
         action="criteria_patch",
-        criteria_patch={"constraints": {}},
+        criteria_patch={"replace_deck": True, "constraints": {}},
     )
 
     if not category:

@@ -37,6 +37,7 @@ RECOMMENDATION_STREAM_SYSTEM_SCHEMA = (
 DECISION_SYSTEM_SCHEMA = (
     "你是电商导购决策器。只输出 JSON，字段为 winner_product_id、summary、why、not_for。"
     "winner_product_id 必须是传入商品之一，不得编造。"
+    "如果输入包含非空 locked_winner_product_id，winner_product_id 必须等于该值，summary/why 只能解释这个锁定商品。"
     "why 是选择该商品的理由列表（每条一句话）。"
     "not_for 是不适合人群或场景列表。"
 )
@@ -203,23 +204,32 @@ def decision_messages(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    locked_winner_product_id: str | None = None,
+    score_breakdown: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
         "products": [product.model_dump() for product in products],
         "valid_winner_ids": [product.product_id for product in products],
     }
+    prompt_vars = {
+        "criteria": criteria.model_dump(),
+        "recommendations": [product.model_dump() for product in products],
+        "feedback_history": [],
+        "evidence_context": _format_evidence_context(evidence_by_product or {}),
+    }
+    if locked_winner_product_id is not None:
+        payload["locked_winner_product_id"] = locked_winner_product_id
+        prompt_vars["locked_winner_product_id"] = locked_winner_product_id
+    if score_breakdown:
+        payload["score_breakdown"] = score_breakdown
+        prompt_vars["score_breakdown"] = score_breakdown
     return [
         {
             "role": "system",
             "content": _prompt_content(
                 "decision",
-                {
-                    "criteria": criteria.model_dump(),
-                    "recommendations": [product.model_dump() for product in products],
-                    "feedback_history": [],
-                    "evidence_context": _format_evidence_context(evidence_by_product or {}),
-                },
+                prompt_vars,
                 DECISION_SYSTEM_SCHEMA,
             ),
         },

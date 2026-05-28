@@ -8,6 +8,7 @@ from src.runtime import streaming as streaming_module
 from src.runtime.cancel_registry import active_turn_count, cancel_turn
 from src.runtime.pipeline import chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
+from src.services.fallbacks import get_fallback_events
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
 from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload
 
@@ -148,7 +149,7 @@ async def test_pipeline_product_first_default_flow():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_product_deck_without_final_decision():
+async def test_pipeline_product_deck_has_consistent_deck_id():
     """Product-first: product_card before criteria_card, deck_id consistent."""
     events = [
         event
@@ -167,6 +168,65 @@ async def test_pipeline_product_deck_without_final_decision():
 
 
 @pytest.mark.asyncio
+async def test_pipeline_multi_product_first_turn_emits_lightweight_decision(monkeypatch):
+    product_a = ProductPayload(product_id="p_initial_a", name="候选A", category="美妆护肤", price=99)
+    product_b = ProductPayload(product_id="p_initial_b", name="候选B", category="美妆护肤", price=109)
+    evidence = [EvidencePayload(source_type="product_chunk", source_id="initial_chunk", snippet="初步证据")]
+
+    async def two_product_retrieval(criteria, top_n=5, feedback=None):
+        del criteria, top_n, feedback
+        return RetrievalResult(
+            products=[product_a, product_b],
+            evidence_by_product={product_a.product_id: evidence, product_b.product_id: evidence},
+        )
+
+    monkeypatch.setattr(pipeline_module, "run_retrieval", two_product_retrieval)
+
+    events = [event async for event in chat_stream("s_initial_decision", ChatStreamRequest(message="推荐洗面奶"))]
+    decisions = [event for event in events if event.event == "final_decision"]
+
+    assert len(decisions) == 1
+    assert decisions[0].decision_status == "needs_more_signal"
+    assert decisions[0].confidence == "low"
+    assert decisions[0].next_step == "continue_current_deck"
+    assert decisions[0].deck_id == events[-1].deck_id
+    assert events[-1].finish_reason == "awaiting_product_feedback"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_records_fallback_when_recommendation_stream_fails(monkeypatch):
+    product_a = ProductPayload(product_id="p_stream_a", name="候选A", category="美妆护肤", price=99)
+    product_b = ProductPayload(product_id="p_stream_b", name="候选B", category="美妆护肤", price=109)
+    evidence = [EvidencePayload(source_type="product_chunk", source_id="stream_chunk", snippet="流式证据")]
+
+    async def two_product_retrieval(criteria, top_n=5, feedback=None):
+        del criteria, top_n, feedback
+        return RetrievalResult(
+            products=[product_a, product_b],
+            evidence_by_product={product_a.product_id: evidence, product_b.product_id: evidence},
+        )
+
+    async def failing_stream(criteria, products, evidence_by_product=None):
+        del criteria, products, evidence_by_product
+        raise RuntimeError("stream failed")
+        yield ""
+
+    monkeypatch.setattr(pipeline_module, "run_retrieval", two_product_retrieval)
+    monkeypatch.setattr(pipeline_module, "run_recommendation_text_stream", failing_stream)
+
+    events = [event async for event in chat_stream("s_stream_fallback", ChatStreamRequest(message="推荐洗面奶"))]
+    fallbacks = get_fallback_events()
+
+    assert "error" not in [event.event for event in events]
+    assert any(
+        item["component"] == "llm.generate_recommendation_stream"
+        and item["reason"] == "stream_text_failed"
+        and item["error_type"] == "RuntimeError"
+        for item in fallbacks
+    )
+
+
+@pytest.mark.asyncio
 async def test_pipeline_continue_after_deck_emits_final_decision():
     _ = [
         event
@@ -181,6 +241,82 @@ async def test_pipeline_continue_after_deck_emits_final_decision():
     assert "product_card" not in tags
     assert "final_decision" in tags
     assert events[-1].finish_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_locks_scored_winner_before_decision_explanation(monkeypatch):
+    product_a = ProductPayload(product_id="p_lock_a", name="算法首选", category="美妆护肤", price=88)
+    product_b = ProductPayload(product_id="p_lock_b", name="LLM偏好", category="美妆护肤", price=89)
+    evidence = [EvidencePayload(source_type="product_chunk", source_id="lock_chunk", snippet="锁定证据")]
+    captured: dict[str, object] = {}
+
+    async def two_product_retrieval(criteria, top_n=5, feedback=None):
+        del criteria, top_n, feedback
+        return RetrievalResult(
+            products=[product_a, product_b],
+            evidence_by_product={product_a.product_id: evidence, product_b.product_id: evidence},
+        )
+
+    async def locked_decision(
+        criteria,
+        products,
+        evidence_by_product=None,
+        *,
+        locked_winner_product_id=None,
+        score_breakdown=None,
+    ):
+        del criteria, products, evidence_by_product
+        captured["locked_winner_product_id"] = locked_winner_product_id
+        captured["score_breakdown"] = score_breakdown
+        return DecisionResult(winner_product_id="p_lock_b", summary="解释锁定商品。")
+
+    monkeypatch.setattr(pipeline_module, "run_retrieval", two_product_retrieval)
+    monkeypatch.setattr(pipeline_module, "run_decision", locked_decision)
+    monkeypatch.setattr(
+        handlers_module,
+        "get_product",
+        lambda product_id: {product_a.product_id: product_a, product_b.product_id: product_b}.get(product_id),
+    )
+
+    _ = [event async for event in chat_stream("s_locked_decision", ChatStreamRequest(message="推荐适合油皮的洗面奶"))]
+    events = [event async for event in chat_stream("s_locked_decision", ChatStreamRequest(message="继续"))]
+    decision = next(event for event in events if event.event == "final_decision")
+
+    assert captured["locked_winner_product_id"] == product_a.product_id
+    assert captured["score_breakdown"]
+    assert decision.winner_product_id == product_a.product_id
+
+
+@pytest.mark.asyncio
+async def test_pipeline_replace_deck_excludes_previous_products(monkeypatch):
+    product_a = ProductPayload(product_id="p_replace_a", name="上一组A", category="美妆护肤", price=88)
+    product_b = ProductPayload(product_id="p_replace_b", name="上一组B", category="美妆护肤", price=89)
+    product_c = ProductPayload(product_id="p_replace_c", name="新一组C", category="美妆护肤", price=90)
+    evidence = [EvidencePayload(source_type="product_chunk", source_id="replace_chunk", snippet="换组证据")]
+    retrieval_feedbacks: list[dict | None] = []
+
+    async def replacement_retrieval(criteria, top_n=5, feedback=None):
+        del criteria, top_n
+        retrieval_feedbacks.append(feedback)
+        avoided = set((feedback or {}).get("avoid_products", []))
+        products = [product_c] if {product_a.product_id, product_b.product_id} <= avoided else [product_a, product_b]
+        return RetrievalResult(
+            products=products,
+            evidence_by_product={product.product_id: evidence for product in products},
+        )
+
+    monkeypatch.setattr(pipeline_module, "run_retrieval", replacement_retrieval)
+
+    first = [event async for event in chat_stream("s_replace", ChatStreamRequest(message="推荐适合油皮的洗面奶"))]
+    second = [event async for event in chat_stream("s_replace", ChatStreamRequest(message="换一组"))]
+
+    assert [event.product.product_id for event in first if event.event == "product_card"] == [
+        product_a.product_id,
+        product_b.product_id,
+    ]
+    assert [event.product.product_id for event in second if event.event == "product_card"] == [product_c.product_id]
+    assert retrieval_feedbacks[-1]
+    assert {product_a.product_id, product_b.product_id} <= set(retrieval_feedbacks[-1]["avoid_products"])
 
 
 @pytest.mark.asyncio

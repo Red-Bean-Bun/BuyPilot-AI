@@ -120,6 +120,28 @@ doc/
 
 ## 快速开始
 
+### 评委验收路径（推荐）
+
+```bash
+# 1) 准备真实模型配置：复制模板到项目根目录 .env，并填写 BAILIAN_API_KEY。
+cp .env.example .env
+
+# 2) 启动 Postgres/pgvector + FastAPI；首次启动会自动建表、入库并生成 1024 维 embedding。
+cd deploy
+docker-compose up --build
+
+# 3) 另开终端执行 live RAG 门禁；输出每个阶段的 JSON 状态，任一阶段失败会非 0 退出。
+cd ../backend
+uv run -m src.scripts.smoke_live_rag
+
+# 4) 执行完整 Demo smoke。
+uv run -m src.scripts.demo_smoke
+```
+
+说明：本地 SQLite 只作为日常开发路径；答辩/评委验收优先使用 `deploy/docker-compose.yml` 的 PostgreSQL + pgvector 环境。
+
+### 开发路径
+
 ```bash
 # 后端
 cd backend

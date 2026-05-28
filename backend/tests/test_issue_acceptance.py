@@ -29,10 +29,9 @@ async def _seed_products_for_issue_acceptance(seeded_products):
 
 @pytest.mark.asyncio
 # 问题 0 验收：
-# - 首轮只出现标准卡，不出现商品卡和 final_decision。
-# - 确认标准后只出现候选商品 deck，不出现 final_decision。
+# - 首轮出现候选商品 deck、criteria_card 和低置信初步 final_decision。
 # - deck 内反馈后回复"继续"，最终建议体现反馈。
-# - final_decision 不早于 awaiting_product_feedback 阶段之后出现。
+# - 初步 final_decision 标记 needs_more_signal，用户继续后再生成 completed 决策。
 # REG-09: SwipeDeck 用户反馈后回复"继续" -> 后端读取当前 deck 反馈，再生成 final_decision。
 async def test_issue0_deck_feedback_is_applied_before_final_decision():
     """Product-first: round 1 = product+criteria, round 2 (继续) = final_decision with feedback."""
@@ -200,9 +199,11 @@ async def test_issue4_ambiguous_photo_need_asks_category_instead_of_skin_type():
 # - "服饰运动"有 category 但无具体商品类型→ product-first: 给宽泛候选 + criteria_card 引导。
 async def test_issue4_sports_category_asks_product_type_before_budget_or_full_criteria():
     events = await _chat("服饰运动")
-    tags = _tags(events)
 
-    assert "final_decision" not in tags or _done(events).finish_reason == "completed"
+    decisions = [event for event in events if event.event == "final_decision"]
+    if decisions:
+        assert decisions[0].decision_status == "needs_more_signal"
+        assert decisions[0].next_step == "continue_current_deck"
     criteria = _criteria(events)
     assert len(criteria) >= 1
     assert criteria[0].category == "服饰运动"
@@ -221,7 +222,9 @@ async def test_issue5_food_aliases_recall_food_products(message: str):
 
     assert products
     assert all(product.category == "食品生活" for product in products)
-    assert "final_decision" not in _tags(events)
+    decisions = [event for event in events if event.event == "final_decision"]
+    assert decisions
+    assert decisions[0].decision_status == "needs_more_signal"
     assert _done(events).finish_reason == "awaiting_product_feedback"
 
 
@@ -245,14 +248,18 @@ async def test_issue5_and_9_unsupported_cd_player_stops_before_criteria_or_empty
 
 @pytest.mark.asyncio
 # 问题 7/8 验收（更新为 product-first）：
-# - product-first: 候选商品出现后 criteria_card 后置，done 为 awaiting_product_feedback 或 completed。
+# - product-first: 候选商品出现后 criteria_card 后置，并给出低置信初步 final_decision。
 # REG-07: 候选商品出现后 -> criteria_card 作为筛选调整卡后置。
-async def test_issue7_and_8_candidate_stage_has_no_final_decision_or_long_followup_text():
+async def test_issue7_and_8_candidate_stage_has_lightweight_final_decision():
     events = await _chat("推荐适合油皮的洗面奶，200元以内，日常护肤")
     tags = _tags(events)
 
     assert "product_card" in tags
     assert "criteria_card" in tags
+    decisions = [event for event in events if event.event == "final_decision"]
+    assert decisions
+    if len(_products(events)) > 1:
+        assert decisions[0].decision_status == "needs_more_signal"
     assert _done(events).finish_reason in ("awaiting_product_feedback", "completed")
 
 

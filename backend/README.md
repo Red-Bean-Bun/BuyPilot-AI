@@ -6,8 +6,29 @@ FastAPI 后端，负责 SSE 对话管道、RAG 检索、pgvector 索引、模型
 
 ## Quick Start
 
+### Judge / Demo Gate
+
 ```bash
-cd /mnt/disk1/LZJ/project/BuyPilot-AI/backend
+# From project root: create .env from .env.example and fill real BAILIAN_API_KEY first.
+cp .env.example .env
+
+# Start the demo-grade database/API path. This uses PostgreSQL + pgvector and auto-seeds data.
+cd deploy
+docker-compose up --build
+
+# In a second terminal, run the live RAG gate. It prints per-stage JSON
+# for embedding index, embedding provider, and chat stream.
+cd ../backend
+uv run -m src.scripts.smoke_live_rag
+uv run -m src.scripts.demo_smoke
+```
+
+SQLite remains useful for local unit tests and development, but judge/demo verification should use the compose path above so pgvector, live embedding, rerank, and LLM providers are exercised together.
+
+### Local Development
+
+```bash
+cd backend
 
 # 安装依赖
 uv sync --extra dev

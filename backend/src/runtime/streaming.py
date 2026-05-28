@@ -66,9 +66,7 @@ class StageBundle(Protocol):
     @property
     def run_decision(
         self,
-    ) -> Callable[
-        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]
-    ]: ...
+    ) -> Callable[..., Awaitable[DecisionResult]]: ...
 
 
 @dataclass(frozen=True)

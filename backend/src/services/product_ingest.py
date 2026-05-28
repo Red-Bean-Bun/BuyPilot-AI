@@ -6,12 +6,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import Callable
 
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.domain_terms import normalize_category
-from src.repos.database import create_db_and_tables, get_async_engine
+from src.repos.database import create_db_and_tables, get_async_engine, is_postgres_engine
 from src.repos.models import Product, ProductChunk
 from src.repos.products import list_raw_products
 from src.services.chunking import build_product_chunks, build_product_knowledge_package
@@ -92,18 +92,17 @@ async def seed_products_if_needed(expected_embedding_dimensions: int | None = No
     await create_db_and_tables()
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         product_count = (await session.exec(select(func.count(Product.id)))).one()
-        chunk_count = (await session.exec(select(func.count(ProductChunk.id)))).one()
-        chunks = (await session.exec(select(ProductChunk.embedding))).all()
 
-    dimensions = {len(embedding) for embedding in chunks if embedding}
-    current_dimensions = dimensions.pop() if len(dimensions) == 1 else 0
+    stats = await chunk_embedding_stats()
+    chunk_count = stats["chunks"]
+    current_dimensions = stats["embedding_dimensions"]
     dimension_ok = expected_embedding_dimensions is None or current_dimensions == expected_embedding_dimensions
     if product_count > 0 and chunk_count > 0 and dimension_ok:
         return {
             "seeded": False,
             "products": product_count,
             "chunks": chunk_count,
-            "embedded_chunks": sum(1 for embedding in chunks if embedding),
+            "embedded_chunks": stats["embedded_chunks"],
             "embedding_dimensions": current_dimensions,
         }
 
@@ -114,12 +113,47 @@ async def seed_products_if_needed(expected_embedding_dimensions: int | None = No
 
 async def chunk_embedding_stats() -> dict[str, int]:
     await create_db_and_tables()
-    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
-        chunks = (await session.exec(select(ProductChunk))).all()
-    dimensions = {len(chunk.embedding) for chunk in chunks if chunk.embedding}
+    engine = get_async_engine()
+    if is_postgres_engine(engine):
+        query = text(
+            """
+            SELECT
+              COUNT(*) AS chunks,
+              COUNT(embedding) AS embedded_chunks,
+              MIN(vector_dims(embedding)) FILTER (WHERE embedding IS NOT NULL) AS min_dimension,
+              MAX(vector_dims(embedding)) FILTER (WHERE embedding IS NOT NULL) AS max_dimension
+            FROM product_chunks
+            """
+        )
+    else:
+        query = text(
+            """
+            SELECT
+              COUNT(*) AS chunks,
+              SUM(CASE
+                    WHEN embedding IS NOT NULL AND json_array_length(embedding) > 0 THEN 1
+                    ELSE 0
+                  END) AS embedded_chunks,
+              MIN(CASE
+                    WHEN embedding IS NOT NULL AND json_array_length(embedding) > 0
+                    THEN json_array_length(embedding)
+                  END) AS min_dimension,
+              MAX(CASE
+                    WHEN embedding IS NOT NULL AND json_array_length(embedding) > 0
+                    THEN json_array_length(embedding)
+                  END) AS max_dimension
+            FROM product_chunks
+            """
+        )
+
+    async with engine.connect() as conn:
+        row = (await conn.execute(query)).mappings().one()
+    min_dimension = int(row["min_dimension"] or 0)
+    max_dimension = int(row["max_dimension"] or 0)
     return {
-        "embedded_chunks": sum(1 for chunk in chunks if chunk.embedding),
-        "embedding_dimensions": dimensions.pop() if len(dimensions) == 1 else 0,
+        "chunks": int(row["chunks"] or 0),
+        "embedded_chunks": int(row["embedded_chunks"] or 0),
+        "embedding_dimensions": min_dimension if min_dimension == max_dimension else 0,
     }
 
 

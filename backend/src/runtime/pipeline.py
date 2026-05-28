@@ -79,7 +79,8 @@ class PipelineStages:
         AsyncGenerator[str, None],
     ]
     run_decision: Callable[
-        [CriteriaPayload, list[ProductPayload], dict[str, list[EvidencePayload]] | None], Awaitable[DecisionResult]
+        ...,
+        Awaitable[DecisionResult],
     ]
 
 
@@ -239,16 +240,18 @@ async def _resolve_intent(
 
     # "换一组" / replace-deck: force recommend intent without LLM call
     if synthetic_intent is None and is_replace_deck_phrase(pipeline_body.message):
-        prev_category = ""
-        try:
-            from src.services.conversation_state import get_previous_criteria
-
-            prev = await get_previous_criteria(ctx.session_id)
-            if prev and prev.category:
-                prev_category = prev.category
-        except Exception:
-            pass
-        synthetic_intent = IntentResult(intent="recommend", category=prev_category or None)
+        prev = await get_previous_criteria(ctx.session_id)
+        if prev is not None:
+            constraints = {
+                key: value for key, value in prev.constraints.model_dump().items() if _has_context_value(value)
+            }
+            synthetic_intent = IntentResult(
+                intent="recommend",
+                category=prev.category or None,
+                extracted_constraints=constraints,
+            )
+        else:
+            synthetic_intent = IntentResult(intent="recommend")
 
     if synthetic_intent is not None:
         intent = synthetic_intent

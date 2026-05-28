@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import logging
 import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
@@ -16,6 +18,7 @@ from src.config.tuning import (
     INTER_CARD_DELAY_MS,
 )
 from src.runtime.cart_rules import message_refers_to_previous_product, quantity_from_intent, referenced_product_id
+from src.runtime.message_rules import is_replace_deck_phrase
 from src.runtime.stages.criteria import criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
 from src.runtime.stages.slot_checker import build_clarification_question
@@ -35,7 +38,7 @@ from src.services.conversation_state import (
 )
 from src.services.decision_scoring import decision_confidence, score_candidates
 from src.services.evidence import get_evidence
-from src.services.fallbacks import get_fallback_events
+from src.services.fallbacks import get_fallback_events, record_fallback
 from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, reason_from_atoms
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
@@ -75,6 +78,8 @@ STREAM_TEXT_DEFAULT_DELAY_MS = 25
 TYPEWRITER_MIN_CHARS = 2
 TYPEWRITER_MAX_CHARS = 6
 TYPEWRITER_PUNCTUATION = set("，。！？；、,.!?;:，。！？")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -303,6 +308,9 @@ async def continue_recommendation_from_criteria(
     ctx.ensure_active()
 
     feedback = await get_feedback_context(ctx.session_id)
+    if _is_replace_deck_request(body):
+        previous_product_ids = await get_previous_product_ids(ctx.session_id)
+        feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
     yield ctx.thinking("searching", "正在检索匹配商品...")
     retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
     ctx.ensure_active()
@@ -344,7 +352,8 @@ async def continue_recommendation_from_criteria(
     if len(products) == 1:
         # Run scoring for consistent decision_status/confidence (PRD 06)
         scored = score_candidates(
-            products, criteria,
+            products,
+            criteria,
             feedback=feedback,
             evidence_by_product=evidences_by_product,
         )
@@ -352,9 +361,17 @@ async def continue_recommendation_from_criteria(
 
         yield _criteria_card_event(ctx, criteria)
         yield ctx.thinking("decision", "正在生成适配建议...")
-        decision = await ctx.stages.run_decision(criteria, products, evidences_by_product)
+        winner = scored[0]
+        decision = await _run_decision_with_context(
+            ctx,
+            criteria,
+            products,
+            evidences_by_product,
+            locked_winner_product_id=winner.product_id,
+            score_breakdown=winner.score_breakdown,
+        )
         merged = DecisionResult(
-            winner_product_id=decision.winner_product_id,
+            winner_product_id=winner.product_id,
             summary=decision.summary,
             why=decision.why,
             not_for=decision.not_for,
@@ -375,11 +392,26 @@ async def continue_recommendation_from_criteria(
             ctx.stages.run_recommendation_text_stream(criteria, products, evidences_by_product),
         ):
             yield event
-    except Exception:
-        pass  # Silently fall back — criteria_card and followup still appear
+    except Exception as exc:
+        record_fallback(
+            "llm.generate_recommendation_stream",
+            "stream_text_failed",
+            error_type=type(exc).__name__,
+        )
+        logger.warning("Recommendation stream text failed; continuing with product cards.", exc_info=True)
 
     # Step 2: criteria_card as post-hoc filter adjustment card
     yield _criteria_card_event(ctx, criteria)
+
+    # Step 2.5: first-round lightweight decision. This gives the turn a
+    # complete loop while explicitly marking the decision as low-confidence.
+    yield _final_decision_event(
+        ctx,
+        criteria,
+        products,
+        _lightweight_initial_decision(criteria, products, evidences_by_product, feedback),
+        deck_id=ctx.deck_id,
+    )
 
     # Step 3: followup guidance text ("你可以自然语言调整...")
     async for event in stream_text(
@@ -469,7 +501,14 @@ async def continue_decision_from_current_deck(
         decision_capture,
         run_with_heartbeat(
             ctx,
-            ctx.stages.run_decision(criteria, products, evidences_by_product),
+            _run_decision_with_context(
+                ctx,
+                criteria,
+                products,
+                evidences_by_product,
+                locked_winner_product_id=winner.product_id,
+                score_breakdown=winner.score_breakdown,
+            ),
             "decision",
             "正在结合你的反馈生成最终建议...",
             timing_key="decision",
@@ -535,6 +574,80 @@ async def _capture_stage_result(
             yield item
 
 
+async def _run_decision_with_context(
+    ctx: StreamContext,
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidences_by_product: dict[str, list[EvidencePayload]],
+    *,
+    locked_winner_product_id: str | None = None,
+    score_breakdown: dict | None = None,
+) -> DecisionResult:
+    kwargs: dict[str, object] = {}
+    if _callable_accepts(ctx.stages.run_decision, "locked_winner_product_id"):
+        kwargs["locked_winner_product_id"] = locked_winner_product_id
+    if _callable_accepts(ctx.stages.run_decision, "score_breakdown"):
+        kwargs["score_breakdown"] = score_breakdown
+    return await ctx.stages.run_decision(criteria, products, evidences_by_product, **kwargs)
+
+
+def _callable_accepts(func: Callable[..., object], parameter_name: str) -> bool:
+    try:
+        parameters = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == parameter_name or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    )
+
+
+def _is_replace_deck_request(body: ChatStreamRequest) -> bool:
+    if body.criteria_patch and body.criteria_patch.get("replace_deck") is True:
+        return True
+    return is_replace_deck_phrase(body.message)
+
+
+def _feedback_with_avoided_products(feedback: dict[str, list[str]], product_ids: list[str]) -> dict[str, list[str]]:
+    if not product_ids:
+        return feedback
+    merged = {key: list(value) for key, value in feedback.items()}
+    merged["avoid_products"] = list(dict.fromkeys([*merged.get("avoid_products", []), *product_ids]))
+    return merged
+
+
+def _lightweight_initial_decision(
+    criteria: CriteriaPayload,
+    products: list[ProductPayload],
+    evidences_by_product: dict[str, list[EvidencePayload]],
+    feedback: dict[str, list[str]],
+) -> DecisionResult:
+    scored = score_candidates(
+        products,
+        criteria,
+        feedback=feedback,
+        evidence_by_product=evidences_by_product,
+    )
+    winner_score = scored[0]
+    winner = next(
+        (product for product in products if product.product_id == winner_score.product_id),
+        products[0],
+    )
+    evidence = evidences_by_product.get(winner.product_id, [])
+    reason_atoms = build_reason_atoms(criteria, winner, evidence)
+    why = [atom.text for atom in reason_atoms[:3] if atom.text]
+    if not why:
+        why = ["当前候选中综合匹配度最高。"]
+    return DecisionResult(
+        winner_product_id=winner.product_id,
+        summary=f"当前先把{winner.name}作为首选候选；继续反馈后我会再收敛。",
+        why=why,
+        not_for=[],
+        decision_status="needs_more_signal",
+        confidence="low",
+        next_step="continue_current_deck",
+    )
+
+
 def _criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> CriteriaCardEvent:
     return CriteriaCardEvent(
         session_id=ctx.session_id,
@@ -589,7 +702,6 @@ async def _product_card_events(
         if rank < len(products):
             ctx.ensure_active()
             await asyncio.sleep(INTER_CARD_DELAY_MS / 1000)
-
 
 
 async def _stream_recommendation_text_events(

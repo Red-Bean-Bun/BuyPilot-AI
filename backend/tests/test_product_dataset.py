@@ -4,7 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.repos.models import Product, ProductChunk
 from src.repos.products import PRODUCT_ASSET_URL_PREFIX, get_raw_product, list_products, list_raw_products
-from src.services.product_ingest import seed_products, seed_products_if_needed
+from src.services.product_ingest import chunk_embedding_stats, seed_products, seed_products_if_needed
 
 
 def test_dataset_is_runtime_product_source():
@@ -66,6 +66,11 @@ async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
     negative_chunks = [chunk for chunk in chunks if chunk.chunk_metadata.get("chunk_type") == "negative_review"]
     assert negative_chunks
     assert all(chunk.chunk_metadata["retrieval_role"] == "risk" for chunk in negative_chunks)
+
+    stats = await chunk_embedding_stats()
+    assert stats["chunks"] == result["chunks"]
+    assert stats["embedded_chunks"] == result["chunks"]
+    assert stats["embedding_dimensions"] == 1024
 
 
 @pytest.mark.asyncio

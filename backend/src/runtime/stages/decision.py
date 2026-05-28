@@ -11,5 +11,14 @@ async def run_decision(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    *,
+    locked_winner_product_id: str | None = None,
+    score_breakdown: dict | None = None,
 ) -> DecisionResult:
-    return await generate_decision(criteria, products, evidence_by_product)
+    return await generate_decision(
+        criteria,
+        products,
+        evidence_by_product,
+        locked_winner_product_id=locked_winner_product_id,
+        score_breakdown=score_breakdown,
+    )
