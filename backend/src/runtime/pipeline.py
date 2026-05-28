@@ -13,7 +13,9 @@ from src.runtime.cancel_registry import StreamCancelled, register_turn, unregist
 from src.runtime.handlers import INTENT_HANDLERS, handle_clarification
 from src.runtime.message_rules import (
     COMMERCIAL_CLAIM_REPLY,
+    extract_adjustment_hints,
     is_commercial_claim_question,
+    is_replace_deck_phrase,
     maybe_intercept_budget_patch,
     message_with_image_context,
 )
@@ -232,8 +234,22 @@ async def _prepare_pipeline_body(
 async def _resolve_intent(
     ctx: StreamContext, pipeline_body: ChatStreamRequest
 ) -> AsyncGenerator[SSEEventBase | StageResult[_ResolvedIntent], None]:
-    # Deterministic budget-patch intercept before LLM intent (铁律3)
+    # Deterministic pre-checks before LLM intent (铁律3)
     pipeline_body, synthetic_intent = await maybe_intercept_budget_patch(ctx.session_id, pipeline_body)
+
+    # "换一组" / replace-deck: force recommend intent without LLM call
+    if synthetic_intent is None and is_replace_deck_phrase(pipeline_body.message):
+        prev_category = ""
+        try:
+            from src.services.conversation_state import get_previous_criteria
+
+            prev = await get_previous_criteria(ctx.session_id)
+            if prev and prev.category:
+                prev_category = prev.category
+        except Exception:
+            pass
+        synthetic_intent = IntentResult(intent="recommend", category=prev_category or None)
+
     if synthetic_intent is not None:
         intent = synthetic_intent
     else:
@@ -253,6 +269,18 @@ async def _resolve_intent(
                 yield intent_item
         if intent is None:
             raise RuntimeError("intent stage completed without a result.")
+
+    # Merge natural-language adjustment hints into extracted constraints
+    adjustment = extract_adjustment_hints(pipeline_body.message)
+    if adjustment and intent.intent in {"recommend", "clarify", "feedback"}:
+        merged = dict(intent.extracted_constraints or {})
+        for key, value in adjustment.items():
+            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
+                merged[key] = list(dict.fromkeys([*merged[key], *value]))
+            else:
+                merged[key] = value
+        intent = intent.model_copy(update={"extracted_constraints": merged})
+
     yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent))
 
 
@@ -338,7 +366,9 @@ def _partial_criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) 
     )
 
 
-async def _emit_unsupported_product_type(ctx: StreamContext, intent: IntentResult) -> AsyncGenerator[SSEEventBase, None]:
+async def _emit_unsupported_product_type(
+    ctx: StreamContext, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
     product_type = (intent.extracted_constraints or {}).get("product_type") or intent.category or "这类商品"
     yield TextDeltaEvent(
         session_id=ctx.session_id,

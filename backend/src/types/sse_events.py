@@ -10,6 +10,7 @@ SCHEMA_VERSION = "2026-05-20"
 CriteriaFieldSource = Literal["user", "inferred", "history"]
 DoneFinishReason = Literal[
     "awaiting_criteria_confirmation",
+    "awaiting_criteria_adjustment",
     "awaiting_product_feedback",
     "completed",
     "cancelled",
@@ -105,6 +106,7 @@ class ProductPayload(BaseModel):
     ingredient_tags: list[str] = Field(default_factory=list)
     ingredient_avoid: list[str] = Field(default_factory=list)
     use_scenario: str | None = None
+    sku_options: list[dict[str, Any]] | None = None
 
 
 class EvidencePayload(BaseModel):
@@ -195,6 +197,11 @@ class FinalDecisionEvent(SSEEventBase):
     not_for: list[str] = Field(default_factory=list)
     alternatives: list[AlternativePayload] = Field(default_factory=list)
     next_actions: list[QuickActionPayload] = Field(default_factory=list)
+    decision_status: Literal["selected", "no_match", "no_suitable_winner", "needs_more_signal"] | None = None
+    confidence: Literal["high", "medium", "low"] | None = None
+    next_step: Literal["adjust_criteria", "replace_deck", "continue_current_deck", "accept_recommendation"] | None = (
+        None
+    )
 
 
 class DoneEvent(SSEEventBase):

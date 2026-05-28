@@ -54,6 +54,8 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
     image_url = _demo_image_url()
 
     scenarios: list[dict[str, Any]] = []
+    # Product-first: recommendation rounds now emit product_card + criteria_card
+    # + done(awaiting_product_feedback); final_decision comes after "继续".
     scenarios.append(
         await _run_turn(
             name="text_budget_beauty",
@@ -62,8 +64,18 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "final_decision": True,
+                "done_reason": "awaiting_product_feedback",
                 "first_evidence_source_id": True,
+            },
+        )
+    )
+    scenarios.append(
+        await _run_turn(
+            name="continue_beauty_decision",
+            session_id=session_id,
+            request=ChatStreamRequest(message="继续"),
+            expect={
+                "final_decision": True,
             },
         )
     )
@@ -75,7 +87,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "final_decision": True,
+                "done_reason": "awaiting_product_feedback",
                 "image_url": bool(image_url),
             },
         )
@@ -88,7 +100,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "final_decision": True,
+                "done_reason": "awaiting_product_feedback",
             },
         )
     )
@@ -100,6 +112,16 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
+                "done_reason": "awaiting_product_feedback",
+            },
+        )
+    )
+    scenarios.append(
+        await _run_turn(
+            name="continue_avoid_decision",
+            session_id=session_id,
+            request=ChatStreamRequest(message="继续"),
+            expect={
                 "final_decision": True,
             },
         )
@@ -169,8 +191,10 @@ def _summarize_events(events: list[SSEEventBase]) -> dict[str, Any]:
     decision_events = [event for event in events if event.event == "final_decision"]
     cart_events = [event for event in events if event.event == "cart_action"]
     error_events = [event for event in events if event.event == "error"]
+    done_events = [event for event in events if event.event == "done"]
     first_product = product_events[0] if product_events else None
     first_evidence = first_product.evidence[0] if first_product and first_product.evidence else None
+    last_done_reason = done_events[-1].finish_reason if done_events else None
     return {
         "events": tags,
         "event_count": len(events),
@@ -187,6 +211,7 @@ def _summarize_events(events: list[SSEEventBase]) -> dict[str, Any]:
         "first_evidence_source_id": first_evidence.source_id if first_evidence else None,
         "first_evidence_chars": len(first_evidence.snippet) if first_evidence else 0,
         "errors": [{"code": event.code, "message": event.message} for event in error_events],
+        "done_reason": last_done_reason,
     }
 
 
@@ -208,6 +233,9 @@ def _evaluate(summary: dict[str, Any], expect: dict[str, Any]) -> tuple[bool, li
         failures.append(f"missing cart_action:{expected_cart_action}")
     if expect.get("image_url") is False:
         failures.append("missing demo image")
+    expected_done = expect.get("done_reason")
+    if expected_done and summary.get("done_reason") != expected_done:
+        failures.append(f"done_reason mismatch: expected {expected_done}, got {summary.get('done_reason')}")
     return not failures, failures
 
 

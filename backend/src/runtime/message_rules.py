@@ -169,6 +169,74 @@ def _is_budget_reduction_phrase(message: str) -> bool:
     return any(pattern.search(message) for pattern in _BUDGET_CAP_PATTERNS)
 
 
+# ── Natural language adjustment hints (PRD 05 §6.5) ──────────────────────
+
+_ADJUST_SOFTEN_PATTERN = re.compile(r"再(.{1,4})(?:一点|些|点儿)")
+_ADJUST_NOT_TOO_PATTERN = re.compile(r"不要太(.{1,6})")
+_ADJUST_AVOID_PATTERN = re.compile(r"不要(.{1,8})")
+_ADJUST_BUDGET_CAP_PATTERN = re.compile(r"预算.{0,3}(\d+(?:\.\d+)?)")
+_ADJUST_BUDGET_LOWER = ("预算再低", "再便宜", "便宜点", "便宜些")
+_ADJUST_BUDGET_HIGHER = ("预算再高", "贵一点", "好一点")
+
+
+def extract_adjustment_hints(message: str) -> dict[str, Any]:
+    """Extract fuzzy adjustment hints from natural-language follow-up messages.
+
+    Returns a dict that can be merged into IntentResult.extracted_constraints
+    to influence criteria generation.
+    """
+    hints: dict[str, Any] = {}
+    text = message.strip()
+
+    m = _ADJUST_SOFTEN_PATTERN.search(text)
+    if m:
+        hints["preference"] = [m.group(1)]
+
+    m = _ADJUST_NOT_TOO_PATTERN.search(text)
+    if m:
+        hints.setdefault("avoid_trait", []).append(m.group(1))
+
+    m = _ADJUST_AVOID_PATTERN.search(text)
+    if m:
+        term = m.group(1).strip()
+        if term not in ("太", "再", "那么", "这么", "含", "含有"):
+            hints.setdefault("ingredient_avoid", []).append(term)
+
+    if any(phrase in text for phrase in _ADJUST_BUDGET_LOWER):
+        hints["budget_direction"] = "lower"
+    elif any(phrase in text for phrase in _ADJUST_BUDGET_HIGHER):
+        hints["budget_direction"] = "higher"
+
+    m = _ADJUST_BUDGET_CAP_PATTERN.search(text)
+    if m:
+        try:
+            hints["budget_max"] = float(m.group(1))
+        except ValueError:
+            pass
+
+    return hints
+
+
+# ── Replace-deck detection (PRD 06 §5.2) ─────────────────────────────────
+
+_REPLACE_DECK_PATTERNS = (
+    "换一组",
+    "换一批",
+    "再来一组",
+    "再来一批",
+    "不看这些了",
+    "这些都不喜欢",
+    "都不合适",
+    "换几个",
+)
+
+
+def is_replace_deck_phrase(message: str) -> bool:
+    """True when the user is asking to replace the current deck with fresh candidates."""
+    lowered = message.strip().lower()
+    return any(pattern in lowered for pattern in _REPLACE_DECK_PATTERNS)
+
+
 def _parse_budget_from_message(message: str, current_budget_max: float | None) -> float | None:
     for pattern in _BUDGET_CAP_PATTERNS:
         match = pattern.search(message)

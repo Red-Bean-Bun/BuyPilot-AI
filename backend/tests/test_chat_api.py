@@ -53,6 +53,7 @@ class TestChatStreamEndpoint:
 
     @pytest.mark.asyncio
     async def test_required_event_types_present(self, test_client):
+        """Product-first: default request includes product_card + criteria_card."""
         async with test_client as c:
             async with c.stream(
                 "POST",
@@ -66,9 +67,8 @@ class TestChatStreamEndpoint:
         assert "criteria_card" in tags
         assert "text_delta" in tags
         assert "done" in tags
-        assert "product_card" not in tags
-        assert "final_decision" not in tags
-        assert events[-1][1]["finish_reason"] == "awaiting_criteria_confirmation"
+        assert "product_card" in tags
+        assert events[-1][1]["finish_reason"] in ("awaiting_product_feedback", "completed")
 
     @pytest.mark.asyncio
     async def test_product_card_has_required_fields(self, test_client):
@@ -92,26 +92,26 @@ class TestChatStreamEndpoint:
 
     @pytest.mark.asyncio
     async def test_event_order_correct(self, test_client):
+        """Product-first: intro text → product_card → criteria_card → done."""
         async with test_client as c:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤", "auto_run": True},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
         tags = [t for t, _ in events]
         first_thinking = tags.index("thinking")
-        first_criteria = tags.index("criteria_card")
         first_text_delta = tags.index("text_delta")
         first_product = tags.index("product_card")
+        first_criteria = tags.index("criteria_card")
         first_done = tags.index("done")
 
         assert first_thinking < first_text_delta
-        assert first_text_delta < first_criteria
-        assert first_criteria < first_product
-        assert first_product < first_done
-        assert "final_decision" not in tags
+        assert first_text_delta < first_product
+        assert first_product < first_criteria
+        assert first_criteria < first_done
 
     @pytest.mark.asyncio
     async def test_text_delta_done_marker(self, test_client):

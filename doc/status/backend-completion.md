@@ -1,8 +1,9 @@
 # BuyPilot-AI 后端完成状态
 
-> 最后核实：2026-05-28
+> 最后核实：2026-05-28（全面整改）
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 核实命令：2026-05-28 增量整改验证 `timeout 90s backend/.venv/bin/python -m pytest backend/tests/test_sse_events.py backend/tests/test_slot_checker.py backend/tests/test_pipeline.py backend/tests/test_contract_remediation.py -q`（28 passed）；`timeout 60s backend/.venv/bin/python -m ruff check backend/src backend/tests/test_pipeline.py backend/tests/test_slot_checker.py backend/tests/test_sse_events.py backend/tests/test_contract_remediation.py` 通过。历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过；`uv run ruff format --check src tests` 通过；Postgres/pgvector reindex 通过（100 products / 1292 chunks / 1292 embedded / 1024 dimensions）；smoke_live_rag 通过（1024 维 + pgvector + 真实 live provider）
+> 本次改动摘要：product-first 流式体验重构 + 决策收敛算法 + SSE 类型扩展。
+> 历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过
 
 ---
 
@@ -15,10 +16,10 @@
 | 3 | 意图识别（7 种意图） | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `services/llm_fallbacks.py` `stages/intent.py` | LLM primary + 关键词规则 fallback，含 `continue`/`view_cart`/`add_to_cart`/`feedback`；`continue` 用于识别标准确认和候选后收敛；`STRICT_RUNTIME=1` 下坏 JSON/无 provider 会显性失败 |
 | 4 | 购买标准生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `stages/criteria.py` | LLM + 规则 fallback，含 `criteria_patch` 合并（列表约束如 ingredient_avoid/brand_avoid 累积去重）+ feedback 注入；strict 下不再静默兜底 |
 | 5 | 推荐解释生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `stages/recommendation.py` | LLM + 规则 fallback，流式 text_delta；strict 下要求有效 live 响应 |
-| 6 | 最终决策生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `stages/decision.py` | LLM + 规则 fallback，含 winner/why/not_for/alternatives；strict 下 winner/schema 不合法会失败 |
+| 6 | 最终决策生成 | ✅ 已完成 | 4.1, PRD 06 | `services/llm_client.py` `stages/decision.py` `services/decision_scoring.py` | **2026-05-28：接入决策评分算法**（retrieval×0.35 + criteria_match×0.25 + user_signal×0.25 + evidence×0.10 - risk×0.05）。LLM 只解释不挑选。三种决策不足态。FinalDecisionEvent 新增 decision_status/confidence/next_step。商业 claims 校验。 |
 | 7 | 数据入库（100 商品 × 1292 semantic chunk） | ✅ 已完成 | 3.5 | `services/product_ingest.py` `services/chunking.py` `scripts/reindex_embeddings.py` | seed 已按 profile/marketing/faq/review/warning/compare 语义 chunk 入库，并在 product_metadata 写入 `knowledge_package`；Postgres reindex 已通过；旧派生表清理必须显式传 `--drop-derived-tables` |
 | 8 | API 端点注册 | ✅ 已完成 | 5.2 | `api/app.py` | 7 个 router 已注册（chat/cancel/feedback/upload/cart/admin_eval/observability），upload 支持 multipart 图片上传；cancel 已接本进程 token + DB cancel request |
-| 9 | 管道编排 | ✅ 已完成 | 4.1 | `runtime/pipeline.py` `runtime/handlers.py` `runtime/streaming.py` | pipeline 只负责 turn 生命周期、图片/意图前置和 handler 路由；2026-05-28 已改为 `criteria_card -> awaiting_criteria_confirmation`、`product_card* -> awaiting_product_feedback`、`final_decision -> completed` 三段式链路 |
+| 9 | 管道编排 | ✅ 已完成 | 4.1, PRD 05/06 | `runtime/pipeline.py` `runtime/handlers.py` `runtime/streaming.py` | **2026-05-28 全面重构：product-first 流**。默认流：intro text_delta → criteria → retrieval → product_card*(带延迟) → LLM 推荐解释流式 → criteria_card → done(awaiting_product_feedback)。候选数量分支（0→no_match, 1→final_decision, 2+→swipe_deck）。自然语言模糊调整解析 + "换一组"机制。移除 auto_run 门控。 |
 | 10 | 混合检索（硬过滤 + pgvector/SQLite 向量召回 + Rerank） | ✅ 已完成 | 4.2 | `services/retriever.py` `repos/documents.py` | PostgreSQL 下使用 pgvector `<=>` 库内 top-k + HNSW index，SQLite 下保留 JSON embedding + Python 余弦 fallback；`retrieval_role=risk` 的负评/风险 chunk 不进入主召回；硬过滤涵盖 category/budget/brand_avoid/origin_avoid/product_type/ingredient_avoid |
 
 ## P1：效果与可靠性（评审权重 20%）+ 加分项启动（20%）
@@ -45,7 +46,13 @@
 | 23 | 评测模块 | ✅ 已完成 | 6.1 | `services/eval/` | 代码实际包含 7 个确定性指标 + 8 个 LLM Judge 指标 + overall_score，Qwen-Plus 做 Judge，无需额外依赖 |
 | 24 | 评测样本（15 条） | ✅ 已完成 | 6.3 | `data/eval/eval_samples.json` | 15 条覆盖 6 种 scenario_type × 4 品类 × 3 难度 |
 | 25 | 管理后台 API | ⚠️ 部分完成 | 5.2 | `api/admin_eval.py` | 已有 GET /admin/eval/runs、GET /admin/eval/runs/{id}、GET /admin/eval/samples、POST /admin/eval/samples/seed；无 POST /admin/eval/runs 触发评测 |
-| 26 | 4 条 Demo 路径稳定性打磨 | ✅ 已完成 | — | `src/scripts/demo_smoke.py` | 真实 Postgres/pgvector + 真实模型 Demo smoke 已验证 6/6 场景通过，覆盖文字推荐、图片理解、多轮约束、加购、查看购物车 |
+| 26 | 4 条 Demo 路径稳定性打磨 | ✅ 已完成 | — | `src/scripts/demo_smoke.py` | **2026-05-28 对齐 product-first 流程**：第一轮验证 product_card+criteria_card+done(awaiting_product_feedback)，第二轮"继续"验证 final_decision。覆盖文字推荐、图片理解、多轮约束、加购、查看购物车 |
+| 37 | ChatGPT 式真 SSE 流式 | ✅ 已完成 | 新需求 | `runtime/handlers.py` | `stream_text()` 逐 chunk 流式（25ms 间隔）；`_stream_recommendation_text_events` 低缓冲透传（50ms timeout）；商品卡节奏化（150ms 间隔） |
+| 38 | 自然语言模糊调整 | ✅ 已完成 | PRD 05 §6.5 | `runtime/message_rules.py` | `extract_adjustment_hints()` 识别"再X一点""不要X""预算再低点"等模式，注入 intent |
+| 39 | "换一组"机制 | ✅ 已完成 | PRD 06 §5.2 | `runtime/message_rules.py` | `is_replace_deck_phrase()` 确定性匹配，强制 intent=recommend + feedback 过滤旧候选 |
+| 40 | SSE 类型扩展 | ✅ 已完成 | PRD 06 | `types/sse_events.py` `contracts/` | DoneFinishReason 新增 awaiting_criteria_adjustment；FinalDecisionEvent 新增 decision_status/confidence/next_step；ProductPayload 新增 sku_options |
+| 41 | 数据路径清理 | ✅ 已完成 | 总评 #8 | `data/processed/*.json` | 100 处个人绝对路径替换为 `/assets/products/...` |
+| 42 | 前后端契约文档刷新 | ✅ 已完成 | 总评 #5 | `contracts/frontend-integration.md` | cancel 状态更新、JSON 上传兼容删除、新字段补充 |
 
 ## 工程质量（评审权重 25%）
 

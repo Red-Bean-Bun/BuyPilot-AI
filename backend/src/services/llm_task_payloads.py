@@ -456,9 +456,7 @@ def criteria_from_live_payload(
 def _normalize_intent_constraints(constraints: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(constraints)
     if "product_type" in normalized:
-        normalized["product_type"] = normalize_product_type(
-            _normalize_nullable_string(normalized.get("product_type"))
-        )
+        normalized["product_type"] = normalize_product_type(_normalize_nullable_string(normalized.get("product_type")))
     return normalized
 
 

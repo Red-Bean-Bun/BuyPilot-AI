@@ -228,12 +228,13 @@ async def generate_decision(
             valid_ids,
         )
         winner_id = valid_ids[0]
-    return DecisionResult(
+    decision = DecisionResult(
         winner_product_id=winner_id,
         summary=parsed.get("summary", f"优先选{winner_id}。"),
         why=parsed.get("why", ["综合匹配度最高"]) if isinstance(parsed.get("why"), list) else ["综合匹配度最高"],
         not_for=parsed.get("not_for", []) if isinstance(parsed.get("not_for"), list) else [],
     )
+    return _sanitize_decision(decision, valid_ids, products)
 
 
 def _require_json_object(text: str, task: str) -> dict[str, Any]:
@@ -264,6 +265,62 @@ def _validate_recommendation_chunks(chunks: list[str], products: list[ProductPay
     forbidden_terms = [term for term in _FORBIDDEN_RECOMMENDATION_TERMS if term in text]
     if forbidden_terms:
         raise RuntimeError(f"Live recommendation text contained unsupported commercial claims: {forbidden_terms}.")
+
+
+# ── Decision text sanitisation (总评 #7) ────────────────────────────────────
+
+_DECISION_FORBIDDEN_TERMS = (
+    "库存",
+    "现货",
+    "有货",
+    "缺货",
+    "优惠券",
+    "满减",
+    "折扣",
+    "打折",
+    "包邮",
+    "免邮",
+    "运费",
+    "下单",
+    "购买链接",
+    "物流",
+    "快递",
+    "发货",
+    "几天到",
+    "送到",
+)
+_DECISION_SAFE_REPLACEMENT = "在当前候选范围内"
+
+
+def _sanitize_decision(
+    decision: DecisionResult,
+    valid_ids: list[str],
+    products: list[ProductPayload],
+) -> DecisionResult:
+    """Remove commercial claims and non-candidate product references from decision text."""
+    candidate_names = {p.name for p in products}
+    all_names = {p.name for p in list_products()}
+    non_candidate_names = sorted(name for name in all_names - candidate_names if name and len(name) >= 2)
+
+    def _clean(text: str) -> str:
+        for term in _DECISION_FORBIDDEN_TERMS:
+            if term in text:
+                text = text.replace(term, _DECISION_SAFE_REPLACEMENT)
+        for name in non_candidate_names:
+            if name in text:
+                text = text.replace(name, _DECISION_SAFE_REPLACEMENT)
+        return text
+
+    # Also check the why/not_for lists
+    return DecisionResult(
+        winner_product_id=decision.winner_product_id,
+        summary=_clean(decision.summary),
+        why=[_clean(w) for w in decision.why],
+        not_for=[_clean(n) for n in decision.not_for],
+        decision_status=decision.decision_status,
+        confidence=decision.confidence,
+        next_step=decision.next_step,
+    )
 
 
 def _json_preview(value: Any) -> str:

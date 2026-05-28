@@ -58,7 +58,9 @@ def annotate_criteria_sources(
     history_fields = _history_source_fields(criteria, existing)
     field_sources: dict[str, str] = {}
     if criteria.category:
-        field_sources["category"] = "user" if "category" in explicit_fields else "history" if "category" in history_fields else "inferred"
+        field_sources["category"] = (
+            "user" if "category" in explicit_fields else "history" if "category" in history_fields else "inferred"
+        )
 
     constraints_update: dict[str, Any] = {}
     for key in Constraints.model_fields:
@@ -140,6 +142,11 @@ def _constraint_chips(constraints: Constraints) -> list[str]:
 
 
 def criteria_quick_actions() -> list[QuickActionPayload]:
+    """Post-hoc filter adjustment actions for criteria_card.
+
+    These are context-free quick actions for the filter card.
+    Category-specific actions are preferred when a category is known.
+    """
     return [
         QuickActionPayload(
             action_id="budget_low",
@@ -158,5 +165,11 @@ def criteria_quick_actions() -> list[QuickActionPayload]:
             label="不要含酒精",
             action="criteria_patch",
             criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
+        ),
+        QuickActionPayload(
+            action_id="replace_deck",
+            label="换一组",
+            action="criteria_patch",
+            criteria_patch={"constraints": {}},
         ),
     ]

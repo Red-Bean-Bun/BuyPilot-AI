@@ -32,9 +32,9 @@ def _check_live_provider() -> None:
         )
     if bailian_key == "test-key":
         raise SystemExit(
-            "SMOKE GATE FAILED: BAILIAN_API_KEY is set to mock value 'test-key'. "
-            "Use real credentials for live smoke."
+            "SMOKE GATE FAILED: BAILIAN_API_KEY is set to mock value 'test-key'. Use real credentials for live smoke."
         )
+
 
 EXPECTED_EMBEDDING_DIMENSIONS = 1024
 

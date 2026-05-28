@@ -98,9 +98,7 @@ def build_audit(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict[str, Any]:
     scenario_rows = _term_candidates(products, SCENARIO_CANDIDATE_TERMS, low_rating_only=False)
 
     uncovered = [row for row in sub_category_rows if not row["supported"]]
-    warning_updates = [
-        row["term"] for row in warning_rows if not row["current_marker"] and row["count"] >= 2
-    ]
+    warning_updates = [row["term"] for row in warning_rows if not row["current_marker"] and row["count"] >= 2]
     scenario_updates = [
         {"term": row["term"], "suggested_value": row["term"]}
         for row in scenario_rows
@@ -179,10 +177,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         _markdown_table(
             ["key", "count", "sample_values"],
-            [
-                [row["key"], row["count"], ", ".join(row["sample_values"])]
-                for row in report["sku_property_keys"]
-            ],
+            [[row["key"], row["count"], ", ".join(row["sample_values"])] for row in report["sku_property_keys"]],
         ),
         "",
         "## Warning Candidates",

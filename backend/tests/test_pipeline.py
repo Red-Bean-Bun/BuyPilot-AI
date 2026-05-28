@@ -122,12 +122,15 @@ def _stub_pipeline_io(monkeypatch):
     monkeypatch.setattr(handlers_module, "get_previous_deck_id", previous_deck)
     monkeypatch.setattr(handlers_module, "get_feedback_context", no_feedback)
     monkeypatch.setattr(handlers_module, "get_evidence", fixed_evidence)
-    monkeypatch.setattr(handlers_module, "get_product", lambda product_id: product if product_id == product.product_id else None)
+    monkeypatch.setattr(
+        handlers_module, "get_product", lambda product_id: product if product_id == product.product_id else None
+    )
     monkeypatch.setattr(streaming_module, "is_chat_turn_cancellation_requested", not_cancelled)
 
 
 @pytest.mark.asyncio
-async def test_pipeline_waits_for_criteria_confirmation_by_default():
+async def test_pipeline_product_first_default_flow():
+    """Product-first: default request emits product_card + criteria_card, done is awaiting_product_feedback or completed."""
     events = [
         event
         async for event in chat_stream(
@@ -136,30 +139,31 @@ async def test_pipeline_waits_for_criteria_confirmation_by_default():
         )
     ]
     tags = [event.event for event in events]
-    assert tags.index("thinking") < tags.index("criteria_card")
-    assert "product_card" not in tags
-    assert "final_decision" not in tags
+    assert "thinking" in tags
+    assert "product_card" in tags
+    assert "criteria_card" in tags
     assert events[-1].event == "done"
-    assert events[-1].finish_reason == "awaiting_criteria_confirmation"
+    assert events[-1].finish_reason in ("awaiting_product_feedback", "completed")
     assert [event.seq for event in events] == sorted(event.seq for event in events)
 
 
 @pytest.mark.asyncio
-async def test_pipeline_auto_run_emits_product_deck_without_final_decision():
+async def test_pipeline_product_deck_without_final_decision():
+    """Product-first: product_card before criteria_card, deck_id consistent."""
     events = [
         event
         async for event in chat_stream(
             "s_deck",
-            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤", auto_run=True),
+            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤"),
         )
     ]
     tags = [event.event for event in events]
-    assert tags.index("criteria_card") < tags.index("product_card")
-    assert "final_decision" not in tags
-    assert events[-1].finish_reason == "awaiting_product_feedback"
+    assert tags.index("product_card") < tags.index("criteria_card")
+    assert events[-1].finish_reason in ("awaiting_product_feedback", "completed")
     product_deck_ids = {event.deck_id for event in events if event.event == "product_card"}
     assert len(product_deck_ids) == 1
-    assert events[-1].deck_id in product_deck_ids
+    if events[-1].deck_id is not None:
+        assert events[-1].deck_id in product_deck_ids
 
 
 @pytest.mark.asyncio

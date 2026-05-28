@@ -13,6 +13,7 @@ from src.config.tuning import (
     CHEAPER_BUDGET_DEFAULT_MAX,
     CHEAPER_BUDGET_MIN_MAX,
     CHEAPER_BUDGET_RATIO,
+    INTER_CARD_DELAY_MS,
 )
 from src.runtime.cart_rules import message_refers_to_previous_product, quantity_from_intent, referenced_product_id
 from src.runtime.stages.criteria import criteria_quick_actions
@@ -32,12 +33,13 @@ from src.services.conversation_state import (
     get_previous_product_ids,
     save_recommendation_turn,
 )
+from src.services.decision_scoring import decision_confidence, score_candidates
 from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events
 from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, reason_from_atoms
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
-from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
+from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
 from src.types.sse_events import (
     AlternativePayload,
     CartActionEvent,
@@ -56,13 +58,23 @@ from src.types.sse_events import (
 
 IntentHandler = Callable[[StreamContext, ChatStreamRequest, IntentResult], AsyncGenerator[SSEEventBase, None]]
 T = TypeVar("T")
-CRITERIA_CONFIRMATION_PROMPT = "你可以先确认或修改这些标准。没问题的话回复「继续」，我再开始推荐。"
-CLARIFICATION_ANALYSIS_TEXT = "我先看了一下你的需求，已经能判断大方向，但还缺一个会影响推荐标准的关键信息。补齐后再生成购买标准会更稳。"
-CRITERIA_ANALYSIS_TEXT = "我先把你的需求拆成可执行的购买标准，包含品类、预算、适用对象、使用场景和排除项。你可以先确认这版标准。"
+CLARIFICATION_ANALYSIS_TEXT = (
+    "我先看了一下你的需求，已经能判断大方向，但还缺一个会影响推荐标准的关键信息。补齐后再生成购买标准会更稳。"
+)
 RECOMMENDATION_STREAM_FALLBACK_TEXT = "我先把匹配商品列出来，方便你快速比较。"
-RECOMMENDATION_STREAM_MIN_CHARS = 3
+RECOMMENDATION_STREAM_MIN_CHARS = 1
 RECOMMENDATION_STREAM_MAX_CHARS = 8
 RECOMMENDATION_STREAM_BOUNDARIES = set("，。！？；、,.!?;:\n")
+INTRO_TEXT_NO_CONSTRAINTS = "正在为你查找匹配商品..."
+FOLLOWUP_TEXT_DEFAULT = (
+    "你先看看这几款候选。如果想调整筛选范围，可以直接说「再温和一点」「不要酒精」「预算再低一点」，也可以点筛选卡修改。"
+)
+FOLLOWUP_TEXT_NO_MATCH = "当前条件下暂时没有匹配的商品。你可以放宽预算、换一个品类，或者去掉一些排除条件试试。"
+
+STREAM_TEXT_DEFAULT_DELAY_MS = 25
+TYPEWRITER_MIN_CHARS = 2
+TYPEWRITER_MAX_CHARS = 6
+TYPEWRITER_PUNCTUATION = set("，。！？；、,.!?;:，。！？")
 
 
 @dataclass
@@ -205,11 +217,11 @@ async def handle_chitchat(
 async def handle_clarification(ctx: StreamContext, missing_slots: list[str]) -> AsyncGenerator[SSEEventBase, None]:
     question, options = build_clarification_question(missing_slots)
     yield ctx.thinking("clarifying", "需要补充一个关键信息。")
-    for event in _text_delta_from_text(
+    async for event in stream_text(
         ctx,
+        CLARIFICATION_ANALYSIS_TEXT,
         message_id=f"clarification_analysis_{ctx.turn_id}",
         node_id=f"clarification_analysis_{ctx.turn_id}",
-        text=CLARIFICATION_ANALYSIS_TEXT,
     ):
         yield event
     yield ClarificationEvent(
@@ -232,6 +244,16 @@ async def handle_recommendation(
     if intent.intent == "feedback":
         await _record_feedback_intent(ctx, intent, body.message)
 
+    # Product-first: intro text starts immediately while criteria is generated
+    intro_text = _build_intro_text(intent, body.message)
+    async for event in stream_text(
+        ctx,
+        intro_text,
+        message_id=f"intro_{ctx.turn_id}",
+        node_id=f"intro_{ctx.turn_id}",
+    ):
+        yield event
+
     yield ctx.thinking("criteria", "正在生成购买标准...")
     criteria_capture: CapturedStage[CriteriaPayload] = CapturedStage()
     ctx.ensure_active()
@@ -248,21 +270,7 @@ async def handle_recommendation(
         yield event
     criteria = criteria_capture.require("criteria")
 
-    for event in _text_delta_from_text(
-        ctx,
-        message_id=f"criteria_analysis_{ctx.turn_id}",
-        node_id=f"criteria_analysis_{ctx.turn_id}",
-        text=CRITERIA_ANALYSIS_TEXT,
-    ):
-        yield event
-
-    yield _criteria_card_event(ctx, criteria)
-    if not _should_continue_after_criteria(body):
-        yield _criteria_confirmation_event(ctx)
-        await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
-        yield ctx.done("awaiting_criteria_confirmation")
-        return
-
+    # Always continue to retrieval — no more auto_run gate
     async for event in continue_recommendation_from_criteria(ctx, body, criteria):
         yield event
 
@@ -312,25 +320,57 @@ async def continue_recommendation_from_criteria(
     retrieval = retrieval_capture.require("retrieval")
 
     products = retrieval.products
+    evidences_by_product = dict(retrieval.evidence_by_product)
+
+    # Branch 0: no matching products
     if not products:
-        yield TextDeltaEvent(
-            session_id=ctx.session_id,
-            turn_id=ctx.turn_id,
-            seq=ctx.seq.next(),
-            event_id=ctx.seq.event_id(),
-            node_id=f"ai_text_{ctx.turn_id}",
-            created_at_ms=now_ms(),
-            message_id=f"msg_{ctx.turn_id}",
-            delta="在您给定的条件下暂时没有匹配的商品，可以放宽预算或品类试试。",
-            done=True,
-        )
+        yield _criteria_card_event(ctx, criteria)
+        async for event in stream_text(
+            ctx,
+            FOLLOWUP_TEXT_NO_MATCH,
+            message_id=f"no_match_{ctx.turn_id}",
+            node_id=f"no_match_{ctx.turn_id}",
+        ):
+            yield event
         await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
-        yield ctx.done()
+        yield ctx.done("awaiting_criteria_adjustment")
         return
 
-    evidences_by_product = dict(retrieval.evidence_by_product)
-    yield ctx.thinking("searching", f"找到{len(products)}个匹配商品...")
+    # Emit product cards with pacing delay (built into _product_card_events)
     async for event in _product_card_events(ctx, criteria, products, evidences_by_product):
+        yield event
+
+    # Branch 1: single product — direct to final_decision
+    if len(products) == 1:
+        yield _criteria_card_event(ctx, criteria)
+        yield ctx.thinking("decision", "正在生成适配建议...")
+        decision = await ctx.stages.run_decision(criteria, products, evidences_by_product)
+        yield _final_decision_event(ctx, criteria, products, decision)
+        await _persist_recommendation(ctx, body, criteria, retrieval)
+        yield ctx.done("completed")
+        return
+
+    # Branch 2+: LLM explanation → criteria_card → followup guidance → done
+    # Step 1: LLM recommendation explanation ("为什么先给这些")
+    try:
+        async for event in _stream_recommendation_text_events(
+            ctx,
+            ctx.stages.run_recommendation_text_stream(criteria, products, evidences_by_product),
+        ):
+            yield event
+    except Exception:
+        pass  # Silently fall back — criteria_card and followup still appear
+
+    # Step 2: criteria_card as post-hoc filter adjustment card
+    yield _criteria_card_event(ctx, criteria)
+
+    # Step 3: followup guidance text ("你可以自然语言调整...")
+    async for event in stream_text(
+        ctx,
+        FOLLOWUP_TEXT_DEFAULT,
+        message_id=f"followup_{ctx.turn_id}",
+        node_id=f"followup_{ctx.turn_id}",
+    ):
         yield event
 
     await _persist_recommendation(ctx, body, criteria, retrieval)
@@ -351,10 +391,61 @@ async def continue_decision_from_current_deck(
         async for event in handle_clarification(ctx, ["product_type"]):
             yield event
         return
+
+    # Filter out disliked products
     filtered_products = [product for product in products if product.product_id not in avoided]
-    if filtered_products:
-        products = filtered_products
+
+    # Decision state B: all candidates excluded by user
+    if not filtered_products:
+        yield _final_decision_event(
+            ctx,
+            criteria,
+            products,
+            DecisionResult(
+                winner_product_id="",
+                summary="当前候选都不太符合你的偏好。你可以换一组商品，或者调整筛选条件后重新推荐。",
+                why=[],
+                not_for=[p.product_id for p in products],
+                decision_status="no_suitable_winner",
+                confidence=None,
+                next_step="replace_deck",
+            ),
+            deck_id=deck_id,
+        )
+        yield _criteria_card_event(ctx, criteria)
+        await save_recommendation_turn(
+            ctx.session_id,
+            criteria,
+            [product.product_id for product in products],
+            deck_id=deck_id,
+            user_message=body.message,
+        )
+        yield ctx.done("awaiting_criteria_adjustment")
+        return
+
+    products = filtered_products
     evidences_by_product = {product.product_id: await get_evidence(product) for product in products}
+
+    # Run scoring algorithm (PRD 06) before LLM
+    scored = score_candidates(
+        products,
+        criteria,
+        feedback=feedback,
+        evidence_by_product=evidences_by_product,
+    )
+    winner = scored[0]
+    user_signal_count = sum(1 for pid in feedback.get("avoid_products", []) if pid) + sum(
+        1 for pid in feedback.get("prefer_traits", []) if pid
+    )
+    status, confidence = decision_confidence(scored, user_signal_count=user_signal_count)
+
+    # Determine next_step from decision status
+    next_step: str | None = None
+    if status == "selected":
+        next_step = "accept_recommendation"
+    elif status == "needs_more_signal":
+        next_step = "continue_current_deck"
+
     yield ctx.thinking("decision", "正在结合你的反馈生成最终建议...")
     decision_capture: CapturedStage[DecisionResult] = CapturedStage()
     async for event in _capture_stage_result(
@@ -368,16 +459,27 @@ async def continue_decision_from_current_deck(
         ),
     ):
         yield event
-    decision = decision_capture.require("decision")
+    llm_decision = decision_capture.require("decision")
 
-    yield _final_decision_event(ctx, criteria, products, decision, deck_id=deck_id)
+    # Lock winner to scoring result; LLM is only for explanation
+    merged = DecisionResult(
+        winner_product_id=winner.product_id,
+        summary=llm_decision.summary,
+        why=llm_decision.why,
+        not_for=llm_decision.not_for,
+        decision_status=status,
+        confidence=confidence,
+        next_step=next_step,
+    )
+
+    yield _final_decision_event(ctx, criteria, products, merged, deck_id=deck_id)
     await save_recommendation_turn(
         ctx.session_id,
         criteria,
         [product.product_id for product in products],
         deck_id=deck_id,
         user_message=body.message,
-        ai_response=decision.summary,
+        ai_response=merged.summary,
     )
     yield ctx.done()
 
@@ -467,28 +569,10 @@ async def _product_card_events(
                 ),
             ],
         )
+        if rank < len(products):
+            ctx.ensure_active()
+            await asyncio.sleep(INTER_CARD_DELAY_MS / 1000)
 
-
-def _text_delta_events(ctx: StreamContext, recommendation: RecommendationResult) -> list[TextDeltaEvent]:
-    message_id = f"msg_{ctx.turn_id}"
-    text_chunks = recommendation.text_chunks or ["我先把匹配商品列出来，方便你快速比较。"]
-    events: list[TextDeltaEvent] = []
-    for index, chunk in enumerate(text_chunks):
-        ctx.ensure_active()
-        events.append(
-            TextDeltaEvent(
-                session_id=ctx.session_id,
-                turn_id=ctx.turn_id,
-                seq=ctx.seq.next(),
-                event_id=ctx.seq.event_id(),
-                node_id=f"ai_text_{ctx.turn_id}",
-                created_at_ms=now_ms(),
-                message_id=message_id,
-                delta=chunk,
-                done=index == len(text_chunks) - 1,
-            )
-        )
-    return events
 
 
 async def _stream_recommendation_text_events(
@@ -515,9 +599,15 @@ async def _stream_recommendation_text_events(
         while True:
             ctx.ensure_active()
             try:
-                kind, value = await asyncio.wait_for(queue.get(), timeout=ctx.heartbeat_interval_seconds)
+                kind, value = await asyncio.wait_for(queue.get(), timeout=0.05)
             except asyncio.TimeoutError:
-                yield ctx.thinking("recommending", "正在生成推荐解释...")
+                # Fast 50ms timeout for low-latency delta passthrough
+                if buffer:
+                    # Flush accumulated buffer on timeout
+                    chunk, buffer = buffer, ""
+                    if chunk:
+                        emitted = True
+                        yield _text_delta_event(ctx, message_id=message_id, node_id=node_id, delta=chunk, done=False)
                 continue
 
             if kind == "delta":
@@ -585,50 +675,89 @@ def _text_delta_event(
     )
 
 
-def _text_delta_from_text(
+def _split_for_typewriter(text: str) -> list[str]:
+    """Split text into typewriter-friendly chunks at punctuation boundaries."""
+    if not text:
+        return []
+    chunks: list[str] = []
+    buf = ""
+    for char in text:
+        buf += char
+        if char in TYPEWRITER_PUNCTUATION or len(buf) >= TYPEWRITER_MAX_CHARS:
+            chunks.append(buf)
+            buf = ""
+    if buf:
+        chunks.append(buf)
+    # Merge very short trailing chunks
+    if len(chunks) >= 2 and len(chunks[-1]) < TYPEWRITER_MIN_CHARS:
+        chunks[-2] += chunks[-1]
+        chunks.pop()
+    return chunks
+
+
+async def stream_text(
     ctx: StreamContext,
-    *,
-    message_id: str,
-    node_id: str,
     text: str,
-    chunk_size: int = 18,
-) -> list[TextDeltaEvent]:
-    chunks = [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)] or [""]
-    events: list[TextDeltaEvent] = []
-    for index, chunk in enumerate(chunks):
+    message_id: str | None = None,
+    node_id: str | None = None,
+    delay_ms: int = STREAM_TEXT_DEFAULT_DELAY_MS,
+) -> AsyncGenerator[TextDeltaEvent, None]:
+    """Yield text as progressively arriving TextDeltaEvents with real delays."""
+    mid = message_id or f"msg_{ctx.turn_id}"
+    nid = node_id or f"ai_text_{ctx.turn_id}"
+    chunks = _split_for_typewriter(text)
+    for i, chunk in enumerate(chunks):
         ctx.ensure_active()
-        events.append(
-            TextDeltaEvent(
-                session_id=ctx.session_id,
-                turn_id=ctx.turn_id,
-                seq=ctx.seq.next(),
-                event_id=ctx.seq.event_id(),
-                node_id=node_id,
-                created_at_ms=now_ms(),
-                message_id=message_id,
-                delta=chunk,
-                done=index == len(chunks) - 1,
-            )
+        yield TextDeltaEvent(
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            seq=ctx.seq.next(),
+            event_id=ctx.seq.event_id(),
+            node_id=nid,
+            created_at_ms=now_ms(),
+            message_id=mid,
+            delta=chunk,
+            done=False,
         )
-    return events
-
-
-def _criteria_confirmation_event(ctx: StreamContext) -> TextDeltaEvent:
-    return TextDeltaEvent(
+        if i < len(chunks) - 1:
+            await asyncio.sleep(delay_ms / 1000)
+    yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
         seq=ctx.seq.next(),
         event_id=ctx.seq.event_id(),
-        node_id=f"criteria_confirmation_{ctx.turn_id}",
+        node_id=nid,
         created_at_ms=now_ms(),
-        message_id=f"criteria_confirmation_{ctx.turn_id}",
-        delta=CRITERIA_CONFIRMATION_PROMPT,
+        message_id=mid,
+        delta="",
         done=True,
     )
 
 
-def _should_continue_after_criteria(body: ChatStreamRequest) -> bool:
-    return "recommendation" in body.skip_stages or body.auto_run
+def _build_intro_text(intent: IntentResult, _message: str) -> str:
+    """Construct the product-first intro text from intent data."""
+    parts: list[str] = []
+    if intent.category:
+        parts.append(intent.category)
+    constraints = intent.extracted_constraints or {}
+    budget = constraints.get("budget_max")
+    if budget is not None:
+        try:
+            parts.append(f"{float(budget):g}元以内")
+        except (ValueError, TypeError):
+            pass
+    product_type = constraints.get("product_type")
+    if product_type:
+        parts.append(str(product_type))
+    scenario = constraints.get("use_scenario")
+    if scenario:
+        parts.append(str(scenario))
+    skin = constraints.get("skin_type")
+    if skin:
+        parts.append(f"{skin}肌肤")
+    if parts:
+        return f"我先按{'、'.join(parts)}这几个条件找一组候选。"
+    return INTRO_TEXT_NO_CONSTRAINTS
 
 
 def _final_decision_event(
@@ -665,6 +794,9 @@ def _final_decision_event(
             ),
             QuickActionPayload(action_id="compare", label="加入对比", action="compare"),
         ],
+        decision_status=decision.decision_status,
+        confidence=decision.confidence,
+        next_step=decision.next_step,
     )
 
 

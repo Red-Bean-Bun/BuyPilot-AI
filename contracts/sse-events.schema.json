@@ -86,7 +86,8 @@
         "skin_type_match": { "type": "array", "items": { "type": "string" } },
         "ingredient_tags": { "type": "array", "items": { "type": "string" } },
         "ingredient_avoid": { "type": "array", "items": { "type": "string" } },
-        "use_scenario": { "type": ["string", "null"] }
+        "use_scenario": { "type": ["string", "null"] },
+        "sku_options": { "type": ["array", "null"], "items": { "type": "object" } }
       },
       "required": ["product_id", "name"]
     },
@@ -242,7 +243,10 @@
             "why": { "type": "array", "items": { "type": "string" } },
             "not_for": { "type": "array", "items": { "type": "string" } },
             "alternatives": { "type": "array", "items": { "$ref": "#/$defs/alternative_payload" } },
-            "next_actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } }
+            "next_actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } },
+            "decision_status": { "type": ["string", "null"], "enum": ["selected", "no_match", "no_suitable_winner", "needs_more_signal", null] },
+            "confidence": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] },
+            "next_step": { "type": ["string", "null"], "enum": ["adjust_criteria", "replace_deck", "continue_current_deck", "accept_recommendation", null] }
           },
           "required": ["event", "winner_product_id", "summary"]
         }
@@ -258,7 +262,7 @@
             "display_mode": { "const": "none" },
             "finish_reason": {
               "type": "string",
-              "enum": ["awaiting_criteria_confirmation", "awaiting_product_feedback", "completed", "cancelled", "error"]
+              "enum": ["awaiting_criteria_confirmation", "awaiting_criteria_adjustment", "awaiting_product_feedback", "completed", "cancelled", "error"]
             }
           },
           "required": ["event", "finish_reason"]

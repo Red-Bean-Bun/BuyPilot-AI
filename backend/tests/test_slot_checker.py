@@ -12,9 +12,9 @@ def test_category_present_product_type_present_no_missing_slots():
 
 
 def test_category_present_product_type_missing_no_constraints():
-    """No product_type and no narrowing constraints → ask for product_type."""
+    """No product_type and no narrowing constraints → product-first, don't block."""
     intent = IntentResult(intent="recommend", category="美妆护肤")
-    assert check_required_slots("推荐护肤品", intent) == ["product_type"]
+    assert check_required_slots("推荐护肤品", intent) == []
 
 
 def test_category_present_product_type_missing_but_has_budget():

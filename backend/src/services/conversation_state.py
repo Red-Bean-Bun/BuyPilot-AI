@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from src.repos.conversations import get_last_criteria, get_last_deck_id, get_last_product_ids, list_recent_turns, save_turn
+from src.repos.conversations import (
+    get_last_criteria,
+    get_last_deck_id,
+    get_last_product_ids,
+    list_recent_turns,
+    save_turn,
+)
 from src.types.sse_events import CriteriaPayload
 
 

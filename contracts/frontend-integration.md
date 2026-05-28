@@ -36,8 +36,8 @@ cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 |--------|------|------|------|
 | GET | `/health` | 健康检查 | ✅ |
 | POST | `/chat/stream` | SSE 流式导购主链路 | ✅ |
-| POST | `/chat/cancel` | 取消指定 turn（当前为 stub） | ⚠️ |
-| POST | `/upload/image` | 图片上传（multipart + JSON 兼容） | ✅ |
+| POST | `/chat/cancel` | 取消指定 turn（best-effort 持久化） | ✅ |
+| POST | `/upload/image` | 图片上传（仅支持 multipart/form-data） | ✅ |
 | POST | `/chat/upload/image` | 图片上传兼容路径（不在 OpenAPI schema 中） | ✅ |
 | POST | `/feedback` | 用户反馈 | ✅ |
 | POST | `/chat/feedback` | 用户反馈兼容路径（不在 OpenAPI schema 中） | ✅ |
@@ -118,15 +118,14 @@ data: <JSON>
 }
 ```
 
-> ⚠️ 当前为 best-effort stub：返回 `canceled: true` 但不真正中断正在执行的 LLM/RAG 任务。
+> Best-effort cancellation：写入 DB cancel request，pipeline heartbeat 跨进程检测。同一进程内通过 cancel_token 快速中断。
 
 ---
 
 ### 3.4 `POST /upload/image` — 图片上传
 
-支持两种 Content-Type：
+仅支持 **multipart/form-data**（非 multipart 请求返回 415）：
 
-**multipart/form-data（推荐）：**
 ```
 POST /upload/image
 Content-Type: multipart/form-data; boundary=...
@@ -137,14 +136,6 @@ Content-Type: image/jpeg
 
 <binary image data>
 --boundary--
-```
-
-**application/json（兼容旧客户端）：**
-```json
-{
-  "file_name": "product.jpg",
-  "content_type": "image/jpeg"
-}
 ```
 
 **响应 (`ImageUploadResponse`)：**
@@ -386,18 +377,35 @@ Content-Type: image/jpeg
   "next_actions": [
     { "action_id": "compare", "label": "对比商品", "action": "compare" },
     { "action_id": "restart", "label": "重新推荐", "action": "feedback", "feedback_type": "restart" }
-  ]
+  ],
+  "decision_status": "selected",
+  "confidence": "high",
+  "next_step": "accept_recommendation"
 }
 ```
+
+**新增字段（v0.3）：**
+- `decision_status` (string | null)：`selected` / `no_match` / `no_suitable_winner` / `needs_more_signal`
+- `confidence` (string | null)：`high` / `medium` / `low`
+- `next_step` (string | null)：`adjust_criteria` / `replace_deck` / `continue_current_deck` / `accept_recommendation`
 
 ### 4.8 `done` — 流结束信号
 
 ```json
 {
   "event": "done",
-  "display_mode": "none"
+  "display_mode": "none",
+  "finish_reason": "awaiting_product_feedback",
+  "deck_id": "deck_turn_abc123"
 }
 ```
+
+`finish_reason` 取值：
+- `awaiting_product_feedback` — 候选已展示，等待用户反馈/继续
+- `awaiting_criteria_adjustment` — 无匹配或全部排除，等待用户调整筛选
+- `completed` — 流正常结束（含 final_decision）
+- `cancelled` — 用户取消
+- `error` — 异常终止
 
 收到 `done` 后前端关闭 loading 状态，本次 SSE 流完整结束。
 

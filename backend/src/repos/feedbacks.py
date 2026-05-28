@@ -48,9 +48,7 @@ async def get_session_feedbacks(session_id: str, deck_id: str | None = None) -> 
         stmt = select(Feedback).where(Feedback.session_id == session_id)
         if deck_id is not None:
             stmt = stmt.where(Feedback.deck_id == deck_id)
-        rows = (
-            await session.exec(stmt.order_by(Feedback.created_at))
-        ).all()
+        rows = (await session.exec(stmt.order_by(Feedback.created_at))).all()
     return [
         FeedbackRecord(
             session_id=row.session_id,

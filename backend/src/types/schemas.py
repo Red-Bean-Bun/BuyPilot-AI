@@ -114,6 +114,9 @@ class DecisionResult(BaseModel):
     summary: str
     why: list[str] = Field(default_factory=list)
     not_for: list[str] = Field(default_factory=list)
+    decision_status: str | None = None
+    confidence: str | None = None
+    next_step: str | None = None
 
 
 class SessionState(BaseModel):

@@ -12,6 +12,11 @@ _NARROWING_CONSTRAINT_KEYS = frozenset(
 
 
 def check_required_slots(message: str, intent: IntentResult) -> list[str]:
+    """Return missing required slots. Only clarifies when truly missing key entry info.
+
+    Product-first: if the user has given a category or any narrowing constraint,
+    don't block — go straight to broad candidates and let criteria_card guide narrowing.
+    """
     if intent.intent not in {"recommend", "clarify"}:
         return []
     missing: list[str] = []
@@ -20,10 +25,11 @@ def check_required_slots(message: str, intent: IntentResult) -> list[str]:
         return missing
     if intent.category in KNOWN_CATEGORIES:
         product_type = (intent.extracted_constraints or {}).get("product_type")
+        # Only clarify budget for high-variance digital categories with no price hint
         if _needs_budget(intent.category, product_type, intent.extracted_constraints or {}):
             missing.append("budget")
-        if not product_type and not _has_narrowing_constraints(intent.extracted_constraints or {}):
-            missing.append("product_type")
+        # Product-first: no longer clarify for missing product_type —
+        # broad candidates + criteria_card will do the narrowing
     return missing
 
 
