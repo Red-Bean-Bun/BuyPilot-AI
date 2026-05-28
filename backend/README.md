@@ -25,6 +25,18 @@ uv run -m src.scripts.demo_smoke
 
 SQLite remains useful for local unit tests and development, but judge/demo verification should use the compose path above so pgvector, live embedding, rerank, and LLM providers are exercised together.
 
+### Cloudflare Tunnel
+
+Deploy the same compose runtime behind Cloudflare with the override in `deploy/docker-compose.cloudflare.yml`.
+See `deploy/cloudflare.md` from the project root for the Cloudflare dashboard steps and Android endpoint update.
+
+```bash
+docker compose --env-file .env \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.cloudflare.yml \
+  up --build -d
+```
+
 ### Local Development
 
 ```bash

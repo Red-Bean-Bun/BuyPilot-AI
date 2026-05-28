@@ -38,9 +38,9 @@ _load_env_file(PROJECT_DIR / ".env")
 
 TASK_MODEL_MAP: dict[str, dict[str, str | None]] = {
     "analyze_intent": {"primary": "qwen_turbo", "fallback": "doubao_intent"},
-    "generate_criteria": {"primary": "qwen_plus", "fallback": "doubao_generation"},
-    "generate_recommendation": {"primary": "qwen_plus", "fallback": "doubao_generation"},
-    "generate_decision": {"primary": "qwen_plus", "fallback": "doubao_generation"},
+    "generate_criteria": {"primary": "qwen_turbo", "fallback": "doubao_generation"},
+    "generate_recommendation": {"primary": "qwen_turbo", "fallback": "doubao_generation"},
+    "generate_decision": {"primary": "qwen_turbo", "fallback": "doubao_generation"},
     "analyze_image": {"primary": "qwen_vl_plus", "fallback": None},
     "embedding": {"primary": "qwen_embedding", "fallback": None},
     "rerank": {"primary": "gte_rerank", "fallback": None},

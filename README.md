@@ -140,6 +140,17 @@ uv run -m src.scripts.demo_smoke
 
 说明：本地 SQLite 只作为日常开发路径；答辩/评委验收优先使用 `deploy/docker-compose.yml` 的 PostgreSQL + pgvector 环境。
 
+### Cloudflare 部署
+
+后端推荐通过 Cloudflare Tunnel 暴露现有 Docker Compose 服务，避免把 FastAPI + pgvector + SSE 强行迁到 Worker 运行时。配置见 [`deploy/cloudflare.md`](deploy/cloudflare.md)。
+
+```bash
+docker compose --env-file .env \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.cloudflare.yml \
+  up --build -d
+```
+
 ### 开发路径
 
 ```bash
