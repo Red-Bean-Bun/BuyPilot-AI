@@ -141,35 +141,105 @@ def _constraint_chips(constraints: Constraints) -> list[str]:
     return chips
 
 
-def criteria_quick_actions() -> list[QuickActionPayload]:
-    """Post-hoc filter adjustment actions for criteria_card.
+def criteria_quick_actions(category: str | None = None) -> list[QuickActionPayload]:
+    """Post-hoc filter adjustment actions for criteria_card, per category.
 
-    These are context-free quick actions for the filter card.
-    Category-specific actions are preferred when a category is known.
+    Returns category-specific quick-adjust actions plus a shared "换一组".
+    When category is None, defaults to the beauty-skincare set for backward
+    compatibility.
     """
-    return [
-        QuickActionPayload(
-            action_id="budget_low",
-            label="预算压低",
-            action="criteria_patch",
-            criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_DEFAULT_MAX}},
-        ),
-        QuickActionPayload(
-            action_id="sensitive_skin",
-            label="敏感肌适用",
-            action="criteria_patch",
-            criteria_patch={"constraints": {"skin_type": "敏感"}},
-        ),
-        QuickActionPayload(
-            action_id="no_alcohol",
-            label="不要含酒精",
-            action="criteria_patch",
-            criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
-        ),
-        QuickActionPayload(
-            action_id="replace_deck",
-            label="换一组",
-            action="criteria_patch",
-            criteria_patch={"constraints": {}},
-        ),
-    ]
+    budget_action = QuickActionPayload(
+        action_id="budget_low",
+        label="预算压低",
+        action="criteria_patch",
+        criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_DEFAULT_MAX}},
+    )
+    replace_action = QuickActionPayload(
+        action_id="replace_deck",
+        label="换一组",
+        action="criteria_patch",
+        criteria_patch={"constraints": {}},
+    )
+
+    if not category:
+        # Fallback: generic + beauty defaults
+        return [
+            budget_action,
+            QuickActionPayload(
+                action_id="sensitive_skin",
+                label="敏感肌适用",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"skin_type": "敏感"}},
+            ),
+            QuickActionPayload(
+                action_id="no_alcohol",
+                label="不要含酒精",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
+            ),
+            replace_action,
+        ]
+
+    _ACTIONS: dict[str, list[QuickActionPayload]] = {
+        "美妆护肤": [
+            budget_action,
+            QuickActionPayload(
+                action_id="sensitive_skin",
+                label="敏感肌适用",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"skin_type": "敏感"}},
+            ),
+            QuickActionPayload(
+                action_id="no_alcohol",
+                label="不要含酒精",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
+            ),
+        ],
+        "数码电子": [
+            budget_action,
+            QuickActionPayload(
+                action_id="storage_256",
+                label="256G以上",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"storage": "256GB"}},
+            ),
+            QuickActionPayload(
+                action_id="large_screen",
+                label="大屏幕",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"screen_size": "6.5英寸以上"}},
+            ),
+        ],
+        "服饰运动": [
+            budget_action,
+            QuickActionPayload(
+                action_id="sport_running",
+                label="跑步",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"sport_type": "跑步"}},
+            ),
+            QuickActionPayload(
+                action_id="season_spring",
+                label="春夏款",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"season": "春夏"}},
+            ),
+        ],
+        "食品生活": [
+            budget_action,
+            QuickActionPayload(
+                action_id="dietary_sugar_free",
+                label="无糖",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"dietary": ["无糖"]}},
+            ),
+            QuickActionPayload(
+                action_id="dietary_low_fat",
+                label="低脂",
+                action="criteria_patch",
+                criteria_patch={"constraints": {"dietary": ["低脂"]}},
+            ),
+        ],
+    }
+    return _ACTIONS.get(category, _ACTIONS["美妆护肤"]) + [replace_action]

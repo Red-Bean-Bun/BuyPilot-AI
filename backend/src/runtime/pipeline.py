@@ -362,7 +362,7 @@ def _partial_criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) 
         node_id=f"criteria_{criteria.criteria_id}",
         created_at_ms=now_ms(),
         criteria=criteria,
-        quick_actions=criteria_quick_actions(),
+        quick_actions=criteria_quick_actions(category=criteria.category or None),
     )
 
 
