@@ -31,6 +31,7 @@ data class ChatCancelRequest(
 @Serializable
 data class FeedbackRequest(
     @SerialName("session_id") val sessionId: String,
+    @SerialName("deck_id") val deckId: String? = null,
     @SerialName("product_id") val productId: String? = null,
     @SerialName("feedback_type") val feedbackType: String? = null,
     val action: String? = null,

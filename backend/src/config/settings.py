@@ -55,10 +55,12 @@ class Settings:
         self.strict_runtime = os.getenv("STRICT_RUNTIME", "0") == "1"
         self.auto_seed_on_startup = os.getenv("AUTO_SEED_ON_STARTUP", "0") == "1"
         self.auto_seed_strict_embeddings = os.getenv("AUTO_SEED_STRICT_EMBEDDINGS", "0") == "1"
-        self.dataset_dir = Path(
-            os.getenv("ECOMMERCE_DATASET_DIR", PROJECT_DIR / "data" / "raw" / "ecommerce_agent_dataset")
+        self.dataset_dir = _resolve_path(
+            os.getenv("ECOMMERCE_DATASET_DIR"),
+            PROJECT_DIR / "data" / "raw" / "ecommerce_agent_dataset",
+            PROJECT_DIR,
         )
-        self.upload_dir = Path(os.getenv("UPLOAD_DIR", BACKEND_DIR / "uploads"))
+        self.upload_dir = _resolve_path(os.getenv("UPLOAD_DIR"), BACKEND_DIR / "uploads", BACKEND_DIR)
         self.llm_profiles_path = BACKEND_DIR / "src" / "config" / "llm_profiles.yaml"
         self.task_model_map = TASK_MODEL_MAP
 
@@ -89,6 +91,15 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def _resolve_path(raw_path: str | None, default: Path, base_dir: Path) -> Path:
+    if not raw_path:
+        return default
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+    return base_dir / path
 
 
 def _resolve_database_url(raw_url: str | None) -> str:

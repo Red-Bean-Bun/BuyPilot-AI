@@ -25,6 +25,7 @@ data class ChatUiState(
     val streamingTextLength: Int = 0,
     val productSwipeStates: Map<String, ProductSwipeState> = emptyMap(),
     val awaitingConvergenceDeckIds: Set<String> = emptySet(),
+    val awaitingCriteriaAdjustment: Boolean = false,
     val pendingDecisions: Map<String, PendingDecision> = emptyMap(),
     val backendBaseUrl: String = "",
     val useMockChat: Boolean = false,

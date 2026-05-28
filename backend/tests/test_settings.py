@@ -1,4 +1,4 @@
-from src.config.settings import BACKEND_DIR, get_settings
+from src.config.settings import BACKEND_DIR, PROJECT_DIR, get_settings
 import src.config.settings as settings_module
 
 
@@ -25,6 +25,15 @@ def test_relative_sqlite_database_url_resolves_under_backend(monkeypatch):
     settings = get_settings()
 
     assert settings.database_url == f"sqlite:///{BACKEND_DIR / 'buypilot-dev.db'}"
+
+
+def test_relative_dataset_dir_resolves_under_project(monkeypatch):
+    monkeypatch.setenv("ECOMMERCE_DATASET_DIR", "./data/raw/ecommerce_agent_dataset")
+    settings_module._settings = None
+
+    settings = get_settings()
+
+    assert settings.dataset_dir == PROJECT_DIR / "data" / "raw" / "ecommerce_agent_dataset"
 
 
 def test_strict_runtime_flag(monkeypatch):

@@ -63,6 +63,31 @@ class ChatReducerTest {
     }
 
     @Test
+    fun blankMessageIdUsesNodeIdAsSeparateTextNodeKey() {
+        val first = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "intro_turn_1",
+                payload = TextDeltaPayload(delta = "第一段"),
+            ),
+        )
+        val state = ChatReducer.reduce(
+            first,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "followup_turn_1",
+                payload = TextDeltaPayload(delta = "第二段"),
+            ),
+        )
+
+        val nodes = state.nodes.filterIsInstance<AiStreamNode>()
+        assertEquals(2, nodes.size)
+        assertEquals(listOf("intro_turn_1", "followup_turn_1"), nodes.map { it.key })
+        assertEquals(listOf("第一段", "第二段"), nodes.map { it.content })
+    }
+
+    @Test
     fun addUserMessageStoresScrollAnchorAndResetsStreamingTextAnchor() {
         val state = ChatReducer.addUserMessage(
             state = ChatUiState(streamingTextKey = "old_msg", streamingTextLength = 12),
@@ -471,9 +496,18 @@ class ChatReducerTest {
             product(rank = 1, productId = "p1"),
             product(rank = 2, productId = "p2"),
         ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val awaitingState = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
 
         val earlyDecision = ChatReducer.reduce(
-            deckState,
+            awaitingState,
             envelope(
                 event = AgentEventType.FinalDecision,
                 nodeId = "decision_turn_1",
@@ -482,11 +516,79 @@ class ChatReducerTest {
         )
         val converged = ChatReducer.convergeDeck(earlyDecision, "deck_1")
 
-        assertTrue("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertTrue("deck_1" in awaitingState.awaitingConvergenceDeckIds)
         assertFalse(earlyDecision.nodes.any { it is FinalDecisionNode })
         assertTrue("deck_1" in earlyDecision.pendingDecisions)
         assertFalse("deck_1" in converged.awaitingConvergenceDeckIds)
         assertTrue(converged.nodes.any { it is FinalDecisionNode })
+    }
+
+    @Test
+    fun singleProductDeckDoesNotAwaitConvergenceAfterDone() {
+        val deckState = ChatReducer.reduce(
+            ChatUiState(),
+            product(rank = 1, productId = "p1"),
+        )
+        val done = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+
+        assertFalse("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in done.awaitingConvergenceDeckIds)
+    }
+
+    @Test
+    fun awaitingCriteriaAdjustmentFinishReasonMarksAdjustmentState() {
+        val state = ChatReducer.reduce(
+            ChatUiState(isStreaming = true, inputState = ChatInputState.Streaming),
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                payload = DonePayload(finishReason = "awaiting_criteria_adjustment"),
+            ),
+        )
+
+        assertTrue(state.awaitingCriteriaAdjustment)
+        assertFalse(state.isStreaming)
+        assertEquals(ChatInputState.Idle, state.inputState)
+    }
+
+    @Test
+    fun newUserMessageClearsCriteriaAdjustmentState() {
+        val state = ChatReducer.addUserMessage(
+            state = ChatUiState(awaitingCriteriaAdjustment = true),
+            key = "user_1",
+            content = "预算放宽到 500",
+        )
+
+        assertFalse(state.awaitingCriteriaAdjustment)
+    }
+
+    @Test
+    fun singleProductFinalDecisionDisplaysImmediately() {
+        val deckState = ChatReducer.reduce(
+            ChatUiState(),
+            product(rank = 1, productId = "p1"),
+        )
+
+        val state = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = FinalDecisionPayload(winnerProductId = "p1", summary = "唯一候选适配 p1"),
+            ),
+        )
+
+        assertTrue(state.nodes.any { it is FinalDecisionNode })
+        assertTrue(state.pendingDecisions.isEmpty())
     }
 
     @Test

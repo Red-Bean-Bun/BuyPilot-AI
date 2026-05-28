@@ -37,6 +37,7 @@ class ChatRepository @Inject constructor(
 
     suspend fun submitProductFeedback(
         sessionId: String,
+        deckId: String,
         productId: String,
         feedbackType: String,
         action: String,
@@ -45,6 +46,7 @@ class ChatRepository @Inject constructor(
         feedbackApi.submit(
             FeedbackRequest(
                 sessionId = sessionId,
+                deckId = deckId,
                 productId = productId,
                 feedbackType = feedbackType,
                 action = action,

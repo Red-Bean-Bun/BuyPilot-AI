@@ -55,6 +55,9 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     onOpenProductDeck = { deckId, productId ->
                         navController.navigate(Routes.productDeck(deckId, productId))
                     },
+                    onOpenProductDetail = { deckId, productId ->
+                        navController.navigate(Routes.productDetail(deckId, productId))
+                    },
                 )
             }
 
@@ -92,6 +95,10 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     onBack = { navController.popBackStack() },
                     onOpenDetail = { targetDeckId, targetProductId ->
                         navController.navigate(Routes.productDetail(targetDeckId, targetProductId))
+                    },
+                    onConverge = { targetDeckId ->
+                        viewModel.convergeProductDeck(targetDeckId)
+                        navController.popBackStack(Routes.ChatHome, false)
                     },
                     onSwipe = viewModel::swipeProduct,
                     onUndo = viewModel::undoSwipe,

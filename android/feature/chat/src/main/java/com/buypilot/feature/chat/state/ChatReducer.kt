@@ -52,6 +52,7 @@ object ChatReducer {
             ),
             streamingTextKey = null,
             streamingTextLength = 0,
+            awaitingCriteriaAdjustment = false,
         )
 
     fun reduce(
@@ -99,14 +100,15 @@ object ChatReducer {
                 val awaitingDeckId = payload.deckId?.takeIf { it.isNotBlank() }
                 val doneBase = if (
                     payload.finishReason == "awaiting_product_feedback" &&
-                    awaitingDeckId != null
+                    awaitingDeckId != null &&
+                    contentBase.productCountForDeck(awaitingDeckId) >= 2
                 ) {
                     contentBase.markDeckAwaitingConvergence(awaitingDeckId)
                 } else {
                     contentBase
                 }
                 doneBase.copy(
-                    inputState = if (payload.finishReason == "canceled") {
+                    inputState = if (payload.finishReason == "canceled" || payload.finishReason == "cancelled") {
                         ChatInputState.Canceled
                     } else if (contentBase.inputState == ChatInputState.Clarifying ||
                         contentBase.inputState == ChatInputState.Error ||
@@ -117,6 +119,7 @@ object ChatReducer {
                         ChatInputState.Idle
                     },
                     isStreaming = false,
+                    awaitingCriteriaAdjustment = payload.finishReason == "awaiting_criteria_adjustment",
                 )
             }
 
@@ -240,7 +243,10 @@ object ChatReducer {
         val payload = envelope.payload as TextDeltaPayload
         val messageKey = payload.messageId.ifBlank { envelope.nodeId }
         val existing = state.nodes.filterIsInstance<AiStreamNode>()
-            .firstOrNull { it.messageId == payload.messageId || it.key == messageKey }
+            .firstOrNull {
+                it.key == messageKey ||
+                    (payload.messageId.isNotBlank() && it.messageId == payload.messageId)
+            }
         val textBase = state.withoutThinking(envelope.turnId)
         val node = AiStreamNode(
             key = existing?.key ?: messageKey,
@@ -300,13 +306,14 @@ object ChatReducer {
         val products = (existing?.products.orEmpty()
             .filterNot { it.product.productId == payload.product.productId } + payload)
             .sortedBy { it.rank }
-        return state.upsertNode(
+        val nextState = state.upsertNode(
             ProductDeckNode(
                 key = deckId,
                 deckId = deckId,
                 products = products,
             ),
-        ).markDeckAwaitingConvergence(deckId)
+        )
+        return if (products.size <= 1) nextState.clearDeckConvergence(deckId) else nextState
     }
 
     private fun reduceFinalDecision(
@@ -316,7 +323,11 @@ object ChatReducer {
         val payload = envelope.payload as FinalDecisionPayload
         val latestDeck = state.nodes.filterIsInstance<ProductDeckNode>().lastOrNull()
         val deckId = latestDeck?.deckId
-        return if (deckId != null && deckId in state.awaitingConvergenceDeckIds) {
+        return if (
+            deckId != null &&
+            latestDeck.products.size >= 2 &&
+            deckId in state.awaitingConvergenceDeckIds
+        ) {
             state.copy(
                 pendingDecisions = state.pendingDecisions + (
                     deckId to PendingDecision(
@@ -339,10 +350,23 @@ object ChatReducer {
             .map { it.product.productId }
             .filter { it.isNotBlank() }
 
+    private fun ChatUiState.productCountForDeck(deckId: String): Int =
+        nodes.filterIsInstance<ProductDeckNode>()
+            .firstOrNull { it.deckId == deckId }
+            ?.products
+            .orEmpty()
+            .size
+
     private fun ProductSwipeState?.orEmpty(): ProductSwipeState = this ?: ProductSwipeState()
 
     private fun ChatUiState.markDeckAwaitingConvergence(deckId: String): ChatUiState =
         copy(awaitingConvergenceDeckIds = awaitingConvergenceDeckIds + deckId)
+
+    private fun ChatUiState.clearDeckConvergence(deckId: String): ChatUiState =
+        copy(
+            awaitingConvergenceDeckIds = awaitingConvergenceDeckIds - deckId,
+            pendingDecisions = pendingDecisions - deckId,
+        )
 
     private fun ChatUiState.upsertNode(node: ChatUiNode): ChatUiState {
         val index = nodes.indexOfFirst { it.key == node.key }

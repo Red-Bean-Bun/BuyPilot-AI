@@ -325,6 +325,24 @@ private enum class CriteriaTileSpan {
     Full,
 }
 
+private data class ProductDeckSignalSummary(
+    val viewed: Int,
+    val liked: Int,
+    val dismissed: Int,
+) {
+    val hasSignals: Boolean
+        get() = viewed > 0 || liked > 0 || dismissed > 0
+}
+
+private data class DecisionPresentation(
+    val eyebrow: String,
+    val title: String,
+    val helper: String,
+    val accent: Color,
+    val surface: Color,
+    val forceCard: Boolean = true,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuyPilotChatScreen(
@@ -334,6 +352,7 @@ fun BuyPilotChatScreen(
     onCriteriaPatch: (JsonObject) -> Unit,
     onCancel: () -> Unit,
     onOpenProductDeck: (String, String?) -> Unit,
+    onOpenProductDetail: (String, String) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
 ) {
@@ -346,6 +365,7 @@ fun BuyPilotChatScreen(
     var dismissedClarificationKeys by remember { mutableStateOf(emptySet<String>()) }
     var dismissingClarificationKey by remember { mutableStateOf<String?>(null) }
     var revealedMessageKeys by remember { mutableStateOf(emptySet<String>()) }
+    var typingMessageKeys by remember { mutableStateOf(emptySet<String>()) }
     var pendingClarificationAnswer by remember { mutableStateOf<PendingClarificationAnswer?>(null) }
     var activeClarificationFlight by remember { mutableStateOf<ClarificationFlight?>(null) }
     var hiddenFlightMessageKeys by remember { mutableStateOf(emptySet<String>()) }
@@ -564,6 +584,8 @@ fun BuyPilotChatScreen(
                     },
                     onCriteriaEdit = { openSheet(ChatSheetContent.Criteria(it)) },
                     onProductOpen = onOpenProductDeck,
+                    onProductDetailOpen = onOpenProductDetail,
+                    onConvergeRecommendation = { sendAndClear("继续") },
                     onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
                     onRetryLastMessage = onRetryLastMessage,
                     onEditLastMessage = { editAndFocus(it) },
@@ -590,6 +612,13 @@ fun BuyPilotChatScreen(
                     activeFlightMessageKey = activeFlightMessageKey,
                     revealedMessageKeys = revealedMessageKeys,
                     onMessageRevealComplete = { revealedMessageKeys = revealedMessageKeys + it },
+                    onMessageRevealActiveChange = { key, active ->
+                        typingMessageKeys = if (active) {
+                            typingMessageKeys + key
+                        } else {
+                            typingMessageKeys - key
+                        }
+                    },
                     onUserBubblePositioned = { key, snapshot ->
                         if (userBubbleSnapshots[key] != snapshot) {
                             userBubbleSnapshots = userBubbleSnapshots + (key to snapshot)
@@ -612,6 +641,8 @@ fun BuyPilotChatScreen(
             text = input,
             inputState = state.inputState,
             isStreaming = state.isStreaming,
+            isTextRevealing = typingMessageKeys.isNotEmpty(),
+            awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
             focusRequester = composerFocusRequester,
             modifier = Modifier
@@ -810,6 +841,8 @@ private fun ConversationStage(
     onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
+    onProductDetailOpen: (String, String) -> Unit,
+    onConvergeRecommendation: () -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
@@ -825,6 +858,7 @@ private fun ConversationStage(
     activeFlightMessageKey: String?,
     revealedMessageKeys: Set<String>,
     onMessageRevealComplete: (String) -> Unit,
+    onMessageRevealActiveChange: (String, Boolean) -> Unit,
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
@@ -876,6 +910,8 @@ private fun ConversationStage(
                 onClarificationManualSource = onClarificationManualSource,
                 onCriteriaEdit = onCriteriaEdit,
                 onProductOpen = onProductOpen,
+                onProductDetailOpen = onProductDetailOpen,
+                onConvergeRecommendation = onConvergeRecommendation,
                 onDecisionEvidence = onDecisionEvidence,
                 onRetryLastMessage = onRetryLastMessage,
                 onEditLastMessage = onEditLastMessage,
@@ -891,6 +927,7 @@ private fun ConversationStage(
                 activeFlightMessageKey = activeFlightMessageKey,
                 revealedMessageKeys = revealedMessageKeys,
                 onMessageRevealComplete = onMessageRevealComplete,
+                onMessageRevealActiveChange = onMessageRevealActiveChange,
                 onUserBubblePositioned = onUserBubblePositioned,
                 onClarificationCardDismissed = onClarificationCardDismissed,
             )
@@ -1181,6 +1218,8 @@ private fun ChatTimeline(
     onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
+    onProductDetailOpen: (String, String) -> Unit,
+    onConvergeRecommendation: () -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
@@ -1196,6 +1235,7 @@ private fun ChatTimeline(
     activeFlightMessageKey: String?,
     revealedMessageKeys: Set<String>,
     onMessageRevealComplete: (String) -> Unit,
+    onMessageRevealActiveChange: (String, Boolean) -> Unit,
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
@@ -1336,6 +1376,19 @@ private fun ChatTimeline(
                             content = node.content,
                             done = node.done,
                             onRevealComplete = { onMessageRevealComplete(node.key) },
+                            onRevealActiveChange = { active -> onMessageRevealActiveChange(node.key, active) },
+                            onRevealProgress = {
+                                if (followStreamingText) {
+                                    coroutineScope.launch {
+                                        scrollActiveTurnIfNeeded(
+                                            listState = listState,
+                                            lastContentIndex = state.lastContentIndex(hasTimelineError),
+                                            bottomPaddingPx = timelineBottomPaddingPx,
+                                            tolerancePx = followCorrectionTolerancePx,
+                                        )
+                                    }
+                                }
+                            },
                         )
                     }
                     is ClarificationNode -> ClarificationBlock(
@@ -1361,6 +1414,8 @@ private fun ChatTimeline(
                         awaitingConvergence = node.deckId in state.awaitingConvergenceDeckIds,
                         hasPendingDecision = node.deckId in state.pendingDecisions,
                         onOpen = onProductOpen,
+                        onOpenDetail = onProductDetailOpen,
+                        onConverge = onConvergeRecommendation,
                     )
                     is FinalDecisionNode -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         DecisionSummaryCard(
@@ -1765,6 +1820,25 @@ private fun String.hasPartialTable(): Boolean {
     }
 }
 
+private fun typingStep(backlog: Int, done: Boolean): Int =
+    when {
+        backlog <= 0 -> 0
+        done -> minOf(8, backlog)
+        backlog > 30 -> minOf(6, backlog)
+        backlog > 12 -> minOf(3, backlog)
+        else -> minOf(2, backlog)
+    }
+
+private fun typingDelayMs(lastVisibleChar: Char?, backlog: Int, done: Boolean): Long =
+    when {
+        done || backlog > 30 -> 8L
+        lastVisibleChar != null && lastVisibleChar.isTypingPausePunctuation() -> 90L
+        else -> 24L
+    }
+
+private fun Char.isTypingPausePunctuation(): Boolean =
+    this in setOf('，', '。', '、', '；', '：', '！', '？', ',', '.', ';', ':', '!', '?')
+
 @Composable
 private fun AssistantText(content: String) {
     if (content.isBlank()) return
@@ -1783,19 +1857,54 @@ private fun StreamingAssistantText(
     content: String,
     done: Boolean = false,
     onRevealComplete: (() -> Unit)? = null,
+    onRevealActiveChange: ((Boolean) -> Unit)? = null,
+    onRevealProgress: (() -> Unit)? = null,
 ) {
-    LaunchedEffect(done) {
-        if (done) {
-            onRevealComplete?.invoke()
+    var visibleLength by rememberSaveable { mutableIntStateOf(0) }
+    var completionReported by remember { mutableStateOf(false) }
+    val latestOnRevealComplete by rememberUpdatedState(onRevealComplete)
+    val latestOnRevealActiveChange by rememberUpdatedState(onRevealActiveChange)
+    val latestOnRevealProgress by rememberUpdatedState(onRevealProgress)
+
+    if (visibleLength > content.length) {
+        visibleLength = content.length
+    }
+
+    LaunchedEffect(content, done) {
+        if (content.isBlank()) {
+            latestOnRevealActiveChange?.invoke(false)
+            return@LaunchedEffect
+        }
+        if (visibleLength < content.length) {
+            completionReported = false
+            latestOnRevealActiveChange?.invoke(true)
+        }
+        while (visibleLength < content.length) {
+            val backlog = content.length - visibleLength
+            val step = typingStep(backlog = backlog, done = done)
+            visibleLength = (visibleLength + step).coerceAtMost(content.length)
+            latestOnRevealProgress?.invoke()
+            val lastVisibleChar = content.getOrNull(visibleLength - 1)
+            kotlinx.coroutines.delay(typingDelayMs(lastVisibleChar, backlog = backlog, done = done))
+        }
+        if (done && !completionReported) {
+            completionReported = true
+            latestOnRevealActiveChange?.invoke(false)
+            latestOnRevealComplete?.invoke()
+        } else if (!done) {
+            latestOnRevealActiveChange?.invoke(false)
         }
     }
-    if (content.isBlank()) return
 
-    val showPlainStreaming = !done && content.needsPlainStreamingRender()
+    if (content.isBlank() || visibleLength <= 0) return
+
+    val visibleContent = content.take(visibleLength.coerceAtMost(content.length))
+    val revealFinished = done && visibleLength >= content.length
+    val showPlainStreaming = !revealFinished && visibleContent.needsPlainStreamingRender()
     if (showPlainStreaming) {
-        PlainStreamingTextBlock(content)
+        PlainStreamingTextBlock(visibleContent)
     } else {
-        MarkdownTextBlock(content)
+        MarkdownTextBlock(visibleContent)
     }
 }
 
@@ -2570,11 +2679,32 @@ private fun CriteriaSummaryCard(
     val tiles = criteria.summaryTiles()
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "当前筛选",
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Title,
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "已按这些条件找到候选，可继续优化推荐范围",
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 18.sp,
+            )
+        }
         if (tiles.isNotEmpty()) {
             CriteriaBentoGrid(tiles = tiles)
         }
+        Text(
+            text = "也可以直接说“再温和一点”“不要酒精”“预算低一点”。",
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 18.sp,
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            GhostButton(label = "修改标准", leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
+            GhostButton(label = "调整筛选", leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
         }
     }
 }
@@ -2810,12 +2940,18 @@ private fun ProductRecommendationStrip(
     awaitingConvergence: Boolean,
     hasPendingDecision: Boolean,
     onOpen: (String, String?) -> Unit,
+    onOpenDetail: (String, String) -> Unit,
+    onConverge: () -> Unit,
 ) {
     val products = node.products
     if (products.isEmpty()) return
+    val singleCandidate = products.size == 1
 
     val pagerState = rememberPagerState(pageCount = { products.size })
     val activeIndex = pagerState.currentPage.coerceIn(0, products.lastIndex)
+    val activePayload = products[activeIndex]
+    val activeProductId = activePayload.product.productId.takeIf { it.isNotBlank() }
+    val signalSummary = swipeState.signalSummary()
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
@@ -2824,11 +2960,23 @@ private fun ProductRecommendationStrip(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = "候选商品",
+                    text = if (singleCandidate) "唯一匹配商品" else "候选商品",
                     color = BuyPilotColors.TextPrimary,
                     fontSize = BuyPilotType.Title,
                     lineHeight = 23.sp,
                     fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (singleCandidate) {
+                        "不用滑卡，先看详情；系统会给适配判断"
+                    } else {
+                        "可滑卡反馈，也可直接让系统收敛"
+                    },
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 17.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(
@@ -2846,7 +2994,7 @@ private fun ProductRecommendationStrip(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(238.dp),
-            contentPadding = PaddingValues(horizontal = 44.dp),
+            contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
             pageSpacing = 14.dp,
             beyondViewportPageCount = 1,
         ) { page ->
@@ -2859,61 +3007,117 @@ private fun ProductRecommendationStrip(
                 payload = payload,
                 backendBaseUrl = backendBaseUrl,
                 selected = page == activeIndex,
-                onClick = { onOpen(node.deckId, payload.product.productId.takeIf { it.isNotBlank() }) },
+                onClick = {
+                    val productId = payload.product.productId.takeIf { it.isNotBlank() }
+                    if (singleCandidate && productId != null) {
+                        onOpenDetail(node.deckId, productId)
+                    } else {
+                        onOpen(node.deckId, productId)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
                         scaleX = 1f - distance * 0.055f
                         scaleY = 1f - distance * 0.075f
                         alpha = 1f - distance * 0.18f
-                    },
+                },
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            products.take(6).forEachIndexed { index, _ ->
-                val active = index == activeIndex.coerceAtMost(5)
-                val indicatorWidth by animateDpAsState(
-                    targetValue = if (active) 18.dp else 5.dp,
-                    animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
-                    label = "product_carousel_indicator_width",
-                )
-                val indicatorColor by animateColorAsState(
-                    targetValue = if (active) BuyPilotColors.Primary.copy(alpha = 0.82f) else BuyPilotColors.Border.copy(alpha = 0.9f),
-                    animationSpec = tween(durationMillis = 180),
-                    label = "product_carousel_indicator_color",
-                )
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 3.dp)
-                        .size(width = indicatorWidth, height = 5.dp)
-                        .background(indicatorColor, CircleShape),
-                )
+        if (!singleCandidate) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                products.take(6).forEachIndexed { index, _ ->
+                    val active = index == activeIndex.coerceAtMost(5)
+                    val indicatorWidth by animateDpAsState(
+                        targetValue = if (active) 18.dp else 5.dp,
+                        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+                        label = "product_carousel_indicator_width",
+                    )
+                    val indicatorColor by animateColorAsState(
+                        targetValue = if (active) BuyPilotColors.Primary.copy(alpha = 0.82f) else BuyPilotColors.Border.copy(alpha = 0.9f),
+                        animationSpec = tween(durationMillis = 180),
+                        label = "product_carousel_indicator_color",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .size(width = indicatorWidth, height = 5.dp)
+                            .background(indicatorColor, CircleShape),
+                    )
+                }
             }
         }
-        AnimatedVisibility(
-            visible = awaitingConvergence,
-            enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) +
-                slideInVertically(
-                    animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
-                    initialOffsetY = { it / 4 },
-                ),
-            exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)),
+        if (singleCandidate) {
+            SingleCandidateHint(
+                onOpenDetail = {
+                    activeProductId?.let { onOpenDetail(node.deckId, it) }
+                },
+            )
+        } else {
+            AnimatedVisibility(
+                visible = awaitingConvergence,
+                enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) +
+                    slideInVertically(
+                        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+                        initialOffsetY = { it / 4 },
+                    ),
+                exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)),
+            ) {
+                ProductConvergenceHint(
+                    signalSummary = signalSummary,
+                    readyFromBackend = hasPendingDecision,
+                    onOpenDetail = {
+                        activeProductId?.let { onOpenDetail(node.deckId, it) }
+                    },
+                    onOpenDeck = { onOpen(node.deckId, activeProductId) },
+                    onConverge = onConverge,
+                )
+            }
+            if (!awaitingConvergence) {
+                ProductDeckLoadingHint()
+            }
+        }
+    }
+}
+
+@Composable
+private fun SingleCandidateHint(
+    onOpenDetail: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.58f),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.64f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            ProductConvergenceHint(
-                readyFromBackend = hasPendingDecision,
+            Text(
+                text = "只有一个候选时不进入滑卡，直接看适配性。",
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 17.sp,
+                modifier = Modifier.weight(1f),
+            )
+            CandidateActionButton(
+                label = "查看详情",
+                leadingIconRes = R.drawable.ic_article_24,
+                primary = false,
+                onClick = onOpenDetail,
             )
         }
     }
 }
 
 @Composable
-private fun ProductConvergenceHint(
-    readyFromBackend: Boolean,
-) {
+private fun ProductDeckLoadingHint() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2923,17 +3127,127 @@ private fun ProductConvergenceHint(
         Box(
             modifier = Modifier
                 .size(5.dp)
-                .background(
-                    if (readyFromBackend) BuyPilotColors.Primary else BuyPilotColors.TextMuted.copy(alpha = 0.45f),
-                    CircleShape,
-                ),
+                .background(BuyPilotColors.TextMuted.copy(alpha = 0.36f), CircleShape),
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            text = "回复「继续」我再收敛建议",
+            text = "正在补齐候选和筛选范围，商品已可先查看",
             color = BuyPilotColors.TextMuted,
             fontSize = BuyPilotType.Label,
             lineHeight = 17.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ProductConvergenceHint(
+    signalSummary: ProductDeckSignalSummary,
+    readyFromBackend: Boolean,
+    onOpenDetail: () -> Unit,
+    onOpenDeck: () -> Unit,
+    onConverge: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp),
+        color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.54f),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .background(
+                            if (readyFromBackend) BuyPilotColors.Primary else BuyPilotColors.TextMuted.copy(alpha = 0.45f),
+                            CircleShape,
+                        ),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = signalSummary.displayLabel()
+                        ?: "不用滑完，当前候选也可以直接收敛",
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 17.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CandidateActionButton(
+                    label = "先看详情",
+                    leadingIconRes = R.drawable.ic_article_24,
+                    primary = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = onOpenDetail,
+                )
+                CandidateActionButton(
+                    label = "滑卡反馈",
+                    leadingIconRes = R.drawable.ic_favorite_24,
+                    primary = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = onOpenDeck,
+                )
+                CandidateActionButton(
+                    label = if (readyFromBackend) "查看建议" else "帮我选",
+                    leadingIconRes = R.drawable.ic_compare_arrows_24,
+                    primary = true,
+                    modifier = Modifier.weight(1f),
+                    onClick = onConverge,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CandidateActionButton(
+    label: String,
+    @DrawableRes leadingIconRes: Int,
+    primary: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val background = if (primary) BuyPilotColors.Primary else BuyPilotColors.SurfaceCard.copy(alpha = 0.78f)
+    val content = if (primary) BuyPilotColors.OnPrimary else BuyPilotColors.TextSecondary
+    val border = if (primary) BuyPilotColors.Primary.copy(alpha = 0.0f) else BuyPilotColors.Border.copy(alpha = 0.76f)
+    Row(
+        modifier = modifier
+            .height(36.dp)
+            .background(background, CircleShape)
+            .border(1.dp, border, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(leadingIconRes),
+            contentDescription = null,
+            tint = content.copy(alpha = 0.92f),
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = label,
+            color = content,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = if (primary) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -3232,11 +3546,20 @@ private fun DecisionSummaryCard(
     val product = winner?.product
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
     val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
-    val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
+    val presentation = payload.decisionPresentation()
+    val nextActions = payload.nextActions
+        .ifEmpty { payload.fallbackDecisionActions() }
+        .filter { it.label.isNotBlank() }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         AssistantText(payload.summary)
-        if (winner != null || !payload.winnerProductId.isNullOrBlank() || whyItems.isNotEmpty() || notForItems.isNotEmpty()) {
+        if (
+            winner != null ||
+            !payload.winnerProductId.isNullOrBlank() ||
+            whyItems.isNotEmpty() ||
+            notForItems.isNotEmpty() ||
+            presentation?.forceCard == true
+        ) {
             Surface(
                 modifier = Modifier.shadow(
                     elevation = 8.dp,
@@ -3250,14 +3573,16 @@ private fun DecisionSummaryCard(
                 border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
             ) {
                 Column {
-                    if (winner != null || !payload.winnerProductId.isNullOrBlank()) {
+                    if (winner != null || !payload.winnerProductId.isNullOrBlank() || presentation != null) {
+                        val headerAccent = presentation?.accent ?: BuyPilotColors.PrimaryDark
+                        val headerSurface = presentation?.surface ?: BuyPilotColors.PrimarySoft.copy(alpha = 0.78f)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(
                                     Brush.horizontalGradient(
                                         listOf(
-                                            BuyPilotColors.PrimarySoft.copy(alpha = 0.78f),
+                                            headerSurface,
                                             Color(0xFFFFF7F0),
                                         ),
                                     ),
@@ -3268,15 +3593,15 @@ private fun DecisionSummaryCard(
                             Box(
                                 modifier = Modifier
                                     .size(22.dp)
-                                    .background(BuyPilotColors.Primary.copy(alpha = 0.12f), CircleShape),
+                                    .background(headerAccent.copy(alpha = 0.12f), CircleShape),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("✪", color = BuyPilotColors.PrimaryDark, fontSize = BuyPilotType.Label)
+                                Text("✪", color = headerAccent, fontSize = BuyPilotType.Label)
                             }
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "首选推荐",
-                                color = BuyPilotColors.PrimaryDark,
+                                presentation?.eyebrow ?: "首选推荐",
+                                color = headerAccent,
                                 fontSize = BuyPilotType.Body,
                                 lineHeight = 18.sp,
                                 fontWeight = FontWeight.Bold,
@@ -3287,6 +3612,9 @@ private fun DecisionSummaryCard(
                         Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
+                        if (winner == null && payload.winnerProductId.isNullOrBlank() && presentation != null) {
+                            DecisionStateBlock(presentation = presentation, payload = payload)
+                        }
                         if (winner != null || !payload.winnerProductId.isNullOrBlank()) {
                             Row(
                                 verticalAlignment = Alignment.Top,
@@ -3364,6 +3692,9 @@ private fun DecisionSummaryCard(
                         if (notForItems.isNotEmpty()) {
                             WarningBox(notForItems.joinToString("；"))
                         }
+                        if (payload.decisionStatus == "selected" && payload.confidence == "low") {
+                            DecisionLowConfidenceNotice()
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End,
@@ -3385,6 +3716,73 @@ private fun DecisionSummaryCard(
     }
 }
 
+@Composable
+private fun DecisionStateBlock(
+    presentation: DecisionPresentation,
+    payload: FinalDecisionPayload,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = presentation.title,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = 20.sp,
+            lineHeight = 25.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = presentation.helper,
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 21.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            payload.confidence?.takeIf { it.isNotBlank() }?.let {
+                DecisionMetaPill("置信度：${it.confidenceLabel()}", presentation.accent)
+            }
+            payload.nextStep?.takeIf { it.isNotBlank() }?.let {
+                DecisionMetaPill(it.nextStepLabel(), BuyPilotColors.TextSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DecisionLowConfidenceNotice() {
+    Surface(
+        color = Color(0xFFFFF7E8),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Warning.copy(alpha = 0.24f)),
+    ) {
+        Text(
+            text = "当前偏好信号还不多，这是一条低置信度建议。继续看 1 到 2 个候选后再收敛会更准。",
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        )
+    }
+}
+
+@Composable
+private fun DecisionMetaPill(
+    label: String,
+    color: Color,
+) {
+    Text(
+        text = label,
+        color = color,
+        fontSize = BuyPilotType.Tiny,
+        lineHeight = 14.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.08f), CircleShape)
+            .border(1.dp, color.copy(alpha = 0.12f), CircleShape)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductSwipeModeScreen(
@@ -3393,19 +3791,26 @@ fun ProductSwipeModeScreen(
     initialProductId: String?,
     onBack: () -> Unit,
     onOpenDetail: (String, String) -> Unit,
+    onConverge: (String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
     onUndo: (String) -> Unit,
 ) {
     val deck = state.findProductDeck(deckId)
     val products = deck?.products.orEmpty()
     val swipeState = state.productSwipeStates[deckId] ?: ProductSwipeState()
+    val remainingProducts = products.filterNot { it.product.productId in swipeState.swipedProductIds }
     val currentProductId = swipeState.currentProductId
-        ?: initialProductId?.takeIf { id -> products.any { it.product.productId == id } }
-        ?: products.firstOrNull { it.product.productId !in swipeState.swipedProductIds }?.product?.productId
+        ?: initialProductId?.takeIf { id -> remainingProducts.any { it.product.productId == id } }
+        ?: remainingProducts.firstOrNull()?.product?.productId
         ?: products.firstOrNull()?.product?.productId
-    val payload = products.firstOrNull { it.product.productId == currentProductId }
+    val payload = if (products.size == 1) {
+        products.firstOrNull { it.product.productId == currentProductId } ?: products.firstOrNull()
+    } else {
+        remainingProducts.firstOrNull { it.product.productId == currentProductId }
+    }
     val haptics = LocalHapticFeedback.current
     val cardStackBridge = remember(deckId) { CardStackBridge() }
+    val signalSummary = swipeState.signalSummary()
 
     Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -3419,26 +3824,46 @@ fun ProductSwipeModeScreen(
             )
 
             if (deck == null || payload == null) {
-                ExpiredRecommendationState(onBack = onBack)
+                if (deck != null && products.isNotEmpty() && remainingProducts.isEmpty()) {
+                    ProductSwipeCompletedState(
+                        signalSummary = signalSummary,
+                        onBack = onBack,
+                        onConverge = { onConverge(deckId) },
+                    )
+                } else {
+                    ExpiredRecommendationState(onBack = onBack)
+                }
                 return@Column
             }
 
-            ProductSwipeHeroCopy()
-            ProductSwipeModeContent(
-                products = products,
-                currentProductId = payload.product.productId,
-                backendBaseUrl = state.backendBaseUrl,
-                cardStackBridge = cardStackBridge,
-                onOpenDetail = { productId -> onOpenDetail(deckId, productId) },
-                onDislike = { productId ->
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSwipe(deckId, productId, "not_interested", "not_interested", null)
-                },
-                onLike = { productId ->
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSwipe(deckId, productId, "like", "like", null)
-                },
-            )
+            if (products.size == 1) {
+                ProductSingleCandidateModeContent(
+                    payload = payload,
+                    backendBaseUrl = state.backendBaseUrl,
+                    onOpenDetail = { onOpenDetail(deckId, payload.product.productId) },
+                    onLike = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSwipe(deckId, payload.product.productId, "like", "like", "用户标记唯一候选感兴趣")
+                    },
+                )
+            } else {
+                ProductSwipeHeroCopy()
+                ProductSwipeModeContent(
+                    products = remainingProducts,
+                    currentProductId = payload.product.productId,
+                    backendBaseUrl = state.backendBaseUrl,
+                    cardStackBridge = cardStackBridge,
+                    onOpenDetail = { productId -> onOpenDetail(deckId, productId) },
+                    onDislike = { productId ->
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSwipe(deckId, productId, "not_interested", "not_interested", null)
+                    },
+                    onLike = { productId ->
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSwipe(deckId, productId, "like", "like", null)
+                    },
+                )
+            }
         }
     }
 }
@@ -3481,20 +3906,123 @@ private fun ProductSwipeHeroCopy() {
             .padding(horizontal = 32.dp, vertical = 22.dp),
     ) {
         Text(
-            text = "找到最佳匹配",
+            text = "表达你的偏好",
             color = BuyPilotColors.TextPrimary,
             fontSize = 29.sp,
             lineHeight = 36.sp,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "右滑心动，左滑无感，我正在努力懂你。",
+            text = "右滑喜欢，左滑排除；不必滑完，已有信号会被纳入决策。",
             color = BuyPilotColors.TextSecondary,
             fontSize = 18.sp,
             lineHeight = 25.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun ProductSingleCandidateModeContent(
+    payload: ProductCardPayload,
+    backendBaseUrl: String,
+    onOpenDetail: () -> Unit,
+    onLike: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 22.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "唯一候选",
+                color = BuyPilotColors.TextPrimary,
+                fontSize = 29.sp,
+                lineHeight = 36.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "这轮只有一个匹配商品，不需要左右滑。先看详情，最终建议会判断它是否真的适合你。",
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.LargeBody,
+                lineHeight = 24.sp,
+            )
+        }
+        ProductHeroCard(
+            payload = payload,
+            backendBaseUrl = backendBaseUrl,
+            modifier = Modifier.weight(1f),
+            onOpen = onOpenDetail,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            CandidateActionButton(
+                label = "查看详情",
+                leadingIconRes = R.drawable.ic_article_24,
+                primary = false,
+                modifier = Modifier.weight(1f),
+                onClick = onOpenDetail,
+            )
+            CandidateActionButton(
+                label = "感兴趣",
+                leadingIconRes = R.drawable.ic_favorite_24,
+                primary = true,
+                modifier = Modifier.weight(1f),
+                onClick = onLike,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductSwipeCompletedState(
+    signalSummary: ProductDeckSignalSummary,
+    onBack: () -> Unit,
+    onConverge: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "这组候选已经处理完",
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Title,
+            lineHeight = 24.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = signalSummary.displayLabel() ?: "可以回到聊天流继续调整，也可以直接收敛建议。",
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 21.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CandidateActionButton(
+                label = "回聊天",
+                leadingIconRes = R.drawable.ic_arrow_back_24,
+                primary = false,
+                onClick = onBack,
+            )
+            CandidateActionButton(
+                label = "帮我选",
+                leadingIconRes = R.drawable.ic_compare_arrows_24,
+                primary = true,
+                onClick = onConverge,
+            )
+        }
     }
 }
 
@@ -5200,6 +5728,8 @@ private fun BottomComposer(
     text: String,
     inputState: ChatInputState,
     isStreaming: Boolean,
+    isTextRevealing: Boolean,
+    awaitingCriteriaAdjustment: Boolean,
     isAttachmentMenuOpen: Boolean,
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
@@ -5212,10 +5742,12 @@ private fun BottomComposer(
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val placeholder = when (inputState) {
-        ChatInputState.Clarifying -> "请回答上面的问题"
-        ChatInputState.Streaming -> "正在生成，可随时停止"
-        ChatInputState.Error -> "输入后重试"
+    val placeholder = when {
+        inputState == ChatInputState.Clarifying -> "请回答上面的问题"
+        inputState == ChatInputState.Streaming -> "正在生成，可随时停止"
+        inputState == ChatInputState.Error -> "输入后重试"
+        isTextRevealing -> "正在显示回复，可继续查看"
+        awaitingCriteriaAdjustment -> "放宽预算、换品类或继续描述需求..."
         else -> "继续追问或描述需求..."
     }
     val canSubmit = isStreaming || text.isNotBlank()
@@ -5525,7 +6057,7 @@ private fun CriteriaEditSheet(
     }
 
     SheetContentColumn(expandToMaxHeight = false) {
-        SheetTitle("编辑购买标准")
+        SheetTitle("调整筛选")
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             EditableFieldBlock(
                 label = "核心诉求",
@@ -5609,7 +6141,7 @@ private fun CriteriaEditSheet(
                 contentPadding = PaddingValues(horizontal = 16.dp),
             ) {
                 Text(
-                    text = "保存并重新推荐",
+                    text = "应用并重新推荐",
                     fontSize = BuyPilotType.Body,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -6996,6 +7528,112 @@ private fun ChatUiState.findProductDeck(deckId: String): ProductDeckNode? =
 
 private fun ChatUiState.findProduct(deckId: String, productId: String): ProductCardPayload? =
     findProductDeck(deckId)?.products?.firstOrNull { it.product.productId == productId }
+
+private fun ProductSwipeState?.signalSummary(): ProductDeckSignalSummary {
+    val state = this ?: return ProductDeckSignalSummary(viewed = 0, liked = 0, dismissed = 0)
+    val likedIds = state.undoStack
+        .filter { it.feedbackType == "like" || it.action == "like" }
+        .map { it.productId }
+        .distinct()
+    val dismissedIds = state.undoStack
+        .filter { it.feedbackType == "not_interested" || it.action == "not_interested" }
+        .map { it.productId }
+        .distinct()
+    return ProductDeckSignalSummary(
+        viewed = state.viewedProductIds.distinct().size,
+        liked = likedIds.size,
+        dismissed = dismissedIds.size,
+    )
+}
+
+private fun ProductDeckSignalSummary.displayLabel(): String? {
+    if (!hasSignals) return null
+    return buildList {
+        if (viewed > 0) add("已看 $viewed 个")
+        if (liked > 0) add("喜欢 $liked 个")
+        if (dismissed > 0) add("排除 $dismissed 个")
+    }.joinToString("｜")
+}
+
+private fun FinalDecisionPayload.decisionPresentation(): DecisionPresentation? =
+    when (decisionStatus) {
+        "no_match" -> DecisionPresentation(
+            eyebrow = "无匹配",
+            title = "当前条件下没有匹配商品",
+            helper = "不应该硬选一个不存在的商品。下一步需要放宽或调整筛选范围后重新检索。",
+            accent = BuyPilotColors.Warning,
+            surface = Color(0xFFFFF7E8),
+        )
+        "no_suitable_winner" -> DecisionPresentation(
+            eyebrow = "不强行推荐",
+            title = "当前候选都不太合适",
+            helper = "你已经排除了这组候选，我不会从被排除的商品里硬选一个。可以换一组，或调整筛选条件。",
+            accent = BuyPilotColors.Warning,
+            surface = Color(0xFFFFF7E8),
+        )
+        "needs_more_signal" -> DecisionPresentation(
+            eyebrow = "还需偏好",
+            title = "我还需要一点偏好信号",
+            helper = "当前候选之间差距不大。你可以继续看候选，也可以要求我先按 RAG 和筛选条件给一个保守建议。",
+            accent = BuyPilotColors.Info,
+            surface = Color(0xFFEDF5FF),
+        )
+        "selected" -> if (confidence == "low") {
+            DecisionPresentation(
+                eyebrow = "低置信建议",
+                title = "我先给一个当前建议",
+                helper = "这是基于当前候选、筛选条件和已有行为信号得到的暂时首选。",
+                accent = BuyPilotColors.PrimaryDark,
+                surface = BuyPilotColors.PrimarySoft.copy(alpha = 0.72f),
+                forceCard = false,
+            )
+        } else {
+            null
+        }
+        else -> null
+    }
+
+private fun FinalDecisionPayload.fallbackDecisionActions(): List<QuickActionPayload> =
+    when (decisionStatus) {
+        "no_match" -> listOf(
+            QuickActionPayload(actionId = "adjust_criteria", label = "调整筛选", action = "feedback"),
+            QuickActionPayload(actionId = "relax_budget", label = "预算高一点", action = "feedback"),
+        )
+        "no_suitable_winner" -> listOf(
+            QuickActionPayload(actionId = "replace_deck", label = "换一组", action = "feedback"),
+            QuickActionPayload(actionId = "adjust_criteria", label = "调整筛选", action = "feedback"),
+        )
+        "needs_more_signal" -> listOf(
+            QuickActionPayload(actionId = "continue_current_deck", label = "继续看候选", action = "feedback"),
+            QuickActionPayload(actionId = "still_decide", label = "仍然帮我选", action = "feedback"),
+        )
+        "selected" -> if (confidence == "low") {
+            listOf(
+                QuickActionPayload(actionId = "continue_current_deck", label = "继续看候选", action = "feedback"),
+                QuickActionPayload(actionId = "adjust_criteria", label = "调整筛选", action = "feedback"),
+            )
+        } else {
+            emptyList()
+        }
+        else -> emptyList()
+    }
+
+private fun String.confidenceLabel(): String =
+    when (this) {
+        "high" -> "高"
+        "medium" -> "中"
+        "low" -> "低"
+        else -> this
+    }
+
+private fun String.nextStepLabel(): String =
+    when (this) {
+        "adjust_criteria" -> "下一步：调整筛选"
+        "replace_deck" -> "下一步：换一组"
+        "continue_current_deck" -> "下一步：继续看候选"
+        "accept_recommendation" -> "下一步：接受建议"
+        else -> this
+    }
 
 private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {
     val max = budgetMax ?: constraints?.budgetMax

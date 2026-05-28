@@ -40,8 +40,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 
 private const val FALLBACK_THINKING_MIN_MS = 8_000L
-private const val CRITERIA_CONFIRMATION_PROMPT = "你可以先确认或修改这些标准。没问题的话回复「继续」，我再开始推荐。"
-
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
@@ -102,7 +100,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendCriteriaPatch(criteriaPatch: JsonObject) {
-        val patchMessage = "保存并重新推荐"
+        val patchMessage = "应用并重新推荐"
         if (BuildConfig.USE_MOCK_CHAT) {
             sendMockMessage(patchMessage, imageUrl = null)
             return
@@ -239,7 +237,7 @@ class ChatViewModel @Inject constructor(
     ) {
         val sessionId = _uiState.value.sessionId
         _uiState.update { ChatReducer.swipeProduct(it, deckId, productId, feedbackType, action) }
-        submitProductInteraction(sessionId, productId, feedbackType, action, reason)
+        submitProductInteraction(sessionId, deckId, productId, feedbackType, action, reason)
     }
 
     fun undoSwipe(deckId: String) {
@@ -265,11 +263,12 @@ class ChatViewModel @Inject constructor(
     ) {
         val sessionId = _uiState.value.sessionId
         _uiState.update { ChatReducer.swipeProduct(it, deckId, productId, feedbackType, action) }
-        submitProductInteraction(sessionId, productId, feedbackType, action, reason)
+        submitProductInteraction(sessionId, deckId, productId, feedbackType, action, reason)
     }
 
     private fun submitProductInteraction(
         sessionId: String?,
+        deckId: String,
         productId: String,
         feedbackType: String,
         action: String,
@@ -281,6 +280,7 @@ class ChatViewModel @Inject constructor(
             runCatching {
                 chatRepository.submitProductFeedback(
                     sessionId = sessionId,
+                    deckId = deckId,
                     productId = productId,
                     feedbackType = feedbackType,
                     action = action,
@@ -309,7 +309,8 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        sendFallbackConvergence(deckId, userMessage)
+        _uiState.update { ChatReducer.convergeDeck(it, deckId) }
+        startRealStream(message = userMessage.ifBlank { "继续" })
     }
 
     private fun addConvergenceUserMessage(deckId: String, message: String): Pair<String, String> {
@@ -337,9 +338,6 @@ class ChatViewModel @Inject constructor(
         val turnId = "mock_turn_$nowMs"
         val currentNodes = _uiState.value.nodes
         val hasCriteriaContext = currentNodes.any { it is CriteriaNode }
-        val hasPendingCriteriaConfirmation = hasCriteriaContext &&
-            currentNodes.none { it is ProductDeckNode || it is FinalDecisionNode }
-        val shouldContinueFromCriteria = hasPendingCriteriaConfirmation && message.isMockContinueCommand()
 
         streamJob?.cancel()
         _uiState.update {
@@ -475,42 +473,6 @@ class ChatViewModel @Inject constructor(
                 return@launch
             }
 
-            if (!shouldContinueFromCriteria) {
-                emit(
-                    event = AgentEventType.Thinking,
-                    nodeId = "thinking_$turnId",
-                    payload = ThinkingPayload(stage = "criteria", message = "正在生成购买标准..."),
-                )
-                delay(550)
-
-                emitTextStream(
-                    nodeId = "criteria_analysis_$turnId",
-                    messageId = "criteria_analysis_$turnId",
-                    text = mockCriteriaAnalysis(message, fromEditResubmit),
-                )
-                delay(180)
-
-                emit(
-                    event = AgentEventType.CriteriaCard,
-                    nodeId = "criteria_mock_001",
-                    payload = mockCriteria(),
-                    displayMode = "summary_card",
-                )
-                delay(360)
-
-                emitTextStream(
-                    nodeId = "criteria_confirmation_$turnId",
-                    messageId = "criteria_confirmation_$turnId",
-                    text = if (fromEditResubmit) {
-                        mockEditedCriteriaConfirmation(message)
-                    } else {
-                        CRITERIA_CONFIRMATION_PROMPT
-                    },
-                )
-                emitDone(turnId, sessionId, seq, totalProducts = 0)
-                return@launch
-            }
-
             emit(
                 event = AgentEventType.Thinking,
                 nodeId = "thinking_$turnId",
@@ -542,6 +504,13 @@ class ChatViewModel @Inject constructor(
                 )
                 delay(260)
             }
+            delay(180)
+            emit(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_mock_001",
+                payload = mockCriteria(),
+                displayMode = "summary_card",
+            )
             emitDone(
                 turnId = turnId,
                 sessionId = sessionId,
@@ -814,21 +783,6 @@ class ChatViewModel @Inject constructor(
         ).none { it in text }
     }
 
-    private fun String.isMockContinueCommand(): Boolean {
-        val text = lowercase().trim()
-        return listOf(
-            "继续",
-            "可以",
-            "确认",
-            "没问题",
-            "开始推荐",
-            "推荐吧",
-            "go",
-            "ok",
-            "continue",
-        ).any { it in text }
-    }
-
     private fun String.isProductConvergenceCommand(): Boolean {
         val text = lowercase()
             .trim()
@@ -888,31 +842,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun mockEditedCriteriaConfirmation(message: String): String =
-        """
-            已按你编辑后的问题更新条件：
-
-            1. **预算**：优先采纳问题里的新预算，默认控制在 **200 元以内**。
-            2. **排除项**：如果你写了“不含酒精 / 不要香精 / 排除高价”，下一轮会作为硬约束处理。
-            3. **推荐口径**：先保证证据可解释，再比较价格和肤质匹配。
-
-            可以回复「继续」，我会按这版标准重新推荐。
-
-            > 本轮来自编辑重发：`${message.take(24)}${if (message.length > 24) "..." else ""}`
-        """.trimIndent()
-
     private fun mockClarificationAnalysis(message: String): String =
         """
             我先看了一下你的需求。
 
-            现在能判断大方向是护肤类推荐，但还缺一个会直接影响标准的信息。不同肤质对清洁力、刺激风险和预算优先级的判断会不一样，所以我先补齐这个条件，再继续生成购买标准。
-        """.trimIndent()
-
-    private fun mockCriteriaAnalysis(message: String, fromEditResubmit: Boolean): String =
-        """
-            ${if (fromEditResubmit) "我已按你编辑后的问题重新理解需求。" else "我先把你的需求拆成可执行的购买标准。"}
-
-            这轮会重点看 5 件事：品类是否明确、肤质是否匹配、预算是否可控、排除项是否会影响风险，以及使用场景是不是日常护理。下面这张标准卡先给你确认，确认后我再进入商品检索。
+            现在能判断大方向是护肤类推荐，但还缺一个会直接影响筛选的信息。不同肤质对清洁力、刺激风险和预算优先级的判断会不一样，所以我先补齐这个条件，再直接检索候选商品。
         """.trimIndent()
 
     private fun mockRecommendationMarkdown(message: String, fromEditResubmit: Boolean): String =
