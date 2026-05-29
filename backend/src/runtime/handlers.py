@@ -304,7 +304,19 @@ async def handle_recommendation(
     if intent.intent == "feedback":
         await _record_feedback_intent(ctx, intent, body.message)
 
-    # Product-first: intro text starts immediately
+    # ── Fire DB reads before intro text: overlap with typewriter animation ──
+    feedback_task = asyncio.create_task(get_feedback_context(ctx.session_id))
+    ctx.background_tasks.append(feedback_task)
+    if _is_replace_deck_request(body):
+        product_ids_task = asyncio.create_task(get_previous_product_ids(ctx.session_id))
+        ctx.background_tasks.append(product_ids_task)
+    else:
+        product_ids_task = None
+
+    # ── Build speculative criteria (instant, no I/O) ──
+    spec_criteria = criteria_from_intent(intent, summary=_speculative_summary(intent))
+
+    # ── Stream intro text while DB queries complete ──
     intro_text = _build_intro_text(intent, body.message)
     async for event in stream_text(
         ctx,
@@ -314,14 +326,13 @@ async def handle_recommendation(
     ):
         yield event
 
-    # ── Speculative retrieval: launch in background while criteria runs ──
-    spec_criteria = criteria_from_intent(intent, summary=_speculative_summary(intent))
-
-    feedback = await get_feedback_context(ctx.session_id)
-    if _is_replace_deck_request(body):
-        previous_product_ids = await get_previous_product_ids(ctx.session_id)
+    # ── Collect DB results (already done by now) ──
+    feedback = await feedback_task
+    if product_ids_task is not None:
+        previous_product_ids = await product_ids_task
         feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
 
+    # ── Speculative retrieval: launch in background while criteria runs ──
     retrieval_task = start_stage_task(
         ctx,
         ctx.stages.run_retrieval(spec_criteria, top_n=8, feedback=feedback),
@@ -369,7 +380,7 @@ async def handle_recommendation(
             precomputed = None  # trigger serial fallback in continue_recommendation_from_criteria
 
     async for event in continue_recommendation_from_criteria(
-        ctx, body, criteria, precomputed_retrieval=precomputed,
+        ctx, body, criteria, precomputed_retrieval=precomputed, precomputed_feedback=feedback,
     ):
         yield event
 
@@ -400,13 +411,17 @@ async def continue_recommendation_from_criteria(
     criteria: CriteriaPayload,
     *,
     precomputed_retrieval: RetrievalResult | None = None,
+    precomputed_feedback: dict | None = None,
 ) -> AsyncGenerator[SSEEventBase, None]:
     ctx.ensure_active()
 
-    feedback = await get_feedback_context(ctx.session_id)
-    if _is_replace_deck_request(body):
-        previous_product_ids = await get_previous_product_ids(ctx.session_id)
-        feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
+    if precomputed_feedback is not None:
+        feedback = precomputed_feedback
+    else:
+        feedback = await get_feedback_context(ctx.session_id)
+        if _is_replace_deck_request(body):
+            previous_product_ids = await get_previous_product_ids(ctx.session_id)
+            feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
 
     if precomputed_retrieval is not None:
         retrieval = precomputed_retrieval
@@ -573,7 +588,8 @@ async def continue_decision_from_current_deck(
         return
 
     products = filtered_products
-    evidences_by_product = {product.product_id: await get_evidence(product) for product in products}
+    evidences_list = await asyncio.gather(*(get_evidence(p) for p in products))
+    evidences_by_product = {p.product_id: ev for p, ev in zip(products, evidences_list)}
 
     # Run scoring algorithm (PRD 06) before LLM
     scored = score_candidates(
@@ -1059,18 +1075,18 @@ async def _persist_recommendation(
             trace_details=retrieval.trace_details,
         ),
         record_evidence_links(products, evidences_by_product, conversation_id=conversation_id),
-    )
-    await record_audit_event(
-        "chat.recommendation_persisted",
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        resource_type="conversation",
-        resource_id=conversation_id,
-        metadata={
-            "criteria_id": criteria.criteria_id,
-            "selected_ids": [product.product_id for product in products],
-            "fallbacks": get_fallback_events(),
-        },
+        record_audit_event(
+            "chat.recommendation_persisted",
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            resource_type="conversation",
+            resource_id=conversation_id,
+            metadata={
+                "criteria_id": criteria.criteria_id,
+                "selected_ids": [product.product_id for product in products],
+                "fallbacks": get_fallback_events(),
+            },
+        ),
     )
 
 

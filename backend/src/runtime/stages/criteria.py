@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -14,11 +15,19 @@ from src.types.sse_events import Constraints, CriteriaPayload, QuickActionPayloa
 
 
 async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentResult) -> CriteriaPayload:
-    existing = await get_previous_criteria(session_id)
+    # Fire all 3 DB reads concurrently — none depend on each other
+    existing_task = asyncio.create_task(get_previous_criteria(session_id))
+    feedback_task = asyncio.create_task(get_feedback_context(session_id))
+    summary_task = asyncio.create_task(get_conversation_summary(session_id))
+
+    existing = await existing_task
     if body.criteria_patch:
+        feedback_task.cancel()
+        summary_task.cancel()
         return apply_criteria_patch(existing or CriteriaPayload(criteria_id="c_auto_001"), body.criteria_patch)
-    feedback = await get_feedback_context(session_id)
-    ctx_summary = await get_conversation_summary(session_id)
+
+    feedback = await feedback_task
+    ctx_summary = await summary_task
     criteria = await generate_criteria(
         body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
     )

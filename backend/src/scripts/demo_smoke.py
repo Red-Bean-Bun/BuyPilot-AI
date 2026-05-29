@@ -6,12 +6,18 @@ Run from backend/:
 
 from __future__ import annotations
 
+import sys
+
+if sys.platform == "win32":
+    import asyncio as _asyncio
+
+    _asyncio.set_event_loop_policy(_asyncio.WindowsSelectorEventLoopPolicy())
+
 import argparse
 import asyncio
 import json
 import os
 import shutil
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path

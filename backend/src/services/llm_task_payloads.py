@@ -431,6 +431,8 @@ def criteria_from_live_payload(
             **raw_constraints,
             "product_type": normalize_product_type(_normalize_nullable_string(raw_constraints.get("product_type"))),
         }
+    # ── Defensive sanitization: strip unknown fields & coerce types ──
+    raw_constraints = _sanitize_constraints(raw_constraints)
     category = (
         normalize_category(payload.get("category"))
         or infer_category_from_product_type(raw_constraints.get("product_type"))
@@ -461,6 +463,42 @@ def criteria_from_live_payload(
     if not criteria.summary:
         criteria.summary = "，".join(criteria.chips) if criteria.chips else f"{criteria.category}导购"
     return criteria
+
+
+def _sanitize_constraints(raw: dict[str, Any]) -> dict[str, Any]:
+    """Filter unknown fields and coerce common LLM type errors before Pydantic validation.
+
+    The LLM occasionally returns field values with the wrong type (e.g. string
+    budget, empty-string enums) or invents fields outside the Constraints schema.
+    Without this sanitization these would raise ``ValidationError`` and cause the
+    entire criteria generation to fail.
+    """
+    from src.types.sse_events import Constraints
+
+    allowed = set(Constraints.model_fields)
+    numeric = {"budget_min", "budget_max"}
+    list_fields = {"brand_avoid", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in allowed:
+            continue
+        # Drop Pydantic-empty values that aren't valid for the field type
+        if value is None or value == "" or value == []:
+            continue
+        if key in numeric and isinstance(value, str):
+            try:
+                cleaned[key] = float(value)
+            except (ValueError, TypeError):
+                continue  # drop unparseable budget values
+        elif key in list_fields and isinstance(value, str):
+            cleaned[key] = [value]
+        elif key in list_fields and isinstance(value, list):
+            coerced = [str(v) for v in value if v]
+            if coerced:  # don't let a degenerate list override a valid base value
+                cleaned[key] = coerced
+        else:
+            cleaned[key] = value
+    return cleaned
 
 
 def _normalize_intent_constraints(constraints: dict[str, Any]) -> dict[str, Any]:
