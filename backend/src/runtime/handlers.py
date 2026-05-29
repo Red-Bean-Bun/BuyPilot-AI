@@ -19,13 +19,14 @@ from src.config.tuning import (
 )
 from src.runtime.cart_rules import message_refers_to_previous_product, quantity_from_intent, referenced_product_id
 from src.runtime.message_rules import is_replace_deck_phrase
-from src.runtime.stages.criteria import criteria_quick_actions
+from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
 from src.runtime.stages.slot_checker import build_clarification_question
 from src.runtime.streaming import (
     StageResult,
     StreamContext,
     run_with_heartbeat,
+    start_stage_task,
 )
 from src.services.audit import record_audit_event
 from src.services.cart import add_product_to_cart, remove_product_from_cart, update_product_quantity
@@ -41,6 +42,7 @@ from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events, record_fallback
 from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, reason_from_atoms
+from src.services.retriever import filter_products
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
 from src.types.sse_events import (
@@ -243,13 +245,66 @@ async def handle_clarification(ctx: StreamContext, missing_slots: list[str]) -> 
     yield ctx.done()
 
 
+# ── Speculative retrieval helpers ──────────────────────────────────────────
+
+
+def _speculative_summary(intent: IntentResult) -> str:
+    """Build a natural-language summary from intent for speculative retrieval embedding.
+
+    Produces neutral descriptions like "用户需要美妆护肤类产品，油性肌肤适用，预算200元以内"
+    that match the linguistic style of LLM-generated criteria summaries.
+    """
+    constraints = intent.extracted_constraints or {}
+    parts: list[str] = []
+    if intent.category:
+        parts.append(f"{intent.category}类产品")
+    skin_type = constraints.get("skin_type")
+    if skin_type:
+        parts.append(f"{skin_type}肌肤适用")
+    budget = constraints.get("budget_max")
+    if budget is not None:
+        parts.append(f"预算{budget:g}元以内")
+    scenario = constraints.get("use_scenario")
+    if scenario:
+        parts.append(f"{scenario}场景")
+    product_type = constraints.get("product_type")
+    if product_type:
+        parts.append(str(product_type))
+    return "用户需要" + "，".join(parts) if parts else ""
+
+
+def _post_filter_retrieval(
+    result: RetrievalResult,
+    criteria: CriteriaPayload,
+    feedback: dict,
+    max_products: int = 5,
+) -> RetrievalResult:
+    """Re-screen speculative retrieval results against full criteria hard filters.
+
+    Does NOT re-run embedding or Rerank — just applies the hard-filter checks (O(n)).
+    """
+    kept = filter_products(
+        result.products, criteria, feedback, max_products=max_products
+    )
+    kept_ids = {p.product_id for p in kept}
+    return RetrievalResult(
+        products=kept,
+        evidence_by_product={
+            pid: ev
+            for pid, ev in result.evidence_by_product.items()
+            if pid in kept_ids
+        },
+        trace_details={**result.trace_details, "speculative_post_filtered": True},
+    )
+
+
 async def handle_recommendation(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     if intent.intent == "feedback":
         await _record_feedback_intent(ctx, intent, body.message)
 
-    # Product-first: intro text starts immediately while criteria is generated
+    # Product-first: intro text starts immediately
     intro_text = _build_intro_text(intent, body.message)
     async for event in stream_text(
         ctx,
@@ -259,6 +314,22 @@ async def handle_recommendation(
     ):
         yield event
 
+    # ── Speculative retrieval: launch in background while criteria runs ──
+    spec_criteria = criteria_from_intent(intent, summary=_speculative_summary(intent))
+
+    feedback = await get_feedback_context(ctx.session_id)
+    if _is_replace_deck_request(body):
+        previous_product_ids = await get_previous_product_ids(ctx.session_id)
+        feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
+
+    retrieval_task = start_stage_task(
+        ctx,
+        ctx.stages.run_retrieval(spec_criteria, top_n=8, feedback=feedback),
+        timing_key="retrieve",
+        background=True,
+    )
+
+    # ── Criteria generation (in parallel with speculative retrieval) ──
     yield ctx.thinking("criteria", "正在生成购买标准...")
     criteria_capture: CapturedStage[CriteriaPayload] = CapturedStage()
     ctx.ensure_active()
@@ -275,8 +346,31 @@ async def handle_recommendation(
         yield event
     criteria = criteria_capture.require("criteria")
 
-    # Always continue to retrieval — no more auto_run gate
-    async for event in continue_recommendation_from_criteria(ctx, body, criteria):
+    # ── Await speculative retrieval + post-filter, then delegate ──
+    if not retrieval_task.task.done():
+        yield ctx.thinking("searching", "正在检索匹配商品...")
+    try:
+        precomputed = await retrieval_task.task
+    except Exception:
+        precomputed = None
+
+    if precomputed is not None:
+        # Always re-screen with full criteria. The speculative retrieval used
+        # a CriteriaPayload built from intent (which may lack brand_avoid,
+        # product_type, or a tighter budget that the LLM criteria adds).
+        # Post-filter is O(n) on at most 8 products — negligible cost.
+        precomputed = _post_filter_retrieval(precomputed, criteria, feedback)
+        precomputed = RetrievalResult(
+            products=precomputed.products,
+            evidence_by_product=precomputed.evidence_by_product,
+            trace_details={**precomputed.trace_details, "speculative": True},
+        )
+        if not precomputed.products:
+            precomputed = None  # trigger serial fallback in continue_recommendation_from_criteria
+
+    async for event in continue_recommendation_from_criteria(
+        ctx, body, criteria, precomputed_retrieval=precomputed,
+    ):
         yield event
 
 
@@ -304,6 +398,8 @@ async def continue_recommendation_from_criteria(
     ctx: StreamContext,
     body: ChatStreamRequest,
     criteria: CriteriaPayload,
+    *,
+    precomputed_retrieval: RetrievalResult | None = None,
 ) -> AsyncGenerator[SSEEventBase, None]:
     ctx.ensure_active()
 
@@ -311,21 +407,25 @@ async def continue_recommendation_from_criteria(
     if _is_replace_deck_request(body):
         previous_product_ids = await get_previous_product_ids(ctx.session_id)
         feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
-    yield ctx.thinking("searching", "正在检索匹配商品...")
-    retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
-    ctx.ensure_active()
-    async for event in _capture_stage_result(
-        retrieval_capture,
-        run_with_heartbeat(
-            ctx,
-            ctx.stages.run_retrieval(criteria, feedback=feedback),
-            "searching",
-            "正在检索匹配商品...",
-            timing_key="retrieve",
-        ),
-    ):
-        yield event
-    retrieval = retrieval_capture.require("retrieval")
+
+    if precomputed_retrieval is not None:
+        retrieval = precomputed_retrieval
+    else:
+        yield ctx.thinking("searching", "正在检索匹配商品...")
+        retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
+        ctx.ensure_active()
+        async for event in _capture_stage_result(
+            retrieval_capture,
+            run_with_heartbeat(
+                ctx,
+                ctx.stages.run_retrieval(criteria, feedback=feedback),
+                "searching",
+                "正在检索匹配商品...",
+                timing_key="retrieve",
+            ),
+        ):
+            yield event
+        retrieval = retrieval_capture.require("retrieval")
 
     products = retrieval.products
     evidences_by_product = dict(retrieval.evidence_by_product)

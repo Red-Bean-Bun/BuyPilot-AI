@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX
@@ -22,6 +23,45 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
         body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
     )
     return annotate_criteria_sources(criteria, intent, existing)
+
+
+def criteria_from_intent(
+    intent: IntentResult,
+    *,
+    summary: str = "",
+) -> CriteriaPayload:
+    """Build a CriteriaPayload from intent results without an LLM call.
+
+    Used for:
+    1. Clarification continuity   — summary defaults to chip concatenation
+    2. Speculative retrieval       — summary uses natural-language template
+    """
+    _LIST_FIELDS = {"brand_avoid", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
+    allowed = set(Constraints.model_fields)
+    constraint_kwargs: dict[str, Any] = {}
+    for key, value in (intent.extracted_constraints or {}).items():
+        if key not in allowed or value is None:
+            continue
+        if key in _LIST_FIELDS and isinstance(value, str):
+            constraint_kwargs[key] = [value]
+        else:
+            constraint_kwargs[key] = value
+    constraints = Constraints(**constraint_kwargs)
+    category = intent.category or ""
+    chips = [category] if category else []
+    chips.extend(_constraint_chips(constraints))
+
+    return CriteriaPayload(
+        criteria_id=f"pending_{uuid.uuid4().hex[:8]}",
+        category=category,
+        summary=summary or "，".join(chips) if chips else "",
+        chips=chips,
+        constraints=constraints,
+        field_sources={
+            **({"category": "user"} if category else {}),
+            **{f"constraints.{key}": "user" for key in constraint_kwargs},
+        },
+    )
 
 
 _MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "origin_avoid", "dietary"}

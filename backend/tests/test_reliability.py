@@ -195,7 +195,7 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, seed
     async def fake_criteria(_session_id, _body, _intent):
         return CriteriaPayload(criteria_id="c_test", category="服饰运动", summary="测试")
 
-    async def fake_retrieval(criteria, feedback=None):
+    async def fake_retrieval(criteria, feedback=None, top_n=5):
         product = ProductPayload(product_id="p_shoe_001", name="测试跑鞋", category="服饰运动", price=300, brand="安踏")
         return RetrievalResult(
             products=[product],
@@ -287,7 +287,7 @@ async def test_pipeline_handles_sql_like_injection(monkeypatch, tmp_path):
     async def fake_criteria(_session_id, _body, _intent):
         return CriteriaPayload(criteria_id="c_inj", category="美妆护肤", summary="测试")
 
-    async def fake_retrieval(criteria, feedback=None):
+    async def fake_retrieval(criteria, feedback=None, top_n=5):
         return RetrievalResult(products=[], evidence_by_product={})
 
     async def fake_recommendation(criteria, products, evidence_by_product=None):
@@ -330,7 +330,7 @@ async def test_pipeline_handles_system_override_injection(monkeypatch, tmp_path)
     async def fake_criteria(_session_id, _body, _intent):
         return CriteriaPayload(criteria_id="c_inj2", category="美妆护肤", summary="测试")
 
-    async def fake_retrieval(criteria, feedback=None):
+    async def fake_retrieval(criteria, feedback=None, top_n=5):
         return RetrievalResult(products=[], evidence_by_product={})
 
     async def fake_recommendation(criteria, products, evidence_by_product=None):

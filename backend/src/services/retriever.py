@@ -455,6 +455,25 @@ def _retrieval_filters(feedback: Mapping[str, list[str]] | None) -> RetrievalFil
     )
 
 
+def filter_products(
+    products: list[ProductPayload],
+    criteria: CriteriaPayload,
+    feedback: Mapping[str, list[str]] | None = None,
+    max_products: int = 5,
+) -> list[ProductPayload]:
+    """Apply hard filters to an already-retrieved product list. O(n).
+
+    Used by speculative retrieval post-filtering: re-screen speculatively
+    retrieved candidates against the full criteria (which may include
+    brand_avoid / origin_avoid that the speculative CriteriaPayload lacked).
+    """
+    filters = _retrieval_filters(feedback)
+    return [
+        p for p in products
+        if _passes_hard_filters(criteria, p, filters)
+    ][:max_products]
+
+
 def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
     return product_match_score(
         criteria,

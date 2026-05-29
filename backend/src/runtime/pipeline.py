@@ -19,7 +19,7 @@ from src.runtime.message_rules import (
     maybe_intercept_budget_patch,
     message_with_image_context,
 )
-from src.runtime.stages.criteria import _constraint_chips, criteria_quick_actions, run_criteria
+from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions, run_criteria
 from src.runtime.stages.decision import run_decision
 from src.runtime.stages.intent import run_intent
 from src.runtime.stages.multimodal import run_multimodal
@@ -34,7 +34,6 @@ from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
-    Constraints,
     CriteriaPayload,
     CriteriaCardEvent,
     ErrorEvent,
@@ -425,29 +424,5 @@ async def _emit_commercial_claim_reply(ctx: StreamContext) -> AsyncGenerator[SSE
 
 
 def _intent_to_partial_criteria(intent: IntentResult, message: str) -> CriteriaPayload:
-    """Construct a partial CriteriaPayload from intent for multi-turn clarification continuity.
-
-    The resulting payload captures the category and any constraints already extracted
-    from the user's message. It reuses the existing conversation state machinery —
-    get_conversation_summary and get_previous_criteria both pick it up automatically.
-    """
-    allowed = set(Constraints.model_fields)
-    constraint_kwargs: dict[str, Any] = {}
-    for key, value in (intent.extracted_constraints or {}).items():
-        if key in allowed and value is not None:
-            constraint_kwargs[key] = value
-    constraints = Constraints(**constraint_kwargs)
-    category = intent.category or ""
-    chips = [category] if category else []
-    chips.extend(_constraint_chips(constraints))
-    return CriteriaPayload(
-        criteria_id=f"pending_{uuid.uuid4().hex[:8]}",
-        category=category,
-        summary="，".join(chips) if chips else "",
-        chips=chips,
-        constraints=constraints,
-        field_sources={
-            **({"category": "user"} if category else {}),
-            **{f"constraints.{key}": "user" for key in constraint_kwargs},
-        },
-    )
+    """Construct a partial CriteriaPayload from intent for multi-turn clarification continuity."""
+    return criteria_from_intent(intent)
