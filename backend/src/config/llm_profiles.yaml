@@ -23,6 +23,12 @@ profiles:
     base_url_env: BAILIAN_BASE_URL
     api_key_env: BAILIAN_API_KEY
     timeout_seconds: 20
+  qwen3_turbo:
+    provider: bailian
+    model: qwen3-turbo
+    base_url_env: BAILIAN_BASE_URL
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 20
   qwen_plus:
     provider: bailian
     model: qwen-plus
