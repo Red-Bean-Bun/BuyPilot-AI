@@ -217,15 +217,27 @@ class ChatViewModel @Inject constructor(
     }
 
     fun selectProduct(deckId: String, productId: String?) {
+        // 单次原子更新：只改 currentProductId，不触发 renderContext 重建
         _uiState.update { ChatReducer.selectProduct(it, deckId, productId) }
         val targetProductId = productId?.takeIf { it.isNotBlank() } ?: return
-        recordProductInteraction(
-            deckId = deckId,
-            productId = targetProductId,
-            feedbackType = "view_detail",
-            action = "view_detail",
-            reason = "用户打开候选商品预览",
-        )
+        val sessionId = _uiState.value.sessionId
+
+        // 网络请求单独处理，失败时不更新 lastError（查看详情失败不需要用户感知）
+        if (!BuildConfig.USE_MOCK_CHAT && !sessionId.isNullOrBlank()) {
+            viewModelScope.launch {
+                runCatching {
+                    chatRepository.submitProductFeedback(
+                        sessionId = sessionId,
+                        deckId = deckId,
+                        productId = targetProductId,
+                        feedbackType = "view_detail",
+                        action = "view_detail",
+                        reason = "用户打开候选商品预览",
+                    )
+                }
+                // 静默失败，不更新 UI 状态
+            }
+        }
     }
 
     fun swipeProduct(
