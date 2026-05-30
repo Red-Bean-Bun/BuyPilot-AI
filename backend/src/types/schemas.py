@@ -24,7 +24,6 @@ class ChatStreamRequest(BaseModel):
     image_url: str | None = None
     criteria_patch: dict[str, Any] | None = None
     skip_stages: list[str] = Field(default_factory=list)
-    auto_run: bool = False
     client_turn_id: str | None = None
     client_trace_id: str | None = None
 

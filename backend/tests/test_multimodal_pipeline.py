@@ -25,7 +25,7 @@ async def test_pipeline_injects_multimodal_analysis_into_criteria(monkeypatch):
         event
         async for event in pipeline_module.chat_stream(
             "sess_multimodal",
-            ChatStreamRequest(message="这个适合日常喝吗？", image_url="/uploads/test.png", auto_run=True),
+            ChatStreamRequest(message="这个适合日常喝吗？", image_url="/uploads/test.png"),
         )
     ]
     tags = [event.event for event in events]

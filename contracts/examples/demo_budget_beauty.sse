@@ -25,8 +25,14 @@ data: {"schema_version": "2026-05-20", "event": "text_delta", "session_id": "dem
 event: text_delta
 data: {"schema_version": "2026-05-20", "event": "text_delta", "session_id": "demo_001", "turn_id": "turn_demo_001", "seq": 9, "event_id": "demo_001:9", "node_id": "ai_text_demo_001", "display_mode": "inline_text", "message_id": "msg_ai_01", "delta": "下面给你几款更适合油皮日常洁面的选择。", "done": true}
 
+event: done
+data: {"schema_version": "2026-05-20", "event": "done", "session_id": "demo_001", "turn_id": "turn_demo_001", "seq": 10, "event_id": "demo_001:10", "node_id": "done_demo_001", "display_mode": "none", "deck_id": "deck_demo_001", "finish_reason": "awaiting_product_feedback"}
+
+event: thinking
+data: {"schema_version": "2026-05-20", "event": "thinking", "session_id": "demo_001", "turn_id": "turn_demo_002", "seq": 1, "event_id": "demo_002:1", "node_id": "thinking_demo_002", "display_mode": "inline_thinking", "stage": "decision", "message": "正在结合你的反馈生成最终建议..."}
+
 event: final_decision
-data: {"schema_version": "2026-05-20", "event": "final_decision", "session_id": "demo_001", "turn_id": "turn_demo_001", "seq": 10, "event_id": "demo_001:10", "node_id": "decision_demo_001", "display_mode": "summary_card", "winner_product_id": "p_beauty_011", "summary": "如果你更看重控油效果和性价比，优先选珊珂洗颜专科洁面乳。", "why": ["油性适用", "200元内", "控油效果好", "性价比高"], "not_for": ["若你希望避免含香精产品，不建议Top1"], "alternatives": [{"product_id": "p_beauty_006", "name": "巴黎欧莱雅新多重防护隔离露"}, {"product_id": "p_beauty_010", "name": "安热沙金灿倍护防晒乳"}], "next_actions": [{"action_id": "cheaper", "label": "再便宜一点", "action": "criteria_patch", "criteria_patch": {"budget_max": 150}}, {"action_id": "sensitive_skin", "label": "敏感肌适用", "action": "criteria_patch", "criteria_patch": {"skin_type": "敏感"}}, {"action_id": "compare", "label": "加入对比", "action": "compare"}]}
+data: {"schema_version": "2026-05-20", "event": "final_decision", "session_id": "demo_001", "turn_id": "turn_demo_002", "seq": 2, "event_id": "demo_002:2", "node_id": "decision_demo_002", "display_mode": "summary_card", "deck_id": "deck_demo_001", "winner_product_id": "p_beauty_011", "summary": "如果你更看重控油效果和性价比，优先选珊珂洗颜专科洁面乳。", "why": ["油性适用", "200元内", "控油效果好", "性价比高"], "not_for": ["若你希望避免含香精产品，不建议Top1"], "alternatives": [{"product_id": "p_beauty_006", "name": "巴黎欧莱雅新多重防护隔离露"}, {"product_id": "p_beauty_010", "name": "安热沙金灿倍护防晒乳"}], "next_actions": [{"action_id": "cheaper", "label": "再便宜一点", "action": "criteria_patch", "criteria_patch": {"budget_max": 150}}, {"action_id": "sensitive_skin", "label": "敏感肌适用", "action": "criteria_patch", "criteria_patch": {"skin_type": "敏感"}}, {"action_id": "compare", "label": "加入对比", "action": "compare"}], "decision_status": "selected", "confidence": "medium", "next_step": "accept_recommendation"}
 
 event: done
-data: {"schema_version": "2026-05-20", "event": "done", "session_id": "demo_001", "turn_id": "turn_demo_001", "seq": 11, "event_id": "demo_001:11", "node_id": "done_demo_001", "display_mode": "none", "finish_reason": "completed"}
+data: {"schema_version": "2026-05-20", "event": "done", "session_id": "demo_001", "turn_id": "turn_demo_002", "seq": 3, "event_id": "demo_002:3", "node_id": "done_demo_002", "display_mode": "none", "finish_reason": "completed"}

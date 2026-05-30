@@ -138,11 +138,24 @@ def decision_confidence(
 
 
 def _compute_user_signal_scores(feedback: dict[str, Any]) -> dict[str, float]:
-    """Convert feedback actions into per-product signal scores."""
+    """Convert feedback actions into per-product signal scores.
+
+    Processes both negative signals (avoid_products) and positive signals
+    (liked_products, add_to_cart_products, viewed_products) per PRD 06.
+    """
     scores: dict[str, float] = {}
     # Per-product negative signals from avoid_products
     for pid in feedback.get("avoid_products", []):
         scores[pid] = scores.get(pid, 0.0) + SIGNAL_NOT_INTERESTED
+    # Per-product positive signals from liked_products (like/right_swipe)
+    for pid in feedback.get("liked_products", []):
+        scores[pid] = scores.get(pid, 0.0) + SIGNAL_LIKE
+    # Per-product positive signals from add_to_cart_products
+    for pid in feedback.get("add_to_cart_products", []):
+        scores[pid] = scores.get(pid, 0.0) + SIGNAL_ADD_TO_CART
+    # Per-product positive signals from viewed_products (view_detail/open_evidence)
+    for pid in feedback.get("viewed_products", []):
+        scores[pid] = scores.get(pid, 0.0) + SIGNAL_VIEW_DETAIL
     return scores
 
 

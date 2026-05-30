@@ -76,7 +76,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤", "auto_run": True},
+                json={"message": "推荐适合油皮的洗面奶，200元以内，日常护肤"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -132,7 +132,7 @@ class TestChatStreamEndpoint:
             async with c.stream(
                 "POST",
                 "/chat/stream",
-                json={"message": "推荐适合油皮的洗面奶", "auto_run": True},
+                json={"message": "推荐适合油皮的洗面奶"},
             ) as resp:
                 events = await collect_sse_stream(resp)
 
@@ -149,7 +149,6 @@ class TestChatStreamEndpoint:
                 json={
                     "message": "推荐适合油皮的洗面奶，200元以内，日常护肤",
                     "session_id": "sess_chat_api_decision",
-                    "auto_run": True,
                 },
             ) as resp:
                 await collect_sse_stream(resp)

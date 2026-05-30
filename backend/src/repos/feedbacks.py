@@ -11,6 +11,13 @@ from src.config.domain_terms import extract_feedback_avoid_terms, is_negative_fe
 from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import Feedback
 
+# ── Feedback action signal classification ────────────────────────────────────
+
+POSITIVE_FEEDBACK_ACTIONS = {"like", "right_swipe", "add_to_cart", "view_detail", "open_evidence"}
+CART_ADD_ACTIONS = {"add_to_cart"}
+VIEW_ACTIONS = {"view_detail", "open_evidence"}
+LIKE_ACTIONS = {"like", "right_swipe"}
+
 
 @dataclass(frozen=True)
 class FeedbackRecord:
@@ -69,9 +76,18 @@ def extract_feedback_context(records: list[FeedbackRecord]) -> dict[str, list[st
     avoid_products: list[str] = []
     avoid_traits: list[str] = []
     prefer_traits: list[str] = []
+    liked_products: list[str] = []
+    add_to_cart_products: list[str] = []
+    viewed_products: list[str] = []
     for item in records:
         if is_negative_feedback(item.action) and item.product_id:
             avoid_products.append(item.product_id)
+        elif item.action in LIKE_ACTIONS and item.product_id:
+            liked_products.append(item.product_id)
+        elif item.action in CART_ADD_ACTIONS and item.product_id:
+            add_to_cart_products.append(item.product_id)
+        elif item.action in VIEW_ACTIONS and item.product_id:
+            viewed_products.append(item.product_id)
         if item.reason:
             if is_negative_feedback(item.action, item.reason):
                 avoid_traits.extend(extract_feedback_avoid_terms(item.reason))
@@ -81,4 +97,7 @@ def extract_feedback_context(records: list[FeedbackRecord]) -> dict[str, list[st
         "avoid_products": list(dict.fromkeys(avoid_products)),
         "avoid_traits": list(dict.fromkeys(avoid_traits)),
         "prefer_traits": prefer_traits,
+        "liked_products": list(dict.fromkeys(liked_products)),
+        "add_to_cart_products": list(dict.fromkeys(add_to_cart_products)),
+        "viewed_products": list(dict.fromkeys(viewed_products)),
     }

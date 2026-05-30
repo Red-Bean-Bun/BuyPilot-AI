@@ -161,13 +161,12 @@ async def _collect_chat(
     *,
     session_id: str | None = None,
     image_url: str | None = None,
-    auto_run: bool = True,
 ) -> list[SSEEventBase]:
     return [
         event
         async for event in chat_stream(
             session_id or _session_id(),
-            ChatStreamRequest(message=message, image_url=image_url, auto_run=auto_run),
+            ChatStreamRequest(message=message, image_url=image_url),
         )
     ]
 

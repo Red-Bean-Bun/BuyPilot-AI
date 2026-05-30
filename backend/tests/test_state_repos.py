@@ -120,7 +120,7 @@ async def test_pipeline_feedback_excludes_disliked_product(temp_database):
         event
         async for event in chat_stream(
             "sess_feedback_pipeline",
-            ChatStreamRequest(message="推荐适合油皮的护肤品，200元以内，日常护肤", auto_run=True),
+            ChatStreamRequest(message="推荐适合油皮的护肤品，200元以内，日常护肤"),
         )
     ]
     first_product_id = [event.product.product_id for event in first_events if event.event == "product_card"][0]
@@ -135,7 +135,7 @@ async def test_pipeline_feedback_excludes_disliked_product(temp_database):
         event
         async for event in chat_stream(
             "sess_feedback_pipeline",
-            ChatStreamRequest(message="再推荐适合油皮的护肤品，200元以内，日常护肤", auto_run=True),
+            ChatStreamRequest(message="再推荐适合油皮的护肤品，200元以内，日常护肤"),
         )
     ]
     second_product_ids = [event.product.product_id for event in second_events if event.event == "product_card"]

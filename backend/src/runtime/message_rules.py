@@ -173,8 +173,8 @@ def _is_budget_reduction_phrase(message: str) -> bool:
 
 _ADJUST_SOFTEN_PATTERN = re.compile(r"再(.{1,4})(?:一点|些|点儿)")
 _ADJUST_NOT_TOO_PATTERN = re.compile(r"不要太(.{1,6})")
-_ADJUST_AVOID_PATTERN = re.compile(r"不要(.{1,8})")
-_ADJUST_BUDGET_CAP_PATTERN = re.compile(r"预算.{0,3}(\d+(?:\.\d+)?)")
+_ADJUST_AVOID_PATTERN = re.compile(r"不要([^，。！？；、,.!?;:\n]{1,8})")
+_ADJUST_BUDGET_CAP_PATTERN = re.compile(r"预算[^0-9]{0,3}(\d+(?:\.\d+)?)")
 _ADJUST_BUDGET_LOWER = ("预算再低", "再便宜", "便宜点", "便宜些")
 _ADJUST_BUDGET_HIGHER = ("预算再高", "贵一点", "好一点")
 
@@ -199,7 +199,11 @@ def extract_adjustment_hints(message: str) -> dict[str, Any]:
     m = _ADJUST_AVOID_PATTERN.search(text)
     if m:
         term = m.group(1).strip()
-        if term not in ("太", "再", "那么", "这么", "含", "含有"):
+        # Stop-word prefixes: terms starting with these are degree/intensity
+        # modifiers, not ingredients to avoid (e.g. "太贵" = "too expensive",
+        # not an ingredient named "太贵").
+        _AVOID_STOP_PREFIXES = ("太", "再", "那么", "这么", "很", "特别", "非常", "最", "含", "含有")
+        if not any(term.startswith(p) for p in _AVOID_STOP_PREFIXES):
             hints.setdefault("ingredient_avoid", []).append(term)
 
     if any(phrase in text for phrase in _ADJUST_BUDGET_LOWER):

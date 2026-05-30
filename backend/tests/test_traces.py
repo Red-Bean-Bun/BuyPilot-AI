@@ -22,7 +22,7 @@ async def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch,
         event
         async for event in chat_stream(
             "sess_trace",
-            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤", auto_run=True),
+            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤"),
         )
     ]
     assert events[-1].event == "done"

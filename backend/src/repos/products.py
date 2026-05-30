@@ -97,6 +97,7 @@ def evidence_snippet(product_id: str, max_chars: int = 180) -> str | None:
 def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
     text = build_product_text(raw)
     source_category = str(raw.get("category") or "")
+    sku_options = _normalize_sku_options(raw.get("skus"))
     return ProductPayload(
         product_id=str(raw["product_id"]),
         name=str(raw["title"]),
@@ -110,6 +111,7 @@ def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
         ingredient_tags=_extract_terms(text, INGREDIENT_TERMS),
         ingredient_avoid=[],
         use_scenario=_extract_scenario(text),
+        sku_options=sku_options,
     )
 
 
@@ -118,6 +120,27 @@ def public_product_image_url(image_path: Any) -> str | None:
     if not path:
         return None
     return f"{PRODUCT_ASSET_URL_PREFIX}/{path}"
+
+
+def _normalize_sku_options(skus: Any) -> list[dict[str, Any]] | None:
+    """Convert raw SKU list to sku_options format.
+
+    Raw format: [{sku_id, properties: {key: value, ...}, price}]
+    Target format: [{sku_id, properties: {key: value, ...}, price}]
+    They're structurally identical — just validate that the input is a non-empty list.
+    """
+    if not skus or not isinstance(skus, list):
+        return None
+    options: list[dict[str, Any]] = []
+    for sku in skus:
+        if not isinstance(sku, dict) or "sku_id" not in sku:
+            continue
+        options.append({
+            "sku_id": str(sku["sku_id"]),
+            "properties": sku.get("properties") or {},
+            "price": sku.get("price"),
+        })
+    return options or None
 
 
 @lru_cache(maxsize=1)

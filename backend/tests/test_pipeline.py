@@ -168,7 +168,7 @@ async def test_pipeline_product_deck_has_consistent_deck_id():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_multi_product_first_turn_emits_lightweight_decision(monkeypatch):
+async def test_pipeline_multi_product_first_turn_waits_for_convergence(monkeypatch):
     product_a = ProductPayload(product_id="p_initial_a", name="候选A", category="美妆护肤", price=99)
     product_b = ProductPayload(product_id="p_initial_b", name="候选B", category="美妆护肤", price=109)
     evidence = [EvidencePayload(source_type="product_chunk", source_id="initial_chunk", snippet="初步证据")]
@@ -183,13 +183,13 @@ async def test_pipeline_multi_product_first_turn_emits_lightweight_decision(monk
     monkeypatch.setattr(pipeline_module, "run_retrieval", two_product_retrieval)
 
     events = [event async for event in chat_stream("s_initial_decision", ChatStreamRequest(message="推荐洗面奶"))]
+    tags = [event.event for event in events]
     decisions = [event for event in events if event.event == "final_decision"]
 
-    assert len(decisions) == 1
-    assert decisions[0].decision_status == "needs_more_signal"
-    assert decisions[0].confidence == "low"
-    assert decisions[0].next_step == "continue_current_deck"
-    assert decisions[0].deck_id == events[-1].deck_id
+    assert "product_card" in tags
+    assert "criteria_card" in tags
+    assert tags.index("product_card") < tags.index("criteria_card")
+    assert decisions == []
     assert events[-1].finish_reason == "awaiting_product_feedback"
 
 
@@ -232,7 +232,7 @@ async def test_pipeline_continue_after_deck_emits_final_decision():
         event
         async for event in chat_stream(
             "s_decision",
-            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤", auto_run=True),
+            ChatStreamRequest(message="推荐适合油皮的洗面奶，200元以内，日常护肤"),
         )
     ]
     events = [event async for event in chat_stream("s_decision", ChatStreamRequest(message="继续"))]

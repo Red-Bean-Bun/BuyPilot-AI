@@ -29,9 +29,9 @@ async def _seed_products_for_issue_acceptance(seeded_products):
 
 @pytest.mark.asyncio
 # 问题 0 验收：
-# - 首轮出现候选商品 deck、criteria_card 和低置信初步 final_decision。
+# - 首轮出现候选商品 deck 和 criteria_card，但不出现 final_decision。
 # - deck 内反馈后回复"继续"，最终建议体现反馈。
-# - 初步 final_decision 标记 needs_more_signal，用户继续后再生成 completed 决策。
+# - 用户继续后再生成 completed 决策。
 # REG-09: SwipeDeck 用户反馈后回复"继续" -> 后端读取当前 deck 反馈，再生成 final_decision。
 async def test_issue0_deck_feedback_is_applied_before_final_decision():
     """Product-first: round 1 = product+criteria, round 2 (继续) = final_decision with feedback."""
@@ -201,9 +201,7 @@ async def test_issue4_sports_category_asks_product_type_before_budget_or_full_cr
     events = await _chat("服饰运动")
 
     decisions = [event for event in events if event.event == "final_decision"]
-    if decisions:
-        assert decisions[0].decision_status == "needs_more_signal"
-        assert decisions[0].next_step == "continue_current_deck"
+    assert decisions == []
     criteria = _criteria(events)
     assert len(criteria) >= 1
     assert criteria[0].category == "服饰运动"
@@ -217,14 +215,13 @@ async def test_issue4_sports_category_asks_product_type_before_budget_or_full_cr
 # - 食品 raw/source category 与业务 category 归一后不排空。
 # REG-05: "推荐无糖饮料" -> 能召回食品类商品。
 async def test_issue5_food_aliases_recall_food_products(message: str):
-    events = await _chat(message, auto_run=True)
+    events = await _chat(message)
     products = _products(events)
 
     assert products
     assert all(product.category == "食品生活" for product in products)
     decisions = [event for event in events if event.event == "final_decision"]
-    assert decisions
-    assert decisions[0].decision_status == "needs_more_signal"
+    assert decisions == []
     assert _done(events).finish_reason == "awaiting_product_feedback"
 
 
@@ -248,49 +245,35 @@ async def test_issue5_and_9_unsupported_cd_player_stops_before_criteria_or_empty
 
 @pytest.mark.asyncio
 # 问题 7/8 验收（更新为 product-first）：
-# - product-first: 候选商品出现后 criteria_card 后置，并给出低置信初步 final_decision。
+# - product-first: 候选商品出现后 criteria_card 后置，不同轮自动输出 final_decision。
 # REG-07: 候选商品出现后 -> criteria_card 作为筛选调整卡后置。
-async def test_issue7_and_8_candidate_stage_has_lightweight_final_decision():
-    events = await _chat("推荐适合油皮的洗面奶，200元以内，日常护肤")
+async def test_issue7_and_8_candidate_stage_has_no_final_decision():
+    events = await _chat("推荐适合油皮的护肤品，300元以内，日常护肤")
     tags = _tags(events)
 
     assert "product_card" in tags
     assert "criteria_card" in tags
+    assert tags.index("product_card") < tags.index("criteria_card")
     decisions = [event for event in events if event.event == "final_decision"]
-    assert decisions
-    if len(_products(events)) > 1:
-        assert decisions[0].decision_status == "needs_more_signal"
-    assert _done(events).finish_reason in ("awaiting_product_feedback", "completed")
+    assert decisions == []
+    assert _done(events).finish_reason == "awaiting_product_feedback"
 
 
 @pytest.mark.asyncio
 # 问题 0/7 验收：
-# - product_card 后收到过早 final_decision 时，Android 端继续缓存。
-# - 用户收敛后再展示 pending decision。
-# REG-08: product_card 后收到 final_decision -> Android 端继续缓存，用户收敛后再展示。
-async def test_regression_android_reducer_caches_early_final_decision_until_converged():
-    reducer_test_path = (
-        PROJECT_ROOT
-        / "android"
-        / "feature"
-        / "chat"
-        / "src"
-        / "test"
-        / "java"
-        / "com"
-        / "buypilot"
-        / "feature"
-        / "chat"
-        / "state"
-        / "ChatReducerTest.kt"
-    )
-    source = reducer_test_path.read_text(encoding="utf-8")
+# - product_card 后不应收到过早 final_decision。
+# - 用户收敛后再返回 final_decision。
+# REG-08: product_card 后不再提前发送 final_decision。
+async def test_regression_backend_does_not_emit_early_final_decision_before_convergence():
+    session_id = _session_id()
 
-    assert "productCardsAwaitConvergenceAndCacheEarlyDecisionUntilUserConverges" in source
-    assert "assertFalse(earlyDecision.nodes.any { it is FinalDecisionNode })" in source
-    assert 'assertTrue("deck_1" in earlyDecision.pendingDecisions)' in source
-    assert 'ChatReducer.convergeDeck(earlyDecision, "deck_1")' in source
-    assert "assertTrue(converged.nodes.any { it is FinalDecisionNode })" in source
+    first = await _chat("推荐适合油皮的护肤品，300元以内，日常护肤", session_id=session_id)
+    assert "final_decision" not in _tags(first)
+    assert _done(first).finish_reason == "awaiting_product_feedback"
+
+    second = await _chat("继续", session_id=session_id)
+    assert "final_decision" in _tags(second)
+    assert _done(second).finish_reason == "completed"
 
 
 @pytest.mark.asyncio
@@ -316,21 +299,20 @@ async def test_issue8_android_markdown_rendering_uses_markwon():
     source = screen_path.read_text(encoding="utf-8")
 
     assert "import io.noties.markwon.Markwon" in source
-    assert "Markwon.builder(context)" in source
-    assert "markwon.setMarkdown(textView, content)" in source
+    assert "Markwon.builder(" in source
+    assert "markwon.setParsedMarkdown(textView, renderedMarkdown)" in source
 
 
 async def _chat(
     message: str,
     *,
     session_id: str | None = None,
-    auto_run: bool = False,
 ) -> list[SSEEventBase]:
     return [
         event
         async for event in chat_stream(
             session_id or _session_id(),
-            ChatStreamRequest(message=message, auto_run=auto_run),
+            ChatStreamRequest(message=message),
         )
     ]
 
@@ -347,6 +329,7 @@ def _assert_waiting_for_criteria(events: list[SSEEventBase]) -> None:
 def _assert_product_feedback(events: list[SSEEventBase]) -> None:
     tags = _tags(events)
     assert "product_card" in tags
+    assert "final_decision" not in tags
     assert "done" in tags
     assert _done(events).finish_reason == "awaiting_product_feedback"
 

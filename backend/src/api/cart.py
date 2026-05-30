@@ -17,7 +17,11 @@ async def read_cart(session_id: str) -> CartResponse:
 
 @cart_router.patch("/cart/{session_id}/items/{product_id}")
 async def patch_cart_item(session_id: str, product_id: str, body: CartMutationRequest) -> CartItemPayload:
-    item = await update_product_quantity(session_id, product_id, body.quantity)
+    try:
+        item = await update_product_quantity(session_id, product_id, body.quantity)
+    except ValueError:
+        # Product not found in catalog or cart item doesn't exist
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product or cart item not found.")
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cart item not found.")
     return item

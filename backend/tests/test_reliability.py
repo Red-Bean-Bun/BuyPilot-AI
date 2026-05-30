@@ -225,7 +225,7 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, seed
 
     # Round 2: intent with budget, should proceed through recommendation
     monkeypatch.setattr(pipeline_module, "run_intent", mock_intent_round2)
-    events2 = [e async for e in chat_stream("sess_multi", ChatStreamRequest(message="预算500以内", auto_run=True))]
+    events2 = [e async for e in chat_stream("sess_multi", ChatStreamRequest(message="预算500以内"))]
     tags2 = [e.event for e in events2]
     assert "product_card" in tags2, f"Expected product_card, got: {tags2}"
 

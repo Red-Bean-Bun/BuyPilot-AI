@@ -75,6 +75,9 @@ FOLLOWUP_TEXT_DEFAULT = (
     "你先看看这几款候选。如果想调整筛选范围，可以直接说「再温和一点」「不要酒精」「预算再低一点」，也可以点筛选卡修改。"
 )
 FOLLOWUP_TEXT_NO_MATCH = "当前条件下暂时没有匹配的商品。你可以放宽预算、换一个品类，或者去掉一些排除条件试试。"
+FOLLOWUP_TEXT_BUDGET_RELAXED = (
+    "原预算内没有匹配商品，以下为放宽预算后的备选。如果你想回到原预算，可以直接说或点筛选卡修改。"
+)
 
 STREAM_TEXT_DEFAULT_DELAY_MS = 25
 TYPEWRITER_MIN_CHARS = 2
@@ -444,6 +447,8 @@ async def continue_recommendation_from_criteria(
 
     products = retrieval.products
     evidences_by_product = dict(retrieval.evidence_by_product)
+    budget_relaxed = _budget_was_relaxed(retrieval.trace_details)
+    risk_notes_extra = ["原预算内无匹配，此为超预算备选"] if budget_relaxed else []
 
     # Branch 0: no matching products
     if not products:
@@ -460,7 +465,7 @@ async def continue_recommendation_from_criteria(
         return
 
     # Emit product cards with pacing delay (built into _product_card_events)
-    async for event in _product_card_events(ctx, criteria, products, evidences_by_product):
+    async for event in _product_card_events(ctx, criteria, products, evidences_by_product, risk_notes_extra=risk_notes_extra):
         yield event
 
     # Branch 1: single product — score, then LLM explanation, then final_decision
@@ -499,7 +504,9 @@ async def continue_recommendation_from_criteria(
         yield ctx.done("completed")
         return
 
-    # Branch 2+: LLM explanation → criteria_card → followup guidance → done
+    # Branch 2+: LLM explanation → criteria_card → followup guidance → done.
+    # PRD 05/06: multi-candidate decks must wait for user feedback or an
+    # explicit convergence turn before emitting final_decision.
     # Step 1: LLM recommendation explanation ("为什么先给这些")
     try:
         async for event in _stream_recommendation_text_events(
@@ -518,20 +525,11 @@ async def continue_recommendation_from_criteria(
     # Step 2: criteria_card as post-hoc filter adjustment card
     yield _criteria_card_event(ctx, criteria)
 
-    # Step 2.5: first-round lightweight decision. This gives the turn a
-    # complete loop while explicitly marking the decision as low-confidence.
-    yield _final_decision_event(
-        ctx,
-        criteria,
-        products,
-        _lightweight_initial_decision(criteria, products, evidences_by_product, feedback),
-        deck_id=ctx.deck_id,
-    )
-
     # Step 3: followup guidance text ("你可以自然语言调整...")
+    followup_text = FOLLOWUP_TEXT_BUDGET_RELAXED if budget_relaxed else FOLLOWUP_TEXT_DEFAULT
     async for event in stream_text(
         ctx,
-        FOLLOWUP_TEXT_DEFAULT,
+        followup_text,
         message_id=f"followup_{ctx.turn_id}",
         node_id=f"followup_{ctx.turn_id}",
     ):
@@ -731,39 +729,6 @@ def _feedback_with_avoided_products(feedback: dict[str, list[str]], product_ids:
     return merged
 
 
-def _lightweight_initial_decision(
-    criteria: CriteriaPayload,
-    products: list[ProductPayload],
-    evidences_by_product: dict[str, list[EvidencePayload]],
-    feedback: dict[str, list[str]],
-) -> DecisionResult:
-    scored = score_candidates(
-        products,
-        criteria,
-        feedback=feedback,
-        evidence_by_product=evidences_by_product,
-    )
-    winner_score = scored[0]
-    winner = next(
-        (product for product in products if product.product_id == winner_score.product_id),
-        products[0],
-    )
-    evidence = evidences_by_product.get(winner.product_id, [])
-    reason_atoms = build_reason_atoms(criteria, winner, evidence)
-    why = [atom.text for atom in reason_atoms[:3] if atom.text]
-    if not why:
-        why = ["当前候选中综合匹配度最高。"]
-    return DecisionResult(
-        winner_product_id=winner.product_id,
-        summary=f"当前先把{winner.name}作为首选候选；继续反馈后我会再收敛。",
-        why=why,
-        not_for=[],
-        decision_status="needs_more_signal",
-        confidence="low",
-        next_step="continue_current_deck",
-    )
-
-
 def _criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> CriteriaCardEvent:
     return CriteriaCardEvent(
         session_id=ctx.session_id,
@@ -782,6 +747,8 @@ async def _product_card_events(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidences_by_product: dict[str, list[EvidencePayload]],
+    *,
+    risk_notes_extra: list[str] | None = None,
 ) -> AsyncGenerator[ProductCardEvent, None]:
     for rank, product in enumerate(products, start=1):
         ctx.ensure_active()
@@ -802,7 +769,7 @@ async def _product_card_events(
             product=product,
             reason=reason_from_atoms(product, reason_atoms),
             reason_atoms=reason_atoms,
-            risk_notes=[],
+            risk_notes=list(risk_notes_extra or []),
             evidence=evidence,
             actions=[
                 QuickActionPayload(action_id="show_evidence", label="看证据", action="open_evidence"),
@@ -1088,6 +1055,15 @@ async def _persist_recommendation(
             },
         ),
     )
+
+
+def _budget_was_relaxed(trace_details: dict) -> bool:
+    """Check whether budget_max was relaxed during retrieval."""
+    relaxation_steps = (trace_details.get("filters_applied") or {}).get("relaxation_steps") or []
+    for step in relaxation_steps:
+        if "budget_max" in (step.get("relaxed_fields") or []):
+            return True
+    return False
 
 
 INTENT_HANDLERS: dict[str, IntentHandler] = {

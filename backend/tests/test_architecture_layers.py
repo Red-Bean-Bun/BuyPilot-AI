@@ -103,6 +103,10 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_vector_chunks_by_similarity",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_embedded_chunks",
     "tests/test_retrieval.py::test_retrieve_returns_empty_without_db_vector_hits -> src.services.retriever.embed_text",
+    # Goal 7: LLM bad response defense — stub stage raising RuntimeError
+    # to simulate invalid/empty/hallucinated responses (no llm_gateway._chat_completion
+    # mock needed — uses MOCK_ALLOWED_INTERNAL stage entry points instead)
+    "tests/test_viewmodel_pipeline.py::test_viewmodel_decision_winner_not_in_candidates_locked_to_scoring_winner -> src.services.llm_gateway._chat_completion",
 }
 
 
