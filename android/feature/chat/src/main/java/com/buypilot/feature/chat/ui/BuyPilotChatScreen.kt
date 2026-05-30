@@ -11,6 +11,7 @@ import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -119,7 +120,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -561,7 +561,6 @@ fun BuyPilotChatScreen(
 ) {
     var input by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
-    var welcomeDismissed by rememberSaveable { mutableStateOf(false) }
     var sheetContent by remember { mutableStateOf<ChatSheetContent?>(null) }
     var sheetExiting by remember { mutableStateOf(false) }
     var sheetTransitionId by remember { mutableStateOf(0) }
@@ -589,7 +588,7 @@ fun BuyPilotChatScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
     val defaultSkinTypeOptions = stringArrayResource(R.array.default_skin_type_options).toSet()
-    val showWelcome = state.nodes.isEmpty() && !welcomeDismissed
+    val showWelcome = state.nodes.isEmpty() && input.isBlank()
     val activeClarificationKey = state.nodes
         .filterIsInstance<ClarificationNode>()
         .lastOrNull { it.key !in dismissedClarificationKeys }
@@ -608,7 +607,6 @@ fun BuyPilotChatScreen(
         listOfNotNull(pendingFlightMessageKey, activeFlightMessageKey)
 
     fun focusComposer() {
-        welcomeDismissed = true
         showAttachmentMenu = false
         composerFocusRequester.requestFocus()
         keyboardController?.show()
@@ -644,7 +642,6 @@ fun BuyPilotChatScreen(
         val next = message.trim()
         if (next.isEmpty() && imageUrl == null) return
 
-        welcomeDismissed = true
         onSendMessage(next, imageUrl)
         input = ""
         onInputChanged("", false)
@@ -657,11 +654,17 @@ fun BuyPilotChatScreen(
         val next = message.trim()
         if (next.isEmpty()) return
 
-        welcomeDismissed = true
         showAttachmentMenu = false
         input = next
         onInputChanged(next, false)
         onEditLastMessage(next)
+        composerFocusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
+    fun loadWelcomePrompt(text: String) {
+        input = text
+        onInputChanged(text, false)
         composerFocusRequester.requestFocus()
         keyboardController?.show()
     }
@@ -687,7 +690,6 @@ fun BuyPilotChatScreen(
             return
         }
 
-        welcomeDismissed = true
         showAttachmentMenu = false
         input = ""
         onInputChanged("", false)
@@ -756,6 +758,13 @@ fun BuyPilotChatScreen(
         }
     }
 
+    BackHandler(enabled = sheetContent != null || composerFocused) {
+        when {
+            sheetContent != null -> dismissSheet()
+            composerFocused -> focusManager.clearFocus()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -789,6 +798,7 @@ fun BuyPilotChatScreen(
                     onProductOpen = onOpenProductDeck,
                     onProductDetailOpen = onOpenProductDetail,
                     onConvergeRecommendation = { sendAndClear("继续") },
+                    onWelcomePromptClick = { loadWelcomePrompt(it) },
                     onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
                     onRetryLastMessage = onRetryLastMessage,
                     onEditLastMessage = { editAndFocus(it) },
@@ -864,7 +874,6 @@ fun BuyPilotChatScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter),
             onAttachmentClick = {
-                welcomeDismissed = true
                 showAttachmentMenu = !showAttachmentMenu
                 focusManager.clearFocus()
             },
@@ -873,7 +882,6 @@ fun BuyPilotChatScreen(
                 onInputChanged(it, false)
             },
             onTextFocus = {
-                welcomeDismissed = true
                 showAttachmentMenu = false
             },
             onFocusChanged = { composerFocused = it },
@@ -1058,6 +1066,7 @@ private fun ConversationStage(
     onProductOpen: (String, String?) -> Unit,
     onProductDetailOpen: (String, String) -> Unit,
     onConvergeRecommendation: () -> Unit,
+    onWelcomePromptClick: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
@@ -1100,6 +1109,7 @@ private fun ConversationStage(
             WelcomeHome(
                 composerHeightPx = composerHeightPx,
                 imeBottomPx = imeBottomPx,
+                onWelcomePromptClick = onWelcomePromptClick,
             )
         }
 
@@ -1330,6 +1340,7 @@ private fun M3IconButton(
 private fun WelcomeHome(
     composerHeightPx: Int,
     imeBottomPx: Int,
+    onWelcomePromptClick: (String) -> Unit,
 ) {
     val density = LocalDensity.current
     Column(
@@ -1391,19 +1402,23 @@ private fun WelcomeHome(
                         imeBottomPx = imeBottomPx,
                     ),
                 ),
+            onPromptClick = onWelcomePromptClick,
         )
     }
 }
 
 @Composable
-private fun PromptSuggestions(modifier: Modifier = Modifier) {
+private fun PromptSuggestions(
+    modifier: Modifier = Modifier,
+    onPromptClick: (String) -> Unit,
+) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         WelcomePrompts.forEach { prompt ->
-            PromptSuggestionCard(prompt = prompt)
+            PromptSuggestionCard(prompt = prompt, onClick = { onPromptClick(prompt.text) })
         }
     }
 }
@@ -1411,12 +1426,14 @@ private fun PromptSuggestions(modifier: Modifier = Modifier) {
 @Composable
 private fun PromptSuggestionCard(
     prompt: WelcomePrompt,
+    onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 28.dp)
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = 8.dp)
+            .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -7117,6 +7134,39 @@ private fun ProductAttributeRows(product: ProductPayload, payload: ProductCardPa
 
 @Composable
 private fun CartActionCard(payload: CartActionPayload) {
+    payload.cart?.let { cart ->
+        val actionLabel = if (payload.status == "failed") {
+            when (payload.action) {
+                "add" -> "加购失败"
+                "remove" -> "移出失败"
+                "update_quantity" -> "更新失败"
+                else -> "购物车操作失败"
+            }
+        } else {
+            when (payload.action) {
+                "add" -> "已加入购物车"
+                "remove" -> "已移出购物车"
+                "update_quantity" -> "已更新数量"
+                "view" -> "购物车"
+                else -> payload.action
+            }
+        }
+        val itemSummary = if (cart.items.isEmpty()) {
+            "购物车为空"
+        } else {
+            cart.items.take(2).joinToString(" · ") { item ->
+                "${item.name.ifBlank { item.productId }} x${item.quantity}"
+            }
+        }
+        val moreSummary = if (cart.items.size > 2) "等${cart.items.size}种商品" else null
+        val totalSummary = if (cart.totalItems > 0) "共${cart.totalItems}件 · ¥${cart.totalPrice.clean()}" else null
+        InlineSystemNotice(
+            listOfNotNull(actionLabel, itemSummary, moreSummary, totalSummary)
+                .filter { it.isNotBlank() }
+                .joinToString(" · "),
+        )
+        return
+    }
     val parts = listOf(payload.action, payload.status, payload.productId)
         .filter { it.isNotBlank() }
     if (parts.isEmpty()) return

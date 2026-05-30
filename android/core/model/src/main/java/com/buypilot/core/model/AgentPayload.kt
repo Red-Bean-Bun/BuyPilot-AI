@@ -104,6 +104,23 @@ data class ProductCardPayload(
 ) : AgentPayload
 
 @Serializable
+data class CartItemPayload(
+    @SerialName("product_id") val productId: String = "",
+    val name: String = "",
+    val price: Double? = null,
+    val quantity: Int = 1,
+    @SerialName("added_at") val addedAt: String? = null,
+    val product: ProductPayload? = null,
+)
+
+@Serializable
+data class CartSummaryPayload(
+    val items: List<CartItemPayload> = emptyList(),
+    @SerialName("total_items") val totalItems: Int = 0,
+    @SerialName("total_price") val totalPrice: Double = 0.0,
+)
+
+@Serializable
 data class FinalDecisionPayload(
     @SerialName("winner_product_id") val winnerProductId: String? = null,
     val summary: String = "",
@@ -123,6 +140,7 @@ data class CartActionPayload(
     @SerialName("cart_id") val cartId: String? = null,
     val quantity: Int = 1,
     val status: String = "",
+    val cart: CartSummaryPayload? = null,
 ) : AgentPayload
 
 @Serializable
