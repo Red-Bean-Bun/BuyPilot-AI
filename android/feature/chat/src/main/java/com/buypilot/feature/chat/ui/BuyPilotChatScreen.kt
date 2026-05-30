@@ -782,7 +782,13 @@ fun BuyPilotChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .onGloballyPositioned { timelineTopPx = it.positionInRoot().y },
+                    .onGloballyPositioned { timelineTopPx = it.positionInRoot().y }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        focusManager.clearFocus()
+                    },
             ) {
                 ConversationStage(
                     showWelcome = showWelcome,
