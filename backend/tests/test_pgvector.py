@@ -1,4 +1,4 @@
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
 from src.repos.database import is_postgres_database_url
@@ -10,13 +10,6 @@ def test_product_chunk_embedding_compiles_to_pgvector_for_postgres():
     ddl = str(CreateTable(ProductChunk.__table__).compile(dialect=postgresql.dialect()))
 
     assert "VECTOR(1024)" in ddl
-
-
-def test_product_chunk_embedding_stays_json_for_sqlite():
-    ddl = str(CreateTable(ProductChunk.__table__).compile(dialect=sqlite.dialect()))
-
-    assert "JSON" in ddl
-    assert "VECTOR" not in ddl
 
 
 def test_vector_literal_roundtrip():

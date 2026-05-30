@@ -1,4 +1,5 @@
 from src.config.settings import BACKEND_DIR, PROJECT_DIR, get_settings
+import pytest
 import src.config.settings as settings_module
 
 
@@ -18,13 +19,12 @@ def test_env_configures_bailian_profile():
     assert settings.dataset_dir.name == "ecommerce_agent_dataset"
 
 
-def test_relative_sqlite_database_url_resolves_under_backend(monkeypatch):
+def test_runtime_rejects_sqlite_database_url(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///./buypilot-dev.db")
     settings_module._settings = None
 
-    settings = get_settings()
-
-    assert settings.database_url == f"sqlite:///{BACKEND_DIR / 'buypilot-dev.db'}"
+    with pytest.raises(SystemExit, match="SQLite is not supported"):
+        get_settings()
 
 
 def test_relative_dataset_dir_resolves_under_project(monkeypatch):

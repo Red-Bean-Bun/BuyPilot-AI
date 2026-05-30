@@ -25,9 +25,11 @@ def get_async_engine() -> AsyncEngine:
     cached = _ASYNC_ENGINE_CACHE
     if cached is None or cached[0] != database_url:
         async_url = async_database_url(database_url)
-        engine_kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": NullPool}
-        if not async_url.startswith("sqlite"):
-            engine_kwargs = {}
+        engine_kwargs = {}
+        if async_url.startswith("sqlite"):
+            # SQLite needs check_same_thread=False for async access and NullPool
+            # (no connection pooling across threads). Only used for test isolation.
+            engine_kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": NullPool}
         cached = (database_url, create_async_engine(async_url, **engine_kwargs))
         _ASYNC_ENGINE_CACHE = cached
     return cached[1]

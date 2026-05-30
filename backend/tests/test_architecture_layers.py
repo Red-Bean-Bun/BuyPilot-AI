@@ -100,8 +100,8 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/conftest.py::mock_external_ai -> src.services.llm_gateway._chat_completion_stream",
     "tests/conftest.py::mock_external_ai -> src.services.embedding._embedding_request",
     "tests/conftest.py::mock_external_ai -> src.services.reranker._rerank_request",
+    "tests/conftest.py::_patch_vector_search_for_sqlite_tests -> src.services.retriever.list_vector_chunks_by_similarity",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_vector_chunks_by_similarity",
-    "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_embedded_chunks",
     "tests/test_retrieval.py::test_retrieve_returns_empty_without_db_vector_hits -> src.services.retriever.embed_text",
     # Goal 7: LLM bad response defense — stub stage raising RuntimeError
     # to simulate invalid/empty/hallucinated responses (no llm_gateway._chat_completion

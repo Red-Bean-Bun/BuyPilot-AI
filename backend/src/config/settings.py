@@ -6,6 +6,7 @@ Business code must depend on this module instead of calling os.getenv directly.
 from __future__ import annotations
 
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -104,14 +105,26 @@ def _resolve_path(raw_path: str | None, default: Path, base_dir: Path) -> Path:
 
 def _resolve_database_url(raw_url: str | None) -> str:
     if not raw_url:
-        return f"sqlite:///{BACKEND_DIR / 'buypilot-dev.db'}"
+        raise SystemExit(
+            "DATABASE_URL is required. PostgreSQL + pgvector is the only supported database.\n"
+            "Example: DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot\n"
+            "Or use: docker-compose -f deploy/docker-compose.yml up"
+        )
+    # Test escape hatches: :memory: and /tmp/ paths under pytest
     if raw_url == "sqlite:///:memory:":
         return raw_url
-
-    sqlite_prefix = "sqlite:///"
-    if raw_url.startswith(sqlite_prefix) and not raw_url.startswith("sqlite:////"):
-        raw_path = raw_url[len(sqlite_prefix) :]
+    if raw_url.startswith("sqlite:///") and not raw_url.startswith("sqlite:////"):
+        raw_path = raw_url[len("sqlite:///"):]
         db_path = Path(raw_path)
         if not db_path.is_absolute():
-            return f"sqlite:///{BACKEND_DIR / db_path}"
+            resolved = f"sqlite:///{BACKEND_DIR / db_path}"
+        else:
+            resolved = raw_url
+        # Allow SQLite under /tmp/ when running inside pytest (test isolation)
+        if "/tmp/" in resolved and "pytest" in sys.modules:
+            return resolved
+        raise SystemExit(
+            f"SQLite is not supported for runtime. Use PostgreSQL + pgvector.\n"
+            f"Got: {raw_url}"
+        )
     return raw_url

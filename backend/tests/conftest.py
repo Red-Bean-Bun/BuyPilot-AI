@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -67,6 +68,53 @@ async def reset_database_engine():
     from src.repos.database import dispose_async_engine
 
     await dispose_async_engine()
+
+
+@pytest.fixture(autouse=True)
+def _patch_vector_search_for_sqlite_tests(monkeypatch, mock_external_ai):
+    """When mock_external_ai is active (BAILIAN_API_KEY=test-key), the database is
+    SQLite and pgvector queries don't work. Patch list_vector_chunks_by_similarity
+    to use list_embedded_chunks + deterministic cosine scoring instead.
+
+    This is a test-only compatibility shim — production code has no SQLite fallback.
+    Must run AFTER mock_external_ai to see BAILIAN_API_KEY=test-key."""
+    del mock_external_ai  # just ensures ordering
+    if os.getenv("BAILIAN_API_KEY") != "test-key":
+        return
+
+    import math
+
+    from src.repos.documents import list_embedded_chunks
+
+    async def _sqlite_vector_similarity(query_embedding, limit):
+        chunks = await list_embedded_chunks()
+        if not chunks or not query_embedding:
+            return []
+        hits = []
+        for chunk in chunks:
+            if not chunk.embedding or len(chunk.embedding) != len(query_embedding):
+                continue
+            dim = len(query_embedding)
+            dot = sum(query_embedding[i] * chunk.embedding[i] for i in range(dim))
+            q_norm = math.sqrt(sum(v * v for v in query_embedding))
+            c_norm = math.sqrt(sum(v * v for v in chunk.embedding))
+            if q_norm == 0 or c_norm == 0:
+                continue
+            similarity = dot / (q_norm * c_norm)
+            if similarity > 0:
+                hits.append(
+                    type(
+                        "VectorChunkHit",
+                        (),
+                        {"document": chunk, "distance": 1.0 - similarity},
+                    )
+                )
+        hits.sort(key=lambda h: h.distance)
+        return hits[:limit]
+
+    from src.services import retriever
+
+    monkeypatch.setattr(retriever, "list_vector_chunks_by_similarity", _sqlite_vector_similarity)
 
 
 @pytest.fixture

@@ -39,6 +39,17 @@ def _check_live_provider() -> None:
         )
 
 
+def _check_postgres() -> None:
+    """Fail fast if smoke would not exercise pgvector."""
+    if "pytest" in sys.modules:
+        return
+    url = os.getenv("DATABASE_URL", "")
+    if "postgresql" not in url:
+        raise SystemExit(
+            f"SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:80]}..."
+        )
+
+
 EXPECTED_EMBEDDING_DIMENSIONS = 1024
 INDEX_TIMEOUT_SECONDS = 20
 EMBEDDING_TIMEOUT_SECONDS = 45
@@ -48,6 +59,11 @@ T = TypeVar("T")
 
 async def run_checks() -> None:
     _check_live_provider()
+    _check_postgres()
+    # Print dialect diagnostic so reviewers can confirm pgvector is active
+    from src.repos.database import get_async_engine
+
+    _print_json({"check": "database_engine", "dialect": get_async_engine().dialect.name})
     index_stats = await _run_step(
         "embedding_index",
         chunk_embedding_stats(),

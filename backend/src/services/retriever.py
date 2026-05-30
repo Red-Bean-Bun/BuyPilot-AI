@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
@@ -24,10 +23,8 @@ from src.config.tuning import (
 from src.repos.documents import (
     ChunkDocument,
     evidence_for_chunk,
-    list_embedded_chunks,
     list_vector_chunks_by_similarity,
 )
-from src.repos.database import get_async_engine, is_postgres_engine
 from src.repos.products import get_product
 from src.services.embedding import embed_text
 from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
@@ -125,38 +122,7 @@ async def _vector_recall_from_db(
     query_embedding: list[float],
     filters: RetrievalFilters,
 ) -> list[ProductHit]:
-    pgvector_hits = await _vector_recall_from_pgvector(criteria, query_embedding, filters)
-    if pgvector_hits:
-        return pgvector_hits
-    if is_postgres_engine(get_async_engine()):
-        return []
-
-    chunks = await list_embedded_chunks()
-    if not chunks or not query_embedding:
-        return []
-
-    hits: list[ProductHit] = []
-    for chunk in chunks:
-        if not _eligible_for_primary_recall(chunk):
-            continue
-        if len(chunk.embedding) != len(query_embedding):
-            continue
-        product = get_product(chunk.product_id)
-        if product is None or not _passes_hard_filters(criteria, product, filters):
-            continue
-        vector_score = _cosine_similarity(query_embedding, chunk.embedding)
-        if vector_score <= 0:
-            continue
-        filter_score = _filter_score(criteria, product)
-        hits.append(
-            ProductHit(
-                product=product,
-                vector_score=vector_score,
-                filter_score=filter_score,
-                chunk=chunk,
-            )
-        )
-    return hits
+    return await _vector_recall_from_pgvector(criteria, query_embedding, filters)
 
 
 async def _vector_recall_from_pgvector(
@@ -483,18 +449,6 @@ def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
         budget_weight=FILTER_SCORE_BUDGET,
         scenario_weight=FILTER_SCORE_SCENARIO,
     )
-
-
-def _cosine_similarity(left: list[float], right: list[float]) -> float:
-    size = min(len(left), len(right))
-    if size == 0:
-        return 0.0
-    dot = sum(left[index] * right[index] for index in range(size))
-    left_norm = math.sqrt(sum(left[index] * left[index] for index in range(size)))
-    right_norm = math.sqrt(sum(right[index] * right[index] for index in range(size)))
-    if left_norm == 0 or right_norm == 0:
-        return 0.0
-    return dot / (left_norm * right_norm)
 
 
 def _distance_to_score(distance: float) -> float:

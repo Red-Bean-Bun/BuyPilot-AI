@@ -48,12 +48,24 @@ def _check_live_provider() -> None:
         )
 
 
+def _check_postgres() -> None:
+    """Fail fast if demo smoke would not exercise pgvector."""
+    if "pytest" in sys.modules:
+        return
+    url = os.getenv("DATABASE_URL", "")
+    if "postgresql" not in url:
+        raise SystemExit(
+            f"DEMO SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:80]}..."
+        )
+
+
 REPORTS_DIR = BACKEND_DIR / "reports"
 DEFAULT_IMAGE_PATH = "1_美妆护肤/images/p_beauty_012_live.jpg"
 
 
 async def main_async(write_report: bool = True) -> dict[str, Any]:
     _check_live_provider()
+    _check_postgres()
     started = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     session_id = f"demo_smoke_{started.strftime('%Y%m%d_%H%M%S')}"

@@ -151,11 +151,7 @@ async def test_retrieve_prefers_pgvector_hits(monkeypatch):
             )
         ]
 
-    async def fail_sqlite_scan():
-        raise AssertionError("SQLite chunk scan should not run when pgvector returns hits")
-
     monkeypatch.setattr("src.services.retriever.list_vector_chunks_by_similarity", fake_pgvector_hits)
-    monkeypatch.setattr("src.services.retriever.list_embedded_chunks", fail_sqlite_scan)
 
     criteria = CriteriaPayload(
         category=product.category,
