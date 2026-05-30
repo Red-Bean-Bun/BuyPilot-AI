@@ -11,17 +11,17 @@
 | 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
 | LLM | **双轨并行**：火山引擎 Doubao（意图识别主力）+ 百炼 Qwen（生成/多模态/Embedding/Rerank 主力） |
-| 后端 | Python FastAPI + SQLite（日常开发）/ PostgreSQL + pgvector（演示） + SQLModel |
+| 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel（SQLite 仅 pytest 隔离测试） |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
 | 商品数据 | 导师官方脱敏电商数据（100条，4品类×25） |
 | 图片处理 | 本地 jpg + 上传转 data URL 进入 Qwen-VL 多模态理解 |
 | 前端架构 | 1 人负责，sealed interface + ChatUiNode |
 | 后端架构 | 2 人（主开发 + 算法），AGENTS.md 分层（API → Runtime → Service → Repo → Config/Types） |
 | SSE 管道 | async generator stage 模式（推荐文案与决策后台并行） |
-| 降级策略 | 仅保留 LLM provider fallback；embedding/rerank/retrieval/state/audit 默认显性失败；SQLite 是持久化向量后端兼容，不是 memory fallback |
+| 降级策略 | 仅保留 LLM provider fallback；embedding/rerank/retrieval/state/audit 默认显性失败；运行时数据库必须使用 PostgreSQL + pgvector |
 | 图片上传 | multipart `/upload/image` |
 | LLM 调用 | task-oriented interface + Profile 配置驱动（YAML）+ PromptStore 运行时加载 |
-| 开发环境 | `uv run uvicorn`（默认 SQLite）；`deploy/docker-compose.yml`（Postgres + pgvector 演示） |
+| 开发环境 | `.env` 必须配置 PostgreSQL `DATABASE_URL`；推荐使用 `deploy/docker-compose.yml` 启动 Postgres + pgvector |
 | 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/eval_samples/retrieval_traces/evidence_links |
 
 完整决策记录 → [doc/decisions/决策记录.md](doc/decisions/决策记录.md) · 设计决策 → [design-decisions.md](design-decisions.md)
@@ -138,7 +138,7 @@ uv run -m src.scripts.smoke_live_rag
 uv run -m src.scripts.demo_smoke
 ```
 
-说明：本地 SQLite 只作为日常开发路径；答辩/评委验收优先使用 `deploy/docker-compose.yml` 的 PostgreSQL + pgvector 环境。
+说明：PostgreSQL + pgvector 是后端运行时必需依赖；SQLite 仅作为 pytest 隔离测试路径，不支持日常开发或答辩运行。
 
 ### Cloudflare 部署
 
@@ -207,7 +207,7 @@ cd deploy && docker-compose up
   ↓ 并行
 购买标准生成 (Qwen-Plus primary / Doubao fallback)  |  投机检索 (embedding + 硬过滤)
   ↓
-混合检索：硬过滤(SQL) + 向量召回(pgvector/SQLite) + Rerank(qwen3-rerank)
+混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(qwen3-rerank)
   ↓
 推荐解释生成 (Qwen-Plus) + 证据绑定
   ↓

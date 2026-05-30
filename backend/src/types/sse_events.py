@@ -179,6 +179,21 @@ class ProductCardEvent(SSEEventBase):
     actions: list[QuickActionPayload] = Field(default_factory=list)
 
 
+class CartItemEventPayload(BaseModel):
+    product_id: str
+    name: str
+    price: float | None = None
+    quantity: int = 1
+    added_at: str | None = None
+    product: ProductPayload | None = None
+
+
+class CartSummaryPayload(BaseModel):
+    items: list[CartItemEventPayload] = Field(default_factory=list)
+    total_items: int = 0
+    total_price: float = 0.0
+
+
 class CartActionEvent(SSEEventBase):
     event: Literal["cart_action"] = "cart_action"
     display_mode: DisplayMode = "inline_card"
@@ -186,6 +201,7 @@ class CartActionEvent(SSEEventBase):
     product_id: str
     quantity: int = 1
     status: str = "success"  # success/failed
+    cart: CartSummaryPayload | None = None
 
 
 class FinalDecisionEvent(SSEEventBase):

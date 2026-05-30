@@ -29,7 +29,7 @@ from src.runtime.streaming import (
     start_stage_task,
 )
 from src.services.audit import record_audit_event
-from src.services.cart import add_product_to_cart, remove_product_from_cart, update_product_quantity
+from src.services.cart import add_product_to_cart, get_session_cart, remove_product_from_cart, update_product_quantity
 from src.services.catalog import get_product
 from src.services.conversation_state import (
     get_previous_criteria,
@@ -44,10 +44,12 @@ from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, reason_from_atoms
 from src.services.retriever import filter_products
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
-from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
+from src.types.schemas import CartResponse, ChatStreamRequest, DecisionResult, IntentResult
 from src.types.sse_events import (
     AlternativePayload,
     CartActionEvent,
+    CartItemEventPayload,
+    CartSummaryPayload,
     ClarificationEvent,
     CriteriaCardEvent,
     CriteriaPayload,
@@ -102,18 +104,7 @@ async def handle_view_cart(
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body, intent
     yield ctx.thinking("generating", "正在查看购物车...")
-    yield CartActionEvent(
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"cart_{ctx.turn_id}",
-        created_at_ms=now_ms(),
-        action="view",
-        product_id="",
-        quantity=0,
-        status="success",
-    )
+    yield await _cart_action_event(ctx, "view", "", 0, "success")
     yield ctx.done()
 
 
@@ -130,7 +121,7 @@ async def handle_add_to_cart(
     try:
         await add_product_to_cart(ctx.session_id, product_id, quantity=quantity)
     except ValueError:
-        yield _cart_action_event(ctx, "add", product_id, 0, "failed")
+        yield await _cart_action_event(ctx, "add", product_id, 0, "failed")
         yield ctx.done()
         return
     await record_audit_event(
@@ -142,7 +133,7 @@ async def handle_add_to_cart(
         metadata={"quantity": quantity, "source": "chat_intent"},
     )
     ctx.ensure_active()
-    yield _cart_action_event(ctx, "add", product_id, quantity, "success")
+    yield await _cart_action_event(ctx, "add", product_id, quantity, "success")
     yield ctx.done()
 
 
@@ -160,7 +151,7 @@ async def handle_remove_from_cart(
     except ValueError:
         item = None
     if item is None:
-        yield _cart_action_event(ctx, "remove", product_id, 0, "failed")
+        yield await _cart_action_event(ctx, "remove", product_id, 0, "failed")
         yield ctx.done()
         return
     await record_audit_event(
@@ -171,7 +162,7 @@ async def handle_remove_from_cart(
         resource_id=product_id,
         metadata={"source": "chat_intent"},
     )
-    yield _cart_action_event(ctx, "remove", product_id, 0, "success")
+    yield await _cart_action_event(ctx, "remove", product_id, 0, "success")
     yield ctx.done()
 
 
@@ -190,7 +181,7 @@ async def handle_update_cart_quantity(
     except ValueError:
         item = None
     if item is None:
-        yield _cart_action_event(ctx, "update_quantity", product_id, quantity, "failed")
+        yield await _cart_action_event(ctx, "update_quantity", product_id, quantity, "failed")
         yield ctx.done()
         return
     await record_audit_event(
@@ -201,7 +192,7 @@ async def handle_update_cart_quantity(
         resource_id=product_id,
         metadata={"quantity": quantity, "source": "chat_intent"},
     )
-    yield _cart_action_event(ctx, "update_quantity", product_id, quantity, "success")
+    yield await _cart_action_event(ctx, "update_quantity", product_id, quantity, "success")
     yield ctx.done()
 
 
@@ -1094,7 +1085,10 @@ async def _clarify_cart_target(ctx: StreamContext, question: str) -> AsyncGenera
     )
 
 
-def _cart_action_event(ctx: StreamContext, action: str, product_id: str, quantity: int, status: str) -> CartActionEvent:
+async def _cart_action_event(
+    ctx: StreamContext, action: str, product_id: str, quantity: int, status: str
+) -> CartActionEvent:
+    cart = _cart_summary_payload(await get_session_cart(ctx.session_id))
     return CartActionEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -1106,6 +1100,25 @@ def _cart_action_event(ctx: StreamContext, action: str, product_id: str, quantit
         product_id=product_id,
         quantity=quantity,
         status=status,
+        cart=cart,
+    )
+
+
+def _cart_summary_payload(cart: CartResponse) -> CartSummaryPayload:
+    return CartSummaryPayload(
+        items=[
+            CartItemEventPayload(
+                product_id=item.product_id,
+                name=item.name,
+                price=item.price,
+                quantity=item.quantity,
+                added_at=item.added_at,
+                product=item.product,
+            )
+            for item in cart.items
+        ],
+        total_items=cart.total_items,
+        total_price=cart.total_price,
     )
 
 

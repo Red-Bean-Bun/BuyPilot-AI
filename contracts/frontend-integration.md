@@ -216,7 +216,7 @@ Content-Type: image/jpeg
 }
 ```
 
-> ⚠️ 当前支持 add/view，Remove/Update 未实现。
+同一购物车能力也会通过 `cart_action` SSE 事件返回最新摘要，便于聊天流内直接渲染。
 
 ---
 
@@ -355,11 +355,25 @@ Content-Type: image/jpeg
   "action": "add",
   "product_id": "p_beauty_018",
   "quantity": 1,
-  "status": "success"
+  "status": "success",
+  "cart": {
+    "items": [
+      {
+        "product_id": "p_beauty_018",
+        "name": "氨基酸洁面乳",
+        "price": 89.0,
+        "quantity": 1,
+        "added_at": "2026-05-24T10:30:00",
+        "product": { "...": "ProductPayload" }
+      }
+    ],
+    "total_items": 1,
+    "total_price": 89.0
+  }
 }
 ```
 
-`action` 取值：`add` / `view`。`status` 取值：`success` / `failed`。
+`action` 取值：`add` / `remove` / `update_quantity` / `view`。`status` 取值：`success` / `failed`。`cart` 为本次操作后的结构化购物车快照；`view` 事件也会返回该字段，空购物车时 `items=[]`、`total_items=0`、`total_price=0.0`。
 
 ### 4.7 `final_decision` — 最终决策
 

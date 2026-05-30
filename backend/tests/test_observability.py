@@ -17,7 +17,7 @@ async def observability_database(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_request_middleware_records_request_log(test_client, observability_database):
+async def test_request_middleware_skips_health_request_log(test_client, observability_database):
     del observability_database
 
     async with test_client as c:
@@ -28,12 +28,7 @@ async def test_request_middleware_records_request_log(test_client, observability
     assert response.headers["X-Trace-ID"] == "trace_test_001"
 
     rows = await list_api_request_logs(trace_id="trace_test_001")
-    assert len(rows) == 1
-    assert rows[0].request_id == "req_test_001"
-    assert rows[0].method == "GET"
-    assert rows[0].path == "/health"
-    assert rows[0].status_code == 200
-    assert rows[0].duration_ms >= 0
+    assert rows == []
 
 
 @pytest.mark.asyncio

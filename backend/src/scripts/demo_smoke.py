@@ -61,6 +61,7 @@ def _check_postgres() -> None:
 
 REPORTS_DIR = BACKEND_DIR / "reports"
 DEFAULT_IMAGE_PATH = "1_美妆护肤/images/p_beauty_012_live.jpg"
+TURN_TIMEOUT_SECONDS = 150
 
 
 async def main_async(write_report: bool = True) -> dict[str, Any]:
@@ -72,8 +73,9 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
     image_url = _demo_image_url()
 
     scenarios: list[dict[str, Any]] = []
-    # Product-first: recommendation rounds now emit product_card + criteria_card
-    # + done(awaiting_product_feedback); final_decision comes after "继续".
+    # Product-first: recommendation rounds emit product_card + criteria_card.
+    # Multi-product decks wait for feedback; a single strong candidate may
+    # converge immediately with final_decision + done(completed).
     scenarios.append(
         await _run_turn(
             name="text_budget_beauty",
@@ -82,7 +84,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "done_reason": "awaiting_product_feedback",
+                "recommendation_done_reason": True,
                 "first_evidence_source_id": True,
             },
         )
@@ -105,7 +107,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "done_reason": "awaiting_product_feedback",
+                "recommendation_done_reason": True,
                 "image_url": bool(image_url),
             },
         )
@@ -118,7 +120,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "done_reason": "awaiting_product_feedback",
+                "recommendation_done_reason": True,
             },
         )
     )
@@ -130,7 +132,7 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             expect={
                 "product_card_min": 1,
                 "criteria_card": True,
-                "done_reason": "awaiting_product_feedback",
+                "recommendation_done_reason": True,
             },
         )
     )
@@ -188,10 +190,45 @@ async def _run_turn(
     expect: dict[str, Any],
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    events = [event async for event in chat_stream(session_id, request)]
+    _print_progress(
+        {
+            "check": "demo_smoke",
+            "stage": "turn_start",
+            "name": name,
+            "message": request.message,
+            "timeout_seconds": TURN_TIMEOUT_SECONDS,
+        }
+    )
+    try:
+        events = await asyncio.wait_for(_collect_turn_events(session_id, request), timeout=TURN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        result = {
+            "name": name,
+            "ok": False,
+            "duration_ms": duration_ms,
+            "message": request.message,
+            "expect": expect,
+            "failures": [f"turn timeout after {TURN_TIMEOUT_SECONDS}s"],
+            "events": [],
+            "event_count": 0,
+            "product_count": 0,
+            "product_ids": [],
+            "has_criteria": False,
+            "criteria_summary": None,
+            "has_decision": False,
+            "winner_product_id": None,
+            "cart_actions": [],
+            "first_evidence_source_id": None,
+            "first_evidence_chars": 0,
+            "errors": [],
+            "done_reason": None,
+        }
+        _print_progress(_turn_progress_payload("turn_timeout", result))
+        return result
     summary = _summarize_events(events)
     ok, failures = _evaluate(summary, expect)
-    return {
+    result = {
         "name": name,
         "ok": ok,
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
@@ -200,6 +237,12 @@ async def _run_turn(
         "failures": failures,
         **summary,
     }
+    _print_progress(_turn_progress_payload("turn_end", result))
+    return result
+
+
+async def _collect_turn_events(session_id: str, request: ChatStreamRequest) -> list[SSEEventBase]:
+    return [event async for event in chat_stream(session_id, request)]
 
 
 def _summarize_events(events: list[SSEEventBase]) -> dict[str, Any]:
@@ -223,7 +266,13 @@ def _summarize_events(events: list[SSEEventBase]) -> dict[str, Any]:
         "has_decision": bool(decision_events),
         "winner_product_id": decision_events[-1].winner_product_id if decision_events else None,
         "cart_actions": [
-            {"action": event.action, "product_id": event.product_id, "quantity": event.quantity, "status": event.status}
+            {
+                "action": event.action,
+                "product_id": event.product_id,
+                "quantity": event.quantity,
+                "status": event.status,
+                "cart": event.cart.model_dump(mode="json") if event.cart else None,
+            }
             for event in cart_events
         ],
         "first_evidence_source_id": first_evidence.source_id if first_evidence else None,
@@ -254,7 +303,45 @@ def _evaluate(summary: dict[str, Any], expect: dict[str, Any]) -> tuple[bool, li
     expected_done = expect.get("done_reason")
     if expected_done and summary.get("done_reason") != expected_done:
         failures.append(f"done_reason mismatch: expected {expected_done}, got {summary.get('done_reason')}")
+    if expect.get("recommendation_done_reason") and not _recommendation_done_reason_ok(summary):
+        failures.append(
+            "recommendation done_reason mismatch: expected completed for single-product decision "
+            "or awaiting_product_feedback for multi-product deck, "
+            f"got product_count={summary.get('product_count')} "
+            f"has_decision={summary.get('has_decision')} done_reason={summary.get('done_reason')}"
+        )
     return not failures, failures
+
+
+def _recommendation_done_reason_ok(summary: dict[str, Any]) -> bool:
+    product_count = int(summary.get("product_count") or 0)
+    done_reason = summary.get("done_reason")
+    has_decision = bool(summary.get("has_decision"))
+    if product_count == 1 and has_decision:
+        return done_reason == "completed"
+    if product_count >= 2 and not has_decision:
+        return done_reason == "awaiting_product_feedback"
+    return False
+
+
+def _turn_progress_payload(stage: str, result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "check": "demo_smoke",
+        "stage": stage,
+        "name": result["name"],
+        "ok": result["ok"],
+        "duration_ms": result["duration_ms"],
+        "event_count": result["event_count"],
+        "product_count": result["product_count"],
+        "has_criteria": result["has_criteria"],
+        "has_decision": result["has_decision"],
+        "done_reason": result["done_reason"],
+        "failures": result["failures"],
+    }
+
+
+def _print_progress(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
 def _demo_image_url() -> str | None:

@@ -11,6 +11,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from src.services.audit import record_api_request
 from src.services.request_context import RequestContext, clear_request_context, get_request_context, set_request_context
 
+REQUEST_LOG_EXCLUDED_PATHS = {"/health", "/health/"}
+
 
 class RequestContextMiddleware:
     def __init__(self, app: ASGIApp) -> None:
@@ -54,14 +56,16 @@ class RequestContextMiddleware:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             client = scope.get("client")
             client_ip = client[0] if client else None
-            await record_api_request(
-                method=scope["method"],
-                path=scope["path"],
-                status_code=status_code,
-                duration_ms=duration_ms,
-                client_ip=client_ip,
-                user_agent=request_headers.get("user-agent"),
-                error_type=error_type,
-            )
+            path = scope["path"]
+            if path not in REQUEST_LOG_EXCLUDED_PATHS:
+                await record_api_request(
+                    method=scope["method"],
+                    path=path,
+                    status_code=status_code,
+                    duration_ms=duration_ms,
+                    client_ip=client_ip,
+                    user_agent=request_headers.get("user-agent"),
+                    error_type=error_type,
+                )
             if context is not None:
                 clear_request_context()

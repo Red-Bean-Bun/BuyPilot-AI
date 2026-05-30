@@ -3,6 +3,8 @@ import jsonschema
 from src.repos.products import _normalize_sku_options
 from src.types.sse_events import (
     CartActionEvent,
+    CartItemEventPayload,
+    CartSummaryPayload,
     ClarificationEvent,
     Constraints,
     CriteriaCardEvent,
@@ -157,6 +159,11 @@ class TestSchemaValidation:
                 action="add",
                 product_id="p1",
                 status="success",
+                cart=CartSummaryPayload(
+                    items=[CartItemEventPayload(product_id="p1", name="T", price=12.5, quantity=2)],
+                    total_items=2,
+                    total_price=25.0,
+                ),
             ),
             FinalDecisionEvent(
                 session_id="s1",

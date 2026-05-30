@@ -91,6 +91,27 @@
       },
       "required": ["product_id", "name"]
     },
+    "cart_item_payload": {
+      "type": "object",
+      "properties": {
+        "product_id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": ["number", "null"] },
+        "quantity": { "type": "integer" },
+        "added_at": { "type": ["string", "null"] },
+        "product": { "anyOf": [{ "$ref": "#/$defs/product_payload" }, { "type": "null" }] }
+      },
+      "required": ["product_id", "name", "quantity"]
+    },
+    "cart_summary_payload": {
+      "type": "object",
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/cart_item_payload" } },
+        "total_items": { "type": "integer" },
+        "total_price": { "type": "number" }
+      },
+      "required": ["items", "total_items", "total_price"]
+    },
     "evidence_payload": {
       "type": "object",
       "properties": {
@@ -224,7 +245,8 @@
             "action": { "type": "string", "enum": ["add", "remove", "update_quantity", "view"] },
             "product_id": { "type": "string" },
             "quantity": { "type": "integer" },
-            "status": { "type": "string", "enum": ["success", "failed"] }
+            "status": { "type": "string", "enum": ["success", "failed"] },
+            "cart": { "anyOf": [{ "$ref": "#/$defs/cart_summary_payload" }, { "type": "null" }] }
           },
           "required": ["event", "action", "product_id", "status"]
         }

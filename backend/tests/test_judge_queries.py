@@ -127,12 +127,30 @@ async def test_judge_cart_second_item_update_and_remove():
     assert add_action.product_id == target.product_id
     assert add_action.action == "add"
     assert add_action.status == "success"
+    assert add_action.cart is not None
+    assert add_action.cart.total_items == 1
+    assert add_action.cart.total_price == pytest.approx(target.price or 0.0)
+    assert [(item.product_id, item.quantity) for item in add_action.cart.items] == [(target.product_id, 1)]
 
     update_events = await _collect_chat("把第二个商品改成2件", session_id=session_id)
     update_action = _single_cart_action(update_events)
     assert update_action.product_id == target.product_id
     assert update_action.action == "update_quantity"
     assert update_action.quantity == 2
+    assert update_action.cart is not None
+    assert update_action.cart.total_items == 2
+    assert update_action.cart.total_price == pytest.approx((target.price or 0.0) * 2)
+    assert [(item.product_id, item.quantity) for item in update_action.cart.items] == [(target.product_id, 2)]
+
+    view_events = await _collect_chat("查看购物车", session_id=session_id)
+    view_action = _single_cart_action(view_events)
+    assert view_action.action == "view"
+    assert view_action.product_id == ""
+    assert view_action.cart is not None
+    assert view_action.cart.total_items == 2
+    assert view_action.cart.total_price == pytest.approx((target.price or 0.0) * 2)
+    assert [(item.product_id, item.quantity) for item in view_action.cart.items] == [(target.product_id, 2)]
+
     cart = await get_session_cart(session_id)
     assert [(item.product_id, item.quantity) for item in cart.items] == [(target.product_id, 2)]
 
@@ -141,6 +159,10 @@ async def test_judge_cart_second_item_update_and_remove():
     assert remove_action.product_id == target.product_id
     assert remove_action.action == "remove"
     assert remove_action.status == "success"
+    assert remove_action.cart is not None
+    assert remove_action.cart.items == []
+    assert remove_action.cart.total_items == 0
+    assert remove_action.cart.total_price == 0.0
     assert (await get_session_cart(session_id)).items == []
 
 
