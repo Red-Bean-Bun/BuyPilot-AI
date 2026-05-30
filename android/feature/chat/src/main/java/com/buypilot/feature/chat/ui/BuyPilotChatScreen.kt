@@ -53,6 +53,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -115,11 +117,13 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -200,6 +204,7 @@ import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.EvidencePayload
+import com.buypilot.core.model.ReasonAtomPayload
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
@@ -265,11 +270,13 @@ import kotlin.math.roundToInt
 
 private val MenuEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private val MenuEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
+private val PremiumRevealEase = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val ClarificationEaseOut = CubicBezierEasing(0.1f, 1f, 0.1f, 1f)
 private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 private val ProductDetailRevealDistance = 220.dp
 private const val ProductDetailSnapThreshold = 0.36f
 private const val ProductDetailEnterMs = 560
+private const val ProductSwipeDetailEnterMs = 520
 private const val ProductEvidenceEnterMs = 520
 private val CriteriaLeadingNumberRegex = Regex("""^(\d+(?:\.\d+)?)(.*)$""")
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
@@ -281,13 +288,22 @@ private const val ClarificationFlightMs = 360
 private const val ClarificationKeyboardBirthMs = 150
 private const val ClarificationTargetSettleMs = 24L
 private const val ClarificationTargetFallbackMs = 760L
-private val TimelineNearEndThreshold = 96.dp
+private const val ClarificationQuestionToCardDelayMs = 170L
+private const val ClarificationCardEnterMs = 640
+private const val CriteriaCardEnterMs = 560
+private const val ProductDeckArrivalMs = 1480
+private const val ProductDeckAutoConvergeDelayMs = 360L
+private const val ProductSwipeAnimationMs = 430
+private const val DecisionCardEnterMs = 760
+private const val DecisionReasonBaseDelayMs = 240
+private const val DecisionReasonStaggerMs = 120
+private val TimelineNearEndThreshold = 24.dp
 private val TimelineFollowCorrectionTolerance = 8.dp
 private val TimelineSafeGap = 20.dp
 private val TimelineAnchorTopGap = 8.dp
 private val TimelineAnchorBottomReserve = 420.dp
 private val FloatingPanelComposerGap = 8.dp
-private val TimelineJumpButtonComposerGap = (-12).dp
+private val TimelineJumpButtonComposerGap = 14.dp
 private val ChipEdgeFadeWidth = 46.dp
 private const val TurnRevealIntroChars = 18
 private const val TurnRevealIntroRatio = 0.42f
@@ -351,6 +367,12 @@ private data class CriteriaTileSpec(
     val span: CriteriaTileSpan = CriteriaTileSpan.Half,
 )
 
+private data class CriteriaReceiptProperty(
+    val label: String,
+    val value: String,
+    val placeholder: Boolean = false,
+)
+
 private enum class CriteriaTileSpan {
     Half,
     Full,
@@ -365,6 +387,7 @@ private data class CriteriaLabels(
     val budget: String,
     val scenario: String,
     val exclusions: String,
+    val avoidPrefix: String,
 )
 
 private data class ProductDeckSignalSummary(
@@ -438,10 +461,12 @@ private data class TimelineRenderContext(
     val isStreaming: Boolean,
     val currentTurnId: String?,
     val productsById: Map<String, ProductCardPayload>,
+    val productDeckIdByProductId: Map<String, String>,
     val latestProductDeckKey: String?,
     val productSwipeStates: Map<String, ProductSwipeState>,
     val awaitingConvergenceDeckIds: Set<String>,
     val pendingDecisions: Map<String, PendingDecision>,
+    val convergedDeckIds: Set<String>,
     val lastUserMessage: String?,
 )
 
@@ -558,6 +583,7 @@ fun BuyPilotChatScreen(
     onOpenProductDetail: (String, String) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
+    onConvergeProductDeck: (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
@@ -803,7 +829,7 @@ fun BuyPilotChatScreen(
                     onCriteriaEdit = { openSheet(ChatSheetContent.Criteria(it)) },
                     onProductOpen = onOpenProductDeck,
                     onProductDetailOpen = onOpenProductDetail,
-                    onConvergeRecommendation = { sendAndClear("继续") },
+                    onConvergeRecommendation = onConvergeProductDeck,
                     onWelcomePromptClick = { loadWelcomePrompt(it) },
                     onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
                     onRetryLastMessage = onRetryLastMessage,
@@ -963,6 +989,15 @@ fun BuyPilotChatScreen(
         }
     }
 
+    val sheetProductDeckNodes = remember(state.nodes) {
+        state.nodes.filterIsInstance<ProductDeckNode>()
+    }
+    val sheetProductsById = remember(sheetProductDeckNodes) {
+        sheetProductDeckNodes.productsByProductId()
+    }
+    val sheetProductDeckIdByProductId = remember(sheetProductDeckNodes) {
+        sheetProductDeckNodes.productDeckIdByProductId()
+    }
     val content = sheetContent
     if (content != null) {
         ModalBottomSheet(
@@ -993,7 +1028,14 @@ fun BuyPilotChatScreen(
                             dismissSheet { onCriteriaPatch(patch) }
                         },
                     )
-                    is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(targetContent.payload)
+                    is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(
+                        payload = targetContent.payload,
+                        productsById = sheetProductsById,
+                        productDeckIdByProductId = sheetProductDeckIdByProductId,
+                        onProductDetailOpen = { deckId, productId ->
+                            dismissSheet { onOpenProductDetail(deckId, productId) }
+                        },
+                    )
                 }
             }
         }
@@ -1071,7 +1113,7 @@ private fun ConversationStage(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
     onProductDetailOpen: (String, String) -> Unit,
-    onConvergeRecommendation: () -> Unit,
+    onConvergeRecommendation: (String) -> Unit,
     onWelcomePromptClick: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
@@ -1470,7 +1512,7 @@ private fun ChatTimeline(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
     onProductDetailOpen: (String, String) -> Unit,
-    onConvergeRecommendation: () -> Unit,
+    onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
@@ -1509,25 +1551,28 @@ private fun ChatTimeline(
     LaunchedEffect(timelineItems, state.nodes) {
         revealStore.pruneToKeys(
             timelineItemKeys = timelineItems.mapTo(mutableSetOf()) { it.key },
-            nodeKeys = state.nodes.mapTo(mutableSetOf()) { it.key },
+            nodeKeys = state.nodes.timelineRevealKeys(),
         )
     }
     val productDeckNodes = remember(state.nodes) {
         state.nodes.filterIsInstance<ProductDeckNode>()
     }
-    val productsById = remember(state.nodes) {
-        productDeckNodes
-            .flatMap { it.products }
-            .associateBy { it.product.productId }
+    val productsById = remember(productDeckNodes) {
+        productDeckNodes.productsByProductId()
+    }
+    val productDeckIdByProductId = remember(productDeckNodes) {
+        productDeckNodes.productDeckIdByProductId()
     }
     val renderContext = remember(
         state.backendBaseUrl,
         state.isStreaming,
         state.currentTurnId,
         productsById,
+        productDeckIdByProductId,
         state.productSwipeStates,
         state.awaitingConvergenceDeckIds,
         state.pendingDecisions,
+        state.nodes.convergedProductDeckIds(),
         state.lastUserMessage,
     ) {
         TimelineRenderContext(
@@ -1535,10 +1580,12 @@ private fun ChatTimeline(
             isStreaming = state.isStreaming,
             currentTurnId = state.currentTurnId,
             productsById = productsById,
+            productDeckIdByProductId = productDeckIdByProductId,
             latestProductDeckKey = productDeckNodes.lastOrNull()?.key,
             productSwipeStates = state.productSwipeStates,
             awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds,
             pendingDecisions = state.pendingDecisions,
+            convergedDeckIds = state.nodes.convergedProductDeckIds(),
             lastUserMessage = state.lastUserMessage,
         )
     }
@@ -1689,6 +1736,7 @@ private fun ChatTimeline(
                                 onMessageRevealActiveChange = onMessageRevealActiveChange,
                                 onStreamingTextProgress = { requestRevealFollowScroll() },
                                 onTextRevealProgress = { _, _, _ -> },
+                                onStructuredEntered = revealStore::markStructuredNodeEntered,
                                 onUserBubblePositioned = onUserBubblePositioned,
                                 onClarificationCardDismissed = onClarificationCardDismissed,
                             )
@@ -1741,11 +1789,14 @@ private fun ChatTimeline(
                             node = item.node,
                             renderContext = renderContext,
                             timelineMotionEnabled = timelineMotionEnabled,
+                            structuredMotionEnabled = timelineMotionEnabled &&
+                                !revealStore.hasStartedStructuredNode(item.node.key),
+                            structuredAlreadyEntered = revealStore.hasEnteredStructuredNode(item.node.key),
                             hiddenUserMessage = false,
                             activeFlightMessageKey = activeFlightMessageKey,
                             revealedMessageKeys = revealedMessageKeys,
-                            textRevealProgress = (item.node as? AiStreamNode)?.let { revealStore.textRevealProgress(it.key) },
-                            textCompleted = (item.node as? AiStreamNode)?.let { revealStore.hasCompletedText(it.key) } == true,
+                            textRevealProgress = item.node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
+                            textCompleted = item.node.revealTextKey()?.let { revealStore.hasCompletedText(it) } == true,
                             dismissingClarificationKey = dismissingClarificationKey,
                             dismissedClarificationKeys = dismissedClarificationKeys,
                             selectedClarificationOption = selectedClarificationOption,
@@ -1769,6 +1820,7 @@ private fun ChatTimeline(
                             onTextRevealProgress = { key, visible, total ->
                                 revealStore.updateTextProgress(key, visible, total)
                             },
+                            onStructuredEntered = revealStore::markStructuredNodeEntered,
                             onUserBubblePositioned = onUserBubblePositioned,
                             onClarificationCardDismissed = onClarificationCardDismissed,
                         )
@@ -1848,7 +1900,7 @@ private fun AssistantTurnBlock(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
     onProductDetailOpen: (String, String) -> Unit,
-    onConvergeRecommendation: () -> Unit,
+    onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
@@ -1864,9 +1916,11 @@ private fun AssistantTurnBlock(
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
+    val turnSettled = !renderContext.isStreaming || item.turnId != renderContext.currentTurnId
     val coordinator = rememberTurnStreamingCoordinator(
         item = item,
         revealStore = revealStore,
+        turnSettled = turnSettled,
         onTextCompleted = onTextCompleted,
         onTextRevealProgress = onTextRevealProgress,
         onStructuredEntered = onStructuredEntered,
@@ -1891,8 +1945,8 @@ private fun AssistantTurnBlock(
                     node = node,
                     orderIndex = index,
                     motionEnabled = timelineMotionEnabled,
-                    hasStarted = revealStore.hasStartedStructuredNode(node.key),
-                    hasEntered = revealStore.hasEnteredStructuredNode(node.key),
+                    hasStarted = turnSettled || revealStore.hasStartedStructuredNode(node.key),
+                    hasEntered = turnSettled || revealStore.hasEnteredStructuredNode(node.key),
                     onStarted = {
                         if (!node.isTextOrThinkingNode()) {
                             onStructuredStarted(node.key)
@@ -1933,6 +1987,7 @@ private fun AssistantTurnBlock(
                                 onMessageRevealActiveChange = onMessageRevealActiveChange,
                                 onStreamingTextProgress = onStreamingTextProgress,
                                 onTextRevealProgress = coordinator.updateTextProgress,
+                                onStructuredEntered = coordinator.markStructuredEntered,
                                 onUserBubblePositioned = onUserBubblePositioned,
                                 onClarificationCardDismissed = onClarificationCardDismissed,
                             )
@@ -1942,12 +1997,20 @@ private fun AssistantTurnBlock(
                             node = node,
                             renderContext = renderContext,
                             timelineMotionEnabled = timelineMotionEnabled,
+                            structuredMotionEnabled = !turnSettled &&
+                                timelineMotionEnabled &&
+                                !revealStore.hasStartedStructuredNode(node.key),
+                            structuredAlreadyEntered = turnSettled ||
+                                revealStore.hasEnteredStructuredNode(node.key),
                             hiddenUserMessage = false,
                             activeFlightMessageKey = activeFlightMessageKey,
                             revealedMessageKeys = revealedMessageKeys,
-                            textRevealProgress = (node as? AiStreamNode)?.let { revealStore.textRevealProgress(it.key) },
-                            textCompleted = (node as? AiStreamNode)?.let { revealStore.hasCompletedText(it.key) } == true,
-                            delayTextReveal = node is AiStreamNode && node.key in coordinator.textHandoffKeys,
+                            textRevealProgress = node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
+                            textCompleted = node.revealTextKey()?.let {
+                                turnSettled || revealStore.hasCompletedText(it)
+                            } == true,
+                            delayTextReveal = !turnSettled &&
+                                node.revealTextKey()?.let { it in coordinator.textHandoffKeys } == true,
                             dismissingClarificationKey = dismissingClarificationKey,
                             dismissedClarificationKeys = dismissedClarificationKeys,
                             selectedClarificationOption = selectedClarificationOption,
@@ -1969,6 +2032,7 @@ private fun AssistantTurnBlock(
                             onMessageRevealActiveChange = onMessageRevealActiveChange,
                             onStreamingTextProgress = onStreamingTextProgress,
                             onTextRevealProgress = coordinator.updateTextProgress,
+                            onStructuredEntered = coordinator.markStructuredEntered,
                             onUserBubblePositioned = onUserBubblePositioned,
                             onClarificationCardDismissed = onClarificationCardDismissed,
                         )
@@ -2013,22 +2077,33 @@ private fun ThinkingNodeVisibility(
 private fun rememberTurnStreamingCoordinator(
     item: AssistantTurnTimelineItem,
     revealStore: TimelineRevealStore,
+    turnSettled: Boolean,
     onTextCompleted: (String) -> Unit,
     onTextRevealProgress: (String, Int, Int) -> Unit,
     onStructuredEntered: (String) -> Unit,
 ): TurnStreamingCoordinator {
-    val completedTextKeys = item.nodes
-        .filterIsInstance<AiStreamNode>()
-        .mapNotNull { node -> node.key.takeIf { revealStore.hasCompletedText(it) } }
-        .toSet()
+    val completedTextKeys = if (turnSettled) {
+        item.nodes.settledTextRevealKeys()
+    } else {
+        item.nodes
+            .mapNotNull { node -> node.revealTextKey()?.takeIf { revealStore.hasCompletedText(it) } }
+            .toSet()
+    }
     val textRevealProgressByKey = item.nodes
-        .filterIsInstance<AiStreamNode>()
-        .mapNotNull { node -> revealStore.textRevealProgressByKey[node.key]?.let { node.key to it } }
+        .mapNotNull { node ->
+            node.revealTextKey()?.let { key ->
+                revealStore.textRevealProgressByKey[key]?.let { key to it }
+            }
+        }
         .toMap()
-    val enteredStructuredNodeKeys = item.nodes
-        .filterNot { it is AiStreamNode || it is ThinkingNode }
-        .mapNotNull { node -> node.key.takeIf { revealStore.hasEnteredStructuredNode(it) } }
-        .toSet()
+    val enteredStructuredNodeKeys = if (turnSettled) {
+        item.nodes.settledStructuredNodeKeys()
+    } else {
+        item.nodes
+            .filterNot { it is AiStreamNode || it is ThinkingNode }
+            .mapNotNull { node -> node.key.takeIf { revealStore.hasEnteredStructuredNode(it) } }
+            .toSet()
+    }
     val visibilityState = remember(item.nodes, completedTextKeys, textRevealProgressByKey, enteredStructuredNodeKeys) {
         item.nodes.visibleTurnNodeKeys(
             completedTextKeys = completedTextKeys,
@@ -2036,11 +2111,12 @@ private fun rememberTurnStreamingCoordinator(
             enteredStructuredKeys = enteredStructuredNodeKeys,
         )
     }
-    val visualActive = remember(item.nodes, completedTextKeys, enteredStructuredNodeKeys) {
-        item.nodes.hasUnsettledTurnVisual(
-            completedTextKeys = completedTextKeys,
-            enteredStructuredKeys = enteredStructuredNodeKeys,
-        )
+    val visualActive = remember(item.nodes, completedTextKeys, enteredStructuredNodeKeys, turnSettled) {
+        !turnSettled &&
+            item.nodes.hasUnsettledTurnVisual(
+                completedTextKeys = completedTextKeys,
+                enteredStructuredKeys = enteredStructuredNodeKeys,
+            )
     }
 
     return TurnStreamingCoordinator(
@@ -2077,11 +2153,12 @@ internal fun List<ChatUiNode>.visibleTurnNodeKeys(
             else -> {
                 if (canRevealTurnNode(index, node, completedTextKeys, textRevealProgress, enteredStructuredKeys)) {
                     visible += node.key
-                    if (node is AiStreamNode &&
-                        textRevealProgress[node.key]?.hasStarted != true &&
+                    val revealTextKey = node.revealTextKey()
+                    if (revealTextKey != null &&
+                        textRevealProgress[revealTextKey]?.hasStarted != true &&
                         shouldDelayTextForThinkingExit(index)
                     ) {
-                        handoffTexts += node.key
+                        handoffTexts += revealTextKey
                     }
                 }
             }
@@ -2106,6 +2183,11 @@ internal fun List<ChatUiNode>.canRevealThinkingNode(
             is AiStreamNode -> {
                 if (previous.key !in completedTextKeys) return false
             }
+            is ClarificationNode -> {
+                if (previous.revealTextKey() !in completedTextKeys || previous.key !in enteredStructuredKeys) {
+                    return false
+                }
+            }
             else -> {
                 if (previous.key !in enteredStructuredKeys) return false
             }
@@ -2116,7 +2198,8 @@ internal fun List<ChatUiNode>.canRevealThinkingNode(
         .firstOrNull { it !is ThinkingNode }
     when (nextNode) {
         null -> return true
-        is AiStreamNode -> return false
+        is AiStreamNode,
+        is ClarificationNode -> return false
         else -> return false
     }
     return true
@@ -2134,11 +2217,17 @@ internal fun List<ChatUiNode>.canRevealTurnNode(
         when (previous) {
             is ThinkingNode -> Unit
             is AiStreamNode -> {
-                if (previous.key !in completedTextKeys) {
+                val previousRevealKey = previous.revealTextKey()
+                if (previousRevealKey !in completedTextKeys) {
                     val allowDeckAfterIntro = node is ProductDeckNode &&
                         previousIndex == latestTextIndexBefore(index) &&
-                        textRevealProgress[previous.key]?.hasReachedIntroGate == true
+                        textRevealProgress[previousRevealKey]?.hasReachedIntroGate == true
                     if (!allowDeckAfterIntro) return false
+                }
+            }
+            is ClarificationNode -> {
+                if (previous.revealTextKey() !in completedTextKeys || previous.key !in enteredStructuredKeys) {
+                    return false
                 }
             }
             else -> {
@@ -2150,7 +2239,14 @@ internal fun List<ChatUiNode>.canRevealTurnNode(
 }
 
 internal fun List<ChatUiNode>.shouldDelayTextForThinkingExit(index: Int): Boolean =
-    index > 0 && this[index] is AiStreamNode && this[index - 1] is ThinkingNode
+    index > 0 && this[index].revealTextKey() != null && this[index - 1] is ThinkingNode
+
+internal fun List<ChatUiNode>.settledTextRevealKeys(): Set<String> =
+    mapNotNullTo(mutableSetOf()) { node -> node.revealTextKey() }
+
+internal fun List<ChatUiNode>.settledStructuredNodeKeys(): Set<String> =
+    filterNot { it is AiStreamNode || it is ThinkingNode }
+        .mapTo(mutableSetOf()) { node -> node.key }
 
 private fun List<ChatUiNode>.latestTextIndexBefore(index: Int): Int =
     (index - 1 downTo 0).firstOrNull { this[it] is AiStreamNode } ?: -1
@@ -2161,7 +2257,8 @@ internal fun List<ChatUiNode>.hasUnsettledTurnVisual(
 ): Boolean =
     any { node ->
         when (node) {
-            is AiStreamNode -> node.key !in completedTextKeys
+            is AiStreamNode -> node.revealTextKey() !in completedTextKeys
+            is ClarificationNode -> node.revealTextKey() !in completedTextKeys || node.key !in enteredStructuredKeys
             is ThinkingNode -> false
             else -> node.key !in enteredStructuredKeys
         }
@@ -2172,11 +2269,14 @@ private fun ChatUiNode.isTextOrThinkingNode(): Boolean =
 
 internal fun shouldCompactProductDeckHistory(
     node: ProductDeckNode,
+    deckConverged: Boolean,
     isStreaming: Boolean,
     currentTurnId: String?,
     latestProductDeckKey: String?,
 ): Boolean =
-    if (isStreaming && currentTurnId != null) {
+    if (deckConverged) {
+        true
+    } else if (isStreaming && currentTurnId != null) {
         node.turnId != currentTurnId
     } else {
         latestProductDeckKey != null && latestProductDeckKey != node.key
@@ -2193,7 +2293,14 @@ private fun TurnNodeMotion(
     onEntered: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (node is AiStreamNode || node is ThinkingNode) {
+    if (
+        node is AiStreamNode ||
+        node is ThinkingNode ||
+        node is ClarificationNode ||
+        node is CriteriaNode ||
+        node is ProductDeckNode ||
+        node is FinalDecisionNode
+    ) {
         content()
         return
     }
@@ -2251,6 +2358,8 @@ private fun TimelineNodeContent(
     node: ChatUiNode,
     renderContext: TimelineRenderContext,
     timelineMotionEnabled: Boolean,
+    structuredMotionEnabled: Boolean = timelineMotionEnabled,
+    structuredAlreadyEntered: Boolean = false,
     hiddenUserMessage: Boolean,
     activeFlightMessageKey: String?,
     revealedMessageKeys: Set<String>,
@@ -2266,7 +2375,7 @@ private fun TimelineNodeContent(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?) -> Unit,
     onProductDetailOpen: (String, String) -> Unit,
-    onConvergeRecommendation: () -> Unit,
+    onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
@@ -2275,6 +2384,7 @@ private fun TimelineNodeContent(
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
     onStreamingTextProgress: () -> Unit,
     onTextRevealProgress: (String, Int, Int) -> Unit,
+    onStructuredEntered: (String) -> Unit,
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
@@ -2300,6 +2410,8 @@ private fun TimelineNodeContent(
             done = node.done,
             revealState = textRevealProgress,
             alreadyCompleted = textCompleted,
+            animateInitialCompleted = node.turnId == renderContext.currentTurnId &&
+                node.key !in revealedMessageKeys,
             initialRevealDelayMs = if (delayTextReveal) ThinkingToTextHandoffMs else 0L,
             onRevealComplete = { onMessageRevealComplete(node.key) },
             onRevealActiveChange = { active -> onMessageRevealActiveChange(node.key, active) },
@@ -2311,6 +2423,12 @@ private fun TimelineNodeContent(
         is ClarificationNode -> ClarificationBlock(
             nodeKey = node.key,
             payload = node.payload,
+            questionRevealKey = node.clarificationQuestionRevealKey(),
+            questionRevealProgress = textRevealProgress,
+            questionCompleted = textCompleted,
+            animateQuestion = node.turnId == renderContext.currentTurnId &&
+                node.clarificationQuestionRevealKey() !in revealedMessageKeys,
+            questionRevealDelayMs = if (delayTextReveal) ThinkingToTextHandoffMs else 0L,
             anchorRevealed = node.anchorMessageKey.isBlank() || node.anchorMessageKey in revealedMessageKeys,
             dismissed = node.key in dismissedClarificationKeys,
             dismissing = node.key == dismissingClarificationKey,
@@ -2318,31 +2436,57 @@ private fun TimelineNodeContent(
             onOption = onClarificationOption,
             onManualInput = onClarificationManualInput,
             onManualSource = { snapshot -> onClarificationManualSource(node.key, snapshot) },
+            onQuestionRevealComplete = { onMessageRevealComplete(node.clarificationQuestionRevealKey()) },
+            onQuestionRevealActiveChange = { active ->
+                onMessageRevealActiveChange(node.clarificationQuestionRevealKey(), active)
+            },
+            onQuestionRevealProgress = { visible, total ->
+                val revealKey = node.clarificationQuestionRevealKey()
+                onTextRevealProgress(revealKey, visible, total)
+                onStreamingTextProgress()
+            },
+            onCardEntered = { onStructuredEntered(node.key) },
             onCardDismissed = onClarificationCardDismissed,
         )
-        is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
+        is CriteriaNode -> CriteriaSummaryCard(
+            payload = node.payload,
+            motionEnabled = structuredMotionEnabled,
+            alreadyEntered = structuredAlreadyEntered,
+            onEntered = { onStructuredEntered(node.key) },
+            onEdit = { onCriteriaEdit(node.payload) },
+        )
         is ProductDeckNode -> ProductRecommendationStrip(
             node = node,
             backendBaseUrl = renderContext.backendBaseUrl,
             swipeState = renderContext.productSwipeStates[node.deckId],
             awaitingConvergence = node.deckId in renderContext.awaitingConvergenceDeckIds,
             hasPendingDecision = node.deckId in renderContext.pendingDecisions,
+            deckConverged = node.deckId in renderContext.convergedDeckIds,
             deckStillStreaming = renderContext.isStreaming && renderContext.currentTurnId == node.turnId,
             compactHistory = shouldCompactProductDeckHistory(
                 node = node,
+                deckConverged = node.deckId in renderContext.convergedDeckIds,
                 isStreaming = renderContext.isStreaming,
                 currentTurnId = renderContext.currentTurnId,
                 latestProductDeckKey = renderContext.latestProductDeckKey,
             ),
+            motionEnabled = structuredMotionEnabled,
+            alreadyEntered = structuredAlreadyEntered,
+            onEntered = { onStructuredEntered(node.key) },
             onOpen = onProductOpen,
             onOpenDetail = onProductDetailOpen,
-            onConverge = onConvergeRecommendation,
+            onConverge = { onConvergeRecommendation(node.deckId) },
         )
         is FinalDecisionNode -> DecisionSummaryCard(
             payload = node.payload,
             productsById = renderContext.productsById,
+            productDeckIdByProductId = renderContext.productDeckIdByProductId,
             backendBaseUrl = renderContext.backendBaseUrl,
+            motionEnabled = structuredMotionEnabled,
+            alreadyEntered = structuredAlreadyEntered,
+            onEntered = { onStructuredEntered(node.key) },
             onEvidence = { onDecisionEvidence(node.payload) },
+            onProductDetailOpen = onProductDetailOpen,
             onQuickAction = onQuickAction,
         )
         is CartActionNode -> CartActionCard(node.payload)
@@ -2653,10 +2797,30 @@ private fun String.withoutTrailingDots(): String =
 
 private val PlainMarkdownParser: Parser = Parser.builder().build()
 private val MarkdownBlockQuoteMarkerRegex = Regex("""^\s{0,3}>\s?""")
+private val InternalDebugLabelValueRegex = Regex(
+    """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id)\s*[:：=]\s*[\w.-]+""",
+)
+private val InternalDebugLabelRegex = Regex(
+    """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id)\b""",
+)
+private val InternalIdTokenRegex = Regex("""(?i)\b(?:pg|p)_[a-z0-9_-]*\b""")
 
 private fun String.withoutMarkdownBlockQuoteMarkers(): String =
     lineSequence()
         .joinToString("\n") { line -> line.replace(MarkdownBlockQuoteMarkerRegex, "") }
+
+private fun String.withoutInternalDebugTokens(): String =
+    replace(InternalDebugLabelValueRegex, "")
+        .replace(InternalIdTokenRegex, "")
+        .replace(InternalDebugLabelRegex, "")
+        .replace(Regex("""[（(]\s*[，,、;；:\s]*[）)]"""), "")
+        .replace(Regex("""\s+([，。！？；：、,.!?;:])"""), "$1")
+        .replace(Regex("""([（(])\s+"""), "$1")
+        .replace(Regex("""\s+([）)])"""), "$1")
+        .replace(Regex("""[ \t]{2,}"""), " ")
+        .replace(Regex("""(?m)^\s*[-•、,，;；:：]+\s*$"""), "")
+        .replace(Regex("""\n{3,}"""), "\n\n")
+        .trim()
 
 private fun String.withoutMarkdownMarkup(): String {
     val source = trim()
@@ -2724,11 +2888,12 @@ private fun String.withoutMarkdownMarkup(): String {
 private fun StringBuilder.endsWithWhitespace(): Boolean =
     isNotEmpty() && last().isWhitespace()
 
-private fun String.needsFinalMarkdownRender(): Boolean {
+internal fun String.needsFinalMarkdownRender(): Boolean {
     val source = trim()
     if (source.isBlank()) return false
     return source.contains("```") ||
         Regex("""(?m)^\s{0,3}#{1,6}\s+""").containsMatchIn(source) ||
+        Regex("""(?m)^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""").containsMatchIn(source) ||
         Regex("""(?m)^\s*(?:[-*+]|\d+\.)\s+""").containsMatchIn(source) ||
         Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
         Regex("""(?<!\*)\*\*[^*\n]+\*\*(?!\*)""").containsMatchIn(source) ||
@@ -2736,11 +2901,12 @@ private fun String.needsFinalMarkdownRender(): Boolean {
         source.hasCompletedMarkdownTable()
 }
 
-private fun String.requiresAndroidMarkdownRender(): Boolean {
+internal fun String.requiresAndroidMarkdownRender(): Boolean {
     val source = trim()
     if (source.isBlank()) return false
     return source.contains("```") ||
         source.contains("<") ||
+        Regex("""(?m)^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""").containsMatchIn(source) ||
         Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
         source.hasCompletedMarkdownTable()
 }
@@ -2951,25 +3117,28 @@ private fun Char.isTypingPausePunctuation(): Boolean =
     this in setOf('，', '。', '、', '；', '：', '！', '？', ',', '.', ';', ':', '!', '?')
 
 @Composable
-private fun AssistantText(content: String) {
+private fun AssistantText(
+    content: String,
+    style: TextStyle = TextStyle(
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.LargeBody,
+        lineHeight = 26.sp,
+    ),
+) {
     if (content.isBlank()) return
     val renderMarkdown = remember(content) { content.needsFinalMarkdownRender() }
     if (!renderMarkdown) {
-        PlainStreamingTextBlock(content)
+        PlainStreamingTextBlock(content = content, style = style)
         return
     }
     val useAndroidMarkdown = remember(content) { content.requiresAndroidMarkdownRender() }
     if (!useAndroidMarkdown) {
-        NativeMarkdownTextBlock(content)
+        NativeMarkdownTextBlock(content = content, style = style)
         return
     }
     MarkdownTextBlock(
         content = content,
-        style = TextStyle(
-            color = BuyPilotColors.TextPrimary,
-            fontSize = BuyPilotType.LargeBody,
-            lineHeight = 26.sp,
-        ),
+        style = style,
     )
 }
 
@@ -2980,7 +3149,13 @@ private fun StreamingAssistantText(
     done: Boolean = false,
     revealState: TextRevealProgress? = null,
     alreadyCompleted: Boolean = false,
+    animateInitialCompleted: Boolean = false,
     initialRevealDelayMs: Long = 0L,
+    style: TextStyle = TextStyle(
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.LargeBody,
+        lineHeight = 26.sp,
+    ),
     onRevealComplete: (() -> Unit)? = null,
     onRevealActiveChange: ((Boolean) -> Unit)? = null,
     onRevealProgress: ((Int, Int) -> Unit)? = null,
@@ -2997,7 +3172,7 @@ private fun StreamingAssistantText(
             hasSeenLiveStream = true
         }
     }
-    val shouldRenderStatic = alreadyCompleted || (done && !hasSeenLiveStream)
+    val shouldRenderStatic = alreadyCompleted || (done && !hasSeenLiveStream && !animateInitialCompleted)
     if (shouldRenderStatic) {
         LaunchedEffect(nodeKey) {
             if (!alreadyCompleted) {
@@ -3006,7 +3181,7 @@ private fun StreamingAssistantText(
                 if (done) onRevealComplete?.invoke()
             }
         }
-        AssistantText(content)
+        AssistantText(content = content, style = style)
         return
     }
 
@@ -3079,6 +3254,7 @@ private fun StreamingAssistantText(
     PlainStreamingTextBlock(
         content = visibleContent,
         modifier = Modifier.fillMaxWidth(),
+        style = style,
     )
 }
 
@@ -3136,17 +3312,36 @@ private fun ChatUiNode.assistantTurnId(): String? =
         else -> null
     }?.takeIf { it.isNotBlank() }
 
+private fun ChatUiNode.revealTextKey(): String? =
+    when (this) {
+        is AiStreamNode -> key
+        is ClarificationNode -> clarificationQuestionRevealKey()
+        else -> null
+    }
+
+private fun ClarificationNode.clarificationQuestionRevealKey(): String =
+    "${key}_question"
+
+private fun List<ChatUiNode>.timelineRevealKeys(): Set<String> =
+    flatMapTo(mutableSetOf()) { node ->
+        listOfNotNull(node.key, node.revealTextKey())
+    }
+
 @Composable
 private fun PlainStreamingTextBlock(
     content: String,
     modifier: Modifier = Modifier.fillMaxWidth(),
-) {
-    if (content.isBlank()) return
-    Text(
-        text = content,
+    style: TextStyle = TextStyle(
         color = BuyPilotColors.TextPrimary,
         fontSize = BuyPilotType.LargeBody,
         lineHeight = 26.sp,
+    ),
+) {
+    val displayContent = remember(content) { content.withoutInternalDebugTokens() }
+    if (displayContent.isBlank()) return
+    Text(
+        text = displayContent,
+        style = style,
         modifier = modifier,
     )
 }
@@ -3161,9 +3356,10 @@ private fun NativeMarkdownTextBlock(
         lineHeight = 26.sp,
     ),
 ) {
-    if (content.isBlank()) return
-    val annotated = remember(content) {
-        NativeMarkdownRenderer.render(content)
+    val displayContent = remember(content) { content.withoutInternalDebugTokens() }
+    if (displayContent.isBlank()) return
+    val annotated = remember(displayContent) {
+        NativeMarkdownRenderer.render(displayContent)
     }
     if (annotated.isEmpty()) return
     Text(
@@ -3230,11 +3426,12 @@ private fun MarkdownTextBlock(
         lineHeight = 26.sp,
     ),
 ) {
-    if (content.isBlank()) return
-    val requiresAndroidMarkdown = remember(content) { content.requiresAndroidMarkdownRender() }
+    val displayContent = remember(content) { content.withoutInternalDebugTokens() }
+    if (displayContent.isBlank()) return
+    val requiresAndroidMarkdown = remember(displayContent) { displayContent.requiresAndroidMarkdownRender() }
     if (!requiresAndroidMarkdown) {
         NativeMarkdownTextBlock(
-            content = content,
+            content = displayContent,
             modifier = modifier,
             style = style,
         )
@@ -3260,18 +3457,18 @@ private fun MarkdownTextBlock(
     val typeface = remember(typefaceStyle) {
         android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
     }
-    val renderKey = remember(content, textColorArgb, fontSizePx, lineHeightPx, typefaceStyle) {
+    val renderKey = remember(displayContent, textColorArgb, fontSizePx, lineHeightPx, typefaceStyle) {
         MarkdownTextRenderTag(
-            contentHash = content.hashCode(),
-            contentLength = content.length,
+            contentHash = displayContent.hashCode(),
+            contentLength = displayContent.length,
             textColorArgb = textColorArgb,
             fontSizePx = fontSizePx,
             lineHeightPx = lineHeightPx,
             typefaceStyle = typefaceStyle,
         )
     }
-    val renderedMarkdown = remember(appContext, content) {
-        ChatMarkdownRenderer.render(appContext, content)
+    val renderedMarkdown = remember(appContext, displayContent) {
+        ChatMarkdownRenderer.render(appContext, displayContent)
     }
 
     AndroidView(
@@ -3430,6 +3627,11 @@ private fun rememberRouteEnterProgress(
 private fun ClarificationBlock(
     nodeKey: String,
     payload: ClarificationPayload,
+    questionRevealKey: String,
+    questionRevealProgress: TextRevealProgress?,
+    questionCompleted: Boolean,
+    animateQuestion: Boolean,
+    questionRevealDelayMs: Long,
     anchorRevealed: Boolean,
     dismissed: Boolean,
     dismissing: Boolean,
@@ -3437,26 +3639,72 @@ private fun ClarificationBlock(
     onOption: (String, ClarificationChipSnapshot?) -> Unit,
     onManualInput: () -> Unit,
     onManualSource: (ClarificationChipSnapshot) -> Unit,
+    onQuestionRevealComplete: () -> Unit,
+    onQuestionRevealActiveChange: (Boolean) -> Unit,
+    onQuestionRevealProgress: (Int, Int) -> Unit,
+    onCardEntered: () -> Unit,
     onCardDismissed: (String) -> Unit,
 ) {
     val question = payload.question
     val options = payload.suggestedOptions
+    val manualPrompt = remember(payload.requiredSlots, question) {
+        clarificationManualPromptFor(payload)
+    }
     var dismissNotified by remember(nodeKey) { mutableStateOf(false) }
     var exitReady by remember(nodeKey) { mutableStateOf(false) }
+    var questionSettled by remember(nodeKey) { mutableStateOf(questionCompleted) }
+    var cardReady by remember(nodeKey) { mutableStateOf(questionCompleted) }
+    var cardEntered by remember(nodeKey) { mutableStateOf(false) }
     val hasSelection = selectedOption != null
-    val cardVisible = anchorRevealed && !dismissed && (!dismissing || !exitReady)
+    val cardVisible = anchorRevealed && questionSettled && cardReady && !dismissed && (!dismissing || !exitReady)
 
-    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+    LaunchedEffect(questionCompleted, nodeKey) {
+        if (questionCompleted) {
+            questionSettled = true
+            if (!cardReady) {
+                kotlinx.coroutines.delay(ClarificationQuestionToCardDelayMs)
+                cardReady = true
+            }
+        }
+    }
+
+    LaunchedEffect(cardVisible, nodeKey) {
+        if (cardVisible && !cardEntered) {
+            kotlinx.coroutines.delay(ClarificationCardEnterMs.toLong())
+            cardEntered = true
+            onCardEntered()
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (anchorRevealed && !dismissed) {
+            StreamingAssistantText(
+                nodeKey = questionRevealKey,
+                content = question,
+                done = true,
+                revealState = questionRevealProgress,
+                alreadyCompleted = questionCompleted,
+                animateInitialCompleted = animateQuestion,
+                initialRevealDelayMs = questionRevealDelayMs,
+                onRevealComplete = {
+                    questionSettled = true
+                    onQuestionRevealComplete()
+                },
+                onRevealActiveChange = onQuestionRevealActiveChange,
+                onRevealProgress = onQuestionRevealProgress,
+            )
+        }
         AnimatedVisibility(
             visible = cardVisible,
             enter = fadeIn(
-                animationSpec = tween(durationMillis = 280, easing = ClarificationEaseOut),
+                animationSpec = tween(durationMillis = ClarificationCardEnterMs, easing = PremiumRevealEase),
             ) + slideInVertically(
-                animationSpec = tween(durationMillis = 340, easing = ClarificationEaseOut),
-                initialOffsetY = { it / 8 },
+                animationSpec = tween(durationMillis = ClarificationCardEnterMs, easing = PremiumRevealEase),
+                initialOffsetY = { it / 4 },
             ) + scaleIn(
-                animationSpec = tween(durationMillis = 340, easing = ClarificationEaseOut),
-                initialScale = 0.96f,
+                animationSpec = tween(durationMillis = ClarificationCardEnterMs, easing = PremiumRevealEase),
+                initialScale = 0.955f,
+                transformOrigin = TransformOrigin(0.08f, 0f),
             ),
             exit = fadeOut(
                 animationSpec = tween(durationMillis = ClarificationExitMs, easing = MenuEaseIn),
@@ -3468,61 +3716,16 @@ private fun ClarificationBlock(
                 targetScale = 0.975f,
             ),
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                color = BuyPilotColors.SurfaceCard.copy(alpha = 0.96f),
-                shape = RoundedCornerShape(18.dp),
-                shadowElevation = 0.dp,
-                tonalElevation = 0.dp,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (hasSelection) {
-                        BuyPilotColors.PrimarySoft.copy(alpha = 0.92f)
-                    } else {
-                        Color(0xFFE8ECF3)
-                    },
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    ClarificationStatusPill()
-                    Text(
-                        text = "还差一个关键信息",
-                        color = BuyPilotColors.TextPrimary,
-                        fontSize = BuyPilotType.Title,
-                        lineHeight = 22.5.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    MarkdownTextBlock(
-                        content = question,
-                        style = TextStyle(
-                            color = BuyPilotColors.PrimaryDark,
-                            fontSize = BuyPilotType.Body,
-                            lineHeight = 21.sp,
-                        ),
-                    )
-                    if (options.isNotEmpty()) {
-                        ClarificationOptionScroller(
-                            labels = options,
-                            selectedLabel = selectedOption,
-                            enabled = !dismissing,
-                            onClick = onOption,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                    ClarificationManualInputRow(
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .alpha(if (hasSelection) 0f else 1f),
-                        enabled = !dismissing,
-                        onClick = onManualInput,
-                        onPositioned = onManualSource,
-                    )
-                }
-            }
+            ClarificationCardContent(
+                options = options,
+                selectedOption = selectedOption,
+                dismissing = dismissing,
+                hasSelection = hasSelection,
+                manualPrompt = manualPrompt,
+                onOption = onOption,
+                onManualInput = onManualInput,
+                onManualSource = onManualSource,
+            )
         }
     }
 
@@ -3542,6 +3745,111 @@ private fun ClarificationBlock(
         }
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ClarificationCardContent(
+    options: List<String>,
+    selectedOption: String?,
+    dismissing: Boolean,
+    hasSelection: Boolean,
+    manualPrompt: String,
+    onOption: (String, ClarificationChipSnapshot?) -> Unit,
+    onManualInput: () -> Unit,
+    onManualSource: (ClarificationChipSnapshot) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .padding(vertical = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(
+                    if (hasSelection) BuyPilotColors.Primary.copy(alpha = 0.6f)
+                    else Color(0xFFFFC4B0),
+                    RoundedCornerShape(2.dp),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (options.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    options.forEach { label ->
+                        AnimatedVisibility(
+                            visible = selectedOption == null || selectedOption == label,
+                            enter = fadeIn(tween(190, easing = MenuEaseOut)),
+                            exit = fadeOut(tween(100, easing = MenuEaseIn)) + scaleOut(
+                                tween(120, easing = MenuEaseIn),
+                                targetScale = 0.92f,
+                            ),
+                        ) {
+                            ClarificationOptionChip(
+                                label = label,
+                                selected = selectedOption == label,
+                                enabled = !dismissing && selectedOption == null,
+                            ) { snapshot ->
+                                onOption(label, snapshot)
+                            }
+                        }
+                    }
+                }
+            }
+            if (!hasSelection) {
+                ClarificationManualInputRow(
+                    enabled = !dismissing,
+                    prompt = manualPrompt,
+                    onClick = onManualInput,
+                    onPositioned = onManualSource,
+                )
+            }
+        }
+    }
+}
+
+internal fun clarificationManualPromptFor(payload: ClarificationPayload): String {
+    val slots = payload.requiredSlots.mapTo(mutableSetOf()) { it.trim().lowercase() }
+    val question = payload.question
+    val fallbackSlotLabel = slots.firstNotNullOfOrNull { it.clarificationSlotLabelOrNull() }
+    return when {
+        "category" in slots || "哪一类" in question || "品类" in question -> "直接输入想买的品类"
+        "budget" in slots || "预算" in question || "价位" in question -> "直接输入预算范围"
+        "product_type" in slots || "具体哪一类" in question -> "直接输入商品类型"
+        "skin_type" in slots || "肤质" in question -> "直接输入肤质"
+        "target_product" in slots || "哪个商品" in question -> "直接输入商品名称"
+        fallbackSlotLabel != null -> "直接输入$fallbackSlotLabel"
+        else -> "直接输入你的答案"
+    }
+}
+
+private fun String.clarificationSlotLabelOrNull(): String? =
+    when (this) {
+        "budget_min", "budget_max", "price", "price_range" -> "预算"
+        "brand", "brand_prefer" -> "品牌偏好"
+        "brand_avoid" -> "排除品牌"
+        "origin", "origin_prefer" -> "产地偏好"
+        "origin_avoid" -> "排除产地"
+        "ingredient", "ingredient_prefer" -> "成分偏好"
+        "ingredient_avoid" -> "排除成分"
+        "use_scenario", "scenario" -> "使用场景"
+        "storage" -> "存储容量"
+        "screen_size" -> "屏幕尺寸"
+        "sport_type" -> "运动类型"
+        "season" -> "适用季节"
+        "dietary" -> "饮食偏好"
+        else -> null
+    }
 
 @Composable
 private fun ClarificationOptionScroller(
@@ -3675,9 +3983,9 @@ private fun ChipEdgeFade(
 }
 
 @Composable
-private fun ClarificationStatusPill() {
+private fun ClarificationStatusPill(label: String) {
     Text(
-        text = "需要确认",
+        text = label,
         color = BuyPilotColors.Info.copy(alpha = 0.92f),
         fontSize = BuyPilotType.Tiny,
         lineHeight = 15.sp,
@@ -3904,17 +4212,17 @@ private fun ClarificationOptionChip(
     val backgroundColor by animateColorAsState(
         targetValue = when {
             selected -> BuyPilotColors.PrimarySoft.copy(alpha = 0.95f)
-            pressed -> Color(0xFFE8EDF6)
-            else -> Color(0xFFF3F6FA)
+            pressed -> Color(0xFFEDE3DF)
+            else -> Color(0xFFFFF8F6)
         },
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "clarification_chip_background",
     )
     val borderColor by animateColorAsState(
         targetValue = when {
-            selected -> BuyPilotColors.Primary.copy(alpha = 0.26f)
-            pressed -> Color(0xFFD9E0EA)
-            else -> Color(0xFFE5EAF1)
+            selected -> BuyPilotColors.Primary.copy(alpha = 0.32f)
+            pressed -> Color(0xFFE0C9C2)
+            else -> Color(0xFFEDE0DC)
         },
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "clarification_chip_border",
@@ -3950,7 +4258,7 @@ private fun ClarificationOptionChip(
                     onClick(snapshot)
                 },
             )
-            .padding(horizontal = 15.dp, vertical = 9.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     )
 }
 
@@ -3958,6 +4266,7 @@ private fun ClarificationOptionChip(
 private fun ClarificationManualInputRow(
     modifier: Modifier = Modifier,
     enabled: Boolean,
+    prompt: String,
     onClick: () -> Unit,
     onPositioned: (ClarificationChipSnapshot) -> Unit,
 ) {
@@ -3971,8 +4280,11 @@ private fun ClarificationManualInputRow(
 
     Row(
         modifier = modifier
-            .heightIn(min = 38.dp)
-            .clip(CircleShape)
+            .fillMaxWidth()
+            .heightIn(min = 36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFFF5F7FA), RoundedCornerShape(10.dp))
+            .border(1.dp, Color(0xFFE8ECF2), RoundedCornerShape(10.dp))
             .then(positionModifier)
             .clickable(
                 enabled = enabled,
@@ -3980,31 +4292,22 @@ private fun ClarificationManualInputRow(
                 role = Role.Button,
                 onClick = onClick,
             )
-            .padding(horizontal = 4.dp, vertical = 3.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             painter = painterResource(R.drawable.ic_edit_24),
             contentDescription = null,
-            tint = BuyPilotColors.TextMuted.copy(alpha = 0.76f),
-            modifier = Modifier.size(15.dp),
+            tint = BuyPilotColors.TextMuted.copy(alpha = 0.6f),
+            modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Column(modifier = Modifier.width(IntrinsicSize.Max)) {
-            Text(
-                text = "也可以直接输入补充",
-                color = BuyPilotColors.TextSecondary.copy(alpha = 0.8f),
-                fontSize = BuyPilotType.Label,
-                lineHeight = 16.sp,
-            )
-            Box(
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .height(1.dp)
-                    .fillMaxWidth()
-                    .background(BuyPilotColors.TextMuted.copy(alpha = 0.32f)),
-            )
-        }
+        Text(
+            text = prompt,
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+        )
     }
 }
 
@@ -4018,137 +4321,183 @@ private fun rememberCriteriaLabels(): CriteriaLabels =
         budget = stringResource(R.string.criteria_label_budget),
         scenario = stringResource(R.string.criteria_label_scenario),
         exclusions = stringResource(R.string.criteria_label_exclusions),
+        avoidPrefix = stringResource(R.string.criteria_avoid_prefix),
     )
 
 @Composable
 private fun CriteriaSummaryCard(
     payload: CriteriaCardPayload,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    onEntered: () -> Unit,
     onEdit: () -> Unit,
 ) {
     val criteria = payload.criteria
     val summary = criteria.summary.withoutMarkdownMarkup().trim()
     val labels = rememberCriteriaLabels()
     val editLabel = stringResource(R.string.criteria_edit_title)
-    val chips = criteria.summaryTiles(labels)
-        .filter { it.label != labels.summary }
-        .take(5)
+    val properties = criteria.receiptProperties(labels)
+    val headline = criteria.criteriaReceiptHeadline().ifBlank { summary }
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = "当前筛选",
-                color = BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.Title,
-                lineHeight = 24.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "已按这些条件找到候选，可继续优化推荐范围",
-                color = BuyPilotColors.TextMuted,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 18.sp,
-            )
-        }
-        if (summary.isNotBlank()) {
-            CriteriaSummaryFace(text = summary)
-        }
-        if (chips.isNotEmpty()) {
-            CriteriaCompactChipRow(tiles = chips)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            GhostButton(label = editLabel, leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
-        }
-    }
-}
-
-@Composable
-private fun CriteriaSummaryFace(
-    text: String,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFFFFFAF6), RoundedCornerShape(15.dp))
-            .border(1.dp, BuyPilotColors.PrimarySoft.copy(alpha = 0.62f), RoundedCornerShape(15.dp))
-            .padding(horizontal = 13.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
+    StructuredCardMotion(
+        key = headline.ifBlank { properties.joinToString("|") { "${it.label}:${it.value}" } },
+        motionEnabled = motionEnabled,
+        alreadyEntered = alreadyEntered,
+        durationMillis = CriteriaCardEnterMs,
+        initialOffsetY = 8.dp,
+        initialScale = 1f,
+        onEntered = onEntered,
+    ) { progress ->
         Box(
             modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.64f)),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .shadow(
+                    elevation = 2.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    ambientColor = Color.Black.copy(alpha = 0.04f),
+                    spotColor = Color.Black.copy(alpha = 0.06f),
+                )
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFFFFEFD),
+                            Color(0xFFF9FAFB),
+                        ),
+                    ),
+                    RoundedCornerShape(16.dp),
+                )
+                .border(
+                    1.dp,
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFE8ECF0),
+                            Color(0xFFDFE3E8),
+                        ),
+                    ),
+                    RoundedCornerShape(16.dp),
+                ),
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_search_24),
-                contentDescription = null,
-                tint = BuyPilotColors.PrimaryDark.copy(alpha = 0.82f),
-                modifier = Modifier.size(16.dp),
-            )
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            val headerProgress = segmentProgress(progress, 0f, 0.52f)
+                            alpha = headerProgress
+                            translationY = (1f - headerProgress) * 6f
+                        },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(BuyPilotColors.Primary, CircleShape),
+                        )
+                        Text(
+                            text = "筛选条件",
+                            color = BuyPilotColors.TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.5.sp,
+                        )
+                    }
+                    Text(
+                        text = editLabel,
+                        color = BuyPilotColors.Primary.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(role = Role.Button, onClick = onEdit)
+                            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+                if (headline.isNotBlank()) {
+                    Text(
+                        text = headline,
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = 17.sp,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.graphicsLayer {
+                            val headlineProgress = segmentProgress(progress, 0.12f, 0.68f)
+                            alpha = headlineProgress
+                            translationY = (1f - headlineProgress) * 5f
+                        },
+                    )
+                }
+                if (properties.isNotEmpty()) {
+                    CriteriaReceiptTags(
+                        properties = properties,
+                        parentProgress = progress,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = text,
-            color = BuyPilotColors.TextPrimary,
-            fontSize = 15.5f.sp,
-            lineHeight = 21.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 
 @Composable
-private fun CriteriaCompactChipRow(
-    tiles: List<CriteriaTileSpec>,
+private fun CriteriaReceiptTags(
+    properties: List<CriteriaReceiptProperty>,
+    parentProgress: Float,
 ) {
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(end = 4.dp),
     ) {
-        items(
-            items = tiles,
-            key = { tile -> "${tile.label}:${tile.value}" },
-        ) { tile ->
-            CriteriaCompactChip(tile = tile)
+        itemsIndexed(
+            items = properties,
+            key = { _, property -> "${property.label}:${property.value}" },
+        ) { index, property ->
+            CriteriaReceiptTag(
+                property = property,
+                revealProgress = segmentProgress(
+                    value = parentProgress,
+                    start = 0.24f + index.coerceAtMost(3) * 0.06f,
+                    end = 0.74f + index.coerceAtMost(3) * 0.06f,
+                ),
+            )
         }
     }
 }
 
 @Composable
-private fun CriteriaCompactChip(
-    tile: CriteriaTileSpec,
+private fun CriteriaReceiptTag(
+    property: CriteriaReceiptProperty,
+    revealProgress: Float = 1f,
 ) {
-    Row(
+    Text(
+        text = property.value,
         modifier = Modifier
-            .heightIn(min = 34.dp)
-            .clip(CircleShape)
-            .background(tile.background.copy(alpha = 0.66f), CircleShape)
-            .border(1.dp, tile.accent.copy(alpha = 0.13f), CircleShape)
-            .padding(start = 9.dp, top = 7.dp, end = 11.dp, bottom = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            painter = painterResource(tile.iconRes),
-            contentDescription = null,
-            tint = tile.accent.copy(alpha = 0.74f),
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = "${tile.label}：${tile.value}",
-            color = BuyPilotColors.TextSecondary.copy(alpha = 0.9f),
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+            .graphicsLayer {
+                alpha = revealProgress
+                translationY = (1f - revealProgress) * 4f
+            }
+            .background(Color(0xFFF0F2F5), RoundedCornerShape(10.dp))
+            .border(1.dp, Color(0xFFE4E8ED).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        color = BuyPilotColors.TextPrimary.copy(alpha = 0.78f),
+        fontSize = 13.sp,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -4366,6 +4715,220 @@ private fun CriteriaTileValueText(
     }
 }
 
+@Composable
+private fun StructuredCardMotion(
+    key: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    durationMillis: Int,
+    initialOffsetY: Dp,
+    initialScale: Float,
+    onEntered: () -> Unit,
+    content: @Composable (Float) -> Unit,
+) {
+    val progress = remember(key) { Animatable(if (!motionEnabled || alreadyEntered) 1f else 0f) }
+    val density = LocalDensity.current
+    val latestOnEntered by rememberUpdatedState(onEntered)
+
+    LaunchedEffect(key, motionEnabled, alreadyEntered) {
+        if (!motionEnabled || alreadyEntered) {
+            progress.snapTo(1f)
+            if (!alreadyEntered) latestOnEntered()
+            return@LaunchedEffect
+        }
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = durationMillis, easing = PremiumRevealEase),
+        )
+        latestOnEntered()
+    }
+
+    val t = progress.value
+    Box(
+        modifier = Modifier.graphicsLayer {
+            alpha = t
+            translationY = with(density) { initialOffsetY.toPx() } * (1f - t)
+            scaleX = initialScale + (1f - initialScale) * t
+            scaleY = initialScale + (1f - initialScale) * t
+        },
+    ) {
+        content(t)
+    }
+}
+
+@Composable
+private fun rememberProductDeckArrivalProgress(
+    key: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    onEntered: () -> Unit,
+): Float {
+    val progress = remember(key) { Animatable(if (!motionEnabled || alreadyEntered) 1f else 0f) }
+    val latestOnEntered by rememberUpdatedState(onEntered)
+
+    LaunchedEffect(key, motionEnabled, alreadyEntered) {
+        if (!motionEnabled || alreadyEntered) {
+            progress.snapTo(1f)
+            if (!alreadyEntered) latestOnEntered()
+            return@LaunchedEffect
+        }
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = ProductDeckArrivalMs, easing = PremiumRevealEase),
+        )
+        latestOnEntered()
+    }
+
+    return progress.value
+}
+
+@Composable
+private fun ProductDeckArrivalMotion(
+    arrivalProgress: Float,
+    content: @Composable (Float) -> Unit,
+) {
+    val density = LocalDensity.current
+    val t = arrivalProgress
+    val seedT = segmentProgress(t, 0f, 0.12f)
+    val expandT = segmentProgress(t, 0.18f, 0.78f)
+    val contentT = segmentProgress(t, 0.6f, 1f)
+    val settleT = segmentProgress(t, 0.72f, 1f)
+    val shadowT = segmentProgress(t, 0.26f, 1f)
+    val widthFraction = lerp(0.26f, 1f, expandT)
+    val cardHeight = lerp(54f, 218f, expandT)
+    val cornerDp = lerp(30f, 18f, expandT)
+    val offsetY = lerp(24f, 0f, settleT)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(218.dp),
+        contentAlignment = Alignment.TopStart,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(widthFraction)
+                .height(cardHeight.dp)
+                .graphicsLayer {
+                    alpha = 0.78f + seedT * 0.22f
+                    translationY = with(density) { offsetY.dp.toPx() }
+                    scaleX = 0.975f + settleT * 0.025f
+                    scaleY = 0.975f + settleT * 0.025f
+                    transformOrigin = TransformOrigin(0.06f, 0.5f)
+                }
+                .shadow(
+                    elevation = lerp(2f, 8f, shadowT).dp,
+                    shape = RoundedCornerShape(cornerDp.dp),
+                    ambientColor = Color(0xFF8E97A4).copy(alpha = 0.06f),
+                    spotColor = Color.Black.copy(alpha = 0.05f),
+                ),
+            color = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(cornerDp.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            border = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = BuyPilotColors.Border.copy(alpha = lerp(0.38f, 0.72f, expandT)),
+            ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = contentT
+                        translationY = (1f - contentT) * 16f
+                    },
+            ) {
+                content(t)
+            }
+        }
+        if (t < 0.82f) {
+            ProductArrivalSeedBubble(
+                progress = (1f - segmentProgress(t, 0.48f, 0.82f)) * seedT,
+                modifier = Modifier
+                    .padding(start = 12.dp, top = 84.dp)
+                    .zIndex(2f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductArrivalSeedBubble(
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val pulse = rememberInfiniteTransition(label = "product_seed_pulse")
+    val shimmer by pulse.animateFloat(
+        initialValue = 0.18f,
+        targetValue = 0.52f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 920, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "product_seed_shimmer",
+    )
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                alpha = progress
+                scaleX = 0.88f + progress * 0.12f
+                scaleY = 0.88f + progress * 0.12f
+            }
+            .size(width = 74.dp, height = 48.dp)
+            .shadow(
+                elevation = 5.dp,
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = Color.Black.copy(alpha = 0.05f),
+                spotColor = Color.Black.copy(alpha = 0.07f),
+            )
+            .background(BuyPilotColors.SurfaceCard, RoundedCornerShape(24.dp))
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.58f), RoundedCornerShape(24.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 38.dp, height = 26.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.28f + shimmer * 0.26f)),
+        )
+    }
+}
+
+@Composable
+private fun ProductImageLoadingSeed(
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    if (progress <= 0.01f) return
+    val pulse = rememberInfiniteTransition(label = "product_image_seed_pulse")
+    val shimmer by pulse.animateFloat(
+        initialValue = 0.16f,
+        targetValue = 0.42f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 820, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "product_image_seed_shimmer",
+    )
+    Box(
+        modifier = modifier
+            .graphicsLayer { alpha = (1f - progress * 0.78f).coerceIn(0f, 1f) }
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        BuyPilotColors.SurfaceCard.copy(alpha = 0.78f),
+                        BuyPilotColors.PrimarySoft.copy(alpha = 0.2f + shimmer * 0.22f),
+                        BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f),
+                    ),
+                ),
+            ),
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProductRecommendationStrip(
@@ -4374,8 +4937,12 @@ private fun ProductRecommendationStrip(
     swipeState: ProductSwipeState?,
     awaitingConvergence: Boolean,
     hasPendingDecision: Boolean,
+    deckConverged: Boolean,
     deckStillStreaming: Boolean,
     compactHistory: Boolean,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    onEntered: () -> Unit,
     onOpen: (String, String?) -> Unit,
     onOpenDetail: (String, String) -> Unit,
     onConverge: () -> Unit,
@@ -4385,26 +4952,43 @@ private fun ProductRecommendationStrip(
     if (compactHistory) {
         ProductRecommendationHistorySummary(
             node = node,
-            signalSummary = swipeState.signalSummary(),
-            awaitingConvergence = awaitingConvergence,
-            hasPendingDecision = hasPendingDecision,
+            backendBaseUrl = backendBaseUrl,
             onOpen = onOpen,
             onOpenDetail = onOpenDetail,
-            onConverge = onConverge,
         )
         return
     }
     val singleCandidate = products.size == 1 && !deckStillStreaming
+    val preferredPage = preferredProductCarouselPage(products, swipeState)
 
-    val pagerState = rememberPagerState(pageCount = { products.size })
+    val pagerState = rememberPagerState(
+        initialPage = preferredPage,
+        pageCount = { products.size },
+    )
     val activeIndex = pagerState.currentPage.coerceIn(0, products.lastIndex)
-    val activePayload = products[activeIndex]
-    val activeProductId = activePayload.product.productId.takeIf { it.isNotBlank() }
-    val signalSummary = swipeState.signalSummary()
+
+    LaunchedEffect(node.deckId, preferredPage, products.size) {
+        if (preferredPage != pagerState.currentPage && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(preferredPage)
+        }
+    }
+
+    val arrivalProgress = rememberProductDeckArrivalProgress(
+        key = node.key,
+        motionEnabled = motionEnabled,
+        alreadyEntered = alreadyEntered,
+        onEntered = onEntered,
+    )
+    val chromeProgress = segmentProgress(arrivalProgress, 0.46f, 1f)
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = chromeProgress
+                    translationY = (1f - chromeProgress) * 8f
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -4415,281 +4999,192 @@ private fun ProductRecommendationStrip(
                     lineHeight = 23.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
+            }
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.7f), CircleShape)
+                    .border(1.dp, BuyPilotColors.Primary.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
-                    text = if (singleCandidate) {
-                        "不用滑卡，先看详情；系统会给适配判断"
-                    } else {
-                        "可滑卡反馈，也可直接让系统收敛"
-                    },
-                    color = BuyPilotColors.TextMuted,
-                    fontSize = BuyPilotType.Label,
-                    lineHeight = 17.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = products.size.toString(),
+                    color = BuyPilotColors.PrimaryDark,
+                    fontSize = 13.sp,
+                    lineHeight = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
                 )
             }
-            Text(
-                text = if (deckStillStreaming) "已到 ${products.size}" else "${products.size} 个",
-                color = BuyPilotColors.PrimaryDark,
-                fontSize = BuyPilotType.Label,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.7f), CircleShape)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
         }
-        HorizontalPager(
-            state = pagerState,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(238.dp),
-            contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
-            pageSpacing = 14.dp,
-            beyondViewportPageCount = 0,
-        ) { page ->
-            val payload = products[page]
-            val pageOffset = (
-                (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                ).coerceIn(-1f, 1f)
-            val distance = abs(pageOffset)
-            ProductRecommendationThumb(
-                payload = payload,
-                backendBaseUrl = backendBaseUrl,
-                selected = page == activeIndex,
-                onClick = {
-                    val productId = payload.product.productId.takeIf { it.isNotBlank() }
-                    if (singleCandidate && productId != null) {
-                        onOpenDetail(node.deckId, productId)
-                    } else {
-                        onOpen(node.deckId, productId)
-                    }
-                },
-                modifier = Modifier
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
+                pageSpacing = 14.dp,
+                beyondViewportPageCount = 0,
+            ) { page ->
+                val payload = products[page]
+                val pageOffset = (
+                    (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                    ).coerceIn(-1f, 1f)
+                val distance = abs(pageOffset)
+                val thumbModifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
                         scaleX = 1f - distance * 0.055f
                         scaleY = 1f - distance * 0.075f
                         alpha = 1f - distance * 0.18f
-                    },
-            )
-        }
-        if (!singleCandidate) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                products.take(6).forEachIndexed { index, _ ->
-                    val active = index == activeIndex.coerceAtMost(5)
-                    val indicatorWidth by animateDpAsState(
-                        targetValue = if (active) 18.dp else 5.dp,
-                        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
-                        label = "product_carousel_indicator_width",
-                    )
-                    val indicatorColor by animateColorAsState(
-                        targetValue = if (active) BuyPilotColors.Primary.copy(alpha = 0.82f) else BuyPilotColors.Border.copy(alpha = 0.9f),
-                        animationSpec = tween(durationMillis = 180),
-                        label = "product_carousel_indicator_color",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 3.dp)
-                            .size(width = indicatorWidth, height = 5.dp)
-                            .background(indicatorColor, CircleShape),
+                }
+                val openProduct = {
+                    val productId = payload.product.productId.takeIf { it.isNotBlank() }
+                    if (productId != null) {
+                        onOpenDetail(node.deckId, productId)
+                    } else {
+                        onOpen(node.deckId, null)
+                    }
+                }
+                if (page == 0) {
+                    ProductDeckArrivalMotion(
+                        arrivalProgress = arrivalProgress,
+                    ) { cardProgress ->
+                        ProductRecommendationThumb(
+                            payload = payload,
+                            backendBaseUrl = backendBaseUrl,
+                            selected = page == activeIndex,
+                            arrivalProgress = cardProgress,
+                            onClick = openProduct,
+                            modifier = thumbModifier,
+                        )
+                    }
+                } else {
+                    ProductRecommendationThumb(
+                        payload = payload,
+                        backendBaseUrl = backendBaseUrl,
+                        selected = page == activeIndex,
+                        arrivalProgress = 1f,
+                        onClick = openProduct,
+                        modifier = thumbModifier,
                     )
                 }
             }
         }
-        if (singleCandidate) {
-            SingleCandidateHint(
-                onOpenDetail = {
-                    activeProductId?.let { onOpenDetail(node.deckId, it) }
-                },
-            )
-        } else {
-            AnimatedVisibility(
-                visible = awaitingConvergence,
-                enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) +
-                    slideInVertically(
-                        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
-                        initialOffsetY = { it / 4 },
-                    ),
-                exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)),
-            ) {
-                ProductConvergenceHint(
-                    signalSummary = signalSummary,
-                    readyFromBackend = hasPendingDecision,
-                    onOpenDetail = {
-                        activeProductId?.let { onOpenDetail(node.deckId, it) }
-                    },
-                    onOpenDeck = { onOpen(node.deckId, activeProductId) },
-                    onConverge = onConverge,
-                )
-            }
-            if (!awaitingConvergence) {
-                ProductDeckLoadingHint()
-            }
-        }
+        ProductDeckFooterControls(
+            showIndicators = !singleCandidate,
+            productCount = products.size,
+            activeIndex = activeIndex,
+            chromeProgress = chromeProgress,
+            buttonProgress = if (awaitingConvergence) segmentProgress(arrivalProgress, 0.72f, 1f) else 0f,
+            buttonLabel = "帮我选",
+            onConverge = onConverge,
+        )
     }
 }
 
 @Composable
-private fun ProductRecommendationHistorySummary(
-    node: ProductDeckNode,
-    signalSummary: ProductDeckSignalSummary,
-    awaitingConvergence: Boolean,
-    hasPendingDecision: Boolean,
-    onOpen: (String, String?) -> Unit,
-    onOpenDetail: (String, String) -> Unit,
+private fun ProductDeckFooterControls(
+    showIndicators: Boolean,
+    productCount: Int,
+    activeIndex: Int,
+    chromeProgress: Float,
+    buttonProgress: Float,
+    buttonLabel: String,
     onConverge: () -> Unit,
 ) {
-    val products = node.products
-    if (products.isEmpty()) return
-    val firstProduct = products.first().product
-    val firstProductId = firstProduct.productId.takeIf { it.isNotBlank() }
-    val title = firstProduct.name.ifBlank { "候选商品" }
-    val subtitle = buildList {
-        add("${products.size} 个候选")
-        firstProduct.priceLabel().takeIf { it.isNotBlank() }?.let(::add)
-        signalSummary.displayLabel()?.let(::add)
-    }.joinToString(" · ")
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = BuyPilotColors.SurfaceCard.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(18.dp),
-        shadowElevation = 0.dp,
-        tonalElevation = 0.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "上一轮候选",
-                        color = BuyPilotColors.TextMuted,
-                        fontSize = BuyPilotType.Label,
-                        lineHeight = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = title,
-                        color = BuyPilotColors.TextPrimary,
-                        fontSize = BuyPilotType.Body,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = subtitle,
-                        color = BuyPilotColors.TextMuted,
-                        fontSize = BuyPilotType.Label,
-                        lineHeight = 17.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Text(
-                    text = "${products.size}",
-                    color = BuyPilotColors.PrimaryDark,
-                    fontSize = BuyPilotType.Label,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.62f), CircleShape)
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CandidateActionButton(
-                    label = "查看候选",
-                    leadingIconRes = R.drawable.ic_article_24,
-                    primary = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onOpen(node.deckId, firstProductId) },
-                )
-                CandidateActionButton(
-                    label = if (awaitingConvergence || hasPendingDecision) "查看建议" else "继续收敛",
-                    leadingIconRes = R.drawable.ic_compare_arrows_24,
-                    primary = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = onConverge,
-                )
-                CandidateActionButton(
-                    label = "详情",
-                    leadingIconRes = R.drawable.ic_article_24,
-                    primary = true,
-                    modifier = Modifier.weight(0.82f),
-                    onClick = {
-                        firstProductId?.let { onOpenDetail(node.deckId, it) }
-                            ?: onOpen(node.deckId, null)
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SingleCandidateHint(
-    onOpenDetail: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.58f),
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.64f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "只有一个候选时不进入滑卡，直接看适配性。",
-                color = BuyPilotColors.TextMuted,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 17.sp,
-                modifier = Modifier.weight(1f),
-            )
-            CandidateActionButton(
-                label = "查看详情",
-                leadingIconRes = R.drawable.ic_article_24,
-                primary = false,
-                onClick = onOpenDetail,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProductDeckLoadingHint() {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp),
+            .height(if (showIndicators) 46.dp else 30.dp)
+            .graphicsLayer {
+                alpha = maxOf(chromeProgress, buttonProgress * 0.96f)
+                translationY = (1f - chromeProgress.coerceIn(0f, 1f)) * 4f
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = if (showIndicators) Arrangement.spacedBy(6.dp) else Arrangement.Center,
+    ) {
+        if (showIndicators) {
+            ProductDeckPageIndicators(
+                productCount = productCount,
+                activeIndex = activeIndex,
+            )
+        }
+        ProductDeckConvergeMiniButton(
+            label = buttonLabel,
+            visibleProgress = buttonProgress,
+            onClick = onConverge,
+            modifier = Modifier,
+        )
+    }
+}
+
+@Composable
+private fun ProductDeckPageIndicators(
+    productCount: Int,
+    activeIndex: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(5.dp)
-                .background(BuyPilotColors.TextMuted.copy(alpha = 0.36f), CircleShape),
-        )
-        Spacer(Modifier.width(8.dp))
+        repeat(productCount.coerceAtMost(6)) { index ->
+            val active = index == activeIndex.coerceAtMost(5)
+            val indicatorWidth by animateDpAsState(
+                targetValue = if (active) 18.dp else 5.dp,
+                animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+                label = "product_carousel_indicator_width",
+            )
+            val indicatorColor by animateColorAsState(
+                targetValue = if (active) BuyPilotColors.Primary.copy(alpha = 0.82f) else BuyPilotColors.Border.copy(alpha = 0.9f),
+                animationSpec = tween(durationMillis = 180),
+                label = "product_carousel_indicator_color",
+            )
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(width = indicatorWidth, height = 5.dp)
+                    .background(indicatorColor, CircleShape),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductDeckConvergeMiniButton(
+    label: String,
+    visibleProgress: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (visibleProgress <= 0.01f) return
+    val textProgress = segmentProgress(visibleProgress, 0.5f, 1f)
+    Row(
+        modifier = modifier
+            .graphicsLayer {
+                alpha = visibleProgress
+                translationY = (1f - visibleProgress) * 5f
+                scaleX = lerp(0.98f, 1f, textProgress)
+                scaleY = lerp(0.98f, 1f, textProgress)
+                transformOrigin = TransformOrigin(1f, 0.5f)
+            }
+            .clickable(role = Role.Button, onClick = onClick)
+            .height(28.dp)
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
-            text = "正在补齐候选和筛选范围，商品已可先查看",
-            color = BuyPilotColors.TextMuted,
+            text = label,
+            color = BuyPilotColors.TextMuted.copy(alpha = lerp(0f, 0.82f, textProgress)),
             fontSize = BuyPilotType.Label,
-            lineHeight = 17.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -4697,74 +5192,161 @@ private fun ProductDeckLoadingHint() {
 }
 
 @Composable
-private fun ProductConvergenceHint(
-    signalSummary: ProductDeckSignalSummary,
-    readyFromBackend: Boolean,
-    onOpenDetail: () -> Unit,
-    onOpenDeck: () -> Unit,
-    onConverge: () -> Unit,
+private fun ProductRecommendationHistorySummary(
+    node: ProductDeckNode,
+    backendBaseUrl: String,
+    onOpen: (String, String?) -> Unit,
+    onOpenDetail: (String, String) -> Unit,
 ) {
+    val products = node.products
+    if (products.isEmpty()) return
+    val visibleProducts = products.take(5)
+
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 2.dp),
-        color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.54f),
+        modifier = Modifier.fillMaxWidth(),
+        color = BuyPilotColors.SurfaceCard.copy(alpha = 0.92f),
         shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.56f)),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(5.dp)
-                        .background(
-                            if (readyFromBackend) BuyPilotColors.Primary else BuyPilotColors.TextMuted.copy(alpha = 0.45f),
-                            CircleShape,
-                        ),
+            Text(
+                text = "上一轮候选",
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            visibleProducts.forEachIndexed { index, payload ->
+                if (index > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 68.dp)
+                            .height(1.dp)
+                            .background(BuyPilotColors.Border.copy(alpha = 0.42f)),
+                    )
+                }
+                ProductHistoryListRow(
+                    payload = payload,
+                    backendBaseUrl = backendBaseUrl,
+                    onClick = {
+                        payload.product.productId
+                            .takeIf { it.isNotBlank() }
+                            ?.let { onOpenDetail(node.deckId, it) }
+                            ?: onOpen(node.deckId, null)
+                    },
                 )
-                Spacer(Modifier.width(8.dp))
+            }
+            if (products.size > visibleProducts.size) {
                 Text(
-                    text = signalSummary.displayLabel()
-                        ?: "不用滑完，当前候选也可以直接收敛",
+                    text = "查看全部 ${products.size} 个候选",
                     color = BuyPilotColors.TextMuted,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 17.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CandidateActionButton(
-                    label = "先看详情",
-                    leadingIconRes = R.drawable.ic_article_24,
-                    primary = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = onOpenDetail,
-                )
-                CandidateActionButton(
-                    label = "滑卡反馈",
-                    leadingIconRes = R.drawable.ic_favorite_24,
-                    primary = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = onOpenDeck,
-                )
-                CandidateActionButton(
-                    label = if (readyFromBackend) "查看建议" else "帮我选",
-                    leadingIconRes = R.drawable.ic_compare_arrows_24,
-                    primary = true,
-                    modifier = Modifier.weight(1f),
-                    onClick = onConverge,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            visibleProducts.firstOrNull()?.product?.productId
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let { onOpenDetail(node.deckId, it) }
+                                ?: onOpen(node.deckId, null)
+                        }
+                        .padding(vertical = 8.dp),
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ProductHistoryListRow(
+    payload: ProductCardPayload,
+    backendBaseUrl: String,
+    onClick: () -> Unit,
+) {
+    val product = payload.product
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFFF6F8FA))
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.42f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            ProductImage(
+                product = product,
+                backendBaseUrl = backendBaseUrl,
+                decodeSizePx = 128,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(5.dp),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp, end = 8.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = product.displayName(),
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = listOf(
+                    product.brandLabel().takeIf { it.isNotBlank() },
+                    product.priceLabel().takeIf { it.isNotBlank() },
+                ).filterNotNull().joinToString(" · "),
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        ProductDetailChevron()
+    }
+}
+
+@Composable
+private fun ProductDetailChevron(
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.72f), CircleShape)
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.36f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_chevron_right_20),
+            contentDescription = null,
+            tint = BuyPilotColors.TextMuted.copy(alpha = 0.76f),
+            modifier = Modifier.size(21.dp),
+        )
     }
 }
 
@@ -4831,6 +5413,7 @@ private fun rememberProductDisplayTags(
 private fun rememberPlainProductReason(reason: String): String? =
     remember(reason) {
         reason.withoutMarkdownMarkup()
+            .withoutInternalDebugTokens()
             .trim()
             .takeIf { it.isNotBlank() }
     }
@@ -4840,6 +5423,7 @@ private fun ProductRecommendationThumb(
     payload: ProductCardPayload,
     backendBaseUrl: String,
     selected: Boolean,
+    arrivalProgress: Float = 1f,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -4848,22 +5432,29 @@ private fun ProductRecommendationThumb(
     val reason = rememberPlainProductReason(payload.reason)
     val cardShape = RoundedCornerShape(18.dp)
     val borderAlpha = if (selected) 0.72f else 0.54f
+    val cardFillProgress = segmentProgress(arrivalProgress, 0.36f, 0.76f)
+    val imageProgress = segmentProgress(arrivalProgress, 0.5f, 0.92f)
+    val detailProgress = segmentProgress(arrivalProgress, 0.64f, 1f)
 
     Surface(
         modifier = modifier
             .height(218.dp)
             .clip(cardShape)
             .clickable(onClick = onClick),
-        color = BuyPilotColors.SurfaceCard,
+        color = BuyPilotColors.SurfaceCard.copy(alpha = cardFillProgress),
         shape = cardShape,
         shadowElevation = 0.dp,
         tonalElevation = 0.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = borderAlpha)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = borderAlpha * cardFillProgress)),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(10.dp),
+                .padding(10.dp)
+                .graphicsLayer {
+                    alpha = 0.08f + cardFillProgress * 0.92f
+                    translationY = (1f - cardFillProgress) * 16f
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -4875,11 +5466,23 @@ private fun ProductRecommendationThumb(
                     .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.36f), RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center,
             ) {
+                ProductImageLoadingSeed(
+                    progress = segmentProgress(arrivalProgress, 0f, 0.48f),
+                    modifier = Modifier
+                        .width(92.dp)
+                        .height(132.dp)
+                        .padding(horizontal = 3.dp, vertical = 6.dp),
+                )
                 ProductImage(
                     product = product,
                     backendBaseUrl = backendBaseUrl,
                     decodeSizePx = 240,
                     modifier = Modifier
+                        .graphicsLayer {
+                            alpha = imageProgress
+                            scaleX = 0.985f + imageProgress * 0.015f
+                            scaleY = 0.985f + imageProgress * 0.015f
+                        }
                         .width(92.dp)
                         .height(132.dp)
                         .padding(horizontal = 3.dp, vertical = 6.dp),
@@ -4888,6 +5491,10 @@ private fun ProductRecommendationThumb(
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
+                    .graphicsLayer {
+                        alpha = detailProgress
+                        translationY = (1f - detailProgress) * 10f
+                    }
                     .padding(start = 13.dp, top = 4.dp, end = 3.dp, bottom = 3.dp),
             ) {
                 Text(
@@ -4901,7 +5508,7 @@ private fun ProductRecommendationThumb(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = product.name.ifBlank { "推荐商品" },
+                    text = product.displayName(),
                     color = BuyPilotColors.TextPrimary,
                     fontSize = 14.5f.sp,
                     lineHeight = 20.sp,
@@ -5054,7 +5661,7 @@ private fun ProductHeroCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = product.name.ifBlank { "推荐商品" },
+                    text = product.displayName(),
                     color = BuyPilotColors.TextPrimary,
                     fontSize = 24.sp,
                     lineHeight = 30.sp,
@@ -5083,169 +5690,158 @@ private fun ProductHeroCard(
 private fun DecisionSummaryCard(
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
+    productDeckIdByProductId: Map<String, String>,
     backendBaseUrl: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    onEntered: () -> Unit,
     onEvidence: () -> Unit,
+    onProductDetailOpen: (String, String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
-    val winner = payload.winnerProductId
-        ?.takeIf { it.isNotBlank() }
-        ?.let { winnerId -> productsById[winnerId] }
+    val winnerProductId = payload.winnerProductId?.takeIf { it.isNotBlank() }
+    val winner = winnerProductId?.let { winnerId -> productsById[winnerId] }
+    val winnerDeckId = winnerProductId?.let { productDeckIdByProductId[it] }
+    val openWinnerDetail = winnerDeckId?.let { deckId ->
+        { onProductDetailOpen(deckId, winnerProductId.orEmpty()) }
+    }
     val product = winner?.product
-    val whyItems = payload.why.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
-    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
+    val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
+    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
     val statusBadge = payload.decisionStatusBadge()
     val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        AssistantText(payload.summary)
+        AssistantText(payload.decisionSummaryMarkdown(statusBadge?.label))
         if (
             winner != null ||
-            !payload.winnerProductId.isNullOrBlank() ||
+            !winnerProductId.isNullOrBlank() ||
             whyItems.isNotEmpty() ||
             notForItems.isNotEmpty() ||
             statusBadge?.showCardWhenEmpty == true
         ) {
-            Surface(
-                modifier = Modifier.shadow(
-                    elevation = 8.dp,
+            StructuredCardMotion(
+                key = payload.summary.ifBlank { winnerProductId.orEmpty() },
+                motionEnabled = motionEnabled,
+                alreadyEntered = alreadyEntered,
+                durationMillis = DecisionCardEnterMs,
+                initialOffsetY = 16.dp,
+                initialScale = 0.925f,
+                onEntered = onEntered,
+            ) { cardProgress ->
+                Surface(
+                    modifier = Modifier.shadow(
+                        elevation = 8.dp,
+                        shape = RoundedCornerShape(22.dp),
+                        ambientColor = Color(0xFF8E97A4).copy(alpha = 0.07f),
+                        spotColor = Color.Black.copy(alpha = 0.04f),
+                    ),
+                    color = BuyPilotColors.SurfaceCard,
                     shape = RoundedCornerShape(22.dp),
-                    ambientColor = Color(0xFF8E97A4).copy(alpha = 0.07f),
-                    spotColor = Color.Black.copy(alpha = 0.04f),
-                ),
-                color = BuyPilotColors.SurfaceCard,
-                shape = RoundedCornerShape(22.dp),
-                shadowElevation = 0.dp,
-                border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
-            ) {
-                Column {
-                    if (winner != null || !payload.winnerProductId.isNullOrBlank() || statusBadge != null) {
-                        val headerAccent = statusBadge?.accent ?: BuyPilotColors.PrimaryDark
-                        val headerSurface = statusBadge?.surface ?: BuyPilotColors.PrimarySoft.copy(alpha = 0.78f)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.horizontalGradient(
-                                        listOf(
-                                            headerSurface,
-                                            Color(0xFFFFF7F0),
-                                        ),
-                                    ),
-                                )
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                    shadowElevation = 0.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
+                ) {
+                    Column {
+                        Column(
+                            Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .background(headerAccent.copy(alpha = 0.12f), CircleShape),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("✪", color = headerAccent, fontSize = BuyPilotType.Label)
+                            if (winner == null && winnerProductId.isNullOrBlank()) {
+                                DecisionStateMetaRow(payload = payload, accent = statusBadge?.accent ?: BuyPilotColors.TextSecondary)
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                statusBadge?.label ?: "首选推荐",
-                                color = headerAccent,
-                                fontSize = BuyPilotType.Body,
-                                lineHeight = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
-                    Column(
-                        Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        if (winner == null && payload.winnerProductId.isNullOrBlank()) {
-                            DecisionStateMetaRow(payload = payload, accent = statusBadge?.accent ?: BuyPilotColors.TextSecondary)
-                        }
-                        if (winner != null || !payload.winnerProductId.isNullOrBlank()) {
-                            Row(
-                                verticalAlignment = Alignment.Top,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                if (product != null) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(88.dp)
-                                            .background(Color(0xFFF6F8FB), RoundedCornerShape(20.dp))
-                                            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.48f), RoundedCornerShape(20.dp))
-                                            .padding(6.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        ProductImage(
-                                            product = product,
-                                            backendBaseUrl = backendBaseUrl,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(RoundedCornerShape(16.dp)),
+                            if (winner != null || !winnerProductId.isNullOrBlank()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .then(
+                                            if (openWinnerDetail != null) {
+                                                Modifier.clickable(role = Role.Button, onClick = openWinnerDetail)
+                                            } else {
+                                                Modifier
+                                            },
                                         )
-                                    }
-                                }
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                                        .padding(2.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 ) {
-                                    product?.name?.takeIf { it.isNotBlank() }?.let { name ->
-                                        Text(
-                                            text = name,
-                                            color = BuyPilotColors.TextPrimary,
-                                            fontSize = 19.sp,
-                                            lineHeight = 24.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    if (product != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(88.dp)
+                                                .background(Color(0xFFF6F8FB), RoundedCornerShape(20.dp))
+                                                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.48f), RoundedCornerShape(20.dp))
+                                                .padding(6.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            ProductImage(
+                                                product = product,
+                                                backendBaseUrl = backendBaseUrl,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(16.dp)),
+                                            )
+                                        }
                                     }
-                                    payload.winnerProductId?.takeIf { it.isNotBlank() }?.let { winnerId ->
-                                        Text(
-                                            text = winnerId,
-                                            color = BuyPilotColors.TextMuted,
-                                            fontSize = BuyPilotType.Tiny,
-                                            lineHeight = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        product?.displayName("")?.takeIf { it.isNotBlank() }?.let { name ->
+                                            Text(
+                                                text = name,
+                                                color = BuyPilotColors.TextPrimary,
+                                                fontSize = 19.sp,
+                                                lineHeight = 24.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                        winner?.reason?.takeIf { it.isNotBlank() }?.let { reason ->
+                                            MarkdownTextBlock(
+                                                content = reason,
+                                                style = TextStyle(
+                                                    color = BuyPilotColors.TextSecondary,
+                                                    fontSize = BuyPilotType.Body,
+                                                    lineHeight = 21.sp,
+                                                ),
+                                            )
+                                        }
+                                        product?.priceLabelOrNull()?.let { priceLabel ->
+                                            Text(
+                                                text = priceLabel,
+                                                color = BuyPilotColors.Primary,
+                                                fontSize = 21.sp,
+                                                lineHeight = 25.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                        }
                                     }
-                                    winner?.reason?.takeIf { it.isNotBlank() }?.let { reason ->
-                                        MarkdownTextBlock(
-                                            content = reason,
-                                            style = TextStyle(
-                                                color = BuyPilotColors.TextSecondary,
-                                                fontSize = BuyPilotType.Body,
-                                                lineHeight = 21.sp,
-                                            ),
-                                        )
-                                    }
-                                    product?.priceLabelOrNull()?.let { priceLabel ->
-                                        Text(
-                                            text = priceLabel,
-                                            color = BuyPilotColors.Primary,
-                                            fontSize = 21.sp,
-                                            lineHeight = 25.sp,
-                                            fontWeight = FontWeight.Bold,
+                                    if (openWinnerDetail != null) {
+                                        ProductDetailChevron(
+                                            modifier = Modifier.padding(top = 8.dp),
                                         )
                                     }
                                 }
                             }
-                        }
-                        if (whyItems.isNotEmpty()) {
-                            SectionTitle("推荐理由", leading = "✓")
-                            DecisionReasonList(items = whyItems)
-                        }
-                        if (notForItems.isNotEmpty()) {
-                            WarningBox(notForItems.joinToString("；"))
-                        }
-                        if (payload.decisionStatus == "selected" && payload.confidence == "low") {
-                            DecisionLowConfidenceNotice()
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                        ) {
-                            TextButton(onClick = onEvidence, contentPadding = PaddingValues(0.dp)) {
-                                Text("查看决策依据 ›", color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
+                            if (whyItems.isNotEmpty()) {
+                                SectionTitle("推荐理由", leading = "✓")
+                                DecisionReasonList(items = whyItems, parentProgress = cardProgress)
+                            }
+                            if (notForItems.isNotEmpty()) {
+                                WarningBox(notForItems.joinToString("；"))
+                            }
+                            if (payload.decisionStatus == "selected" && payload.confidence == "low") {
+                                DecisionLowConfidenceNotice()
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                TextButton(onClick = onEvidence, contentPadding = PaddingValues(0.dp)) {
+                                    Text("查看决策依据 ›", color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
+                                }
                             }
                         }
                     }
@@ -5259,6 +5855,37 @@ private fun DecisionSummaryCard(
             )
         }
     }
+}
+
+private fun String.withDecisionSummaryDivider(): String {
+    val summary = trim()
+    if (summary.isBlank()) return summary
+    if (
+        summary.startsWith("---") ||
+        summary.startsWith("***") ||
+        summary.startsWith("___")
+    ) return summary
+    return "---\n\n$summary"
+}
+
+private fun FinalDecisionPayload.decisionSummaryMarkdown(statusLabel: String?): String {
+    val summary = this.summary.withoutInternalDebugTokens().trim()
+    val headline = statusLabel
+        ?.withoutInternalDebugTokens()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+    val body = buildString {
+        if (headline != null) {
+            append("**")
+            append(headline)
+            append("**")
+        }
+        if (summary.isNotBlank()) {
+            if (isNotEmpty()) append("\n\n")
+            append(summary)
+        }
+    }
+    return body.withDecisionSummaryDivider()
 }
 
 @Composable
@@ -5284,7 +5911,7 @@ private fun DecisionLowConfidenceNotice() {
         border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Warning.copy(alpha = 0.24f)),
     ) {
         Text(
-            text = "当前偏好信号还不多，这是一条低置信度建议。继续看 1 到 2 个候选后再收敛会更准。",
+            text = "当前偏好信号还不多，这条建议置信度偏低。继续补充偏好后判断会更稳。",
             color = BuyPilotColors.TextSecondary,
             fontSize = BuyPilotType.Label,
             lineHeight = 18.sp,
@@ -5330,6 +5957,7 @@ fun ProductSwipeModeScreen(
     val swipeState = state.productSwipeStates[deckId] ?: ProductSwipeState()
     val remainingProducts = products.filterNot { it.product.productId in swipeState.swipedProductIds }
     val currentProductId = swipeState.currentProductId
+        ?.takeIf { id -> products.size == 1 || remainingProducts.any { it.product.productId == id } }
         ?: initialProductId?.takeIf { id -> remainingProducts.any { it.product.productId == id } }
         ?: remainingProducts.firstOrNull()?.product?.productId
         ?: products.firstOrNull()?.product?.productId
@@ -5340,12 +5968,33 @@ fun ProductSwipeModeScreen(
     }
     val haptics = LocalHapticFeedback.current
     val cardStackBridge = remember(deckId) { CardStackBridge() }
-    val signalSummary = swipeState.signalSummary()
+    val deckCompleted = shouldAutoConvergeProductDeck(
+        products = products,
+        remainingProducts = remainingProducts,
+    )
+    var autoConverged by rememberSaveable(deckId) { mutableStateOf(false) }
+    val latestOnConverge by rememberUpdatedState(onConverge)
+
+    LaunchedEffect(deckId, deckCompleted) {
+        if (!deckCompleted || autoConverged) return@LaunchedEffect
+        autoConverged = true
+        kotlinx.coroutines.delay(ProductDeckAutoConvergeDelayMs)
+        latestOnConverge(deckId)
+    }
+
+    val closeOrConverge: () -> Unit = {
+        if (deckCompleted) {
+            onConverge(deckId)
+        } else {
+            onBack()
+        }
+    }
 
     Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ProductSwipeTopBar(
-                onBack = onBack,
+                title = if (products.size > 1) "商品详情" else "唯一候选",
+                onBack = closeOrConverge,
                 canUndo = swipeState.undoStack.isNotEmpty(),
                 onUndo = {
                     cardStackBridge.rewind()
@@ -5356,9 +6005,6 @@ fun ProductSwipeModeScreen(
             if (deck == null || payload == null) {
                 if (deck != null && products.isNotEmpty() && remainingProducts.isEmpty()) {
                     ProductSwipeCompletedState(
-                        signalSummary = signalSummary,
-                        onBack = onBack,
-                        onConverge = { onConverge(deckId) },
                     )
                 } else {
                     ExpiredRecommendationState(onBack = onBack)
@@ -5377,13 +6023,12 @@ fun ProductSwipeModeScreen(
                     },
                 )
             } else {
-                ProductSwipeHeroCopy()
                 ProductSwipeModeContent(
+                    animationKey = deckId,
                     products = remainingProducts,
                     currentProductId = payload.product.productId,
                     backendBaseUrl = state.backendBaseUrl,
                     cardStackBridge = cardStackBridge,
-                    onOpenDetail = { productId -> onOpenDetail(deckId, productId) },
                     onDislike = { productId ->
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         onSwipe(deckId, productId, "not_interested", "not_interested", null)
@@ -5400,6 +6045,7 @@ fun ProductSwipeModeScreen(
 
 @Composable
 private fun ProductSwipeTopBar(
+    title: String,
     onBack: () -> Unit,
     canUndo: Boolean,
     onUndo: () -> Unit,
@@ -5411,7 +6057,7 @@ private fun ProductSwipeTopBar(
             .statusBarsPadding(),
     ) {
         M3TopAppBarRow(
-            title = "BuyPilot AI",
+            title = title,
             titleCentered = true,
             navigationIcon = R.drawable.ic_arrow_back_24,
             navigationDescription = "返回",
@@ -5425,31 +6071,6 @@ private fun ProductSwipeTopBar(
             modifier = Modifier.fillMaxWidth(),
         )
         HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
-    }
-}
-
-@Composable
-private fun ProductSwipeHeroCopy() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 22.dp),
-    ) {
-        Text(
-            text = "表达你的偏好",
-            color = BuyPilotColors.TextPrimary,
-            fontSize = 29.sp,
-            lineHeight = 36.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "右滑喜欢，左滑排除；不必滑完，已有信号会被纳入决策。",
-            color = BuyPilotColors.TextSecondary,
-            fontSize = 18.sp,
-            lineHeight = 25.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -5510,59 +6131,42 @@ private fun ProductSingleCandidateModeContent(
 }
 
 @Composable
-private fun ProductSwipeCompletedState(
-    signalSummary: ProductDeckSignalSummary,
-    onBack: () -> Unit,
-    onConverge: () -> Unit,
-) {
-    Column(
+private fun ProductSwipeCompletedState() {
+    val mascotProgress = rememberRouteEnterProgress(
+        key = "product_swipe_completed_mascot",
+        durationMillis = 260,
+    )
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(horizontal = 34.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = "这组候选已经处理完",
-            color = BuyPilotColors.TextPrimary,
-            fontSize = BuyPilotType.Title,
-            lineHeight = 24.sp,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
+        Image(
+            painter = painterResource(R.drawable.redbean_bun_mascot_eyes_variant),
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth(0.86f)
+                .widthIn(max = 330.dp)
+                .aspectRatio(1f)
+                .graphicsLayer {
+                    alpha = mascotProgress
+                    translationY = (1f - mascotProgress) * 18f
+                    scaleX = lerp(0.96f, 1f, mascotProgress)
+                    scaleY = lerp(0.96f, 1f, mascotProgress)
+                },
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = signalSummary.displayLabel() ?: "可以回到聊天流继续调整，也可以直接收敛建议。",
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 21.sp,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CandidateActionButton(
-                label = "回聊天",
-                leadingIconRes = R.drawable.ic_arrow_back_24,
-                primary = false,
-                onClick = onBack,
-            )
-            CandidateActionButton(
-                label = "帮我选",
-                leadingIconRes = R.drawable.ic_compare_arrows_24,
-                primary = true,
-                onClick = onConverge,
-            )
-        }
     }
 }
 
 @Composable
 private fun ProductSwipeModeContent(
+    animationKey: String,
     products: List<ProductCardPayload>,
     currentProductId: String,
     backendBaseUrl: String,
     cardStackBridge: CardStackBridge,
-    onOpenDetail: (String) -> Unit,
     onDislike: (String) -> Unit,
     onLike: (String) -> Unit,
 ) {
@@ -5580,6 +6184,12 @@ private fun ProductSwipeModeContent(
     val latestProducts by rememberUpdatedState(orderedProducts)
     val latestOnLike by rememberUpdatedState(onLike)
     val latestOnDislike by rememberUpdatedState(onDislike)
+    val routeProgress = rememberRouteEnterProgress(
+        key = "product_swipe_detail_$animationKey",
+        durationMillis = ProductSwipeDetailEnterMs,
+    )
+    val cardEnter = segmentProgress(routeProgress, 0f, 0.86f)
+    val controlsEnter = segmentProgress(routeProgress, 0.34f, 1f)
 
     Column(
         modifier = Modifier
@@ -5591,14 +6201,19 @@ private fun ProductSwipeModeContent(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = cardEnter
+                    translationY = (1f - cardEnter) * 22f
+                    scaleX = lerp(0.982f, 1f, cardEnter)
+                    scaleY = lerp(0.982f, 1f, cardEnter)
+                },
             contentAlignment = Alignment.Center,
         ) {
             ProductCardStackView(
                 products = orderedProducts,
                 backendBaseUrl = backendBaseUrl,
                 bridge = cardStackBridge,
-                onOpenDetail = onOpenDetail,
                 onSwiped = { direction, position ->
                     val swiped = latestProducts.getOrNull(position) ?: return@ProductCardStackView
                     when (direction) {
@@ -5614,7 +6229,14 @@ private fun ProductSwipeModeContent(
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = controlsEnter
+                    translationY = (1f - controlsEnter) * 18f
+                    scaleX = lerp(0.96f, 1f, controlsEnter)
+                    scaleY = lerp(0.96f, 1f, controlsEnter)
+                },
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -5637,6 +6259,12 @@ private fun ProductSwipeModeContent(
     }
 }
 
+@Suppress("UNUSED_PARAMETER")
+internal fun shouldAutoConvergeProductDeck(
+    products: List<ProductCardPayload>,
+    remainingProducts: List<ProductCardPayload>,
+): Boolean = false
+
 private class CardStackBridge {
     var view: CardStackView? = null
     var manager: CardStackLayoutManager? = null
@@ -5647,8 +6275,8 @@ private class CardStackBridge {
         stackManager.setSwipeAnimationSetting(
             SwipeAnimationSetting.Builder()
                 .setDirection(direction)
-                .setDuration(300)
-                .setInterpolator(PathInterpolator(0.3f, 0f, 1f, 1f))
+                .setDuration(ProductSwipeAnimationMs)
+                .setInterpolator(PathInterpolator(0.2f, 0f, 0f, 1f))
                 .build(),
         )
         stackView.swipe()
@@ -5673,7 +6301,6 @@ private fun ProductCardStackView(
     products: List<ProductCardPayload>,
     backendBaseUrl: String,
     bridge: CardStackBridge,
-    onOpenDetail: (String) -> Unit,
     onSwiped: (Direction, Int) -> Unit,
     onStackPositionChanged: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -5708,7 +6335,6 @@ private fun ProductCardStackView(
                 textMutedColor = textMutedColor,
                 tagBgColor = tagBgColor,
                 tagBorderColor = tagBorderColor,
-                onOpenDetail = onOpenDetail,
             )
             val listener = object : CardStackListener {
                 override fun onCardDragging(direction: Direction, ratio: Float) = Unit
@@ -5730,10 +6356,10 @@ private fun ProductCardStackView(
             val manager = CardStackLayoutManager(viewContext, listener).apply {
                 setStackFrom(StackFrom.None)
                 setVisibleCount(3)
-                setTranslationInterval(8f)
-                setScaleInterval(0.97f)
-                setSwipeThreshold(0.26f)
-                setMaxDegree(11f)
+                setTranslationInterval(13f)
+                setScaleInterval(0.958f)
+                setSwipeThreshold(0.24f)
+                setMaxDegree(7f)
                 setDirections(Direction.HORIZONTAL)
                 setCanScrollHorizontal(true)
                 setCanScrollVertical(false)
@@ -5741,8 +6367,8 @@ private fun ProductCardStackView(
                 setSwipeAnimationSetting(
                     SwipeAnimationSetting.Builder()
                         .setDirection(Direction.Right)
-                        .setDuration(300)
-                        .setInterpolator(PathInterpolator(0.3f, 0f, 1f, 1f))
+                        .setDuration(ProductSwipeAnimationMs)
+                        .setInterpolator(PathInterpolator(0.2f, 0f, 0f, 1f))
                         .build(),
                 )
                 setRewindAnimationSetting(
@@ -5767,7 +6393,6 @@ private fun ProductCardStackView(
         update = { stackView ->
             val adapter = stackView.adapter as? ProductCardStackAdapter ?: return@AndroidView
             adapter.backendBaseUrl = backendBaseUrl
-            adapter.onOpenDetail = onOpenDetail
             val nextProductIds = products.map { it.product.productId }
             if (adapter.productIds != nextProductIds) {
                 val changed = adapter.submit(products)
@@ -5795,7 +6420,6 @@ private class ProductCardStackAdapter(
     private val textMutedColor: Int,
     private val tagBgColor: Int,
     private val tagBorderColor: Int,
-    var onOpenDetail: (String) -> Unit,
 ) : RecyclerView.Adapter<ProductCardStackAdapter.ProductCardViewHolder>() {
     private val items = mutableListOf<ProductCardPayload>()
     val productIds: List<String>
@@ -5889,6 +6513,32 @@ private class ProductCardStackAdapter(
                 rightMargin = (16 * density).roundToInt()
                 topMargin = (18 * density).roundToInt()
                 bottomMargin = (18 * density).roundToInt()
+            },
+        )
+
+        val positionBadge = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(textSecondaryColor)
+            textSize = 12f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = android.view.Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 999 * density
+                setColor(android.graphics.Color.argb(232, 255, 254, 252))
+                setStroke((1 * density).roundToInt().coerceAtLeast(1), android.graphics.Color.argb(150, 226, 231, 238))
+            }
+            setPadding((10 * density).roundToInt(), (5 * density).roundToInt(), (10 * density).roundToInt(), (5 * density).roundToInt())
+        }
+        imageStage.addView(
+            positionBadge,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.TOP or android.view.Gravity.END,
+            ).apply {
+                topMargin = (14 * density).roundToInt()
+                rightMargin = (14 * density).roundToInt()
             },
         )
 
@@ -6024,16 +6674,71 @@ private class ProductCardStackAdapter(
             },
         )
 
+        val detailRows = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        content.addView(
+            detailRows,
+            android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (12 * density).roundToInt()
+            },
+        )
+
+        val riskText = TextView(context).apply {
+            includeFontPadding = false
+            setTextColor(textSecondaryColor)
+            textSize = 12.5f
+            maxLines = 2
+            setLineSpacing((2 * density), 1f)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 12 * density
+                setColor(android.graphics.Color.rgb(255, 247, 248))
+                setStroke((1 * density).roundToInt().coerceAtLeast(1), android.graphics.Color.rgb(255, 226, 232))
+            }
+            setPadding((10 * density).roundToInt(), (7 * density).roundToInt(), (10 * density).roundToInt(), (7 * density).roundToInt())
+        }
+        content.addView(
+            riskText,
+            android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (10 * density).roundToInt()
+            },
+        )
+
         val overlays = createSwipeOverlays(context, primaryColor, textPrimaryColor, density)
         root.addView(overlays.first)
         root.addView(overlays.second)
 
-        return ProductCardViewHolder(root, image, reasonRow, reasonText, brand, name, price, evidence, tagRow, tagBgColor, tagBorderColor, textSecondaryColor, primaryDarkColor)
+        return ProductCardViewHolder(
+            root,
+            image,
+            positionBadge,
+            reasonRow,
+            reasonText,
+            brand,
+            name,
+            price,
+            evidence,
+            tagRow,
+            detailRows,
+            riskText,
+            tagBgColor,
+            tagBorderColor,
+            textPrimaryColor,
+            textSecondaryColor,
+            textMutedColor,
+            primaryDarkColor,
+        )
     }
 
     override fun onBindViewHolder(holder: ProductCardViewHolder, position: Int) {
         val payload = items[position]
-        holder.bind(payload, backendBaseUrl, onOpenDetail)
+        holder.bind(
+            payload = payload,
+            backendBaseUrl = backendBaseUrl,
+            positionLabel = "${position + 1} / ${items.size}",
+        )
     }
 
     override fun getItemCount(): Int = items.size
@@ -6044,7 +6749,7 @@ private class ProductCardStackAdapter(
         textPrimaryColor: Int,
         density: Float,
     ): Pair<View, View> {
-        fun overlay(id: Int, label: String, color: Int, gravity: Int): FrameLayout =
+        fun overlay(id: Int, label: String, color: Int, gravity: Int, rotationDegrees: Float): FrameLayout =
             FrameLayout(context).apply {
                 this.id = id
                 alpha = 0f
@@ -6053,16 +6758,17 @@ private class ProductCardStackAdapter(
                         text = label
                         includeFontPadding = false
                         setTextColor(color)
-                        textSize = 24f
+                        textSize = 20f
                         typeface = android.graphics.Typeface.DEFAULT_BOLD
-                        rotation = if (label == "LIKE") -10f else 10f
+                        letterSpacing = 0.04f
+                        rotation = rotationDegrees
                         background = android.graphics.drawable.GradientDrawable().apply {
                             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
                             cornerRadius = 999 * density
                             setColor(android.graphics.Color.argb(238, 255, 254, 252))
-                            setStroke((2 * density).roundToInt(), color)
+                            setStroke((1.5f * density).roundToInt().coerceAtLeast(1), color)
                         }
-                        setPadding((18 * density).roundToInt(), (8 * density).roundToInt(), (18 * density).roundToInt(), (8 * density).roundToInt())
+                        setPadding((16 * density).roundToInt(), (8 * density).roundToInt(), (16 * density).roundToInt(), (8 * density).roundToInt())
                     },
                     FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -6075,13 +6781,25 @@ private class ProductCardStackAdapter(
                     },
                 )
             }
-        return overlay(com.yuyakaido.android.cardstackview.R.id.left_overlay, "PASS", textPrimaryColor, android.view.Gravity.TOP or android.view.Gravity.END) to
-            overlay(com.yuyakaido.android.cardstackview.R.id.right_overlay, "LIKE", primaryColor, android.view.Gravity.TOP or android.view.Gravity.START)
+        return overlay(
+            id = com.yuyakaido.android.cardstackview.R.id.left_overlay,
+            label = "不合适",
+            color = textPrimaryColor,
+            gravity = android.view.Gravity.TOP or android.view.Gravity.END,
+            rotationDegrees = 8f,
+        ) to overlay(
+            id = com.yuyakaido.android.cardstackview.R.id.right_overlay,
+            label = "喜欢",
+            color = primaryColor,
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START,
+            rotationDegrees = -8f,
+        )
     }
 
     class ProductCardViewHolder(
         itemView: View,
         private val image: ImageView,
+        private val positionBadge: TextView,
         private val reasonRow: android.widget.LinearLayout,
         private val reasonText: TextView,
         private val brand: TextView,
@@ -6089,33 +6807,39 @@ private class ProductCardStackAdapter(
         private val price: TextView,
         private val evidence: TextView,
         private val tagRow: android.widget.LinearLayout,
+        private val detailRows: android.widget.LinearLayout,
+        private val riskText: TextView,
         private val tagBgColor: Int,
         private val tagBorderColor: Int,
+        private val textPrimaryColor: Int,
         private val textSecondaryColor: Int,
+        private val textMutedColor: Int,
         private val primaryDarkColor: Int,
     ) : RecyclerView.ViewHolder(itemView) {
         fun bind(
             payload: ProductCardPayload,
             backendBaseUrl: String,
-            onOpenDetail: (String) -> Unit,
+            positionLabel: String,
         ) {
             val product = payload.product
-            itemView.setOnClickListener {
-                product.productId.takeIf { it.isNotBlank() }?.let(onOpenDetail)
-            }
+            itemView.setOnClickListener(null)
+            itemView.isClickable = false
+            positionBadge.text = positionLabel
             image.load(product.imageUrl.resolveProductImageUrl(backendBaseUrl)) {
+                crossfade(180)
                 placeholder(R.drawable.product_cleanser_sample)
                 error(R.drawable.product_cleanser_sample)
                 fallback(R.drawable.product_cleanser_sample)
             }
             val reason = payload.reason
                 .withoutMarkdownMarkup()
+                .withoutInternalDebugTokens()
                 .trim()
                 .takeIf { it.isNotBlank() }
             reasonRow.visibility = if (reason == null) View.GONE else View.VISIBLE
             reasonText.text = reason.orEmpty()
             brand.text = product.brandLabel()
-            name.text = product.name.ifBlank { "推荐商品" }
+            name.text = product.displayName()
             price.text = product.priceLabel()
             evidence.visibility = View.GONE
             evidence.text = ""
@@ -6128,6 +6852,56 @@ private class ProductCardStackAdapter(
             tagRow.visibility = if (tags.isEmpty()) View.GONE else View.VISIBLE
             tags.forEachIndexed { index, tag ->
                 tagRow.addView(createTagView(tagRow.context, tag, active = index == 0))
+            }
+            detailRows.removeAllViews()
+            val detailItems = listOf(
+                "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback("按当前需求匹配"),
+                "匹配标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.userFacingJoinedOrFallback("按当前需求匹配"),
+                "使用场景" to product.useScenario.userFacingJoinedOrFallback("按当前需求匹配"),
+            ).filter { (_, value) -> value.isNotBlank() }
+            detailRows.visibility = if (detailItems.isEmpty()) View.GONE else View.VISIBLE
+            detailItems.take(3).forEach { (label, value) ->
+                detailRows.addView(createDetailRow(detailRows.context, label, value))
+            }
+            val risk = payload.riskNotes
+                .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
+                .firstOrNull { it.isNotBlank() }
+            riskText.visibility = if (risk == null) View.GONE else View.VISIBLE
+            riskText.text = risk.orEmpty()
+        }
+
+        private fun createDetailRow(
+            context: android.content.Context,
+            label: String,
+            value: String,
+        ): View {
+            val density = context.resources.displayMetrics.density
+            return android.widget.LinearLayout(context).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (3 * density).roundToInt(), 0, (3 * density).roundToInt())
+                addView(
+                    TextView(context).apply {
+                        text = label
+                        includeFontPadding = false
+                        setTextColor(textMutedColor)
+                        textSize = 11.5f
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    },
+                    android.widget.LinearLayout.LayoutParams((64 * density).roundToInt(), ViewGroup.LayoutParams.WRAP_CONTENT),
+                )
+                addView(
+                    TextView(context).apply {
+                        text = value
+                        includeFontPadding = false
+                        setTextColor(textPrimaryColor)
+                        textSize = 13f
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    },
+                    android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
             }
         }
 
@@ -6172,8 +6946,33 @@ fun ProductHeroDetailScreen(
     onOpenEvidence: (String, String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
 ) {
-    val payload = state.findProduct(deckId, productId)
+    var activeProductId by rememberSaveable(deckId, productId) { mutableStateOf(productId) }
+    LaunchedEffect(deckId, productId) {
+        activeProductId = productId
+    }
+    val payload = state.findProduct(deckId, activeProductId)
     val haptics = LocalHapticFeedback.current
+    var submittedFeedback by rememberSaveable(deckId, activeProductId) { mutableStateOf<String?>(null) }
+    var pendingAdvanceProductId by rememberSaveable(deckId, activeProductId) { mutableStateOf<String?>(null) }
+    val handledProductIds = state.productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
+    val readOnlyByState = state.hasConvergedDecisionForDeck(deckId) ||
+        activeProductId in handledProductIds
+    var choiceActionsAvailable by rememberSaveable(deckId, activeProductId) {
+        mutableStateOf(!readOnlyByState)
+    }
+    val nextUnhandledProductId = state.findProductDeck(deckId)
+        ?.products
+        .orEmpty()
+        .map { it.product.productId }
+        .firstOrNull { id ->
+            id.isNotBlank() && id != activeProductId && id !in handledProductIds
+        }
+
+    LaunchedEffect(readOnlyByState, submittedFeedback) {
+        if (readOnlyByState && submittedFeedback == null) {
+            choiceActionsAvailable = false
+        }
+    }
 
     if (payload == null) {
         Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
@@ -6195,14 +6994,50 @@ fun ProductHeroDetailScreen(
             (offset / revealDistancePx).coerceIn(0f, 1f)
         }
     }
+    val choiceActionsActive = choiceActionsAvailable && submittedFeedback == null
     val actionAlpha by animateFloatAsState(
-        targetValue = if (scrollProgress < 0.38f) 1f else 0f,
-        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+        targetValue = if (choiceActionsActive && scrollProgress < 0.38f) 1f else 0f,
+        animationSpec = tween(durationMillis = 260, easing = PremiumRevealEase),
         label = "product_detail_action_alpha",
     )
-    val actionsVisible = actionAlpha > 0.05f
+    val actionBottomPadding by animateDpAsState(
+        targetValue = if (choiceActionsActive) 118.dp else 36.dp,
+        animationSpec = tween(durationMillis = 260, easing = PremiumRevealEase),
+        label = "product_detail_action_bottom_padding",
+    )
+    val actionsVisible = choiceActionsAvailable && actionAlpha > 0.05f
+    val actionsEnabled = actionsVisible && submittedFeedback == null
+    val swipeMaxDistancePx = with(density) { 132.dp.toPx() }
+    val swipeThresholdPx = with(density) { 74.dp.toPx() }
+    val swipeThrowDistancePx = with(density) { 430.dp.toPx() }
+    var gestureOffsetPx by remember(activeProductId) { mutableFloatStateOf(0f) }
+    val throwing = submittedFeedback != null && abs(gestureOffsetPx) > swipeMaxDistancePx
+    val animatedGestureOffsetPx by animateFloatAsState(
+        targetValue = gestureOffsetPx,
+        animationSpec = tween(
+            durationMillis = if (throwing) 360 else 190,
+            easing = if (throwing) MenuEaseIn else PremiumRevealEase,
+        ),
+        label = "product_detail_swipe_offset",
+    )
+    val gestureProgress = (abs(animatedGestureOffsetPx) / swipeThrowDistancePx).coerceIn(0f, 1f)
+    val submitChoice: (String) -> Unit = { feedback ->
+        if (submittedFeedback == null && choiceActionsAvailable) {
+            pendingAdvanceProductId = nextUnhandledProductId
+            gestureOffsetPx = if (feedback == "like") swipeThrowDistancePx else -swipeThrowDistancePx
+            submittedFeedback = feedback
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onSwipe(
+                deckId,
+                activeProductId,
+                feedback,
+                feedback,
+                if (feedback == "like") "用户在商品详情页标记感兴趣" else "用户在商品详情页标记不感兴趣",
+            )
+        }
+    }
     val routeProgress = rememberRouteEnterProgress(
-        key = "detail_${deckId}_${productId}",
+        key = "detail_${deckId}_${activeProductId}",
         durationMillis = ProductDetailEnterMs,
     )
     val backdropEnter = segmentProgress(routeProgress, 0f, 0.82f)
@@ -6224,17 +7059,64 @@ fun ProductHeroDetailScreen(
                     value = targetOffset - currentOffset,
                     animationSpec = tween(durationMillis = 280, easing = MenuEaseOut),
                 )
-            }
+        }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    LaunchedEffect(submittedFeedback) {
+        if (submittedFeedback != null) {
+            kotlinx.coroutines.delay(360L)
+            val nextProductId = pendingAdvanceProductId
+            if (!nextProductId.isNullOrBlank()) {
+                activeProductId = nextProductId
+                pendingAdvanceProductId = null
+                submittedFeedback = null
+                detailListState.scrollToItem(0)
+            }
+            gestureOffsetPx = 0f
+        }
+    }
+
+    val swipeGestureModifier = if (choiceActionsAvailable) {
+        Modifier.pointerInput(activeProductId, actionsEnabled) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    when {
+                        gestureOffsetPx > swipeThresholdPx -> submitChoice("like")
+                        gestureOffsetPx < -swipeThresholdPx -> submitChoice("not_interested")
+                        else -> gestureOffsetPx = 0f
+                    }
+                },
+                onDragCancel = {
+                    gestureOffsetPx = 0f
+                },
+                onHorizontalDrag = { _, dragAmount ->
+                    if (actionsEnabled) {
+                        gestureOffsetPx = (gestureOffsetPx + dragAmount)
+                            .coerceIn(-swipeMaxDistancePx, swipeMaxDistancePx)
+                    }
+                },
+            )
+        }
+    } else {
+        Modifier
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(swipeGestureModifier),
+    ) {
         ProductCinematicBackdrop(
             product = product,
             backendBaseUrl = state.backendBaseUrl,
             progress = scrollProgress,
             enterProgress = backdropEnter,
             modifier = Modifier
-                .fillMaxSize(),
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = animatedGestureOffsetPx * 0.2f
+                    alpha = 1f - gestureProgress * 0.18f
+                },
         )
         ImmersiveCircleButton(
             iconRes = R.drawable.ic_arrow_back_24,
@@ -6255,7 +7137,7 @@ fun ProductHeroDetailScreen(
         ImmersiveCircleButton(
             iconRes = R.drawable.ic_article_24,
             contentDescription = "推荐证据",
-            onClick = { onOpenEvidence(deckId, productId) },
+            onClick = { onOpenEvidence(deckId, activeProductId) },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
@@ -6273,12 +7155,19 @@ fun ProductHeroDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    alpha = contentEnter
+                    alpha = contentEnter * (1f - gestureProgress * 0.42f)
+                    translationX = animatedGestureOffsetPx
                     translationY = (1f - contentEnter) * 42f
+                    rotationZ = (animatedGestureOffsetPx / swipeThrowDistancePx) * 11f
                     scaleX = lerp(0.975f, 1f, contentEnter)
                     scaleY = lerp(0.975f, 1f, contentEnter)
                 },
-            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 418.dp, bottom = 118.dp),
+            contentPadding = PaddingValues(
+                start = 22.dp,
+                end = 22.dp,
+                top = 418.dp,
+                bottom = actionBottomPadding,
+            ),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             item("detail_panel") {
@@ -6288,50 +7177,51 @@ fun ProductHeroDetailScreen(
                 )
             }
         }
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .alpha(actionAlpha)
-                .graphicsLayer {
-                    translationY = (1f - chromeEnter) * 26f
-                    scaleX = lerp(0.96f, 1f, chromeEnter)
-                    scaleY = lerp(0.96f, 1f, chromeEnter)
-                }
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            BuyPilotColors.SurfaceBg.copy(alpha = 0.88f),
-                            BuyPilotColors.SurfaceBg,
+        if (choiceActionsAvailable && (submittedFeedback == null || actionAlpha > 0.01f)) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .alpha(actionAlpha)
+                    .graphicsLayer {
+                        val actionProgress = minOf(chromeEnter, actionAlpha)
+                        translationY = (1f - actionProgress) * 26f
+                        scaleX = lerp(0.96f, 1f, actionProgress)
+                        scaleY = lerp(0.96f, 1f, actionProgress)
+                    }
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                BuyPilotColors.SurfaceBg.copy(alpha = 0.88f),
+                                BuyPilotColors.SurfaceBg,
+                            ),
                         ),
-                    ),
+                    )
+                    .navigationBarsPadding()
+                    .padding(horizontal = 52.dp, vertical = 22.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SwipeRoundButton(
+                    iconRes = R.drawable.ic_close_24,
+                    contentDescription = "不感兴趣",
+                    active = false,
+                    enabled = actionsEnabled,
+                    onClick = {
+                        submitChoice("not_interested")
+                    },
                 )
-                .navigationBarsPadding()
-                .padding(horizontal = 52.dp, vertical = 22.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SwipeRoundButton(
-                iconRes = R.drawable.ic_close_24,
-                contentDescription = "不感兴趣",
-                active = false,
-                enabled = actionsVisible,
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSwipe(deckId, productId, "not_interested", "not_interested", null)
-                },
-            )
-            SwipeRoundButton(
-                iconRes = R.drawable.ic_favorite_24,
-                contentDescription = "感兴趣",
-                active = true,
-                enabled = actionsVisible,
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSwipe(deckId, productId, "like", "like", null)
-                },
-            )
+                SwipeRoundButton(
+                    iconRes = R.drawable.ic_favorite_24,
+                    contentDescription = "感兴趣",
+                    active = true,
+                    enabled = actionsEnabled,
+                    onClick = {
+                        submitChoice("like")
+                    },
+                )
+            }
         }
     }
 }
@@ -6501,7 +7391,7 @@ private fun CinematicProductDetailPanel(
         }
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                text = product.name.ifBlank { "推荐商品" },
+                text = product.displayName(),
                 color = BuyPilotColors.TextPrimary,
                 fontSize = 28.sp,
                 lineHeight = 35.sp,
@@ -6556,7 +7446,7 @@ private fun CinematicProductDetailPanel(
         }
         ImmersiveSectionTitle("BuyPilot AI 核心推荐")
         MarkdownTextBlock(
-            content = payload.reason.ifBlank { "后端已返回该商品为本轮候选，推荐解释待补充。" },
+            content = payload.reason.ifBlank { "这款商品进入了当前候选，详细推荐解释还在补充中。" },
             style = TextStyle(
                 color = BuyPilotColors.TextSecondary,
                 fontSize = BuyPilotType.Body,
@@ -6657,9 +7547,9 @@ private fun ImmersiveWarningBox(text: String) {
 @Composable
 private fun ProductAttributeRowsDark(product: ProductPayload, payload: ProductCardPayload) {
     val rows = listOf(
-        "适用对象" to product.skinTypeMatch.ifEmpty { listOf("后端暂未返回") }.joinToString("、"),
-        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.joinToString("、"),
-        "使用场景" to product.useScenario.ifEmpty { listOf("按当前需求匹配") }.joinToString("、"),
+        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback("按当前需求匹配"),
+        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.userFacingJoinedOrFallback("按当前需求匹配"),
+        "使用场景" to product.useScenario.userFacingJoinedOrFallback("按当前需求匹配"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEach { (label, value) ->
@@ -6694,7 +7584,7 @@ fun ProductEvidenceOverlayScreen(
     val payload = state.findProduct(deckId, productId)
 
     if (payload == null) {
-        Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
+        Surface(color = Color(0xFF1A1D23), modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 ProductPageTopBar(title = "推荐证据", onBack = onBack)
                 ExpiredRecommendationState(onBack = onBack)
@@ -6703,163 +7593,272 @@ fun ProductEvidenceOverlayScreen(
         return
     }
 
+    val product = payload.product
     val evidenceItems = payload.evidence.ifEmpty {
         listOf(
             EvidencePayload(
                 sourceType = "推荐理由",
-                trustLabel = "fallback",
-                snippet = payload.reason.ifBlank { "后端暂未返回独立证据，当前仅展示推荐解释。" },
+                snippet = payload.reason.ifBlank { "当前先展示推荐解释，独立证据片段稍后补充。" },
             ),
         )
     }
+    val highlightTags = payload.displayTags()
     val routeProgress = rememberRouteEnterProgress(
         key = "evidence_${deckId}_${productId}",
         durationMillis = ProductEvidenceEnterMs,
     )
-    val backdropEnter = segmentProgress(routeProgress, 0f, 0.82f)
-    val chromeEnter = segmentProgress(routeProgress, 0.18f, 1f)
-    val contentEnter = segmentProgress(routeProgress, 0.16f, 1f)
-    Box(modifier = Modifier.fillMaxSize()) {
-        ProductImmersiveBackdrop(
-            product = payload.product,
-            backendBaseUrl = state.backendBaseUrl,
-            dimAlpha = 0.78f,
-            enterProgress = backdropEnter,
-        )
-        ImmersiveCircleButton(
-            iconRes = R.drawable.ic_arrow_back_24,
-            contentDescription = "返回",
-            onClick = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(start = 16.dp, top = 8.dp)
-                .graphicsLayer {
-                    alpha = chromeEnter
-                    translationY = (1f - chromeEnter) * -16f
-                    scaleX = lerp(0.92f, 1f, chromeEnter)
-                    scaleY = lerp(0.92f, 1f, chromeEnter)
-                }
-                .zIndex(2f),
-        )
+    val chromeEnter = segmentProgress(routeProgress, 0.12f, 0.72f)
+    val contentEnter = segmentProgress(routeProgress, 0.18f, 1f)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF1A1D23),
+                        Color(0xFF13151A),
+                        Color(0xFF0F1115),
+                    ),
+                ),
+            ),
+    ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     alpha = contentEnter
-                    translationY = (1f - contentEnter) * 42f
+                    translationY = (1f - contentEnter) * 36f
                 }
                 .navigationBarsPadding(),
-            contentPadding = PaddingValues(start = 30.dp, end = 30.dp, top = 224.dp, bottom = 52.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            contentPadding = PaddingValues(start = 28.dp, end = 28.dp, top = 96.dp, bottom = 64.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp),
         ) {
-            item("product_snapshot") {
-                ProductEvidenceHeader(payload = payload, backendBaseUrl = state.backendBaseUrl)
+            item("header") {
+                MagazineProductHeader(product = product)
             }
-            item("recommendation_reason") {
-                FullEvidenceSection(title = "推荐理由") {
-                    Text(
-                        text = payload.reason.ifBlank { "后端暂未返回推荐理由。" },
-                        color = BuyPilotColors.TextPrimary,
-                        fontSize = 25.sp,
-                        lineHeight = 36.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+            item("reason") {
+                Text(
+                    text = payload.reason.ifBlank { "推荐理由生成中..." },
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 22.sp,
+                    lineHeight = 34.sp,
+                    fontWeight = FontWeight.Normal,
+                )
+            }
+            if (highlightTags.isNotEmpty()) {
+                item("highlights") {
+                    MagazineHighlightChips(tags = highlightTags)
                 }
             }
-            item("product_fields") {
-                ProductBackendSnapshot(payload)
-            }
             if (payload.reasonAtoms.isNotEmpty()) {
-                item("reason_atoms") {
-                    FullEvidenceSection(title = "结构化匹配维度") {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            payload.reasonAtoms.forEachIndexed { index, atom ->
-                                EvidenceKeyValue(
-                                    label = "${index + 1}. ${atom.dimension.ifBlank { "dimension" }}",
-                                    value = listOf(
-                                        atom.value.takeIf { it.isNotBlank() },
-                                        atom.text.takeIf { it.isNotBlank() },
-                                        atom.evidenceId?.takeIf { it.isNotBlank() }?.let { "证据：$it" },
-                                    ).filterNotNull().joinToString("\n"),
-                                )
-                            }
+                item("dimensions") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "匹配维度",
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 13.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.sp,
+                        )
+                        payload.reasonAtoms.forEach { atom ->
+                            MagazineDimensionCard(atom = atom)
                         }
                     }
                 }
             }
             if (payload.riskNotes.isNotEmpty()) {
-                item("risk_notes") {
-                    FullEvidenceSection(title = "风险与不适用提醒") {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            payload.riskNotes.forEachIndexed { index, note ->
-                                EvidenceBulletText(index = index + 1, text = note)
-                            }
-                        }
-                    }
+                item("risks") {
+                    MagazineRiskCard(notes = payload.riskNotes)
                 }
             }
-            if (payload.evidence.isEmpty()) {
-                item("evidence_fallback_notice") {
+            if (evidenceItems.isNotEmpty()) {
+                item("evidence_header") {
                     Text(
-                        text = "后端暂未返回独立证据，当前展示推荐理由 fallback。",
-                        color = BuyPilotColors.TextMuted,
-                        fontSize = BuyPilotType.Label,
-                        lineHeight = 18.sp,
+                        text = "推荐依据",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 13.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp,
                     )
                 }
-            }
-            item("evidence_title") {
-                EvidenceEyebrowTitle("原始证据片段", "${evidenceItems.size} 条")
-            }
-            itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { index, evidence ->
-                ImmersiveEvidenceQuote(
-                    evidence = evidence,
-                    index = index + 1,
-                )
-            }
-            if (payload.actions.isNotEmpty()) {
-                item("actions") {
-                    FullEvidenceSection(title = "后端返回动作") {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            payload.actions.forEachIndexed { index, action ->
-                                EvidenceKeyValue(
-                                    label = "${index + 1}. ${action.label.ifBlank { action.action.ifBlank { "action" } }}",
-                                    value = listOf(
-                                        action.actionId.takeIf { it.isNotBlank() }?.let { "action_id: $it" },
-                                        action.action.takeIf { it.isNotBlank() }?.let { "action: $it" },
-                                        action.feedbackType?.takeIf { it.isNotBlank() }?.let { "feedback_type: $it" },
-                                        action.criteriaPatch?.toString()?.let { "criteria_patch: $it" },
-                                    ).filterNotNull().joinToString("\n"),
-                                )
-                            }
-                        }
-                    }
+                itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { index, evidence ->
+                    MagazineEvidenceQuote(evidence = evidence, index = index + 1)
                 }
+            }
+        }
+
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 12.dp, top = 8.dp)
+                .graphicsLayer {
+                    alpha = chromeEnter
+                    translationY = (1f - chromeEnter) * -12f
+                }
+                .zIndex(2f)
+                .size(44.dp)
+                .background(Color.White.copy(alpha = 0.08f), CircleShape),
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = Color.White.copy(alpha = 0.9f),
+            ),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_arrow_back_24),
+                contentDescription = "返回",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MagazineProductHeader(product: ProductPayload) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = product.brandLabel(),
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.sp,
+        )
+        Text(
+            text = product.displayName(),
+            color = Color.White,
+            fontSize = 32.sp,
+            lineHeight = 40.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = product.priceLabel(),
+            color = BuyPilotColors.Primary,
+            fontSize = 24.sp,
+            lineHeight = 30.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MagazineHighlightChips(tags: List<String>) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        tags.forEach { tag ->
+            Text(
+                text = tag,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MagazineDimensionCard(atom: ReasonAtomPayload) {
+    val label = atom.dimension.userFacingReasonDimensionLabel()
+    val value = listOf(
+        atom.value.withoutInternalDebugTokens().takeIf { it.isNotBlank() },
+        atom.text.withoutInternalDebugTokens().takeIf { it.isNotBlank() },
+    ).filterNotNull().joinToString(" · ")
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.5f),
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = value.ifBlank { "匹配" },
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+        )
+    }
+}
+
+@Composable
+private fun MagazineRiskCard(notes: List<String>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF2A1A1A), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0xFFFF6B6B).copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "注意事项",
+            color = Color(0xFFFF6B6B),
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        notes.forEach { note ->
+            val displayNote = note.withoutInternalDebugTokens().trim()
+            if (displayNote.isNotBlank()) {
+                Text(
+                    text = displayNote,
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ProductBackendSnapshot(payload: ProductCardPayload) {
-    val product = payload.product
-    FullEvidenceSection(title = "商品字段快照") {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            EvidenceKeyValue("rank", payload.rank.takeIf { it > 0 }?.toString() ?: "未返回")
-            EvidenceKeyValue("product_id", product.productId.ifBlank { "未返回" })
-            EvidenceKeyValue("商品名", product.name.ifBlank { "未返回" })
-            EvidenceKeyValue("价格", product.priceLabel())
-            EvidenceKeyValue("currency", product.currency ?: "未返回")
-            EvidenceKeyValue("category", product.category.ifBlank { "未返回" })
-            EvidenceKeyValue("sub_category", product.subCategory ?: "未返回")
-            EvidenceKeyValue("brand", product.brand ?: "未返回")
-            EvidenceKeyValue("image_url", product.imageUrl ?: "未返回")
-            EvidenceKeyValue("skin_type_match", product.skinTypeMatch.ifEmpty { listOf("未返回") }.joinToString("、"))
-            EvidenceKeyValue("ingredient_tags", product.ingredientTags.ifEmpty { listOf("未返回") }.joinToString("、"))
-            EvidenceKeyValue("ingredient_avoid", product.ingredientAvoid.ifEmpty { listOf("未返回") }.joinToString("、"))
-            EvidenceKeyValue("use_scenario", product.useScenario.ifEmpty { listOf("未返回") }.joinToString("、"))
+private fun MagazineEvidenceQuote(evidence: EvidencePayload, index: Int) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "#${index.toString().padStart(2, '0')}",
+                color = BuyPilotColors.Primary.copy(alpha = 0.8f),
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
+        Text(
+            text = "“${evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" }}”",
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 18.sp,
+            lineHeight = 28.sp,
+            fontWeight = FontWeight.Normal,
+        )
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = Color.White.copy(alpha = 0.08f),
+        )
     }
 }
 
@@ -6898,16 +7897,18 @@ private fun EvidenceEyebrowTitle(title: String, trailing: String? = null) {
 
 @Composable
 private fun EvidenceKeyValue(label: String, value: String) {
+    val displayLabel = label.withoutInternalDebugTokens().ifBlank { "信息" }
+    val displayValue = value.withoutInternalDebugTokens().ifBlank { "未返回" }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            text = label,
+            text = displayLabel,
             color = BuyPilotColors.TextMuted,
             fontSize = BuyPilotType.Label,
             lineHeight = 16.sp,
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = value.ifBlank { "未返回" },
+            text = displayValue,
             color = BuyPilotColors.TextPrimary,
             fontSize = BuyPilotType.Body,
             lineHeight = 22.sp,
@@ -6917,6 +7918,7 @@ private fun EvidenceKeyValue(label: String, value: String) {
 
 @Composable
 private fun EvidenceBulletText(index: Int, text: String) {
+    val displayText = text.withoutInternalDebugTokens().ifBlank { return }
     Row(verticalAlignment = Alignment.Top) {
         Text(
             text = index.toString(),
@@ -6927,7 +7929,7 @@ private fun EvidenceBulletText(index: Int, text: String) {
             modifier = Modifier.width(24.dp),
         )
         Text(
-            text = text,
+            text = displayText,
             color = BuyPilotColors.TextPrimary,
             fontSize = BuyPilotType.Body,
             lineHeight = 22.sp,
@@ -6952,14 +7954,14 @@ private fun ImmersiveEvidenceQuote(
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = evidence.sourceType.ifBlank { "商品资料" },
+                text = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
                 color = BuyPilotColors.TextMuted,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            evidence.trustLabel?.takeIf { it.isNotBlank() }?.let { label ->
+            evidence.trustLabel?.withoutInternalDebugTokens()?.takeIf { it.isNotBlank() }?.let { label ->
                 Text(
                     text = label,
                     color = BuyPilotColors.TextMuted,
@@ -6969,16 +7971,12 @@ private fun ImmersiveEvidenceQuote(
             }
         }
         Text(
-            text = "“${evidence.snippet.ifBlank { "暂无证据片段" }}”",
+            text = "“${evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" }}”",
             color = BuyPilotColors.TextPrimary,
             fontSize = 28.sp,
             lineHeight = 40.sp,
             fontWeight = FontWeight.Medium,
         )
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            EvidenceKeyValue("source_id", evidence.sourceId ?: "未返回")
-            EvidenceKeyValue("evidence_id", evidence.evidenceId ?: "未返回")
-        }
         HorizontalDivider(
             thickness = 1.dp,
             color = BuyPilotColors.Border.copy(alpha = 0.92f),
@@ -7015,7 +8013,7 @@ private fun ProductEvidenceHeader(payload: ProductCardPayload, backendBaseUrl: S
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = payload.product.name.ifBlank { "推荐商品" },
+                    text = payload.product.displayName(),
                     color = BuyPilotColors.TextPrimary,
                     fontSize = BuyPilotType.Body,
                     lineHeight = 20.sp,
@@ -7112,9 +8110,9 @@ private fun DetailSection(
 @Composable
 private fun ProductAttributeRows(product: ProductPayload, payload: ProductCardPayload) {
     val rows = listOf(
-        "适用对象" to product.skinTypeMatch.ifEmpty { listOf("后端暂未返回") }.joinToString("、"),
-        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.joinToString("、"),
-        "使用场景" to product.useScenario.ifEmpty { listOf("按当前需求匹配") }.joinToString("、"),
+        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback("按当前需求匹配"),
+        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.userFacingJoinedOrFallback("按当前需求匹配"),
+        "使用场景" to product.useScenario.userFacingJoinedOrFallback("按当前需求匹配"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEach { (label, value) ->
@@ -7723,21 +8721,29 @@ private fun CriteriaEditSheet(
 }
 
 @Composable
-private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
-    val whyItems = payload.why.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
-    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
+private fun DecisionEvidenceSheet(
+    payload: FinalDecisionPayload,
+    productsById: Map<String, ProductCardPayload>,
+    productDeckIdByProductId: Map<String, String>,
+    onProductDetailOpen: (String, String) -> Unit,
+) {
+    val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
+    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
     val alternatives = payload.alternatives.filter {
-        it.name.isNotBlank() || it.productId.isNotBlank()
+        it.name.withoutInternalDebugTokens().isNotBlank()
     }
     val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
 
     SheetContentColumn(expandToMaxHeight = false) {
         SheetTitle("决策依据")
 
-        if (payload.summary.isNotBlank() || !payload.winnerProductId.isNullOrBlank()) {
+        if (payload.summary.isNotBlank()) {
             DecisionEvidenceSummary(
                 summary = payload.summary,
                 winnerProductId = payload.winnerProductId,
+                productsById = productsById,
+                productDeckIdByProductId = productDeckIdByProductId,
+                onProductDetailOpen = onProductDetailOpen,
             )
         }
 
@@ -7762,7 +8768,11 @@ private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
         }
 
         if (alternatives.isNotEmpty()) {
-            DecisionAlternativesSection(alternatives)
+            DecisionAlternativesSection(
+                alternatives = alternatives,
+                productDeckIdByProductId = productDeckIdByProductId,
+                onProductDetailOpen = onProductDetailOpen,
+            )
         }
 
         if (nextActions.isNotEmpty()) {
@@ -7775,9 +8785,28 @@ private fun DecisionEvidenceSheet(payload: FinalDecisionPayload) {
 private fun DecisionEvidenceSummary(
     summary: String,
     winnerProductId: String?,
+    productsById: Map<String, ProductCardPayload>,
+    productDeckIdByProductId: Map<String, String>,
+    onProductDetailOpen: (String, String) -> Unit,
 ) {
+    val cleanWinnerProductId = winnerProductId?.takeIf { it.isNotBlank() }
+    val winnerDeckId = cleanWinnerProductId?.let { productDeckIdByProductId[it] }
+    val winnerName = cleanWinnerProductId
+        ?.let { productsById[it]?.product?.displayName("") }
+        ?.takeIf { it.isNotBlank() }
+    val openWinnerDetail = winnerDeckId?.let { deckId ->
+        { onProductDetailOpen(deckId, cleanWinnerProductId.orEmpty()) }
+    }
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (openWinnerDetail != null) {
+                    Modifier.clickable(role = Role.Button, onClick = openWinnerDetail)
+                } else {
+                    Modifier
+                },
+            ),
         color = BuyPilotColors.SurfaceCard,
         shape = RoundedCornerShape(20.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
@@ -7795,20 +8824,20 @@ private fun DecisionEvidenceSummary(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DecisionEvidenceEyebrow("最终判断")
-                winnerProductId?.takeIf { it.isNotBlank() }?.let { id ->
-                    Text(
-                        text = id,
-                        color = BuyPilotColors.TextMuted,
-                        fontSize = BuyPilotType.Tiny,
-                        lineHeight = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .widthIn(max = 156.dp)
-                            .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.62f), CircleShape)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
+                if (openWinnerDetail != null) {
+                    ProductDetailChevron(modifier = Modifier.size(28.dp))
                 }
+            }
+            winnerName?.let { name ->
+                Text(
+                    text = name,
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             if (summary.isNotBlank()) {
                 MarkdownTextBlock(
@@ -7908,7 +8937,11 @@ private fun DecisionEvidenceListRow(
 }
 
 @Composable
-private fun DecisionAlternativesSection(alternatives: List<com.buypilot.core.model.AlternativePayload>) {
+private fun DecisionAlternativesSection(
+    alternatives: List<com.buypilot.core.model.AlternativePayload>,
+    productDeckIdByProductId: Map<String, String>,
+    onProductDetailOpen: (String, String) -> Unit,
+) {
     if (alternatives.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         DecisionEvidenceSectionHeader("备选方案", alternatives.size)
@@ -7923,7 +8956,13 @@ private fun DecisionAlternativesSection(alternatives: List<com.buypilot.core.mod
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 alternatives.forEachIndexed { index, alternative ->
-                    DecisionAlternativeRow(index = index, name = alternative.name, productId = alternative.productId)
+                    DecisionAlternativeRow(
+                        index = index,
+                        name = alternative.name.withoutInternalDebugTokens(),
+                        productId = alternative.productId,
+                        productDeckIdByProductId = productDeckIdByProductId,
+                        onProductDetailOpen = onProductDetailOpen,
+                    )
                     if (index != alternatives.lastIndex) {
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 42.dp),
@@ -7941,10 +8980,25 @@ private fun DecisionAlternativeRow(
     index: Int,
     name: String,
     productId: String,
+    productDeckIdByProductId: Map<String, String>,
+    onProductDetailOpen: (String, String) -> Unit,
 ) {
+    val cleanProductId = productId.takeIf { it.isNotBlank() }
+    val deckId = cleanProductId?.let { productDeckIdByProductId[it] }
+    val openDetail = deckId?.let { resolvedDeckId ->
+        { onProductDetailOpen(resolvedDeckId, cleanProductId.orEmpty()) }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (openDetail != null) {
+                    Modifier.clickable(role = Role.Button, onClick = openDetail)
+                } else {
+                    Modifier
+                },
+            )
             .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -7976,16 +9030,9 @@ private fun DecisionAlternativeRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            productId.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    text = it,
-                    color = BuyPilotColors.TextMuted,
-                    fontSize = BuyPilotType.Tiny,
-                    lineHeight = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+        }
+        if (openDetail != null) {
+            ProductDetailChevron()
         }
     }
 }
@@ -8550,14 +9597,11 @@ private fun EvidenceBlock(evidence: EvidencePayload) {
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillLabel(evidence.sourceType.ifBlank { "证据" })
-                evidence.trustLabel?.takeIf { it.isNotBlank() }?.let { PillLabel(it) }
-            }
-            evidence.evidenceId?.let {
-                Text(it, color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Tiny)
+                PillLabel(evidence.sourceType.userFacingEvidenceSourceLabel("证据"))
+                evidence.trustLabel?.withoutInternalDebugTokens()?.takeIf { it.isNotBlank() }?.let { PillLabel(it) }
             }
             MarkdownTextBlock(
-                content = evidence.snippet.ifBlank { "暂无证据片段" },
+                content = evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" },
                 style = TextStyle(
                     color = BuyPilotColors.TextPrimary,
                     fontSize = BuyPilotType.LargeBody,
@@ -8745,13 +9789,22 @@ private val DecisionReasonChipColors = listOf(
 private fun DecisionReasonList(
     items: List<String>,
     modifier: Modifier = Modifier,
+    parentProgress: Float = 1f,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items.take(4).forEachIndexed { index, item ->
-            DecisionReasonItem(text = item, colorIndex = index)
+            DecisionReasonItem(
+                text = item,
+                colorIndex = index,
+                revealProgress = segmentProgress(
+                    value = parentProgress,
+                    start = (DecisionReasonBaseDelayMs + index * DecisionReasonStaggerMs).toFloat() / DecisionCardEnterMs,
+                    end = (DecisionReasonBaseDelayMs + index * DecisionReasonStaggerMs + 280).toFloat() / DecisionCardEnterMs,
+                ),
+            )
         }
     }
 }
@@ -8760,11 +9813,16 @@ private fun DecisionReasonList(
 private fun DecisionReasonItem(
     text: String,
     colorIndex: Int,
+    revealProgress: Float = 1f,
 ) {
     val colors = DecisionReasonChipColors[colorIndex % DecisionReasonChipColors.size]
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                alpha = revealProgress
+                translationY = (1f - revealProgress) * 16f
+            }
             .background(colors.background.copy(alpha = 0.62f), RoundedCornerShape(13.dp))
             .border(1.dp, colors.border.copy(alpha = 0.72f), RoundedCornerShape(13.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -9004,8 +10062,9 @@ private fun PillLabel(
     text: String,
     modifier: Modifier = Modifier,
 ) {
+    val displayText = text.withoutInternalDebugTokens().ifBlank { return }
     Text(
-        text = text,
+        text = displayText,
         color = BuyPilotColors.PrimaryDark,
         fontSize = BuyPilotType.Tiny,
         lineHeight = 15.sp,
@@ -9098,7 +10157,7 @@ private fun ProductImage(
     }
     AsyncImage(
         model = model,
-        contentDescription = product.name.ifBlank { "商品图片" },
+        contentDescription = product.displayName("商品图片"),
         modifier = modifier,
         contentScale = contentScale,
         error = painterResource(R.drawable.product_cleanser_sample),
@@ -9112,6 +10171,20 @@ private fun ChatUiState.findProductDeck(deckId: String): ProductDeckNode? =
 
 private fun ChatUiState.findProduct(deckId: String, productId: String): ProductCardPayload? =
     findProductDeck(deckId)?.products?.firstOrNull { it.product.productId == productId }
+
+private fun List<ProductDeckNode>.productsByProductId(): Map<String, ProductCardPayload> =
+    flatMap { it.products }
+        .filter { it.product.productId.isNotBlank() }
+        .associateBy { it.product.productId }
+
+private fun List<ProductDeckNode>.productDeckIdByProductId(): Map<String, String> =
+    flatMap { deck ->
+        deck.products.mapNotNull { payload ->
+            payload.product.productId
+                .takeIf { it.isNotBlank() }
+                ?.let { productId -> productId to deck.deckId }
+        }
+    }.toMap()
 
 private fun ProductSwipeState?.signalSummary(): ProductDeckSignalSummary {
     val state = this ?: return ProductDeckSignalSummary(viewed = 0, liked = 0, dismissed = 0)
@@ -9129,6 +10202,49 @@ private fun ProductSwipeState?.signalSummary(): ProductDeckSignalSummary {
         dismissed = dismissedIds.size,
     )
 }
+
+internal fun preferredProductCarouselPage(
+    products: List<ProductCardPayload>,
+    swipeState: ProductSwipeState?,
+): Int {
+    if (products.isEmpty()) return 0
+    val handledProductIds = swipeState?.swipedProductIds.orEmpty().toSet()
+    val preferredProductId = swipeState?.currentProductId
+        ?.takeIf { id ->
+            id !in handledProductIds &&
+                products.any { it.product.productId == id }
+        }
+        ?: products.firstOrNull { it.product.productId !in handledProductIds }?.product?.productId
+        ?: products.firstOrNull()?.product?.productId
+    return products.indexOfFirst { it.product.productId == preferredProductId }
+        .takeIf { it >= 0 }
+        ?: 0
+}
+
+@Suppress("UNUSED_PARAMETER")
+internal fun shouldOpenProductCardAsDetail(
+    productId: String?,
+    singleCandidate: Boolean,
+    handledProductIds: Set<String>,
+    deckConverged: Boolean,
+): Boolean =
+    !productId.isNullOrBlank()
+
+internal fun ChatUiState.hasConvergedDecisionForDeck(deckId: String): Boolean {
+    return deckId in nodes.convergedProductDeckIds()
+}
+
+internal fun List<ChatUiNode>.convergedProductDeckIds(): Set<String> =
+    filterIsInstance<ProductDeckNode>()
+        .mapNotNull { deckNode ->
+            deckNode.deckId.takeIf { deckId ->
+                val deckIndex = indexOfFirst { node ->
+                    node is ProductDeckNode && node.deckId == deckId
+                }
+                deckIndex >= 0 && drop(deckIndex + 1).any { it is FinalDecisionNode }
+            }
+        }
+        .toSet()
 
 private fun ProductDeckSignalSummary.displayLabel(): String? {
     if (!hasSignals) return null
@@ -9199,6 +10315,74 @@ private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {
         else -> ""
     }
 }
+
+private fun com.buypilot.core.model.CriteriaPayload.criteriaReceiptHeadline(): String {
+    val categoryLabel = category.withoutMarkdownMarkup().trim()
+    val productType = productTypeLabel().withoutMarkdownMarkup().trim()
+    return listOf(categoryLabel, productType)
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString("  /  ")
+}
+
+private fun com.buypilot.core.model.CriteriaPayload.receiptProperties(
+    labels: CriteriaLabels,
+): List<CriteriaReceiptProperty> {
+    val headline = criteriaReceiptHeadline()
+    val skinType = skinTypeLabel().withoutMarkdownMarkup().trim()
+    val budget = budgetLabel().withoutMarkdownMarkup().trim()
+    val scenario = useScenarioLabel().withoutMarkdownMarkup().trim()
+    val properties = buildList {
+        chips.forEach { chip ->
+            add(CriteriaReceiptProperty(label = labels.summary, value = chip))
+        }
+        if (skinType.isNotBlank()) {
+            add(CriteriaReceiptProperty(label = labels.targetUser, value = skinType))
+        }
+        if (budget.isNotBlank()) {
+            add(CriteriaReceiptProperty(label = labels.budget, value = budget))
+        }
+        if (scenario.isNotBlank()) {
+            add(CriteriaReceiptProperty(label = labels.scenario, value = scenario))
+        }
+        productSpecificReceiptValues().forEach { value ->
+            add(CriteriaReceiptProperty(label = labels.coreNeed, value = value))
+        }
+        exclusionLabels().forEach { value ->
+            add(CriteriaReceiptProperty(label = labels.exclusions, value = "${labels.avoidPrefix}$value"))
+        }
+    }
+    return properties
+        .mapNotNull { it.compactReceiptPropertyOrNull(headline) }
+        .distinctBy { it.value }
+        .take(4)
+}
+
+private fun CriteriaReceiptProperty.compactReceiptPropertyOrNull(
+    headline: String,
+): CriteriaReceiptProperty? {
+    val compactValue = value
+        .withoutMarkdownMarkup()
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    return copy(value = compactValue).takeIf {
+        compactValue.isNotBlank() &&
+            compactValue.length <= 14 &&
+            !headline.contains(compactValue)
+    }
+}
+
+private fun com.buypilot.core.model.CriteriaPayload.productSpecificReceiptValues(): List<String> =
+    buildList {
+        addAll(ingredientPrefer)
+        addAll(constraints?.ingredientPrefer.orEmpty())
+        storage.orEmpty().ifBlank { constraints?.storage.orEmpty() }.takeIf { it.isNotBlank() }?.let { add(it) }
+        screenSize.orEmpty().ifBlank { constraints?.screenSize.orEmpty() }.takeIf { it.isNotBlank() }?.let { add(it) }
+        sportType.orEmpty().ifBlank { constraints?.sportType.orEmpty() }.takeIf { it.isNotBlank() }?.let { add(it) }
+        season.orEmpty().ifBlank { constraints?.season.orEmpty() }.takeIf { it.isNotBlank() }?.let { add(it) }
+        addAll(dietary)
+        addAll(constraints?.dietary.orEmpty())
+    }
 
 private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(labels: CriteriaLabels): List<CriteriaTileSpec> =
     buildList {
@@ -9419,6 +10603,9 @@ private fun com.buypilot.core.model.ProductPayload.priceLabel(): String =
 private fun com.buypilot.core.model.ProductPayload.priceLabelOrNull(): String? =
     price?.let { "${currency.priceSymbol()}${it.clean()}" }
 
+private fun ProductPayload.displayName(fallback: String = "推荐商品"): String =
+    name.withoutInternalDebugTokens().ifBlank { fallback }
+
 private fun String?.priceSymbol(): String =
     when (this?.trim()?.uppercase()) {
         null, "", "CNY", "RMB", "CN¥", "￥", "¥" -> "¥"
@@ -9427,14 +10614,47 @@ private fun String?.priceSymbol(): String =
     }
 
 private fun ProductPayload.brandLabel(): String =
-    brand?.takeIf { it.isNotBlank() }
-        ?: subCategory?.takeIf { it.isNotBlank() }
-        ?: category.takeIf { it.isNotBlank() }
+    brand?.withoutInternalDebugTokens()?.takeIf { it.isNotBlank() }
+        ?: subCategory?.withoutInternalDebugTokens()?.takeIf { it.isNotBlank() }
+        ?: category.withoutInternalDebugTokens().takeIf { it.isNotBlank() }
         ?: "BuyPilot 推荐"
+
+private fun List<String>.userFacingJoinedOrFallback(fallback: String = "未返回"): String =
+    map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString("、")
+        .ifBlank { fallback }
+
+private fun String.userFacingReasonDimensionLabel(): String =
+    when (trim().lowercase()) {
+        "skin_type", "skin_type_match", "skin" -> "适用对象"
+        "ingredient", "ingredient_tags", "ingredient_prefer" -> "成分标签"
+        "ingredient_avoid" -> "避开成分"
+        "use_scenario", "scenario" -> "使用场景"
+        "budget", "price", "base_price" -> "价格预算"
+        "brand" -> "品牌"
+        "category" -> "品类"
+        "sub_category", "product_type" -> "商品类型"
+        "storage" -> "存储容量"
+        "screen_size" -> "屏幕尺寸"
+        else -> withoutMarkdownMarkup().withoutInternalDebugTokens().trim().ifBlank { "匹配维度" }
+    }
+
+private fun String.userFacingEvidenceSourceLabel(fallback: String): String {
+    val clean = withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
+    return when (clean.lowercase().replace("-", "_")) {
+        "official_faq", "faq" -> "官方问答"
+        "user_review", "review", "reviews" -> "用户评价"
+        "marketing_description", "description", "product_description" -> "商品资料"
+        "recommendation_reason", "reason" -> "推荐理由"
+        else -> clean.ifBlank { fallback }
+    }
+}
 
 private fun ProductCardPayload.displayTags(): List<String> =
     (product.ingredientTags + product.skinTypeMatch + product.useScenario)
-        .map { it.withoutMarkdownMarkup().trim() }
+        .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
         .filter { it.isNotBlank() }
         .distinct()
         .ifEmpty { tagsFromText() }

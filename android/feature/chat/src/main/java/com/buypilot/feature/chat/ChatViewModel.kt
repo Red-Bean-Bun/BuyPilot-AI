@@ -26,6 +26,7 @@ import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.state.ChatReducer
+import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -125,23 +126,42 @@ class ChatViewModel @Inject constructor(
         criteriaPatch: JsonObject? = null,
         skipStages: List<String> = emptyList(),
         fromEditResubmit: Boolean = false,
+        showUserMessage: Boolean = true,
     ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = Ids.clientTurnId()
         val currentSessionId = _uiState.value.sessionId
-        var userMessageRecorded = currentSessionId != null
-        _uiState.update {
-            ChatReducer.addUserMessage(
-                state = it,
-                key = Ids.userMessageId(nowMs),
-                content = message,
-                imageUrl = imageUrl,
-                fromEditResubmit = fromEditResubmit,
-            )
+        var userMessageRecorded = !showUserMessage || currentSessionId != null
+        if (showUserMessage) {
+            _uiState.update {
+                ChatReducer.addUserMessage(
+                    state = it,
+                    key = Ids.userMessageId(nowMs),
+                    content = message,
+                    imageUrl = imageUrl,
+                    fromEditResubmit = fromEditResubmit,
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    currentTurnId = clientTurnId,
+                    inputState = ChatInputState.Streaming,
+                    isStreaming = true,
+                    lastError = null,
+                )
+            }
         }
+        applyEnvelope(
+            localInitialThinkingEnvelope(
+                turnId = clientTurnId,
+                sessionId = currentSessionId,
+                nowMs = nowMs,
+            ),
+        )
 
         viewModelScope.launch {
-            if (currentSessionId != null) {
+            if (showUserMessage && currentSessionId != null) {
                 chatRepository.recordUserMessage(
                     sessionId = currentSessionId,
                     content = message,
@@ -182,7 +202,7 @@ class ChatViewModel @Inject constructor(
                 }
                 .collect { envelope ->
                     val sessionId = envelope.sessionId
-                    if (!userMessageRecorded && sessionId != null) {
+                    if (showUserMessage && !userMessageRecorded && sessionId != null) {
                         userMessageRecorded = true
                         chatRepository.recordUserMessage(
                             sessionId = sessionId,
@@ -294,23 +314,47 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun convergeProductDeck(deckId: String, userMessage: String = "继续") {
+    fun convergeProductDeck(
+        deckId: String,
+        userMessage: String = "帮我选",
+        showUserMessage: Boolean = false,
+    ) {
         val state = _uiState.value
         if (deckId !in state.awaitingConvergenceDeckIds) return
 
         if (BuildConfig.USE_MOCK_CHAT) {
-            sendMockConvergence(deckId, userMessage)
+            sendMockConvergence(deckId, userMessage, showUserMessage)
             return
         }
 
-        if (deckId in state.pendingDecisions) {
-            addConvergenceUserMessage(deckId, userMessage)
+        if (deckId in state.pendingDecisions && !state.hasProductFeedbackSignals(deckId)) {
+            if (showUserMessage) {
+                addConvergenceUserMessage(deckId, userMessage)
+            }
             _uiState.update { ChatReducer.convergeDeck(it, deckId) }
             return
         }
 
-        _uiState.update { ChatReducer.convergeDeck(it, deckId) }
-        startRealStream(message = userMessage.ifBlank { "继续" })
+        _uiState.update { ChatReducer.convergeDeck(it, deckId, usePendingDecision = false) }
+        startRealStream(
+            message = if (showUserMessage) {
+                userMessage.ifBlank { "帮我选" }
+            } else {
+                "继续"
+            },
+            showUserMessage = showUserMessage,
+        )
+    }
+
+    private fun ChatUiState.hasProductFeedbackSignals(deckId: String): Boolean {
+        val swipeState = productSwipeStates[deckId] ?: return false
+        return swipeState.swipedProductIds.isNotEmpty() ||
+            swipeState.undoStack.any { action ->
+                action.feedbackType == "like" ||
+                    action.feedbackType == "not_interested" ||
+                    action.action == "like" ||
+                    action.action == "not_interested"
+            }
     }
 
     private fun addConvergenceUserMessage(deckId: String, message: String): Pair<String, String> {
@@ -321,7 +365,23 @@ class ChatViewModel @Inject constructor(
             ChatReducer.addUserMessage(
                 state = it.copy(sessionId = sessionId, currentTurnId = turnId),
                 key = Ids.userMessageId(nowMs),
-                content = message.ifBlank { "继续" },
+                content = message.ifBlank { "帮我选" },
+            )
+        }
+        return sessionId to turnId
+    }
+
+    private fun beginSilentConvergenceTurn(deckId: String): Pair<String, String> {
+        val nowMs = System.currentTimeMillis()
+        val sessionId = _uiState.value.sessionId ?: "local_session_001"
+        val turnId = "converge_${deckId}_$nowMs"
+        _uiState.update {
+            it.copy(
+                sessionId = sessionId,
+                currentTurnId = turnId,
+                inputState = ChatInputState.Streaming,
+                isStreaming = true,
+                lastError = null,
             )
         }
         return sessionId to turnId
@@ -523,8 +583,12 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun sendMockConvergence(deckId: String, userMessage: String) {
-        val (sessionId, turnId) = addConvergenceUserMessage(deckId, userMessage)
+    private fun sendMockConvergence(deckId: String, userMessage: String, showUserMessage: Boolean) {
+        val (sessionId, turnId) = if (showUserMessage) {
+            addConvergenceUserMessage(deckId, userMessage)
+        } else {
+            beginSilentConvergenceTurn(deckId)
+        }
 
         streamJob?.cancel()
 
@@ -584,8 +648,12 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun sendFallbackConvergence(deckId: String, userMessage: String) {
-        val (sessionId, turnId) = addConvergenceUserMessage(deckId, userMessage)
+    private fun sendFallbackConvergence(deckId: String, userMessage: String, showUserMessage: Boolean = false) {
+        val (sessionId, turnId) = if (showUserMessage) {
+            addConvergenceUserMessage(deckId, userMessage)
+        } else {
+            beginSilentConvergenceTurn(deckId)
+        }
         val decision = fallbackConvergenceDecision(deckId)
 
         streamJob?.cancel()
@@ -630,7 +698,7 @@ class ChatViewModel @Inject constructor(
                 nodeId = "fallback_converge_text_$turnId",
                 payload = TextDeltaPayload(
                     messageId = "fallback_converge_text_$turnId",
-                    delta = "后端收敛接口暂未接入，我先基于当前候选商品和你的操作给出一个前端兜底建议。",
+                    delta = "我先按当前候选和你的选择给出一个判断。",
                     done = true,
                 ),
                 displayMode = "inline_text",
@@ -676,9 +744,9 @@ class ChatViewModel @Inject constructor(
         return FinalDecisionPayload(
             winnerProductId = product?.productId,
             summary = """
-                **收敛建议：优先看$productName。**
+                **优先看$productName。**
 
-                这是前端 fallback 基于当前候选、已看/喜欢/排除动作给出的临时建议。等后端 `POST /recommendation/converge` 接入后，这一步会由真实后端基于同一批候选和反馈生成。
+                在当前候选里，它和你的需求匹配度最高。继续点喜欢或不喜欢后，我会把判断再收紧。
             """.trimIndent(),
             why = listOf(
                 price,
@@ -755,6 +823,25 @@ class ChatViewModel @Inject constructor(
         _uiState.update { ChatReducer.reduce(it, envelope) }
     }
 
+    private fun localInitialThinkingEnvelope(
+        turnId: String,
+        sessionId: String?,
+        nowMs: Long,
+    ): AgentUiEnvelope<ThinkingPayload> =
+        AgentUiEnvelope(
+            event = AgentEventType.Thinking,
+            sessionId = sessionId ?: _uiState.value.sessionId ?: "local_session_001",
+            turnId = turnId,
+            seq = 0,
+            eventId = "$turnId:local-thinking",
+            nodeId = "local_thinking_$turnId",
+            createdAtMs = nowMs,
+            payload = ThinkingPayload(
+                stage = "understanding",
+                message = "正在理解你的需求...",
+            ),
+        )
+
     private fun ChatUiState.convergenceDeckForMessage(message: String, imageUrl: String?): String? {
         if (imageUrl != null || !message.isProductConvergenceCommand()) return null
         return nodes.filterIsInstance<ProductDeckNode>()
@@ -797,6 +884,7 @@ class ChatViewModel @Inject constructor(
             "继续",
             "收敛",
             "收敛建议",
+            "帮我选",
             "给我建议",
             "给建议",
             "总结",

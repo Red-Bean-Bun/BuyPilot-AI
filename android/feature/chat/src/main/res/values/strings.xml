@@ -18,7 +18,9 @@
     <string name="criteria_label_budget">预算</string>
     <string name="criteria_label_scenario">场景/用途</string>
     <string name="criteria_label_exclusions">排除项</string>
+    <string name="criteria_avoid_prefix">避开</string>
 
+    <string name="criteria_summary_title">当前筛选</string>
     <string name="criteria_edit_title">调整筛选</string>
     <string name="criteria_product_type_placeholder">例如 洁面乳、防晒霜、蓝牙耳机</string>
     <string name="criteria_target_user_placeholder">例如 油性、敏感、通勤党</string>
