@@ -494,12 +494,13 @@ class ChatViewModel @Inject constructor(
             )
             delay(360)
 
+            val deckId = "deck_mock_$turnId"
             mockProducts().forEach { product ->
                 emit(
                     event = AgentEventType.ProductCard,
-                    nodeId = "product_${product.product.productId}",
+                    nodeId = "product_${product.product.productId}_$turnId",
                     payload = product,
-                    deckId = "deck_mock_001",
+                    deckId = deckId,
                     displayMode = "swipe_deck_item",
                 )
                 delay(260)
@@ -507,7 +508,7 @@ class ChatViewModel @Inject constructor(
             delay(180)
             emit(
                 event = AgentEventType.CriteriaCard,
-                nodeId = "criteria_mock_001",
+                nodeId = "criteria_$turnId",
                 payload = mockCriteria(),
                 displayMode = "summary_card",
             )
@@ -515,6 +516,7 @@ class ChatViewModel @Inject constructor(
                 turnId = turnId,
                 sessionId = sessionId,
                 seq = seq,
+                deckId = deckId,
                 totalProducts = 3,
                 finishReason = "awaiting_product_feedback",
             )
@@ -857,18 +859,9 @@ class ChatViewModel @Inject constructor(
             2. **预算友好**：控制在 **200 元以内**，超预算商品只作为备选提醒。
             3. **使用风险**：避开高刺激组合，敏感肌会额外提示注意点。
 
-            > 判断原则：主推荐必须有商品资料或评价证据支撑，不只看营销描述。
+            判断原则：主推荐必须有商品资料或评价证据支撑，不只看营销描述。
 
-            ```kotlin
-            val hardFilters = listOf("油性肌肤", "200元以内", "避开酒精")
-            val ranking = "证据匹配度 > 使用风险 > 价格"
-            ```
-
-            | 维度 | 本轮处理 |
-            | --- | --- |
-            | 预算 | 200 元以内优先 |
-            | 肤质 | 油皮、混合肌优先 |
-            | 证据 | 商品资料 [1] 与评价片段 [2] |
+            本轮会优先看三件事：预算控制在 200 元以内，肤质偏向油皮/混合肌，证据来自商品资料与评价片段。
 
             下面是这轮最值得看的候选商品：
         """.trimIndent()
@@ -881,18 +874,9 @@ class ChatViewModel @Inject constructor(
             2. **再压低风险**：含香精或明显超预算的商品只放到备选说明。
             3. **最后绑定证据**：推荐理由会带证据编号，例如 [1] [2]。
 
-            > 如果你刚才触发的是“模拟错误 / 网络失败”，这条用于演示 Retry 后的成功恢复。
+            如果你刚才触发的是“模拟错误 / 网络失败”，这条用于演示 Retry 后的成功恢复。
 
-            ```text
-            retry_source = "${message.take(18)}${if (message.length > 18) "..." else ""}"
-            mode = latest_text_only
-            ```
-
-            | 恢复项 | 状态 |
-            | --- | --- |
-            | 流式输出 | 已恢复 |
-            | 商品候选 | 已重新拉取 |
-            | 错误残留 | 不再重复展示 |
+            本次恢复会重新拉取候选、清掉错误残留，并只使用最近这次输入作为重试来源。
 
             下面给出重试后的候选：
         """.trimIndent()

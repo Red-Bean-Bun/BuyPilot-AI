@@ -1,6 +1,8 @@
 package com.buypilot.feature.chat.ui
 
 import androidx.annotation.DrawableRes
+import android.content.Context
+import android.text.Spanned
 import android.text.method.LinkMovementMethod
 import android.util.TypedValue
 import android.view.View
@@ -22,6 +24,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -29,6 +32,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -40,7 +44,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -101,13 +104,16 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -155,12 +161,16 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -185,6 +195,7 @@ import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import coil.load
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
@@ -205,6 +216,7 @@ import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import com.buypilot.feature.chat.model.PendingDecision
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
 import com.yuyakaido.android.cardstackview.CardStackLayoutManager
@@ -225,20 +237,29 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.commonmark.node.AbstractVisitor
+import org.commonmark.node.BulletList
 import org.commonmark.node.Code
+import org.commonmark.node.Emphasis
 import org.commonmark.node.FencedCodeBlock
 import org.commonmark.node.HardLineBreak
+import org.commonmark.node.Heading
 import org.commonmark.node.Image
 import org.commonmark.node.IndentedCodeBlock
 import org.commonmark.node.Link
+import org.commonmark.node.ListItem
+import org.commonmark.node.OrderedList
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.StrongEmphasis
 import org.commonmark.node.Text as MarkdownText
 import org.commonmark.parser.Parser
 import io.noties.markwon.Markwon
+import io.noties.markwon.AbstractMarkwonPlugin
+import io.noties.markwon.core.MarkwonTheme
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.html.HtmlPlugin
+import java.util.LinkedHashMap
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -265,9 +286,19 @@ private val TimelineFollowCorrectionTolerance = 8.dp
 private val TimelineSafeGap = 20.dp
 private val TimelineAnchorTopGap = 8.dp
 private val TimelineAnchorBottomReserve = 420.dp
-private val TimelineKeyboardScrimHeight = 64.dp
-private val TimelineJumpButtonBottomGap = 18.dp
+private val FloatingPanelComposerGap = 8.dp
+private val TimelineJumpButtonComposerGap = (-12).dp
 private val ChipEdgeFadeWidth = 46.dp
+private const val TurnRevealIntroChars = 18
+private const val TurnRevealIntroRatio = 0.42f
+private const val TurnStructuredEnterMs = 320
+private const val TurnStructuredEnterDelayMs = 90
+private const val ThinkingToTextHandoffMs = 190L
+private const val TimelineRevealScrollThrottleMs = 40L
+private const val TextRevealProgressReportStep = 24
+private const val MarkdownRenderCacheMaxEntries = 36
+private val MarkdownSoftBlockColor = Color(0xFFEFF2F5).toArgb()
+private val MarkdownComposeCodeBackground = Color(0xFFEFF2F5)
 
 private data class PendingClarificationAnswer(
     val nodeKey: String,
@@ -325,6 +356,17 @@ private enum class CriteriaTileSpan {
     Full,
 }
 
+@Immutable
+private data class CriteriaLabels(
+    val summary: String,
+    val category: String,
+    val coreNeed: String,
+    val targetUser: String,
+    val budget: String,
+    val scenario: String,
+    val exclusions: String,
+)
+
 private data class ProductDeckSignalSummary(
     val viewed: Int,
     val liked: Int,
@@ -334,14 +376,175 @@ private data class ProductDeckSignalSummary(
         get() = viewed > 0 || liked > 0 || dismissed > 0
 }
 
-private data class DecisionPresentation(
-    val eyebrow: String,
-    val title: String,
-    val helper: String,
+private data class DecisionStatusBadge(
+    val label: String,
     val accent: Color,
     val surface: Color,
-    val forceCard: Boolean = true,
+    val showCardWhenEmpty: Boolean = false,
 )
+
+@Immutable
+internal sealed interface TimelineRenderItem {
+    val key: String
+}
+
+private val TimelineRenderItem.timelineContentType: String
+    get() = when (this) {
+        is UserTimelineItem -> "user_message"
+        is AssistantTurnTimelineItem -> "assistant_turn"
+        is StandaloneTimelineItem -> when (node) {
+            is ThinkingNode -> "standalone_thinking"
+            is AiStreamNode -> "standalone_text"
+            is ClarificationNode -> "standalone_clarification"
+            is CriteriaNode -> "standalone_criteria"
+            is ProductDeckNode -> "standalone_products"
+            is FinalDecisionNode -> "standalone_decision"
+            is CartActionNode -> "standalone_cart"
+            is ErrorNode -> "standalone_error"
+            is UserMessageNode -> "standalone_user"
+        }
+    }
+
+@Immutable
+internal data class UserTimelineItem(
+    val node: UserMessageNode,
+) : TimelineRenderItem {
+    override val key: String = node.key
+}
+
+@Immutable
+internal data class AssistantTurnTimelineItem(
+    val turnId: String,
+    val nodes: List<ChatUiNode>,
+) : TimelineRenderItem {
+    override val key: String = buildString {
+        append("assistant_")
+        append(turnId.ifBlank { "unknown" })
+        append('_')
+        append(nodes.firstOrNull()?.key.orEmpty())
+    }
+}
+
+@Immutable
+internal data class StandaloneTimelineItem(
+    val node: ChatUiNode,
+) : TimelineRenderItem {
+    override val key: String = node.key
+}
+
+@Immutable
+private data class TimelineRenderContext(
+    val backendBaseUrl: String,
+    val isStreaming: Boolean,
+    val currentTurnId: String?,
+    val productsById: Map<String, ProductCardPayload>,
+    val latestProductDeckKey: String?,
+    val productSwipeStates: Map<String, ProductSwipeState>,
+    val awaitingConvergenceDeckIds: Set<String>,
+    val pendingDecisions: Map<String, PendingDecision>,
+    val lastUserMessage: String?,
+)
+
+@Immutable
+internal data class TextRevealProgress(
+    val visibleLength: Int = 0,
+    val totalLength: Int = 0,
+) {
+    val hasStarted: Boolean
+        get() = visibleLength > 0
+
+    val hasReachedIntroGate: Boolean
+        get() {
+            if (totalLength <= 0) return false
+            val ratio = visibleLength.toFloat() / totalLength.toFloat()
+            return visibleLength >= TurnRevealIntroChars || ratio >= TurnRevealIntroRatio
+        }
+}
+
+internal data class TurnNodeVisibilityState(
+    val visibleNodeKeys: Set<String>,
+    val textHandoffKeys: Set<String>,
+)
+
+private data class MarkdownTextRenderTag(
+    val contentHash: Int,
+    val contentLength: Int,
+    val textColorArgb: Int,
+    val fontSizePx: Float,
+    val lineHeightPx: Float,
+    val typefaceStyle: Int,
+)
+
+@Stable
+private class TurnStreamingCoordinator(
+    val visibleNodeKeys: Set<String>,
+    val textHandoffKeys: Set<String>,
+    val visualActive: Boolean,
+    val markTextCompleted: (String) -> Unit,
+    val updateTextProgress: (String, Int, Int) -> Unit,
+    val markStructuredEntered: (String) -> Unit,
+)
+
+@Stable
+internal class TimelineRevealStore {
+    private val enteredTimelineItemKeys = mutableMapOf<String, Boolean>()
+    private val startedStructuredNodeKeys = mutableMapOf<String, Boolean>()
+    val enteredStructuredNodeKeys = mutableStateMapOf<String, Boolean>()
+    val completedTextKeys = mutableStateMapOf<String, Boolean>()
+    val textRevealProgressByKey = mutableStateMapOf<String, TextRevealProgress>()
+    private val latestTextRevealProgressByKey = mutableMapOf<String, TextRevealProgress>()
+    private val lastSnapshotTextRevealProgressByKey = mutableMapOf<String, TextRevealProgress>()
+
+    fun hasEnteredTimelineItem(key: String): Boolean = enteredTimelineItemKeys[key] == true
+    fun markTimelineItemEntered(key: String) {
+        enteredTimelineItemKeys[key] = true
+    }
+
+    fun hasStartedStructuredNode(key: String): Boolean = startedStructuredNodeKeys[key] == true
+    fun markStructuredNodeStarted(key: String) {
+        startedStructuredNodeKeys[key] = true
+    }
+
+    fun hasEnteredStructuredNode(key: String): Boolean = enteredStructuredNodeKeys[key] == true
+    fun markStructuredNodeEntered(key: String) {
+        enteredStructuredNodeKeys[key] = true
+    }
+
+    fun hasCompletedText(key: String): Boolean = completedTextKeys[key] == true
+    fun markTextCompleted(key: String) {
+        completedTextKeys[key] = true
+    }
+
+    fun updateTextProgress(key: String, visible: Int, total: Int) {
+        val previous = lastSnapshotTextRevealProgressByKey[key]
+        val next = TextRevealProgress(visibleLength = visible, totalLength = total)
+        latestTextRevealProgressByKey[key] = next
+        val crossedIntroGate = previous?.hasReachedIntroGate != true && next.hasReachedIntroGate
+        val completed = total > 0 && visible >= total
+        val shouldSnapshot = previous == null ||
+            !previous.hasStarted ||
+            crossedIntroGate ||
+            completed ||
+            visible - previous.visibleLength >= TextRevealProgressReportStep
+        if (shouldSnapshot && textRevealProgressByKey[key] != next) {
+            lastSnapshotTextRevealProgressByKey[key] = next
+            textRevealProgressByKey[key] = next
+        }
+    }
+
+    fun textRevealProgress(key: String): TextRevealProgress? =
+        latestTextRevealProgressByKey[key] ?: textRevealProgressByKey[key]
+
+    fun pruneToKeys(timelineItemKeys: Set<String>, nodeKeys: Set<String>) {
+        enteredTimelineItemKeys.keys.retainAll(timelineItemKeys)
+        startedStructuredNodeKeys.keys.retainAll(nodeKeys)
+        enteredStructuredNodeKeys.keys.retainAll(nodeKeys)
+        completedTextKeys.keys.retainAll(nodeKeys)
+        textRevealProgressByKey.keys.retainAll(nodeKeys)
+        latestTextRevealProgressByKey.keys.retainAll(nodeKeys)
+        lastSnapshotTextRevealProgressByKey.keys.retainAll(nodeKeys)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -366,6 +569,7 @@ fun BuyPilotChatScreen(
     var dismissingClarificationKey by remember { mutableStateOf<String?>(null) }
     var revealedMessageKeys by remember { mutableStateOf(emptySet<String>()) }
     var typingMessageKeys by remember { mutableStateOf(emptySet<String>()) }
+    var visualActiveTurnKeys by remember { mutableStateOf(emptySet<String>()) }
     var pendingClarificationAnswer by remember { mutableStateOf<PendingClarificationAnswer?>(null) }
     var activeClarificationFlight by remember { mutableStateOf<ClarificationFlight?>(null) }
     var hiddenFlightMessageKeys by remember { mutableStateOf(emptySet<String>()) }
@@ -380,11 +584,11 @@ fun BuyPilotChatScreen(
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val products = state.nodes.filterIsInstance<ProductDeckNode>().flatMap { it.products }
     val focusManager = LocalFocusManager.current
     val composerFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
+    val defaultSkinTypeOptions = stringArrayResource(R.array.default_skin_type_options).toSet()
     val showWelcome = state.nodes.isEmpty() && !welcomeDismissed
     val activeClarificationKey = state.nodes
         .filterIsInstance<ClarificationNode>()
@@ -574,10 +778,9 @@ fun BuyPilotChatScreen(
                 ConversationStage(
                     showWelcome = showWelcome,
                     state = state,
-                    products = products,
                     onClarificationOption = { label, snapshot ->
                         answerClarification(
-                            label.toClarificationUserMessage(),
+                            label.toClarificationUserMessage(defaultSkinTypeOptions),
                             selectedOption = label,
                             chipSnapshot = snapshot,
                         )
@@ -619,6 +822,13 @@ fun BuyPilotChatScreen(
                             typingMessageKeys - key
                         }
                     },
+                    onAssistantTurnVisualActiveChange = { key, active ->
+                        visualActiveTurnKeys = if (active) {
+                            visualActiveTurnKeys + key
+                        } else {
+                            visualActiveTurnKeys - key
+                        }
+                    },
                     onUserBubblePositioned = { key, snapshot ->
                         if (userBubbleSnapshots[key] != snapshot) {
                             userBubbleSnapshots = userBubbleSnapshots + (key to snapshot)
@@ -632,7 +842,13 @@ fun BuyPilotChatScreen(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 120.dp),
+                        .padding(
+                            bottom = calculateFloatingPanelBottomPadding(
+                                density = density,
+                                composerHeightPx = composerHeightPx,
+                                imeBottomPx = imeBottomPx,
+                            ),
+                        ),
                 )
             }
         }
@@ -641,7 +857,7 @@ fun BuyPilotChatScreen(
             text = input,
             inputState = state.inputState,
             isStreaming = state.isStreaming,
-            isTextRevealing = typingMessageKeys.isNotEmpty(),
+            isTextRevealing = typingMessageKeys.isNotEmpty() || visualActiveTurnKeys.isNotEmpty(),
             awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
             focusRequester = composerFocusRequester,
@@ -835,7 +1051,6 @@ private val WelcomePrompts = listOf(
 private fun ConversationStage(
     showWelcome: Boolean,
     state: ChatUiState,
-    products: List<ProductCardPayload>,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
@@ -859,6 +1074,7 @@ private fun ConversationStage(
     revealedMessageKeys: Set<String>,
     onMessageRevealComplete: (String) -> Unit,
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
+    onAssistantTurnVisualActiveChange: (String, Boolean) -> Unit,
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
@@ -881,7 +1097,10 @@ private fun ConversationStage(
                 targetScale = 0.985f,
             ),
         ) {
-            WelcomeHome()
+            WelcomeHome(
+                composerHeightPx = composerHeightPx,
+                imeBottomPx = imeBottomPx,
+            )
         }
 
         AnimatedVisibility(
@@ -904,7 +1123,6 @@ private fun ConversationStage(
         ) {
             ChatTimeline(
                 state = state,
-                products = products,
                 onClarificationOption = onClarificationOption,
                 onClarificationManualInput = onClarificationManualInput,
                 onClarificationManualSource = onClarificationManualSource,
@@ -928,6 +1146,7 @@ private fun ConversationStage(
                 revealedMessageKeys = revealedMessageKeys,
                 onMessageRevealComplete = onMessageRevealComplete,
                 onMessageRevealActiveChange = onMessageRevealActiveChange,
+                onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
                 onUserBubblePositioned = onUserBubblePositioned,
                 onClarificationCardDismissed = onClarificationCardDismissed,
             )
@@ -1108,7 +1327,11 @@ private fun M3IconButton(
 }
 
 @Composable
-private fun WelcomeHome() {
+private fun WelcomeHome(
+    composerHeightPx: Int,
+    imeBottomPx: Int,
+) {
+    val density = LocalDensity.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1161,7 +1384,13 @@ private fun WelcomeHome() {
         PromptSuggestions(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 134.dp),
+                .padding(
+                    bottom = calculateFloatingPanelBottomPadding(
+                        density = density,
+                        composerHeightPx = composerHeightPx,
+                        imeBottomPx = imeBottomPx,
+                    ),
+                ),
         )
     }
 }
@@ -1171,7 +1400,7 @@ private fun PromptSuggestions(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         WelcomePrompts.forEach { prompt ->
             PromptSuggestionCard(prompt = prompt)
@@ -1186,7 +1415,7 @@ private fun PromptSuggestionCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 38.dp)
+            .heightIn(min = 28.dp)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1212,7 +1441,6 @@ private fun PromptSuggestionCard(
 @Composable
 private fun ChatTimeline(
     state: ChatUiState,
-    products: List<ProductCardPayload>,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
@@ -1236,6 +1464,7 @@ private fun ChatTimeline(
     revealedMessageKeys: Set<String>,
     onMessageRevealComplete: (String) -> Unit,
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
+    onAssistantTurnVisualActiveChange: (String, Boolean) -> Unit,
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
@@ -1243,31 +1472,81 @@ private fun ChatTimeline(
     val coroutineScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
-    var followStreamingText by remember { mutableStateOf(true) }
+    val timelineMotionEnabled by remember {
+        derivedStateOf { !listState.isScrollInProgress }
+    }
+    var followStreamingText by remember { mutableStateOf(false) }
     var lastHandledUserMessageKey by remember { mutableStateOf<String?>(null) }
     var activeTurnAnchored by remember { mutableStateOf(false) }
+    var revealScrollTick by remember { mutableIntStateOf(0) }
+    var lastRevealScrollAtMs by remember { mutableStateOf(0L) }
+    val revealStore = remember { TimelineRevealStore() }
     val hasTimelineError = state.nodes.any { it is ErrorNode }
-    val timelineBottomPadding = calculateTimelineBottomPadding(
+    val timelineItems = remember(state.nodes) { state.nodes.toTimelineRenderItems() }
+    LaunchedEffect(timelineItems, state.nodes) {
+        revealStore.pruneToKeys(
+            timelineItemKeys = timelineItems.mapTo(mutableSetOf()) { it.key },
+            nodeKeys = state.nodes.mapTo(mutableSetOf()) { it.key },
+        )
+    }
+    val productDeckNodes = remember(state.nodes) {
+        state.nodes.filterIsInstance<ProductDeckNode>()
+    }
+    val productsById = remember(state.nodes) {
+        productDeckNodes
+            .flatMap { it.products }
+            .associateBy { it.product.productId }
+    }
+    val renderContext = remember(
+        state.backendBaseUrl,
+        state.isStreaming,
+        state.currentTurnId,
+        productsById,
+        state.productSwipeStates,
+        state.awaitingConvergenceDeckIds,
+        state.pendingDecisions,
+        state.lastUserMessage,
+    ) {
+        TimelineRenderContext(
+            backendBaseUrl = state.backendBaseUrl,
+            isStreaming = state.isStreaming,
+            currentTurnId = state.currentTurnId,
+            productsById = productsById,
+            latestProductDeckKey = productDeckNodes.lastOrNull()?.key,
+            productSwipeStates = state.productSwipeStates,
+            awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds,
+            pendingDecisions = state.pendingDecisions,
+            lastUserMessage = state.lastUserMessage,
+        )
+    }
+    fun lastContentIndex(): Int = timelineItems.lastContentIndex(state, hasTimelineError)
+    fun requestRevealFollowScroll() {
+        if (!followStreamingText) return
+        val now = System.currentTimeMillis()
+        if (now - lastRevealScrollAtMs >= TimelineRevealScrollThrottleMs) {
+            lastRevealScrollAtMs = now
+            revealScrollTick += 1
+        }
+    }
+    val timelineViewportBottomInset = calculateTimelineViewportBottomInset(
         density = density,
         composerHeightPx = composerHeightPx,
         imeBottomPx = imeBottomPx,
     )
-    val jumpButtonBottomPadding = with(density) {
-        (composerHeightPx + imeBottomPx + TimelineJumpButtonBottomGap.toPx()).toDp()
-    }
+    val timelineBottomPadding = TimelineSafeGap
+    val jumpButtonBottomPadding = timelineViewportBottomInset + TimelineJumpButtonComposerGap
     val activeTurnBottomReserve = with(density) {
         maxOf(
             TimelineAnchorBottomReserve.toPx(),
-            composerHeightPx + imeBottomPx + 72.dp.toPx(),
+            72.dp.toPx(),
         ).toDp()
     }
     val nearEndThresholdPx = with(density) { TimelineNearEndThreshold.toPx() }
     val followCorrectionTolerancePx = with(density) { TimelineFollowCorrectionTolerance.toPx() }
     val timelineBottomPaddingPx = with(density) { timelineBottomPadding.toPx() }
     val anchorTopOffsetPx = with(density) { TimelineAnchorTopGap.toPx().roundToInt() }
-    val shouldShowKeyboardScrim = isComposerFocused && imeBottomPx > 0 && !followStreamingText
     val isNearTimelineEnd by remember(
-        state.nodes.size,
+        timelineItems.size,
         state.lastError,
         hasTimelineError,
         timelineBottomPadding,
@@ -1276,7 +1555,7 @@ private fun ChatTimeline(
         derivedStateOf {
             isTimelineNearEnd(
                 listState = listState,
-                lastContentIndex = state.lastContentIndex(hasTimelineError),
+                lastContentIndex = lastContentIndex(),
                 bottomPaddingPx = timelineBottomPaddingPx,
                 thresholdPx = nearEndThresholdPx,
             )
@@ -1286,18 +1565,12 @@ private fun ChatTimeline(
     LaunchedEffect(state.lastUserMessageKey, activeFlightMessageKey) {
         val key = state.lastUserMessageKey ?: return@LaunchedEffect
         if (key == activeFlightMessageKey) return@LaunchedEffect
-        val index = state.nodes.indexOfFirst { it.key == key }
+        val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
         if (index >= 0 && key != lastHandledUserMessageKey) {
             lastHandledUserMessageKey = key
             activeTurnAnchored = true
-            followStreamingText = true
+            followStreamingText = false
             listState.scrollToItem(index = index, scrollOffset = -anchorTopOffsetPx)
-            scrollActiveTurnIfNeeded(
-                listState = listState,
-                lastContentIndex = state.lastContentIndex(hasTimelineError),
-                bottomPaddingPx = timelineBottomPaddingPx,
-                tolerancePx = followCorrectionTolerancePx,
-            )
         }
     }
 
@@ -1305,8 +1578,6 @@ private fun ChatTimeline(
         if (isUserDragging && !isNearTimelineEnd) {
             followStreamingText = false
             activeTurnAnchored = false
-        } else if (isNearTimelineEnd) {
-            followStreamingText = true
         }
     }
 
@@ -1319,25 +1590,21 @@ private fun ChatTimeline(
     LaunchedEffect(state.isStreaming) {
         if (!state.isStreaming) {
             activeTurnAnchored = false
+            followStreamingText = false
         }
     }
 
-    LaunchedEffect(state.streamingTextKey, state.streamingTextLength) {
-        if (followStreamingText && state.streamingTextKey != null && state.nodes.isNotEmpty()) {
+    LaunchedEffect(
+        timelineItems.size,
+        state.streamingTextKey,
+        state.isStreaming,
+        timelineBottomPadding,
+        revealScrollTick,
+    ) {
+        if (followStreamingText && timelineItems.isNotEmpty()) {
             scrollActiveTurnIfNeeded(
                 listState = listState,
-                lastContentIndex = state.lastContentIndex(hasTimelineError),
-                bottomPaddingPx = timelineBottomPaddingPx,
-                tolerancePx = followCorrectionTolerancePx,
-            )
-        }
-    }
-
-    LaunchedEffect(state.nodes.size, state.streamingTextKey, state.isStreaming, timelineBottomPadding) {
-        if (followStreamingText && state.nodes.isNotEmpty()) {
-            scrollActiveTurnIfNeeded(
-                listState = listState,
-                lastContentIndex = state.lastContentIndex(hasTimelineError),
+                lastContentIndex = lastContentIndex(),
                 bottomPaddingPx = timelineBottomPaddingPx,
                 tolerancePx = followCorrectionTolerancePx,
                 settleFrames = 2,
@@ -1345,163 +1612,187 @@ private fun ChatTimeline(
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier
-            .fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = 16.dp,
-            end = 16.dp,
-            bottom = timelineBottomPadding,
-        ),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        items(state.nodes, key = { it.key }) { node ->
-            val hiddenUserMessage = node is UserMessageNode && node.key in hiddenUserMessageKeys
-            TimelineItemMotion(animateEnter = !hiddenUserMessage) {
-                when (node) {
-                    is UserMessageNode -> UserBubble(
-                        node = node,
-                        hidden = hiddenUserMessage,
-                        onPositioned = if (node.key == activeFlightMessageKey) {
-                            { onUserBubblePositioned(node.key, it) }
-                        } else {
-                            null
-                        },
-                    )
-                    is ThinkingNode -> ThinkingBubble(message = node.payload.message)
-                    is AiStreamNode -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StreamingAssistantText(
-                            content = node.content,
-                            done = node.done,
-                            onRevealComplete = { onMessageRevealComplete(node.key) },
-                            onRevealActiveChange = { active -> onMessageRevealActiveChange(node.key, active) },
-                            onRevealProgress = {
-                                if (followStreamingText) {
-                                    coroutineScope.launch {
-                                        scrollActiveTurnIfNeeded(
-                                            listState = listState,
-                                            lastContentIndex = state.lastContentIndex(hasTimelineError),
-                                            bottomPaddingPx = timelineBottomPaddingPx,
-                                            tolerancePx = followCorrectionTolerancePx,
-                                        )
-                                    }
-                                }
-                            },
-                        )
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = timelineViewportBottomInset),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = timelineBottomPadding,
+            ),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            items(
+                items = timelineItems,
+                key = { it.key },
+                contentType = { it.timelineContentType },
+            ) { item ->
+                when (item) {
+                    is UserTimelineItem -> {
+                        val hiddenUserMessage = item.node.key in hiddenUserMessageKeys
+                        TimelineItemMotion(
+                            animateEnter = timelineMotionEnabled && !hiddenUserMessage,
+                            hasEntered = revealStore.hasEnteredTimelineItem(item.key),
+                            onEntered = { revealStore.markTimelineItemEntered(item.key) },
+                        ) {
+                            TimelineNodeContent(
+                                node = item.node,
+                                renderContext = renderContext,
+                                timelineMotionEnabled = timelineMotionEnabled,
+                                hiddenUserMessage = hiddenUserMessage,
+                                activeFlightMessageKey = activeFlightMessageKey,
+                                revealedMessageKeys = revealedMessageKeys,
+                                textRevealProgress = null,
+                                textCompleted = false,
+                                dismissingClarificationKey = dismissingClarificationKey,
+                                dismissedClarificationKeys = dismissedClarificationKeys,
+                                selectedClarificationOption = selectedClarificationOption,
+                                onClarificationOption = onClarificationOption,
+                                onClarificationManualInput = onClarificationManualInput,
+                                onClarificationManualSource = onClarificationManualSource,
+                                onCriteriaEdit = onCriteriaEdit,
+                                onProductOpen = onProductOpen,
+                                onProductDetailOpen = onProductDetailOpen,
+                                onConvergeRecommendation = onConvergeRecommendation,
+                                onDecisionEvidence = onDecisionEvidence,
+                                onRetryLastMessage = onRetryLastMessage,
+                                onEditLastMessage = onEditLastMessage,
+                                onQuickAction = onQuickAction,
+                                onMessageRevealComplete = onMessageRevealComplete,
+                                onMessageRevealActiveChange = onMessageRevealActiveChange,
+                                onStreamingTextProgress = { requestRevealFollowScroll() },
+                                onTextRevealProgress = { _, _, _ -> },
+                                onUserBubblePositioned = onUserBubblePositioned,
+                                onClarificationCardDismissed = onClarificationCardDismissed,
+                            )
+                        }
                     }
-                    is ClarificationNode -> ClarificationBlock(
-                        nodeKey = node.key,
-                        payload = node.payload,
-                        anchorRevealed = node.anchorMessageKey.isBlank() ||
-                            node.anchorMessageKey in revealedMessageKeys,
-                        dismissed = node.key in dismissedClarificationKeys,
-                        dismissing = node.key == dismissingClarificationKey,
-                        selectedOption = selectedClarificationOption.takeIf {
-                            node.key == dismissingClarificationKey
-                        },
-                        onOption = onClarificationOption,
-                        onManualInput = onClarificationManualInput,
-                        onManualSource = { snapshot -> onClarificationManualSource(node.key, snapshot) },
-                        onCardDismissed = onClarificationCardDismissed,
-                    )
-                    is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
-                    is ProductDeckNode -> ProductRecommendationStrip(
-                        node = node,
-                        backendBaseUrl = state.backendBaseUrl,
-                        swipeState = state.productSwipeStates[node.deckId],
-                        awaitingConvergence = node.deckId in state.awaitingConvergenceDeckIds,
-                        hasPendingDecision = node.deckId in state.pendingDecisions,
-                        onOpen = onProductOpen,
-                        onOpenDetail = onProductDetailOpen,
-                        onConverge = onConvergeRecommendation,
-                    )
-                    is FinalDecisionNode -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DecisionSummaryCard(
-                            payload = node.payload,
-                            products = products,
-                            backendBaseUrl = state.backendBaseUrl,
-                            onEvidence = { onDecisionEvidence(node.payload) },
+                    is AssistantTurnTimelineItem -> TimelineItemMotion(
+                        animateEnter = timelineMotionEnabled,
+                        hasEntered = revealStore.hasEnteredTimelineItem(item.key),
+                        onEntered = { revealStore.markTimelineItemEntered(item.key) },
+                    ) {
+                        AssistantTurnBlock(
+                            item = item,
+                            renderContext = renderContext,
+                            timelineMotionEnabled = timelineMotionEnabled,
+                            revealStore = revealStore,
+                            activeFlightMessageKey = activeFlightMessageKey,
+                            revealedMessageKeys = revealedMessageKeys,
+                            dismissingClarificationKey = dismissingClarificationKey,
+                            dismissedClarificationKeys = dismissedClarificationKeys,
+                            selectedClarificationOption = selectedClarificationOption,
+                            onClarificationOption = onClarificationOption,
+                            onClarificationManualInput = onClarificationManualInput,
+                            onClarificationManualSource = onClarificationManualSource,
+                            onCriteriaEdit = onCriteriaEdit,
+                            onProductOpen = onProductOpen,
+                            onProductDetailOpen = onProductDetailOpen,
+                            onConvergeRecommendation = onConvergeRecommendation,
+                            onDecisionEvidence = onDecisionEvidence,
+                            onRetryLastMessage = onRetryLastMessage,
+                            onEditLastMessage = onEditLastMessage,
                             onQuickAction = onQuickAction,
+                            onMessageRevealComplete = onMessageRevealComplete,
+                            onMessageRevealActiveChange = onMessageRevealActiveChange,
+                            onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
+                            onStreamingTextProgress = { requestRevealFollowScroll() },
+                            onTextCompleted = revealStore::markTextCompleted,
+                            onTextRevealProgress = revealStore::updateTextProgress,
+                            onStructuredStarted = revealStore::markStructuredNodeStarted,
+                            onStructuredEntered = revealStore::markStructuredNodeEntered,
+                            onUserBubblePositioned = onUserBubblePositioned,
+                            onClarificationCardDismissed = onClarificationCardDismissed,
                         )
                     }
-                    is CartActionNode -> CartActionCard(node.payload)
-                    is ErrorNode -> ErrorCard(
-                        node = node,
-                        latestUserMessage = state.lastUserMessage,
-                        onRetry = onRetryLastMessage,
-                        onEditMessage = onEditLastMessage,
-                    )
+                    is StandaloneTimelineItem -> TimelineItemMotion(
+                        animateEnter = timelineMotionEnabled,
+                        hasEntered = revealStore.hasEnteredTimelineItem(item.key),
+                        onEntered = { revealStore.markTimelineItemEntered(item.key) },
+                    ) {
+                        TimelineNodeContent(
+                            node = item.node,
+                            renderContext = renderContext,
+                            timelineMotionEnabled = timelineMotionEnabled,
+                            hiddenUserMessage = false,
+                            activeFlightMessageKey = activeFlightMessageKey,
+                            revealedMessageKeys = revealedMessageKeys,
+                            textRevealProgress = (item.node as? AiStreamNode)?.let { revealStore.textRevealProgress(it.key) },
+                            textCompleted = (item.node as? AiStreamNode)?.let { revealStore.hasCompletedText(it.key) } == true,
+                            dismissingClarificationKey = dismissingClarificationKey,
+                            dismissedClarificationKeys = dismissedClarificationKeys,
+                            selectedClarificationOption = selectedClarificationOption,
+                            onClarificationOption = onClarificationOption,
+                            onClarificationManualInput = onClarificationManualInput,
+                            onClarificationManualSource = onClarificationManualSource,
+                            onCriteriaEdit = onCriteriaEdit,
+                            onProductOpen = onProductOpen,
+                            onProductDetailOpen = onProductDetailOpen,
+                            onConvergeRecommendation = onConvergeRecommendation,
+                            onDecisionEvidence = onDecisionEvidence,
+                            onRetryLastMessage = onRetryLastMessage,
+                            onEditLastMessage = onEditLastMessage,
+                            onQuickAction = onQuickAction,
+                            onMessageRevealComplete = { key ->
+                                revealStore.markTextCompleted(key)
+                                onMessageRevealComplete(key)
+                            },
+                            onMessageRevealActiveChange = onMessageRevealActiveChange,
+                            onStreamingTextProgress = { requestRevealFollowScroll() },
+                            onTextRevealProgress = { key, visible, total ->
+                                revealStore.updateTextProgress(key, visible, total)
+                            },
+                            onUserBubblePositioned = onUserBubblePositioned,
+                            onClarificationCardDismissed = onClarificationCardDismissed,
+                        )
+                    }
+                }
+            }
+
+            if (state.lastError != null && !hasTimelineError) {
+                item("last_error") {
+                    Box {
+                        InlineSystemNotice(state.lastError)
+                    }
+                }
+            }
+
+            if (activeTurnAnchored) {
+                item("active_turn_anchor_spacer") {
+                    Spacer(Modifier.height(activeTurnBottomReserve))
                 }
             }
         }
 
-        if (state.lastError != null && !hasTimelineError) {
-            item("last_error") {
-                Box {
-                    InlineSystemNotice(state.lastError)
-                }
-            }
-        }
-
-        if (activeTurnAnchored) {
-            item("active_turn_anchor_spacer") {
-                Spacer(Modifier.height(activeTurnBottomReserve))
-            }
-        }
-    }
-
-    AnimatedVisibility(
-        visible = shouldShowKeyboardScrim,
-        enter = fadeIn(animationSpec = tween(durationMillis = 150, easing = MenuEaseOut)),
-        exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)),
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(bottom = with(density) { (composerHeightPx + imeBottomPx).toDp() })
-            .zIndex(1f),
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(TimelineKeyboardScrimHeight)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                BuyPilotColors.SurfaceBg.copy(alpha = 0f),
-                                BuyPilotColors.SurfaceBg.copy(alpha = 0.9f),
-                            ),
-                        ),
-                    ),
-            )
-        }
-    }
-
-    AnimatedVisibility(
-        visible = !isNearTimelineEnd,
-        enter = fadeIn(animationSpec = tween(durationMillis = 160, easing = MenuEaseOut)) +
-            slideInVertically(
-                animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
-                initialOffsetY = { it / 3 },
-            ),
-        exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)) +
-            slideOutVertically(
-                animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
-                targetOffsetY = { it / 3 },
-            ),
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(bottom = jumpButtonBottomPadding)
-            .zIndex(2f),
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-            JumpToLatestButton(
+        AnimatedVisibility(
+            visible = !isNearTimelineEnd && (!followStreamingText || !state.isStreaming),
+            enter = fadeIn(animationSpec = tween(durationMillis = 160, easing = MenuEaseOut)) +
+                slideInVertically(
+                    animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
+                    initialOffsetY = { it / 3 },
+                ),
+            exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)) +
+                slideOutVertically(
+                    animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
+                    targetOffsetY = { it / 3 },
+                ),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = jumpButtonBottomPadding)
+                .zIndex(2f),
+        ) {
+            FollowLatestBubble(
+                isStreaming = state.isStreaming,
+                motionEnabled = false,
                 onClick = {
-                    followStreamingText = true
+                    followStreamingText = state.isStreaming
                     activeTurnAnchored = false
                     coroutineScope.launch {
-                        val lastContentIndex = state.lastContentIndex(hasTimelineError).coerceAtLeast(0)
+                        val lastContentIndex = lastContentIndex().coerceAtLeast(0)
                         listState.animateScrollToItem(index = lastContentIndex)
                         scrollActiveTurnIfNeeded(
                             listState = listState,
@@ -1518,28 +1809,585 @@ private fun ChatTimeline(
 }
 
 @Composable
-private fun JumpToLatestButton(
+private fun AssistantTurnBlock(
+    item: AssistantTurnTimelineItem,
+    renderContext: TimelineRenderContext,
+    timelineMotionEnabled: Boolean,
+    revealStore: TimelineRevealStore,
+    activeFlightMessageKey: String?,
+    revealedMessageKeys: Set<String>,
+    dismissingClarificationKey: String?,
+    dismissedClarificationKeys: Set<String>,
+    selectedClarificationOption: String?,
+    onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
+    onClarificationManualInput: () -> Unit,
+    onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
+    onCriteriaEdit: (CriteriaCardPayload) -> Unit,
+    onProductOpen: (String, String?) -> Unit,
+    onProductDetailOpen: (String, String) -> Unit,
+    onConvergeRecommendation: () -> Unit,
+    onDecisionEvidence: (FinalDecisionPayload) -> Unit,
+    onRetryLastMessage: () -> Unit,
+    onEditLastMessage: (String) -> Unit,
+    onQuickAction: (QuickActionPayload) -> Unit,
+    onMessageRevealComplete: (String) -> Unit,
+    onMessageRevealActiveChange: (String, Boolean) -> Unit,
+    onAssistantTurnVisualActiveChange: (String, Boolean) -> Unit,
+    onStreamingTextProgress: () -> Unit,
+    onTextCompleted: (String) -> Unit,
+    onTextRevealProgress: (String, Int, Int) -> Unit,
+    onStructuredStarted: (String) -> Unit,
+    onStructuredEntered: (String) -> Unit,
+    onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
+    onClarificationCardDismissed: (String) -> Unit,
+) {
+    val coordinator = rememberTurnStreamingCoordinator(
+        item = item,
+        revealStore = revealStore,
+        onTextCompleted = onTextCompleted,
+        onTextRevealProgress = onTextRevealProgress,
+        onStructuredEntered = onStructuredEntered,
+    )
+
+    LaunchedEffect(item.key, coordinator.visualActive) {
+        onAssistantTurnVisualActiveChange(item.key, coordinator.visualActive)
+    }
+    DisposableEffect(item.key) {
+        onDispose { onAssistantTurnVisualActiveChange(item.key, false) }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        item.nodes.forEachIndexed { index, node ->
+            val nodeVisible = node.key in coordinator.visibleNodeKeys
+            if (!nodeVisible && node !is ThinkingNode) return@forEachIndexed
+            key(node.key) {
+                TurnNodeMotion(
+                    node = node,
+                    orderIndex = index,
+                    motionEnabled = timelineMotionEnabled,
+                    hasStarted = revealStore.hasStartedStructuredNode(node.key),
+                    hasEntered = revealStore.hasEnteredStructuredNode(node.key),
+                    onStarted = {
+                        if (!node.isTextOrThinkingNode()) {
+                            onStructuredStarted(node.key)
+                        }
+                    },
+                    onEntered = {
+                        if (!node.isTextOrThinkingNode()) {
+                            coordinator.markStructuredEntered(node.key)
+                        }
+                    },
+                ) {
+                    if (node is ThinkingNode) {
+                        ThinkingNodeVisibility(visible = nodeVisible) {
+                            TimelineNodeContent(
+                                node = node,
+                                renderContext = renderContext,
+                                timelineMotionEnabled = timelineMotionEnabled,
+                                hiddenUserMessage = false,
+                                activeFlightMessageKey = activeFlightMessageKey,
+                                revealedMessageKeys = revealedMessageKeys,
+                                textRevealProgress = null,
+                                textCompleted = false,
+                                dismissingClarificationKey = dismissingClarificationKey,
+                                dismissedClarificationKeys = dismissedClarificationKeys,
+                                selectedClarificationOption = selectedClarificationOption,
+                                onClarificationOption = onClarificationOption,
+                                onClarificationManualInput = onClarificationManualInput,
+                                onClarificationManualSource = onClarificationManualSource,
+                                onCriteriaEdit = onCriteriaEdit,
+                                onProductOpen = onProductOpen,
+                                onProductDetailOpen = onProductDetailOpen,
+                                onConvergeRecommendation = onConvergeRecommendation,
+                                onDecisionEvidence = onDecisionEvidence,
+                                onRetryLastMessage = onRetryLastMessage,
+                                onEditLastMessage = onEditLastMessage,
+                                onQuickAction = onQuickAction,
+                                onMessageRevealComplete = onMessageRevealComplete,
+                                onMessageRevealActiveChange = onMessageRevealActiveChange,
+                                onStreamingTextProgress = onStreamingTextProgress,
+                                onTextRevealProgress = coordinator.updateTextProgress,
+                                onUserBubblePositioned = onUserBubblePositioned,
+                                onClarificationCardDismissed = onClarificationCardDismissed,
+                            )
+                        }
+                    } else if (nodeVisible) {
+                        TimelineNodeContent(
+                            node = node,
+                            renderContext = renderContext,
+                            timelineMotionEnabled = timelineMotionEnabled,
+                            hiddenUserMessage = false,
+                            activeFlightMessageKey = activeFlightMessageKey,
+                            revealedMessageKeys = revealedMessageKeys,
+                            textRevealProgress = (node as? AiStreamNode)?.let { revealStore.textRevealProgress(it.key) },
+                            textCompleted = (node as? AiStreamNode)?.let { revealStore.hasCompletedText(it.key) } == true,
+                            delayTextReveal = node is AiStreamNode && node.key in coordinator.textHandoffKeys,
+                            dismissingClarificationKey = dismissingClarificationKey,
+                            dismissedClarificationKeys = dismissedClarificationKeys,
+                            selectedClarificationOption = selectedClarificationOption,
+                            onClarificationOption = onClarificationOption,
+                            onClarificationManualInput = onClarificationManualInput,
+                            onClarificationManualSource = onClarificationManualSource,
+                            onCriteriaEdit = onCriteriaEdit,
+                            onProductOpen = onProductOpen,
+                            onProductDetailOpen = onProductDetailOpen,
+                            onConvergeRecommendation = onConvergeRecommendation,
+                            onDecisionEvidence = onDecisionEvidence,
+                            onRetryLastMessage = onRetryLastMessage,
+                            onEditLastMessage = onEditLastMessage,
+                            onQuickAction = onQuickAction,
+                            onMessageRevealComplete = { key ->
+                                coordinator.markTextCompleted(key)
+                                onMessageRevealComplete(key)
+                            },
+                            onMessageRevealActiveChange = onMessageRevealActiveChange,
+                            onStreamingTextProgress = onStreamingTextProgress,
+                            onTextRevealProgress = coordinator.updateTextProgress,
+                            onUserBubblePositioned = onUserBubblePositioned,
+                            onClarificationCardDismissed = onClarificationCardDismissed,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThinkingNodeVisibility(
+    visible: Boolean,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        ) + expandVertically(
+            animationSpec = tween(durationMillis = 210, easing = MenuEaseOut),
+            expandFrom = Alignment.Top,
+        ) + slideInVertically(
+            animationSpec = tween(durationMillis = 210, easing = MenuEaseOut),
+            initialOffsetY = { it / 5 },
+        ),
+        exit = fadeOut(
+            animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+        ) + shrinkVertically(
+            animationSpec = tween(durationMillis = 170, easing = MenuEaseIn),
+            shrinkTowards = Alignment.Top,
+        ) + slideOutVertically(
+            animationSpec = tween(durationMillis = 170, easing = MenuEaseIn),
+            targetOffsetY = { -it / 6 },
+        ),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun rememberTurnStreamingCoordinator(
+    item: AssistantTurnTimelineItem,
+    revealStore: TimelineRevealStore,
+    onTextCompleted: (String) -> Unit,
+    onTextRevealProgress: (String, Int, Int) -> Unit,
+    onStructuredEntered: (String) -> Unit,
+): TurnStreamingCoordinator {
+    val completedTextKeys = item.nodes
+        .filterIsInstance<AiStreamNode>()
+        .mapNotNull { node -> node.key.takeIf { revealStore.hasCompletedText(it) } }
+        .toSet()
+    val textRevealProgressByKey = item.nodes
+        .filterIsInstance<AiStreamNode>()
+        .mapNotNull { node -> revealStore.textRevealProgressByKey[node.key]?.let { node.key to it } }
+        .toMap()
+    val enteredStructuredNodeKeys = item.nodes
+        .filterNot { it is AiStreamNode || it is ThinkingNode }
+        .mapNotNull { node -> node.key.takeIf { revealStore.hasEnteredStructuredNode(it) } }
+        .toSet()
+    val visibilityState = remember(item.nodes, completedTextKeys, textRevealProgressByKey, enteredStructuredNodeKeys) {
+        item.nodes.visibleTurnNodeKeys(
+            completedTextKeys = completedTextKeys,
+            textRevealProgress = textRevealProgressByKey,
+            enteredStructuredKeys = enteredStructuredNodeKeys,
+        )
+    }
+    val visualActive = remember(item.nodes, completedTextKeys, enteredStructuredNodeKeys) {
+        item.nodes.hasUnsettledTurnVisual(
+            completedTextKeys = completedTextKeys,
+            enteredStructuredKeys = enteredStructuredNodeKeys,
+        )
+    }
+
+    return TurnStreamingCoordinator(
+        visibleNodeKeys = visibilityState.visibleNodeKeys,
+        textHandoffKeys = visibilityState.textHandoffKeys,
+        visualActive = visualActive,
+        markTextCompleted = { key ->
+            onTextCompleted(key)
+        },
+        updateTextProgress = { key, visible, total ->
+            onTextRevealProgress(key, visible, total)
+        },
+        markStructuredEntered = { key ->
+            onStructuredEntered(key)
+        },
+    )
+}
+
+internal fun List<ChatUiNode>.visibleTurnNodeKeys(
+    completedTextKeys: Set<String>,
+    textRevealProgress: Map<String, TextRevealProgress>,
+    enteredStructuredKeys: Set<String>,
+): TurnNodeVisibilityState {
+    val visible = mutableSetOf<String>()
+    val handoffTexts = mutableSetOf<String>()
+
+    forEachIndexed { index, node ->
+        when (node) {
+            is ThinkingNode -> {
+                if (canRevealThinkingNode(index, completedTextKeys, textRevealProgress, enteredStructuredKeys)) {
+                    visible += node.key
+                }
+            }
+            else -> {
+                if (canRevealTurnNode(index, node, completedTextKeys, textRevealProgress, enteredStructuredKeys)) {
+                    visible += node.key
+                    if (node is AiStreamNode &&
+                        textRevealProgress[node.key]?.hasStarted != true &&
+                        shouldDelayTextForThinkingExit(index)
+                    ) {
+                        handoffTexts += node.key
+                    }
+                }
+            }
+        }
+    }
+    return TurnNodeVisibilityState(
+        visibleNodeKeys = visible,
+        textHandoffKeys = handoffTexts,
+    )
+}
+
+internal fun List<ChatUiNode>.canRevealThinkingNode(
+    index: Int,
+    completedTextKeys: Set<String>,
+    textRevealProgress: Map<String, TextRevealProgress>,
+    enteredStructuredKeys: Set<String>,
+): Boolean {
+    for (previousIndex in 0 until index) {
+        val previous = this[previousIndex]
+        when (previous) {
+            is ThinkingNode -> Unit
+            is AiStreamNode -> {
+                if (previous.key !in completedTextKeys) return false
+            }
+            else -> {
+                if (previous.key !in enteredStructuredKeys) return false
+            }
+        }
+    }
+    val nextNode = (index + 1 until size)
+        .map { this[it] }
+        .firstOrNull { it !is ThinkingNode }
+    when (nextNode) {
+        null -> return true
+        is AiStreamNode -> return false
+        else -> return false
+    }
+    return true
+}
+
+internal fun List<ChatUiNode>.canRevealTurnNode(
+    index: Int,
+    node: ChatUiNode,
+    completedTextKeys: Set<String>,
+    textRevealProgress: Map<String, TextRevealProgress>,
+    enteredStructuredKeys: Set<String>,
+): Boolean {
+    for (previousIndex in 0 until index) {
+        val previous = this[previousIndex]
+        when (previous) {
+            is ThinkingNode -> Unit
+            is AiStreamNode -> {
+                if (previous.key !in completedTextKeys) {
+                    val allowDeckAfterIntro = node is ProductDeckNode &&
+                        previousIndex == latestTextIndexBefore(index) &&
+                        textRevealProgress[previous.key]?.hasReachedIntroGate == true
+                    if (!allowDeckAfterIntro) return false
+                }
+            }
+            else -> {
+                if (previous.key !in enteredStructuredKeys) return false
+            }
+        }
+    }
+    return true
+}
+
+internal fun List<ChatUiNode>.shouldDelayTextForThinkingExit(index: Int): Boolean =
+    index > 0 && this[index] is AiStreamNode && this[index - 1] is ThinkingNode
+
+private fun List<ChatUiNode>.latestTextIndexBefore(index: Int): Int =
+    (index - 1 downTo 0).firstOrNull { this[it] is AiStreamNode } ?: -1
+
+internal fun List<ChatUiNode>.hasUnsettledTurnVisual(
+    completedTextKeys: Set<String>,
+    enteredStructuredKeys: Set<String>,
+): Boolean =
+    any { node ->
+        when (node) {
+            is AiStreamNode -> node.key !in completedTextKeys
+            is ThinkingNode -> false
+            else -> node.key !in enteredStructuredKeys
+        }
+    }
+
+private fun ChatUiNode.isTextOrThinkingNode(): Boolean =
+    this is AiStreamNode || this is ThinkingNode
+
+internal fun shouldCompactProductDeckHistory(
+    node: ProductDeckNode,
+    isStreaming: Boolean,
+    currentTurnId: String?,
+    latestProductDeckKey: String?,
+): Boolean =
+    if (isStreaming && currentTurnId != null) {
+        node.turnId != currentTurnId
+    } else {
+        latestProductDeckKey != null && latestProductDeckKey != node.key
+    }
+
+@Composable
+private fun TurnNodeMotion(
+    node: ChatUiNode,
+    orderIndex: Int,
+    motionEnabled: Boolean,
+    hasStarted: Boolean,
+    hasEntered: Boolean,
+    onStarted: () -> Unit,
+    onEntered: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (node is AiStreamNode || node is ThinkingNode) {
+        content()
+        return
+    }
+    val shouldAnimate = remember(node.key) { motionEnabled && !hasStarted }
+    val latestOnStarted by rememberUpdatedState(onStarted)
+    val latestOnEntered by rememberUpdatedState(onEntered)
+
+    if (!shouldAnimate) {
+        LaunchedEffect(node.key) {
+            if (!hasEntered) latestOnEntered()
+        }
+        content()
+        return
+    }
+
+    var visible by remember(node.key) { mutableStateOf(false) }
+    val enterDelay = TurnStructuredEnterDelayMs + (orderIndex.coerceAtMost(4) * 28)
+
+    LaunchedEffect(node.key) {
+        latestOnStarted()
+        visible = false
+        kotlinx.coroutines.delay(enterDelay.toLong())
+        visible = true
+        kotlinx.coroutines.delay(TurnStructuredEnterMs.toLong())
+        latestOnEntered()
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            animationSpec = tween(
+                durationMillis = TurnStructuredEnterMs,
+                easing = MenuEaseOut,
+            ),
+        ) + slideInVertically(
+            animationSpec = tween(
+                durationMillis = TurnStructuredEnterMs,
+                easing = MenuEaseOut,
+            ),
+            initialOffsetY = { it / 10 },
+        ) + scaleIn(
+            animationSpec = tween(
+                durationMillis = TurnStructuredEnterMs,
+                easing = MenuEaseOut,
+            ),
+            initialScale = 0.985f,
+        ),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun TimelineNodeContent(
+    node: ChatUiNode,
+    renderContext: TimelineRenderContext,
+    timelineMotionEnabled: Boolean,
+    hiddenUserMessage: Boolean,
+    activeFlightMessageKey: String?,
+    revealedMessageKeys: Set<String>,
+    textRevealProgress: TextRevealProgress?,
+    textCompleted: Boolean,
+    delayTextReveal: Boolean = false,
+    dismissingClarificationKey: String?,
+    dismissedClarificationKeys: Set<String>,
+    selectedClarificationOption: String?,
+    onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
+    onClarificationManualInput: () -> Unit,
+    onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
+    onCriteriaEdit: (CriteriaCardPayload) -> Unit,
+    onProductOpen: (String, String?) -> Unit,
+    onProductDetailOpen: (String, String) -> Unit,
+    onConvergeRecommendation: () -> Unit,
+    onDecisionEvidence: (FinalDecisionPayload) -> Unit,
+    onRetryLastMessage: () -> Unit,
+    onEditLastMessage: (String) -> Unit,
+    onQuickAction: (QuickActionPayload) -> Unit,
+    onMessageRevealComplete: (String) -> Unit,
+    onMessageRevealActiveChange: (String, Boolean) -> Unit,
+    onStreamingTextProgress: () -> Unit,
+    onTextRevealProgress: (String, Int, Int) -> Unit,
+    onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
+    onClarificationCardDismissed: (String) -> Unit,
+) {
+    when (node) {
+        is UserMessageNode -> UserBubble(
+            node = node,
+            hidden = hiddenUserMessage,
+            onPositioned = if (node.key == activeFlightMessageKey) {
+                { onUserBubblePositioned(node.key, it) }
+            } else {
+                null
+            },
+        )
+        is ThinkingNode -> AssistantInlineStatus(
+            message = node.payload.message,
+            motionEnabled = timelineMotionEnabled &&
+                renderContext.isStreaming &&
+                renderContext.currentTurnId == node.turnId,
+        )
+        is AiStreamNode -> StreamingAssistantText(
+            nodeKey = node.key,
+            content = node.content,
+            done = node.done,
+            revealState = textRevealProgress,
+            alreadyCompleted = textCompleted,
+            initialRevealDelayMs = if (delayTextReveal) ThinkingToTextHandoffMs else 0L,
+            onRevealComplete = { onMessageRevealComplete(node.key) },
+            onRevealActiveChange = { active -> onMessageRevealActiveChange(node.key, active) },
+            onRevealProgress = { visible, total ->
+                onTextRevealProgress(node.key, visible, total)
+                onStreamingTextProgress()
+            },
+        )
+        is ClarificationNode -> ClarificationBlock(
+            nodeKey = node.key,
+            payload = node.payload,
+            anchorRevealed = node.anchorMessageKey.isBlank() || node.anchorMessageKey in revealedMessageKeys,
+            dismissed = node.key in dismissedClarificationKeys,
+            dismissing = node.key == dismissingClarificationKey,
+            selectedOption = selectedClarificationOption.takeIf { node.key == dismissingClarificationKey },
+            onOption = onClarificationOption,
+            onManualInput = onClarificationManualInput,
+            onManualSource = { snapshot -> onClarificationManualSource(node.key, snapshot) },
+            onCardDismissed = onClarificationCardDismissed,
+        )
+        is CriteriaNode -> CriteriaSummaryCard(node.payload, onEdit = { onCriteriaEdit(node.payload) })
+        is ProductDeckNode -> ProductRecommendationStrip(
+            node = node,
+            backendBaseUrl = renderContext.backendBaseUrl,
+            swipeState = renderContext.productSwipeStates[node.deckId],
+            awaitingConvergence = node.deckId in renderContext.awaitingConvergenceDeckIds,
+            hasPendingDecision = node.deckId in renderContext.pendingDecisions,
+            deckStillStreaming = renderContext.isStreaming && renderContext.currentTurnId == node.turnId,
+            compactHistory = shouldCompactProductDeckHistory(
+                node = node,
+                isStreaming = renderContext.isStreaming,
+                currentTurnId = renderContext.currentTurnId,
+                latestProductDeckKey = renderContext.latestProductDeckKey,
+            ),
+            onOpen = onProductOpen,
+            onOpenDetail = onProductDetailOpen,
+            onConverge = onConvergeRecommendation,
+        )
+        is FinalDecisionNode -> DecisionSummaryCard(
+            payload = node.payload,
+            productsById = renderContext.productsById,
+            backendBaseUrl = renderContext.backendBaseUrl,
+            onEvidence = { onDecisionEvidence(node.payload) },
+            onQuickAction = onQuickAction,
+        )
+        is CartActionNode -> CartActionCard(node.payload)
+        is ErrorNode -> ErrorCard(
+            node = node,
+            latestUserMessage = renderContext.lastUserMessage,
+            onRetry = onRetryLastMessage,
+            onEditMessage = onEditLastMessage,
+        )
+    }
+}
+
+@Composable
+private fun FollowLatestBubble(
+    isStreaming: Boolean,
+    motionEnabled: Boolean,
     onClick: () -> Unit,
 ) {
-    FloatingActionButton(
-        onClick = onClick,
-        modifier = Modifier.size(46.dp),
-        containerColor = BuyPilotColors.SurfaceCard,
-        contentColor = BuyPilotColors.TextPrimary,
-        elevation = FloatingActionButtonDefaults.elevation(
-            defaultElevation = 4.dp,
-            pressedElevation = 2.dp,
-        ),
-        shape = CircleShape,
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .shadow(
+                elevation = 6.dp,
+                shape = CircleShape,
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.1f),
+            )
+            .clip(CircleShape)
+            .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.92f))
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f), CircleShape)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_arrow_upward_24),
-            contentDescription = "回到底部",
-            tint = BuyPilotColors.PrimaryDark,
-            modifier = Modifier
-                .size(20.dp)
-                .rotate(180f),
-        )
+        if (isStreaming) {
+            StreamingFollowGlyph(motionEnabled = motionEnabled)
+        } else {
+            Icon(
+                painter = painterResource(R.drawable.ic_arrow_upward_24),
+                contentDescription = "回到底部",
+                tint = BuyPilotColors.PrimaryDark,
+                modifier = Modifier
+                    .size(18.dp)
+                    .rotate(180f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StreamingFollowGlyph(
+    motionEnabled: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .size(width = 24.dp, height = 16.dp)
+            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.92f), CircleShape),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val dotAlphas = if (motionEnabled) listOf(0.48f, 0.68f, 0.88f) else listOf(0.56f, 0.56f, 0.56f)
+        repeat(3) { index ->
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 1.25.dp)
+                    .size(3.6.dp)
+                    .background(BuyPilotColors.PrimaryDark.copy(alpha = dotAlphas[index]), CircleShape),
+            )
+        }
     }
 }
 
@@ -1547,11 +2395,27 @@ private fun JumpToLatestButton(
 private fun TimelineItemMotion(
     modifier: Modifier = Modifier,
     animateEnter: Boolean = true,
+    hasEntered: Boolean = false,
+    onEntered: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    var visible by remember { mutableStateOf(!animateEnter) }
+    val shouldAnimate = remember { animateEnter && !hasEntered }
+    val latestOnEntered by rememberUpdatedState(onEntered)
 
-    LaunchedEffect(animateEnter) {
+    if (!shouldAnimate) {
+        LaunchedEffect(Unit) {
+            if (!hasEntered) onEntered()
+        }
+        Box(modifier = modifier) {
+            content()
+        }
+        return
+    }
+
+    var visible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        latestOnEntered()
         visible = true
     }
 
@@ -1576,6 +2440,13 @@ private fun UserBubble(
     onPositioned: ((ClarificationChipSnapshot) -> Unit)? = null,
 ) {
     val bubbleShape = RoundedCornerShape(18.dp)
+    val positionModifier = if (onPositioned != null) {
+        Modifier.onGloballyPositioned { coordinates ->
+            onPositioned(coordinates.toClarificationSnapshot())
+        }
+    } else {
+        Modifier
+    }
 
     Column(
         modifier = Modifier
@@ -1587,9 +2458,8 @@ private fun UserBubble(
         Box(
             modifier = Modifier
                 .widthIn(max = 304.dp)
-                .shadow(4.dp, bubbleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
                 .background(BuyPilotColors.Primary, bubbleShape)
-                .onGloballyPositioned { coordinates -> onPositioned?.invoke(coordinates.toClarificationSnapshot()) }
+                .then(positionModifier)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             Text(
@@ -1603,8 +2473,37 @@ private fun UserBubble(
 }
 
 @Composable
+private fun AssistantInlineStatus(
+    message: String,
+    motionEnabled: Boolean,
+) {
+    val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() } ?: return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ThinkingMascotAnimation(
+            modifier = Modifier.size(28.dp),
+            motionEnabled = motionEnabled,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = displayMessage,
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 18.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun ThinkingBubble(
     message: String,
+    motionEnabled: Boolean = true,
 ) {
     val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() } ?: return
 
@@ -1612,32 +2511,30 @@ private fun ThinkingBubble(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ThinkingMascotAnimation()
+        ThinkingMascotAnimation(motionEnabled = motionEnabled)
         Spacer(Modifier.width(10.dp))
-        AnimatedContent(
-            targetState = displayMessage,
-            transitionSpec = {
-                fadeIn(
-                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-                ) + slideInVertically(
-                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-                    initialOffsetY = { it / 4 },
-                ) togetherWith fadeOut(
-                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
-                ) + slideOutVertically(
-                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
-                    targetOffsetY = { -it / 4 },
-                )
-            },
-            label = "thinking_message",
-        ) { targetMessage ->
-            ThinkingShimmerText(targetMessage)
-        }
+        ThinkingShimmerText(
+            text = displayMessage,
+            motionEnabled = motionEnabled,
+        )
     }
 }
 
 @Composable
-private fun ThinkingMascotAnimation(modifier: Modifier = Modifier) {
+private fun ThinkingMascotAnimation(
+    modifier: Modifier = Modifier,
+    motionEnabled: Boolean = true,
+) {
+    if (!motionEnabled) {
+        Image(
+            painter = painterResource(R.drawable.redbean_bun_mascot_white),
+            contentDescription = "BuyPilot mascot",
+            modifier = modifier.size(32.dp),
+            contentScale = ContentScale.Fit,
+        )
+        return
+    }
+
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.mascot_thinking))
     val progress by animateLottieCompositionAsState(
         composition = composition,
@@ -1665,18 +2562,9 @@ private fun ThinkingMascotAnimation(modifier: Modifier = Modifier) {
 private fun ThinkingShimmerText(
     text: String,
     modifier: Modifier = Modifier,
+    motionEnabled: Boolean = true,
 ) {
     val isDarkTheme = isSystemInDarkTheme()
-    val transition = rememberInfiniteTransition(label = "thinking_shimmer")
-    val animationProgress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2000),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "thinking_shimmer_progress",
-    )
     val textStyle = TextStyle(
         fontSize = BuyPilotType.Body,
         lineHeight = 20.sp,
@@ -1687,6 +2575,28 @@ private fun ThinkingShimmerText(
     } else {
         Color(0xFFA4AAB3)
     }
+    if (!motionEnabled) {
+        Text(
+            text = text,
+            style = textStyle,
+            color = shimmerColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier,
+        )
+        return
+    }
+
+    val transition = rememberInfiniteTransition(label = "thinking_shimmer")
+    val animationProgress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "thinking_shimmer_progress",
+    )
     val textBrush = remember(animationProgress, shimmerColor) {
         object : ShaderBrush() {
             override fun createShader(size: Size): Shader {
@@ -1719,6 +2629,11 @@ private fun String.withoutTrailingDots(): String =
     trim().replace(Regex("""[.。…]+$"""), "")
 
 private val PlainMarkdownParser: Parser = Parser.builder().build()
+private val MarkdownBlockQuoteMarkerRegex = Regex("""^\s{0,3}>\s?""")
+
+private fun String.withoutMarkdownBlockQuoteMarkers(): String =
+    lineSequence()
+        .joinToString("\n") { line -> line.replace(MarkdownBlockQuoteMarkerRegex, "") }
 
 private fun String.withoutMarkdownMarkup(): String {
     val source = trim()
@@ -1786,54 +2701,227 @@ private fun String.withoutMarkdownMarkup(): String {
 private fun StringBuilder.endsWithWhitespace(): Boolean =
     isNotEmpty() && last().isWhitespace()
 
-private fun String.needsPlainStreamingRender(): Boolean =
-    hasUnclosedFence() ||
-        hasPartialTable() ||
-        hasUnclosedInlineCode() ||
-        hasUnclosedStrongEmphasis()
-
-private fun String.hasUnclosedFence(): Boolean =
-    Regex("""(?m)^```""").findAll(this).count() % 2 == 1
-
-private fun String.hasUnclosedInlineCode(): Boolean {
-    val withoutFences = replace(Regex("""(?s)```.*?(?:```|$)"""), "")
-    return Regex("""(?<!`)`(?!`)""").findAll(withoutFences).count() % 2 == 1
+private fun String.needsFinalMarkdownRender(): Boolean {
+    val source = trim()
+    if (source.isBlank()) return false
+    return source.contains("```") ||
+        Regex("""(?m)^\s{0,3}#{1,6}\s+""").containsMatchIn(source) ||
+        Regex("""(?m)^\s*(?:[-*+]|\d+\.)\s+""").containsMatchIn(source) ||
+        Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
+        Regex("""(?<!\*)\*\*[^*\n]+\*\*(?!\*)""").containsMatchIn(source) ||
+        Regex("""(?<!`)`[^`\n]+`(?!`)""").containsMatchIn(source) ||
+        source.hasCompletedMarkdownTable()
 }
 
-private fun String.hasUnclosedStrongEmphasis(): Boolean {
-    val withoutCode = replace(Regex("""(?s)```.*?(?:```|$)"""), "")
-        .replace(Regex("""`[^`]*(?:`|$)"""), "")
-    return Regex("""(?<!\*)\*\*(?!\*)""").findAll(withoutCode).count() % 2 == 1
+private fun String.requiresAndroidMarkdownRender(): Boolean {
+    val source = trim()
+    if (source.isBlank()) return false
+    return source.contains("```") ||
+        source.contains("<") ||
+        Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
+        source.hasCompletedMarkdownTable()
 }
 
-private fun String.hasPartialTable(): Boolean {
-    val lines = lineSequence().toList()
-    val lastTableStart = lines.indexOfLast { it.trim().startsWith("|") && it.trim().endsWith("|") }
-    if (lastTableStart < 0) return false
-    val trailing = lines.drop(lastTableStart)
-    val lastNonBlank = lines.lastOrNull { it.isNotBlank() }?.trim()
-    if (lastNonBlank?.startsWith("|") == true) return true
-    if (trailing.size <= 1) return true
-    return trailing.any { line ->
-        val trimmed = line.trim()
-        trimmed.startsWith("|") && !trimmed.endsWith("|")
+internal fun String.toNativeMarkdownAnnotatedString(): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    var written = 0
+    var lastChar: Char? = null
+    var listDepth = 0
+    val orderedCounters = ArrayDeque<Int>()
+
+    fun appendText(value: String?) {
+        if (value.isNullOrEmpty()) return
+        builder.append(value)
+        written += value.length
+        lastChar = value.last()
+    }
+
+    fun appendChar(value: Char) {
+        builder.append(value)
+        written += 1
+        lastChar = value
+    }
+
+    fun appendBlockSeparator() {
+        if (written > 0 && lastChar?.isWhitespace() != true) {
+            appendChar('\n')
+        }
+    }
+
+    fun push(style: SpanStyle, block: () -> Unit) {
+        builder.pushStyle(style)
+        block()
+        builder.pop()
+    }
+
+    val visitor = object : AbstractVisitor() {
+        override fun visit(text: MarkdownText) {
+            appendText(text.literal)
+        }
+
+        override fun visit(code: Code) {
+            push(
+                SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    background = MarkdownComposeCodeBackground,
+                ),
+            ) {
+                appendText(code.literal)
+            }
+        }
+
+        override fun visit(strongEmphasis: StrongEmphasis) {
+            push(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                visitChildren(strongEmphasis)
+            }
+        }
+
+        override fun visit(emphasis: Emphasis) {
+            push(SpanStyle(fontStyle = FontStyle.Italic)) {
+                visitChildren(emphasis)
+            }
+        }
+
+        override fun visit(link: Link) {
+            visitChildren(link)
+        }
+
+        override fun visit(image: Image) {
+            visitChildren(image)
+        }
+
+        override fun visit(softLineBreak: SoftLineBreak) {
+            appendChar(' ')
+        }
+
+        override fun visit(hardLineBreak: HardLineBreak) {
+            appendChar('\n')
+        }
+
+        override fun visit(paragraph: Paragraph) {
+            appendBlockSeparator()
+            visitChildren(paragraph)
+        }
+
+        override fun visit(heading: Heading) {
+            appendBlockSeparator()
+            push(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                visitChildren(heading)
+            }
+        }
+
+        override fun visit(bulletList: BulletList) {
+            appendBlockSeparator()
+            listDepth += 1
+            visitChildren(bulletList)
+            listDepth -= 1
+        }
+
+        override fun visit(orderedList: OrderedList) {
+            appendBlockSeparator()
+            listDepth += 1
+            orderedCounters.addLast(orderedList.startNumber)
+            visitChildren(orderedList)
+            orderedCounters.removeLast()
+            listDepth -= 1
+        }
+
+        override fun visit(listItem: ListItem) {
+            appendBlockSeparator()
+            appendText("  ".repeat((listDepth - 1).coerceAtLeast(0)))
+            val prefix = if (orderedCounters.isEmpty()) {
+                "• "
+            } else {
+                val next = orderedCounters.removeLast()
+                orderedCounters.addLast(next + 1)
+                "$next. "
+            }
+            appendText(prefix)
+            visitChildren(listItem)
+        }
+
+        override fun visit(codeBlock: FencedCodeBlock) {
+            appendBlockSeparator()
+            push(SpanStyle(fontFamily = FontFamily.Monospace, background = MarkdownComposeCodeBackground)) {
+                appendText(codeBlock.literal.trim())
+            }
+        }
+
+        override fun visit(codeBlock: IndentedCodeBlock) {
+            appendBlockSeparator()
+            push(SpanStyle(fontFamily = FontFamily.Monospace, background = MarkdownComposeCodeBackground)) {
+                appendText(codeBlock.literal.trim())
+            }
+        }
+    }
+
+    PlainMarkdownParser.parse(withoutMarkdownBlockQuoteMarkers()).accept(visitor)
+    return builder.toAnnotatedString()
+}
+
+internal object NativeMarkdownRenderer {
+    private val renderedCache = object : LinkedHashMap<String, AnnotatedString>(
+        MarkdownRenderCacheMaxEntries,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AnnotatedString>?): Boolean =
+            size > MarkdownRenderCacheMaxEntries
+    }
+
+    fun render(content: String): AnnotatedString {
+        synchronized(this) {
+            renderedCache[content]?.let { return it }
+        }
+        val rendered = content.toNativeMarkdownAnnotatedString()
+        synchronized(this) {
+            renderedCache[content]?.let { return it }
+            renderedCache[content] = rendered
+            return rendered
+        }
+    }
+
+    fun clearForTest() {
+        synchronized(this) {
+            renderedCache.clear()
+        }
+    }
+}
+
+private fun String.hasCompletedMarkdownTable(): Boolean {
+    val lines = lineSequence().map { it.trim() }.toList()
+    return lines.windowed(size = 2).any { (header, separator) ->
+        header.startsWith("|") &&
+            header.endsWith("|") &&
+            separator.startsWith("|") &&
+            separator.endsWith("|") &&
+            separator.contains("---")
     }
 }
 
 private fun typingStep(backlog: Int, done: Boolean): Int =
     when {
         backlog <= 0 -> 0
-        done -> minOf(8, backlog)
-        backlog > 30 -> minOf(6, backlog)
-        backlog > 12 -> minOf(3, backlog)
-        else -> minOf(2, backlog)
+        done && backlog > 160 -> minOf(4, backlog)
+        done && backlog > 72 -> minOf(3, backlog)
+        backlog > 120 -> minOf(3, backlog)
+        backlog > 48 -> minOf(2, backlog)
+        else -> 1
     }
 
 private fun typingDelayMs(lastVisibleChar: Char?, backlog: Int, done: Boolean): Long =
     when {
-        done || backlog > 30 -> 8L
-        lastVisibleChar != null && lastVisibleChar.isTypingPausePunctuation() -> 90L
-        else -> 24L
+        lastVisibleChar == '\n' && backlog <= 48 -> if (done) 80L else 150L
+        lastVisibleChar != null && backlog <= 48 && lastVisibleChar.isTypingPausePunctuation() -> {
+            if (done) 72L else 128L
+        }
+        done && backlog > 160 -> 16L
+        done && backlog > 72 -> 20L
+        done -> 30L
+        backlog > 120 -> 18L
+        backlog > 48 -> 24L
+        backlog > 20 -> 30L
+        else -> 36L
     }
 
 private fun Char.isTypingPausePunctuation(): Boolean =
@@ -1842,6 +2930,16 @@ private fun Char.isTypingPausePunctuation(): Boolean =
 @Composable
 private fun AssistantText(content: String) {
     if (content.isBlank()) return
+    val renderMarkdown = remember(content) { content.needsFinalMarkdownRender() }
+    if (!renderMarkdown) {
+        PlainStreamingTextBlock(content)
+        return
+    }
+    val useAndroidMarkdown = remember(content) { content.requiresAndroidMarkdownRender() }
+    if (!useAndroidMarkdown) {
+        NativeMarkdownTextBlock(content)
+        return
+    }
     MarkdownTextBlock(
         content = content,
         style = TextStyle(
@@ -1854,66 +2952,166 @@ private fun AssistantText(content: String) {
 
 @Composable
 private fun StreamingAssistantText(
+    nodeKey: String,
     content: String,
     done: Boolean = false,
+    revealState: TextRevealProgress? = null,
+    alreadyCompleted: Boolean = false,
+    initialRevealDelayMs: Long = 0L,
     onRevealComplete: (() -> Unit)? = null,
     onRevealActiveChange: ((Boolean) -> Unit)? = null,
-    onRevealProgress: (() -> Unit)? = null,
+    onRevealProgress: ((Int, Int) -> Unit)? = null,
 ) {
-    var visibleLength by rememberSaveable { mutableIntStateOf(0) }
-    var completionReported by remember { mutableStateOf(false) }
+    if (content.isBlank()) {
+        LaunchedEffect(nodeKey) {
+            onRevealActiveChange?.invoke(false)
+        }
+        return
+    }
+    var hasSeenLiveStream by remember(nodeKey) { mutableStateOf(!done && !alreadyCompleted) }
+    LaunchedEffect(nodeKey, done, alreadyCompleted) {
+        if (!done && !alreadyCompleted) {
+            hasSeenLiveStream = true
+        }
+    }
+    val shouldRenderStatic = alreadyCompleted || (done && !hasSeenLiveStream)
+    if (shouldRenderStatic) {
+        LaunchedEffect(nodeKey) {
+            if (!alreadyCompleted) {
+                onRevealActiveChange?.invoke(false)
+                onRevealProgress?.invoke(content.length, content.length)
+                if (done) onRevealComplete?.invoke()
+            }
+        }
+        AssistantText(content)
+        return
+    }
+
+    var localVisibleLength by remember(nodeKey) {
+        mutableIntStateOf(
+            revealState?.visibleLength?.coerceAtMost(content.length) ?: 0,
+        )
+    }
     val latestOnRevealComplete by rememberUpdatedState(onRevealComplete)
     val latestOnRevealActiveChange by rememberUpdatedState(onRevealActiveChange)
     val latestOnRevealProgress by rememberUpdatedState(onRevealProgress)
+    var completionReported by remember(nodeKey) { mutableStateOf(false) }
+    val visibleLength = maxOf(localVisibleLength, revealState?.visibleLength ?: 0).coerceAtMost(content.length)
 
-    if (visibleLength > content.length) {
-        visibleLength = content.length
+    LaunchedEffect(nodeKey, revealState?.visibleLength) {
+        val target = maxOf(localVisibleLength, revealState?.visibleLength ?: 0).coerceAtMost(content.length)
+        if (localVisibleLength < target || localVisibleLength > content.length) {
+            localVisibleLength = target
+        }
     }
 
-    LaunchedEffect(content, done) {
-        if (content.isBlank()) {
+    val latestContent by rememberUpdatedState(content)
+    val latestDone by rememberUpdatedState(done)
+
+    LaunchedEffect(nodeKey) {
+        if (initialRevealDelayMs > 0 && localVisibleLength <= 0) {
+            kotlinx.coroutines.delay(initialRevealDelayMs)
+        }
+        var activeReported = false
+        while (true) {
+            val targetContent = latestContent
+            val targetLength = targetContent.length
+            if (targetLength <= 0) {
+                kotlinx.coroutines.delay(24L)
+                continue
+            }
+            if (localVisibleLength > targetLength) {
+                localVisibleLength = targetLength
+            }
+            val backlog = targetLength - localVisibleLength
+            if (backlog <= 0) {
+                if (latestDone) break
+                kotlinx.coroutines.delay(24L)
+                continue
+            }
+            if (!activeReported) {
+                activeReported = true
+                latestOnRevealActiveChange?.invoke(true)
+            }
+            val step = typingStep(backlog = backlog, done = latestDone)
+            localVisibleLength = (localVisibleLength + step).coerceAtMost(targetLength)
+            latestOnRevealProgress?.invoke(localVisibleLength, targetLength)
+            val lastVisibleChar = targetContent.getOrNull(localVisibleLength - 1)
+            kotlinx.coroutines.delay(typingDelayMs(lastVisibleChar, backlog = backlog, done = latestDone))
+        }
+        if (activeReported) {
             latestOnRevealActiveChange?.invoke(false)
-            return@LaunchedEffect
         }
-        if (visibleLength < content.length) {
-            completionReported = false
-            latestOnRevealActiveChange?.invoke(true)
-        }
-        while (visibleLength < content.length) {
-            val backlog = content.length - visibleLength
-            val step = typingStep(backlog = backlog, done = done)
-            visibleLength = (visibleLength + step).coerceAtMost(content.length)
-            latestOnRevealProgress?.invoke()
-            val lastVisibleChar = content.getOrNull(visibleLength - 1)
-            kotlinx.coroutines.delay(typingDelayMs(lastVisibleChar, backlog = backlog, done = done))
-        }
-        if (done && !completionReported) {
+        if (latestDone && !completionReported) {
             completionReported = true
-            latestOnRevealActiveChange?.invoke(false)
+            val finalLength = latestContent.length
+            latestOnRevealProgress?.invoke(finalLength, finalLength)
             latestOnRevealComplete?.invoke()
-        } else if (!done) {
-            latestOnRevealActiveChange?.invoke(false)
         }
     }
 
-    if (content.isBlank() || visibleLength <= 0) return
+    if (visibleLength <= 0) return
 
     val visibleContent = content.take(visibleLength.coerceAtMost(content.length))
-    val revealFinished = done && visibleLength >= content.length
-    val showPlainStreaming = !revealFinished && visibleContent.needsPlainStreamingRender()
-    if (showPlainStreaming) {
-        PlainStreamingTextBlock(visibleContent)
-    } else {
-        MarkdownTextBlock(visibleContent)
-    }
+    PlainStreamingTextBlock(
+        content = visibleContent,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
 private fun StreamingAssistantText(
     content: String,
 ) {
-    StreamingAssistantText(content = content, done = true)
+    StreamingAssistantText(nodeKey = content, content = content, done = true)
 }
+
+internal fun List<ChatUiNode>.toTimelineRenderItems(): List<TimelineRenderItem> {
+    val items = mutableListOf<TimelineRenderItem>()
+    var assistantTurnId: String? = null
+    val assistantNodes = mutableListOf<ChatUiNode>()
+
+    fun flushAssistantTurn() {
+        if (assistantNodes.isNotEmpty()) {
+            items += AssistantTurnTimelineItem(
+                turnId = assistantTurnId.orEmpty(),
+                nodes = assistantNodes.toList(),
+            )
+            assistantNodes.clear()
+            assistantTurnId = null
+        }
+    }
+
+    for (node in this) {
+        val turnId = node.assistantTurnId()
+        if (turnId != null) {
+            if (assistantTurnId != null && assistantTurnId != turnId) {
+                flushAssistantTurn()
+            }
+            assistantTurnId = turnId
+            assistantNodes += node
+        } else {
+            flushAssistantTurn()
+            items += when (node) {
+                is UserMessageNode -> UserTimelineItem(node)
+                else -> StandaloneTimelineItem(node)
+            }
+        }
+    }
+    flushAssistantTurn()
+    return items
+}
+
+private fun ChatUiNode.assistantTurnId(): String? =
+    when (this) {
+        is ThinkingNode -> turnId
+        is AiStreamNode -> turnId
+        is ClarificationNode -> turnId
+        is CriteriaNode -> turnId
+        is ProductDeckNode -> turnId
+        is FinalDecisionNode -> turnId
+        else -> null
+    }?.takeIf { it.isNotBlank() }
 
 @Composable
 private fun PlainStreamingTextBlock(
@@ -1931,6 +3129,75 @@ private fun PlainStreamingTextBlock(
 }
 
 @Composable
+private fun NativeMarkdownTextBlock(
+    content: String,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    style: TextStyle = TextStyle(
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.LargeBody,
+        lineHeight = 26.sp,
+    ),
+) {
+    if (content.isBlank()) return
+    val annotated = remember(content) {
+        NativeMarkdownRenderer.render(content)
+    }
+    if (annotated.isEmpty()) return
+    Text(
+        text = annotated,
+        modifier = modifier,
+        style = style,
+    )
+}
+
+private object ChatMarkdownRenderer {
+    @Volatile private var instance: Markwon? = null
+    private val renderedCache = object : LinkedHashMap<String, Spanned>(
+        MarkdownRenderCacheMaxEntries,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Spanned>?): Boolean =
+            size > MarkdownRenderCacheMaxEntries
+    }
+
+    fun get(context: Context): Markwon {
+        val cached = instance
+        if (cached != null) return cached
+        return synchronized(this) {
+            instance ?: Markwon.builder(context.applicationContext)
+                .usePlugin(object : AbstractMarkwonPlugin() {
+                    override fun configureTheme(builder: MarkwonTheme.Builder) {
+                        builder
+                            .blockQuoteWidth(0)
+                            .blockQuoteColor(android.graphics.Color.TRANSPARENT)
+                            .codeBackgroundColor(MarkdownSoftBlockColor)
+                            .codeBlockBackgroundColor(MarkdownSoftBlockColor)
+                            .codeBlockMargin(8)
+                    }
+                })
+                .usePlugin(StrikethroughPlugin.create())
+                .usePlugin(TablePlugin.create(context.applicationContext))
+                .usePlugin(HtmlPlugin.create())
+                .build()
+                .also { instance = it }
+        }
+    }
+
+    fun render(context: Context, content: String): Spanned {
+        synchronized(this) {
+            renderedCache[content]?.let { return it }
+        }
+        val rendered = get(context).toMarkdown(content.withoutMarkdownBlockQuoteMarkers())
+        synchronized(this) {
+            renderedCache[content]?.let { return it }
+            renderedCache[content] = rendered
+            return rendered
+        }
+    }
+}
+
+@Composable
 private fun MarkdownTextBlock(
     content: String,
     modifier: Modifier = Modifier.fillMaxWidth(),
@@ -1941,17 +3208,25 @@ private fun MarkdownTextBlock(
     ),
 ) {
     if (content.isBlank()) return
+    val requiresAndroidMarkdown = remember(content) { content.requiresAndroidMarkdownRender() }
+    if (!requiresAndroidMarkdown) {
+        NativeMarkdownTextBlock(
+            content = content,
+            modifier = modifier,
+            style = style,
+        )
+        return
+    }
     val context = LocalContext.current
-    val markwon = remember(context) {
-        Markwon.builder(context)
-            .usePlugin(StrikethroughPlugin.create())
-            .usePlugin(TablePlugin.create(context))
-            .usePlugin(HtmlPlugin.create())
-            .build()
+    val appContext = context.applicationContext
+    val markwon = remember(appContext) {
+        ChatMarkdownRenderer.get(appContext)
     }
     val textColor = style.color.takeOrElse { BuyPilotColors.TextPrimary }
-    val fontSizePx = with(LocalDensity.current) { style.fontSize.toPx() }
-    val lineHeightPx = with(LocalDensity.current) { style.lineHeight.toPx() }
+    val textColorArgb = remember(textColor) { textColor.toArgb() }
+    val density = LocalDensity.current
+    val fontSizePx = remember(density, style.fontSize) { with(density) { style.fontSize.toPx() } }
+    val lineHeightPx = remember(density, style.lineHeight) { with(density) { style.lineHeight.toPx() } }
     val typefaceStyle = when (style.fontWeight) {
         FontWeight.Bold,
         FontWeight.ExtraBold,
@@ -1959,53 +3234,83 @@ private fun MarkdownTextBlock(
         FontWeight.SemiBold -> android.graphics.Typeface.BOLD
         else -> android.graphics.Typeface.NORMAL
     }
+    val typeface = remember(typefaceStyle) {
+        android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+    }
+    val renderKey = remember(content, textColorArgb, fontSizePx, lineHeightPx, typefaceStyle) {
+        MarkdownTextRenderTag(
+            contentHash = content.hashCode(),
+            contentLength = content.length,
+            textColorArgb = textColorArgb,
+            fontSizePx = fontSizePx,
+            lineHeightPx = lineHeightPx,
+            typefaceStyle = typefaceStyle,
+        )
+    }
+    val renderedMarkdown = remember(appContext, content) {
+        ChatMarkdownRenderer.render(appContext, content)
+    }
 
     AndroidView(
         modifier = modifier,
         factory = { viewContext ->
             TextView(viewContext).apply {
                 includeFontPadding = false
-                setTextColor(textColor.toArgb())
+                setTextColor(textColorArgb)
                 setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizePx)
                 setLineSpacing((lineHeightPx - fontSizePx).coerceAtLeast(0f), 1f)
-                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+                this.typeface = typeface
                 movementMethod = LinkMovementMethod.getInstance()
                 linksClickable = true
             }
         },
         update = { textView ->
-            textView.setTextColor(textColor.toArgb())
+            textView.setTextColor(textColorArgb)
             textView.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizePx)
             textView.setLineSpacing((lineHeightPx - fontSizePx).coerceAtLeast(0f), 1f)
-            textView.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
-            markwon.setMarkdown(textView, content)
+            textView.typeface = typeface
+            if (textView.getTag(R.id.markdown_render_key) != renderKey) {
+                markwon.setParsedMarkdown(textView, renderedMarkdown)
+                textView.setTag(R.id.markdown_render_key, renderKey)
+            }
         },
     )
 }
 
-private fun String.toClarificationUserMessage(): String {
+private fun String.toClarificationUserMessage(defaultSkinTypeOptions: Set<String>): String {
     val clean = withoutMarkdownMarkup().trim()
     if (clean.isBlank()) return this
     val skinLabel = clean.withoutSkinSuffix()
     return when {
         clean == "不确定" -> "我还不确定肤质"
-        clean in DefaultSkinTypeOptions || clean.contains("肌") || clean.contains("肤") -> "我是${skinLabel}肌肤"
+        clean in defaultSkinTypeOptions || clean.contains("肌") || clean.contains("肤") -> "我是${skinLabel}肌肤"
         else -> clean
     }
 }
 
-private fun calculateTimelineBottomPadding(
+private fun calculateTimelineViewportBottomInset(
     density: Density,
     composerHeightPx: Int,
     imeBottomPx: Int,
 ): Dp = with(density) {
-    val baselineComposerPx = 136.dp.toPx()
-    val safeGapPx = TimelineSafeGap.toPx()
-    (maxOf(composerHeightPx.toFloat(), baselineComposerPx) + imeBottomPx + safeGapPx).toDp()
+    val fallbackComposerPx = 120.dp.toPx()
+    ((composerHeightPx.takeIf { it > 0 }?.toFloat() ?: fallbackComposerPx) + imeBottomPx).toDp()
 }
 
-private fun ChatUiState.lastContentIndex(hasTimelineError: Boolean): Int =
-    nodes.lastIndex + if (lastError != null && !hasTimelineError) 1 else 0
+private fun calculateFloatingPanelBottomPadding(
+    density: Density,
+    composerHeightPx: Int,
+    imeBottomPx: Int,
+): Dp = with(density) {
+    val fallbackComposerPx = 96.dp.toPx()
+    ((composerHeightPx.takeIf { it > 0 }?.toFloat() ?: fallbackComposerPx) + imeBottomPx).toDp() +
+        FloatingPanelComposerGap
+}
+
+private fun List<TimelineRenderItem>.lastContentIndex(
+    state: ChatUiState,
+    hasTimelineError: Boolean,
+): Int = lastIndex + if (state.lastError != null && !hasTimelineError) 1 else 0
 
 private fun isTimelineNearEnd(
     listState: LazyListState,
@@ -2038,12 +3343,28 @@ private suspend fun scrollActiveTurnIfNeeded(
         if (lastVisibleItem == null) {
             val visibleHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset - bottomPaddingPx)
                 .coerceAtLeast(tolerancePx)
-            listState.scrollBy(visibleHeight * 0.72f)
+            val delta = visibleHeight * 0.72f
+            if (delta > 96f) {
+                listState.animateScrollBy(
+                    value = delta,
+                    animationSpec = tween(durationMillis = 170, easing = MenuEaseOut),
+                )
+            } else {
+                listState.scrollBy(delta)
+            }
         } else {
             val viewportBottom = layoutInfo.viewportEndOffset - bottomPaddingPx.roundToInt()
             val overflow = (lastVisibleItem.offset + lastVisibleItem.size) - viewportBottom
             if (overflow > tolerancePx) {
-                listState.scrollBy(overflow.toFloat())
+                val delta = overflow.toFloat()
+                if (delta > 96f) {
+                    listState.animateScrollBy(
+                        value = delta,
+                        animationSpec = tween(durationMillis = 170, easing = MenuEaseOut),
+                    )
+                } else {
+                    listState.scrollBy(delta)
+                }
             }
         }
         kotlinx.coroutines.delay(16L)
@@ -2126,13 +3447,7 @@ private fun ClarificationBlock(
         ) {
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(
-                        elevation = 16.dp,
-                        shape = RoundedCornerShape(18.dp),
-                        ambientColor = Color.Black.copy(alpha = 0.035f),
-                        spotColor = Color.Black.copy(alpha = 0.055f),
-                    ),
+                    .fillMaxWidth(),
                 color = BuyPilotColors.SurfaceCard.copy(alpha = 0.96f),
                 shape = RoundedCornerShape(18.dp),
                 shadowElevation = 0.dp,
@@ -2556,6 +3871,13 @@ private fun ClarificationOptionChip(
     val pressed by interactionSource.collectIsPressedAsState()
     val haptic = LocalHapticFeedback.current
     var snapshot by remember { mutableStateOf<ClarificationChipSnapshot?>(null) }
+    val positionModifier = if (enabled) {
+        Modifier.onGloballyPositioned { coordinates ->
+            snapshot = coordinates.toClarificationSnapshot()
+        }
+    } else {
+        Modifier
+    }
     val backgroundColor by animateColorAsState(
         targetValue = when {
             selected -> BuyPilotColors.PrimarySoft.copy(alpha = 0.95f)
@@ -2595,9 +3917,7 @@ private fun ClarificationOptionChip(
             .clip(CircleShape)
             .background(backgroundColor, CircleShape)
             .border(1.dp, borderColor, CircleShape)
-            .onGloballyPositioned { coordinates ->
-                snapshot = coordinates.toClarificationSnapshot()
-            }
+            .then(positionModifier)
             .clickable(
                 enabled = enabled,
                 interactionSource = interactionSource,
@@ -2618,13 +3938,19 @@ private fun ClarificationManualInputRow(
     onClick: () -> Unit,
     onPositioned: (ClarificationChipSnapshot) -> Unit,
 ) {
+    val positionModifier = if (enabled) {
+        Modifier.onGloballyPositioned { coordinates ->
+            onPositioned(coordinates.toClarificationSnapshot())
+        }
+    } else {
+        Modifier
+    }
+
     Row(
         modifier = modifier
             .heightIn(min = 38.dp)
             .clip(CircleShape)
-            .onGloballyPositioned { coordinates ->
-                onPositioned(coordinates.toClarificationSnapshot())
-            }
+            .then(positionModifier)
             .clickable(
                 enabled = enabled,
                 onClickLabel = "聚焦输入框",
@@ -2659,16 +3985,17 @@ private fun ClarificationManualInputRow(
     }
 }
 
-private val DefaultSkinTypeOptions = listOf(
-    "油性",
-    "干性",
-    "混合性",
-    "敏感性",
-    "中性",
-    "痘痘肌",
-    "干敏肌",
-    "不确定",
-)
+@Composable
+private fun rememberCriteriaLabels(): CriteriaLabels =
+    CriteriaLabels(
+        summary = stringResource(R.string.criteria_label_summary),
+        category = stringResource(R.string.criteria_label_category),
+        coreNeed = stringResource(R.string.criteria_label_core_need),
+        targetUser = stringResource(R.string.criteria_label_target_user),
+        budget = stringResource(R.string.criteria_label_budget),
+        scenario = stringResource(R.string.criteria_label_scenario),
+        exclusions = stringResource(R.string.criteria_label_exclusions),
+    )
 
 @Composable
 private fun CriteriaSummaryCard(
@@ -2676,7 +4003,12 @@ private fun CriteriaSummaryCard(
     onEdit: () -> Unit,
 ) {
     val criteria = payload.criteria
-    val tiles = criteria.summaryTiles()
+    val summary = criteria.summary.withoutMarkdownMarkup().trim()
+    val labels = rememberCriteriaLabels()
+    val editLabel = stringResource(R.string.criteria_edit_title)
+    val chips = criteria.summaryTiles(labels)
+        .filter { it.label != labels.summary }
+        .take(5)
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2694,18 +4026,105 @@ private fun CriteriaSummaryCard(
                 lineHeight = 18.sp,
             )
         }
-        if (tiles.isNotEmpty()) {
-            CriteriaBentoGrid(tiles = tiles)
+        if (summary.isNotBlank()) {
+            CriteriaSummaryFace(text = summary)
         }
-        Text(
-            text = "也可以直接说“再温和一点”“不要酒精”“预算低一点”。",
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 18.sp,
-        )
+        if (chips.isNotEmpty()) {
+            CriteriaCompactChipRow(tiles = chips)
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            GhostButton(label = "调整筛选", leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
+            GhostButton(label = editLabel, leadingIconRes = R.drawable.ic_edit_24, onClick = onEdit)
         }
+    }
+}
+
+@Composable
+private fun CriteriaSummaryFace(
+    text: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFFAF6), RoundedCornerShape(15.dp))
+            .border(1.dp, BuyPilotColors.PrimarySoft.copy(alpha = 0.62f), RoundedCornerShape(15.dp))
+            .padding(horizontal = 13.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.64f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_search_24),
+                contentDescription = null,
+                tint = BuyPilotColors.PrimaryDark.copy(alpha = 0.82f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = text,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = 15.5f.sp,
+            lineHeight = 21.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun CriteriaCompactChipRow(
+    tiles: List<CriteriaTileSpec>,
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(end = 4.dp),
+    ) {
+        items(
+            items = tiles,
+            key = { tile -> "${tile.label}:${tile.value}" },
+        ) { tile ->
+            CriteriaCompactChip(tile = tile)
+        }
+    }
+}
+
+@Composable
+private fun CriteriaCompactChip(
+    tile: CriteriaTileSpec,
+) {
+    Row(
+        modifier = Modifier
+            .heightIn(min = 34.dp)
+            .clip(CircleShape)
+            .background(tile.background.copy(alpha = 0.66f), CircleShape)
+            .border(1.dp, tile.accent.copy(alpha = 0.13f), CircleShape)
+            .padding(start = 9.dp, top = 7.dp, end = 11.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(tile.iconRes),
+            contentDescription = null,
+            tint = tile.accent.copy(alpha = 0.74f),
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "${tile.label}：${tile.value}",
+            color = BuyPilotColors.TextSecondary.copy(alpha = 0.9f),
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -2782,7 +4201,7 @@ private fun planCriteriaTileRows(tiles: List<CriteriaTileSpec>): List<List<Crite
 }
 
 private fun CriteriaTileSpec.shouldUseFullCriteriaRow(): Boolean =
-    prominent || label == "摘要" || label == "排除项" || value.length >= 16
+    prominent || value.length >= 16
 
 @Composable
 private fun CriteriaTile(
@@ -2816,12 +4235,6 @@ private fun CriteriaTile(
 
     Box(
         modifier = modifier
-            .shadow(
-                elevation = 4.dp,
-                shape = shape,
-                ambientColor = Color(0xFF8E97A4).copy(alpha = 0.025f),
-                spotColor = Color(0xFF8E97A4).copy(alpha = 0.035f),
-            )
             .clip(shape)
             .background(cardBackground)
             .border(
@@ -2836,7 +4249,6 @@ private fun CriteriaTile(
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2939,13 +4351,27 @@ private fun ProductRecommendationStrip(
     swipeState: ProductSwipeState?,
     awaitingConvergence: Boolean,
     hasPendingDecision: Boolean,
+    deckStillStreaming: Boolean,
+    compactHistory: Boolean,
     onOpen: (String, String?) -> Unit,
     onOpenDetail: (String, String) -> Unit,
     onConverge: () -> Unit,
 ) {
     val products = node.products
     if (products.isEmpty()) return
-    val singleCandidate = products.size == 1
+    if (compactHistory) {
+        ProductRecommendationHistorySummary(
+            node = node,
+            signalSummary = swipeState.signalSummary(),
+            awaitingConvergence = awaitingConvergence,
+            hasPendingDecision = hasPendingDecision,
+            onOpen = onOpen,
+            onOpenDetail = onOpenDetail,
+            onConverge = onConverge,
+        )
+        return
+    }
+    val singleCandidate = products.size == 1 && !deckStillStreaming
 
     val pagerState = rememberPagerState(pageCount = { products.size })
     val activeIndex = pagerState.currentPage.coerceIn(0, products.lastIndex)
@@ -2980,7 +4406,7 @@ private fun ProductRecommendationStrip(
                 )
             }
             Text(
-                text = "${products.size} 个",
+                text = if (deckStillStreaming) "已到 ${products.size}" else "${products.size} 个",
                 color = BuyPilotColors.PrimaryDark,
                 fontSize = BuyPilotType.Label,
                 fontWeight = FontWeight.Medium,
@@ -2996,13 +4422,13 @@ private fun ProductRecommendationStrip(
                 .height(238.dp),
             contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
             pageSpacing = 14.dp,
-            beyondViewportPageCount = 1,
+            beyondViewportPageCount = 0,
         ) { page ->
             val payload = products[page]
             val pageOffset = (
                 (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
                 ).coerceIn(-1f, 1f)
-            val distance = kotlin.math.abs(pageOffset)
+            val distance = abs(pageOffset)
             ProductRecommendationThumb(
                 payload = payload,
                 backendBaseUrl = backendBaseUrl,
@@ -3021,7 +4447,7 @@ private fun ProductRecommendationStrip(
                         scaleX = 1f - distance * 0.055f
                         scaleY = 1f - distance * 0.075f
                         alpha = 1f - distance * 0.18f
-                },
+                    },
             )
         }
         if (!singleCandidate) {
@@ -3079,6 +4505,112 @@ private fun ProductRecommendationStrip(
             }
             if (!awaitingConvergence) {
                 ProductDeckLoadingHint()
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductRecommendationHistorySummary(
+    node: ProductDeckNode,
+    signalSummary: ProductDeckSignalSummary,
+    awaitingConvergence: Boolean,
+    hasPendingDecision: Boolean,
+    onOpen: (String, String?) -> Unit,
+    onOpenDetail: (String, String) -> Unit,
+    onConverge: () -> Unit,
+) {
+    val products = node.products
+    if (products.isEmpty()) return
+    val firstProduct = products.first().product
+    val firstProductId = firstProduct.productId.takeIf { it.isNotBlank() }
+    val title = firstProduct.name.ifBlank { "候选商品" }
+    val subtitle = buildList {
+        add("${products.size} 个候选")
+        firstProduct.priceLabel().takeIf { it.isNotBlank() }?.let(::add)
+        signalSummary.displayLabel()?.let(::add)
+    }.joinToString(" · ")
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = BuyPilotColors.SurfaceCard.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(18.dp),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "上一轮候选",
+                        color = BuyPilotColors.TextMuted,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = title,
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = subtitle,
+                        color = BuyPilotColors.TextMuted,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = "${products.size}",
+                    color = BuyPilotColors.PrimaryDark,
+                    fontSize = BuyPilotType.Label,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.62f), CircleShape)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CandidateActionButton(
+                    label = "查看候选",
+                    leadingIconRes = R.drawable.ic_article_24,
+                    primary = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onOpen(node.deckId, firstProductId) },
+                )
+                CandidateActionButton(
+                    label = if (awaitingConvergence || hasPendingDecision) "查看建议" else "继续收敛",
+                    leadingIconRes = R.drawable.ic_compare_arrows_24,
+                    primary = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = onConverge,
+                )
+                CandidateActionButton(
+                    label = "详情",
+                    leadingIconRes = R.drawable.ic_article_24,
+                    primary = true,
+                    modifier = Modifier.weight(0.82f),
+                    onClick = {
+                        firstProductId?.let { onOpenDetail(node.deckId, it) }
+                            ?: onOpen(node.deckId, null)
+                    },
+                )
             }
         }
     }
@@ -3255,6 +4787,32 @@ private fun CandidateActionButton(
 }
 
 @Composable
+private fun rememberProductDisplayTags(
+    payload: ProductCardPayload,
+    limit: Int,
+): List<String> {
+    val product = payload.product
+    return remember(
+        product.ingredientTags,
+        product.skinTypeMatch,
+        product.useScenario,
+        payload.reason,
+        payload.riskNotes,
+        limit,
+    ) {
+        payload.displayTags().take(limit)
+    }
+}
+
+@Composable
+private fun rememberPlainProductReason(reason: String): String? =
+    remember(reason) {
+        reason.withoutMarkdownMarkup()
+            .trim()
+            .takeIf { it.isNotBlank() }
+    }
+
+@Composable
 private fun ProductRecommendationThumb(
     payload: ProductCardPayload,
     backendBaseUrl: String,
@@ -3263,17 +4821,10 @@ private fun ProductRecommendationThumb(
     modifier: Modifier = Modifier,
 ) {
     val product = payload.product
-    val tags = payload.displayTags().take(2)
-    val reason = payload.reason
-        .withoutMarkdownMarkup()
-        .trim()
-        .takeIf { it.isNotBlank() }
+    val tags = rememberProductDisplayTags(payload = payload, limit = 2)
+    val reason = rememberPlainProductReason(payload.reason)
     val cardShape = RoundedCornerShape(18.dp)
-    val lift by animateDpAsState(
-        targetValue = if (selected) 2.dp else 0.dp,
-        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
-        label = "product_thumb_lift",
-    )
+    val borderAlpha = if (selected) 0.72f else 0.54f
 
     Surface(
         modifier = modifier
@@ -3282,116 +4833,89 @@ private fun ProductRecommendationThumb(
             .clickable(onClick = onClick),
         color = BuyPilotColors.SurfaceCard,
         shape = cardShape,
-        shadowElevation = lift,
-        tonalElevation = if (selected) 1.dp else 0.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = borderAlpha)),
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxSize()
-                .premiumProductCardBackground(),
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .width(106.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF6F8FA))
+                    .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.36f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
+                ProductImage(
+                    product = product,
+                    backendBaseUrl = backendBaseUrl,
+                    decodeSizePx = 240,
                     modifier = Modifier
-                        .width(106.dp)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0xFFFAFBFC),
-                                    Color(0xFFF1F5F8),
-                                    Color(0xFFF9FAFB),
-                                ),
-                            ),
-                        )
-                        .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.36f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ProductImage(
-                        product = product,
-                        backendBaseUrl = backendBaseUrl,
-                        modifier = Modifier
-                            .width(92.dp)
-                            .height(132.dp)
-                            .padding(horizontal = 3.dp, vertical = 6.dp),
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .padding(start = 13.dp, top = 4.dp, end = 3.dp, bottom = 3.dp),
-                ) {
+                        .width(92.dp)
+                        .height(132.dp)
+                        .padding(horizontal = 3.dp, vertical = 6.dp),
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(start = 13.dp, top = 4.dp, end = 3.dp, bottom = 3.dp),
+            ) {
+                Text(
+                    text = product.brandLabel(),
+                    color = BuyPilotColors.TextMuted.copy(alpha = 0.86f),
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = product.name.ifBlank { "推荐商品" },
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = 14.5f.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (reason != null) {
+                    Spacer(Modifier.height(7.dp))
                     Text(
-                        text = product.brandLabel(),
-                        color = BuyPilotColors.TextMuted.copy(alpha = 0.86f),
-                        fontSize = BuyPilotType.Tiny,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = product.name.ifBlank { "推荐商品" },
-                        color = BuyPilotColors.TextPrimary,
-                        fontSize = 14.5f.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = reason,
+                        color = BuyPilotColors.TextSecondary.copy(alpha = 0.76f),
+                        fontSize = 11.5f.sp,
+                        lineHeight = 16.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (reason != null) {
-                        Spacer(Modifier.height(7.dp))
-                        Text(
-                            text = reason,
-                            color = BuyPilotColors.TextSecondary.copy(alpha = 0.76f),
-                            fontSize = 11.5f.sp,
-                            lineHeight = 16.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                }
+                Spacer(Modifier.weight(1f))
+                ProductPriceLabel(price = product.priceLabel())
+                Spacer(Modifier.height(9.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    tags.forEach { tag ->
+                        ProductMiniTag(
+                            label = tag,
+                            compact = true,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    ProductPriceLabel(price = product.priceLabel())
-                    Spacer(Modifier.height(9.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        tags.forEach { tag ->
-                            ProductMiniTag(
-                                label = tag,
-                                compact = true,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                        }
                     }
                 }
             }
         }
     }
 }
-
-private fun Modifier.premiumProductCardBackground(): Modifier =
-    drawBehind {
-        drawRoundRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFFFCFDFE),
-                    BuyPilotColors.SurfaceCard,
-                    Color(0xFFF8FAFC),
-                ),
-            ),
-            cornerRadius = CornerRadius(18.dp.toPx(), 18.dp.toPx()),
-        )
-    }
 
 @Composable
 private fun ProductPriceLabel(
@@ -3462,7 +4986,7 @@ private fun ProductHeroCard(
     onOpen: () -> Unit,
 ) {
     val product = payload.product
-    val tags = payload.displayTags().take(3)
+    val tags = rememberProductDisplayTags(payload = payload, limit = 3)
 
     Surface(
         modifier = modifier.clickable(onClick = onOpen),
@@ -3535,21 +5059,19 @@ private fun ProductHeroCard(
 @Composable
 private fun DecisionSummaryCard(
     payload: FinalDecisionPayload,
-    products: List<ProductCardPayload>,
+    productsById: Map<String, ProductCardPayload>,
     backendBaseUrl: String,
     onEvidence: () -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val winner = payload.winnerProductId
         ?.takeIf { it.isNotBlank() }
-        ?.let { winnerId -> products.firstOrNull { it.product.productId == winnerId } }
+        ?.let { winnerId -> productsById[winnerId] }
     val product = winner?.product
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
     val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().trim() }.filter { it.isNotBlank() }
-    val presentation = payload.decisionPresentation()
-    val nextActions = payload.nextActions
-        .ifEmpty { payload.fallbackDecisionActions() }
-        .filter { it.label.isNotBlank() }
+    val statusBadge = payload.decisionStatusBadge()
+    val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         AssistantText(payload.summary)
@@ -3558,7 +5080,7 @@ private fun DecisionSummaryCard(
             !payload.winnerProductId.isNullOrBlank() ||
             whyItems.isNotEmpty() ||
             notForItems.isNotEmpty() ||
-            presentation?.forceCard == true
+            statusBadge?.showCardWhenEmpty == true
         ) {
             Surface(
                 modifier = Modifier.shadow(
@@ -3573,9 +5095,9 @@ private fun DecisionSummaryCard(
                 border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
             ) {
                 Column {
-                    if (winner != null || !payload.winnerProductId.isNullOrBlank() || presentation != null) {
-                        val headerAccent = presentation?.accent ?: BuyPilotColors.PrimaryDark
-                        val headerSurface = presentation?.surface ?: BuyPilotColors.PrimarySoft.copy(alpha = 0.78f)
+                    if (winner != null || !payload.winnerProductId.isNullOrBlank() || statusBadge != null) {
+                        val headerAccent = statusBadge?.accent ?: BuyPilotColors.PrimaryDark
+                        val headerSurface = statusBadge?.surface ?: BuyPilotColors.PrimarySoft.copy(alpha = 0.78f)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -3600,7 +5122,7 @@ private fun DecisionSummaryCard(
                             }
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                presentation?.eyebrow ?: "首选推荐",
+                                statusBadge?.label ?: "首选推荐",
                                 color = headerAccent,
                                 fontSize = BuyPilotType.Body,
                                 lineHeight = 18.sp,
@@ -3612,8 +5134,8 @@ private fun DecisionSummaryCard(
                         Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        if (winner == null && payload.winnerProductId.isNullOrBlank() && presentation != null) {
-                            DecisionStateBlock(presentation = presentation, payload = payload)
+                        if (winner == null && payload.winnerProductId.isNullOrBlank()) {
+                            DecisionStateMetaRow(payload = payload, accent = statusBadge?.accent ?: BuyPilotColors.TextSecondary)
                         }
                         if (winner != null || !payload.winnerProductId.isNullOrBlank()) {
                             Row(
@@ -3717,31 +5239,16 @@ private fun DecisionSummaryCard(
 }
 
 @Composable
-private fun DecisionStateBlock(
-    presentation: DecisionPresentation,
+private fun DecisionStateMetaRow(
     payload: FinalDecisionPayload,
+    accent: Color,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = presentation.title,
-            color = BuyPilotColors.TextPrimary,
-            fontSize = 20.sp,
-            lineHeight = 25.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = presentation.helper,
-            color = BuyPilotColors.TextSecondary,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 21.sp,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            payload.confidence?.takeIf { it.isNotBlank() }?.let {
-                DecisionMetaPill("置信度：${it.confidenceLabel()}", presentation.accent)
-            }
-            payload.nextStep?.takeIf { it.isNotBlank() }?.let {
-                DecisionMetaPill(it.nextStepLabel(), BuyPilotColors.TextSecondary)
-            }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        payload.confidence?.takeIf { it.isNotBlank() }?.let {
+            DecisionMetaPill("置信度：${it.confidenceLabel()}", accent)
+        }
+        payload.nextStep?.takeIf { it.isNotBlank() }?.let {
+            DecisionMetaPill(it.nextStepLabel(), BuyPilotColors.TextSecondary)
         }
     }
 }
@@ -4238,10 +5745,11 @@ private fun ProductCardStackView(
             val adapter = stackView.adapter as? ProductCardStackAdapter ?: return@AndroidView
             adapter.backendBaseUrl = backendBaseUrl
             adapter.onOpenDetail = onOpenDetail
-            if (adapter.productIds != products.map { it.product.productId }) {
-                adapter.submit(products)
+            val nextProductIds = products.map { it.product.productId }
+            if (adapter.productIds != nextProductIds) {
+                val changed = adapter.submit(products)
                 stackView.scrollToPosition(0)
-                onStackPositionChanged(0)
+                if (changed) onStackPositionChanged(0)
             } else {
                 adapter.submit(products)
             }
@@ -4270,10 +5778,12 @@ private class ProductCardStackAdapter(
     val productIds: List<String>
         get() = items.map { it.product.productId }
 
-    fun submit(nextItems: List<ProductCardPayload>) {
+    fun submit(nextItems: List<ProductCardPayload>): Boolean {
+        if (items == nextItems) return false
         items.clear()
         items.addAll(nextItems)
         notifyDataSetChanged()
+        return true
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ProductCardViewHolder {
@@ -5974,11 +7484,7 @@ private fun ComposerActionButton(
                 ),
                 contentDescription = if (streaming) "停止生成" else "发送",
                 tint = contentColor,
-                modifier = Modifier
-                    .size(if (streaming) 16.dp else 21.dp)
-                    .graphicsLayer {
-                        rotationZ = if (streaming) 0f else 0f
-                    },
+                modifier = Modifier.size(if (streaming) 16.dp else 21.dp),
             )
         }
     }
@@ -6042,6 +7548,14 @@ private fun CriteriaEditSheet(
     onSave: (JsonObject) -> Unit,
 ) {
     val criteria = payload.criteria
+    val labels = rememberCriteriaLabels()
+    val title = stringResource(R.string.criteria_edit_title)
+    val productTypePlaceholder = stringResource(R.string.criteria_product_type_placeholder)
+    val targetUserPlaceholder = stringResource(R.string.criteria_target_user_placeholder)
+    val scenarioPlaceholder = stringResource(R.string.criteria_scenario_placeholder)
+    val exclusionsPlaceholder = stringResource(R.string.criteria_exclusions_placeholder)
+    val resetLabel = stringResource(R.string.criteria_reset)
+    val applyLabel = stringResource(R.string.criteria_apply)
     var productType by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.productTypeLabel()) }
     var budgetMax by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.budgetMaxLabel()) }
     var skinType by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.skinTypeLabel()) }
@@ -6057,12 +7571,12 @@ private fun CriteriaEditSheet(
     }
 
     SheetContentColumn(expandToMaxHeight = false) {
-        SheetTitle("调整筛选")
+        SheetTitle(title)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             EditableFieldBlock(
-                label = "核心诉求",
+                label = labels.coreNeed,
                 value = productType,
-                placeholder = "例如 洁面乳、防晒霜、蓝牙耳机",
+                placeholder = productTypePlaceholder,
                 onValueChange = { productType = it },
                 imeAction = ImeAction.Next,
             )
@@ -6071,23 +7585,23 @@ private fun CriteriaEditSheet(
                 onValueChange = { budgetMax = it },
             )
             EditableFieldBlock(
-                label = "适用对象",
+                label = labels.targetUser,
                 value = skinType,
-                placeholder = "例如 油性、敏感、通勤党",
+                placeholder = targetUserPlaceholder,
                 onValueChange = { skinType = it },
                 imeAction = ImeAction.Next,
             )
             EditableFieldBlock(
-                label = "场景/用途",
+                label = labels.scenario,
                 value = useScenario,
-                placeholder = "例如 日常护肤、通勤、跑步训练",
+                placeholder = scenarioPlaceholder,
                 onValueChange = { useScenario = it },
                 imeAction = ImeAction.Next,
             )
             EditableFieldBlock(
-                label = "排除项",
+                label = labels.exclusions,
                 value = exclusions,
-                placeholder = "例如 酒精、日系、SK-II",
+                placeholder = exclusionsPlaceholder,
                 onValueChange = { exclusions = it },
                 imeAction = ImeAction.Done,
             )
@@ -6119,7 +7633,7 @@ private fun CriteriaEditSheet(
                 shape = RoundedCornerShape(16.dp),
                 contentPadding = PaddingValues(horizontal = 14.dp),
             ) {
-                Text("重置", fontSize = BuyPilotType.Body, fontWeight = FontWeight.Medium)
+                Text(resetLabel, fontSize = BuyPilotType.Body, fontWeight = FontWeight.Medium)
             }
             Button(
                 onClick = {
@@ -6141,7 +7655,7 @@ private fun CriteriaEditSheet(
                 contentPadding = PaddingValues(horizontal = 16.dp),
             ) {
                 Text(
-                    text = "应用并重新推荐",
+                    text = applyLabel,
                     fontSize = BuyPilotType.Body,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -7496,7 +9010,7 @@ private fun ProductMockImage(modifier: Modifier = Modifier) {
             painter = painterResource(R.drawable.product_cleanser_sample),
             contentDescription = "Product image",
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Fit,
+            contentScale = ContentScale.Crop,
         )
     }
 }
@@ -7506,17 +9020,31 @@ private fun ProductImage(
     product: ProductPayload,
     backendBaseUrl: String,
     modifier: Modifier = Modifier,
+    decodeSizePx: Int? = null,
+    contentScale: ContentScale = ContentScale.Fit,
 ) {
+    val context = LocalContext.current
     val imageUrl = product.imageUrl.resolveProductImageUrl(backendBaseUrl)
     if (imageUrl == null) {
         ProductMockImage(modifier)
         return
     }
+    val model = remember(imageUrl, decodeSizePx) {
+        if (decodeSizePx == null) {
+            imageUrl
+        } else {
+            ImageRequest.Builder(context)
+                .data(imageUrl)
+                .size(decodeSizePx)
+                .crossfade(false)
+                .build()
+        }
+    }
     AsyncImage(
-        model = imageUrl,
+        model = model,
         contentDescription = product.name.ifBlank { "商品图片" },
         modifier = modifier,
-        contentScale = ContentScale.Fit,
+        contentScale = contentScale,
         error = painterResource(R.drawable.product_cleanser_sample),
         fallback = painterResource(R.drawable.product_cleanser_sample),
         placeholder = painterResource(R.drawable.product_cleanser_sample),
@@ -7555,67 +9083,37 @@ private fun ProductDeckSignalSummary.displayLabel(): String? {
     }.joinToString("｜")
 }
 
-private fun FinalDecisionPayload.decisionPresentation(): DecisionPresentation? =
+@Composable
+private fun FinalDecisionPayload.decisionStatusBadge(): DecisionStatusBadge? =
     when (decisionStatus) {
-        "no_match" -> DecisionPresentation(
-            eyebrow = "无匹配",
-            title = "当前条件下没有匹配商品",
-            helper = "不应该硬选一个不存在的商品。下一步需要放宽或调整筛选范围后重新检索。",
+        "no_match" -> DecisionStatusBadge(
+            label = stringResource(R.string.decision_badge_no_match),
             accent = BuyPilotColors.Warning,
             surface = Color(0xFFFFF7E8),
+            showCardWhenEmpty = true,
         )
-        "no_suitable_winner" -> DecisionPresentation(
-            eyebrow = "不强行推荐",
-            title = "当前候选都不太合适",
-            helper = "你已经排除了这组候选，我不会从被排除的商品里硬选一个。可以换一组，或调整筛选条件。",
+        "no_suitable_winner" -> DecisionStatusBadge(
+            label = stringResource(R.string.decision_badge_no_suitable_winner),
             accent = BuyPilotColors.Warning,
             surface = Color(0xFFFFF7E8),
+            showCardWhenEmpty = true,
         )
-        "needs_more_signal" -> DecisionPresentation(
-            eyebrow = "还需偏好",
-            title = "我还需要一点偏好信号",
-            helper = "当前候选之间差距不大。你可以继续看候选，也可以要求我先按 RAG 和筛选条件给一个保守建议。",
+        "needs_more_signal" -> DecisionStatusBadge(
+            label = stringResource(R.string.decision_badge_needs_more_signal),
             accent = BuyPilotColors.Info,
             surface = Color(0xFFEDF5FF),
+            showCardWhenEmpty = true,
         )
         "selected" -> if (confidence == "low") {
-            DecisionPresentation(
-                eyebrow = "低置信建议",
-                title = "我先给一个当前建议",
-                helper = "这是基于当前候选、筛选条件和已有行为信号得到的暂时首选。",
+            DecisionStatusBadge(
+                label = stringResource(R.string.decision_badge_low_confidence),
                 accent = BuyPilotColors.PrimaryDark,
                 surface = BuyPilotColors.PrimarySoft.copy(alpha = 0.72f),
-                forceCard = false,
             )
         } else {
             null
         }
         else -> null
-    }
-
-private fun FinalDecisionPayload.fallbackDecisionActions(): List<QuickActionPayload> =
-    when (decisionStatus) {
-        "no_match" -> listOf(
-            QuickActionPayload(actionId = "adjust_criteria", label = "调整筛选", action = "feedback"),
-            QuickActionPayload(actionId = "relax_budget", label = "预算高一点", action = "feedback"),
-        )
-        "no_suitable_winner" -> listOf(
-            QuickActionPayload(actionId = "replace_deck", label = "换一组", action = "feedback"),
-            QuickActionPayload(actionId = "adjust_criteria", label = "调整筛选", action = "feedback"),
-        )
-        "needs_more_signal" -> listOf(
-            QuickActionPayload(actionId = "continue_current_deck", label = "继续看候选", action = "feedback"),
-            QuickActionPayload(actionId = "still_decide", label = "仍然帮我选", action = "feedback"),
-        )
-        "selected" -> if (confidence == "low") {
-            listOf(
-                QuickActionPayload(actionId = "continue_current_deck", label = "继续看候选", action = "feedback"),
-                QuickActionPayload(actionId = "adjust_criteria", label = "调整筛选", action = "feedback"),
-            )
-        } else {
-            emptyList()
-        }
-        else -> emptyList()
     }
 
 private fun String.confidenceLabel(): String =
@@ -7646,7 +9144,7 @@ private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {
     }
 }
 
-private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<CriteriaTileSpec> =
+private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(labels: CriteriaLabels): List<CriteriaTileSpec> =
     buildList {
         fun addTile(
             label: String,
@@ -7675,7 +9173,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
         }
 
         addTile(
-            label = "摘要",
+            label = labels.summary,
             value = summary,
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
@@ -7685,7 +9183,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             span = CriteriaTileSpan.Full,
         )
         addTile(
-            label = "品类",
+            label = labels.category,
             value = category,
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
@@ -7694,7 +9192,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             prominent = isEmpty(),
         )
         addTile(
-            label = "核心诉求",
+            label = labels.coreNeed,
             value = productTypeLabel(),
             iconRes = R.drawable.ic_search_24,
             accent = Color(0xFFE0643B),
@@ -7703,7 +9201,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             prominent = isEmpty(),
         )
         addTile(
-            label = "适用对象",
+            label = labels.targetUser,
             value = skinTypeLabel(),
             iconRes = R.drawable.ic_shield_24,
             accent = Color(0xFF4F86D8),
@@ -7712,7 +9210,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             prominent = isEmpty(),
         )
         addTile(
-            label = "预算",
+            label = labels.budget,
             value = budgetLabel(),
             iconRes = R.drawable.ic_payments_24,
             accent = Color(0xFFB87920),
@@ -7721,7 +9219,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             prominent = isEmpty(),
         )
         addTile(
-            label = "场景/用途",
+            label = labels.scenario,
             value = useScenarioLabel(),
             iconRes = R.drawable.ic_history_24,
             accent = Color(0xFF8B96A5),
@@ -7730,7 +9228,7 @@ private fun com.buypilot.core.model.CriteriaPayload.summaryTiles(): List<Criteri
             prominent = isEmpty(),
         )
         addTile(
-            label = "排除项",
+            label = labels.exclusions,
             value = exclusionLabels().joinToString("、"),
             iconRes = R.drawable.ic_block_24,
             accent = Color(0xFFC75B76),

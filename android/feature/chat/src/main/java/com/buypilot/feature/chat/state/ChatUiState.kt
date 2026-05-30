@@ -1,15 +1,18 @@
 package com.buypilot.feature.chat.state
 
+import androidx.compose.runtime.Immutable
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.PendingDecision
 
+@Immutable
 data class ChatRetryRequest(
     val message: String,
     val imageUrl: String? = null,
     val fromEditResubmit: Boolean = false,
 )
 
+@Immutable
 data class ChatUiState(
     val sessionId: String? = null,
     val currentTurnId: String? = null,

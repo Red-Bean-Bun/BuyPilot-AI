@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="default_skin_type_options">
+        <item>油性</item>
+        <item>干性</item>
+        <item>混合性</item>
+        <item>敏感性</item>
+        <item>中性</item>
+        <item>痘痘肌</item>
+        <item>干敏肌</item>
+        <item>不确定</item>
+    </string-array>
+
+    <string name="criteria_label_summary">摘要</string>
+    <string name="criteria_label_category">品类</string>
+    <string name="criteria_label_core_need">核心诉求</string>
+    <string name="criteria_label_target_user">适用对象</string>
+    <string name="criteria_label_budget">预算</string>
+    <string name="criteria_label_scenario">场景/用途</string>
+    <string name="criteria_label_exclusions">排除项</string>
+
+    <string name="criteria_edit_title">调整筛选</string>
+    <string name="criteria_product_type_placeholder">例如 洁面乳、防晒霜、蓝牙耳机</string>
+    <string name="criteria_target_user_placeholder">例如 油性、敏感、通勤党</string>
+    <string name="criteria_scenario_placeholder">例如 日常护肤、通勤、跑步训练</string>
+    <string name="criteria_exclusions_placeholder">例如 酒精、日系、SK-II</string>
+    <string name="criteria_reset">重置</string>
+    <string name="criteria_apply">应用并重新推荐</string>
+
+    <string name="decision_badge_no_match">无匹配</string>
+    <string name="decision_badge_no_suitable_winner">不强行推荐</string>
+    <string name="decision_badge_needs_more_signal">还需偏好</string>
+    <string name="decision_badge_low_confidence">低置信建议</string>
+</resources>

@@ -38,7 +38,8 @@ class ChatReducerTest {
         val state = ChatReducer.reduce(ChatReducer.reduce(ChatUiState(), first), second)
 
         assertEquals("sess_1", state.sessionId)
-        assertEquals(1, state.nodes.size)
+        assertEquals(2, state.nodes.size)
+        assertEquals("B", (state.nodes.last() as ThinkingNode).payload.message)
     }
 
     @Test
@@ -60,6 +61,84 @@ class ChatReducerTest {
         assertEquals("msg_1", node.key)
         assertEquals("msg_1", state.streamingTextKey)
         assertEquals("hello world".length, state.streamingTextLength)
+    }
+
+    @Test
+    fun repeatedMessageIdAcrossTurnsCreatesSeparateTextNodes() {
+        val firstTurn = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "assistant_intro_turn_1",
+                turnId = "turn_1",
+                payload = TextDeltaPayload(messageId = "assistant_intro", delta = "第一轮建议。", done = true),
+            ),
+        )
+
+        val secondTurn = ChatReducer.reduce(
+            firstTurn,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "assistant_intro_turn_2",
+                turnId = "turn_2",
+                payload = TextDeltaPayload(messageId = "assistant_intro", delta = "第二轮建议。", done = true),
+            ),
+        )
+
+        val nodes = secondTurn.nodes.filterIsInstance<AiStreamNode>()
+        assertEquals(2, nodes.size)
+        assertEquals(listOf("第一轮建议。", "第二轮建议。"), nodes.map { it.content })
+        assertEquals(listOf("assistant_intro", "assistant_intro_turn_2"), nodes.map { it.key })
+    }
+
+    @Test
+    fun doneMarksTurnTextNodesDoneForVisualTypewriterFlush() {
+        val withText = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "intro_turn_1",
+                payload = TextDeltaPayload(messageId = "intro_turn_1", delta = "hello", done = false),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            withText,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                payload = DonePayload(),
+            ),
+        )
+
+        assertTrue(state.nodes.filterIsInstance<AiStreamNode>().single().done)
+        assertFalse(state.isStreaming)
+    }
+
+    @Test
+    fun doneWithoutTurnIdMarksCurrentStreamingTextDone() {
+        val withText = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "standalone_intro",
+                turnId = "",
+                payload = TextDeltaPayload(delta = "hello", done = false),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            withText,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done",
+                turnId = "",
+                payload = DonePayload(),
+            ),
+        )
+
+        assertTrue(state.nodes.filterIsInstance<AiStreamNode>().single().done)
+        assertFalse(state.isStreaming)
     }
 
     @Test
@@ -180,7 +259,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun textDeltaRemovesTransientThinkingAndAppendsIntoAiStreamNode() {
+    fun textDeltaKeepsTransientThinkingForInlineMorphAndAppendsIntoAiStreamNode() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -201,10 +280,53 @@ class ChatReducerTest {
             )
         }
 
-        val node = state.nodes.single() as AiStreamNode
+        val node = state.nodes.filterIsInstance<AiStreamNode>().single()
         assertEquals("assistant_intro_turn_1", node.key)
         assertEquals("敏感肌面霜，我会先避开酒精和香精。", node.content)
-        assertFalse(state.nodes.any { it is ThinkingNode })
+        assertTrue(state.nodes.any { it is ThinkingNode })
+    }
+
+    @Test
+    fun laterThinkingKeepsPriorSegmentAndMovesLiveMascotNearActiveWork() {
+        val intro = listOf("我先看下候选。").fold(ChatUiState()) { acc, delta ->
+            ChatReducer.reduce(
+                acc,
+                envelope(
+                    event = AgentEventType.TextDelta,
+                    nodeId = "assistant_intro_turn_1",
+                    payload = TextDeltaPayload(messageId = "assistant_intro_turn_1", delta = delta),
+                ),
+            )
+        }
+        val firstThinking = ChatReducer.reduce(
+            intro,
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "searching", message = "正在检索匹配商品"),
+            ),
+        )
+        val secondText = ChatReducer.reduce(
+            firstThinking,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "assistant_reason_turn_1",
+                payload = TextDeltaPayload(messageId = "assistant_reason_turn_1", delta = "这里有三款比较接近。"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            secondText,
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "decision", message = "正在结合反馈"),
+            ),
+        )
+
+        assertEquals(2, state.nodes.filterIsInstance<ThinkingNode>().size)
+        assertTrue(state.nodes.last() is ThinkingNode)
+        assertEquals("正在结合反馈", (state.nodes.last() as ThinkingNode).payload.message)
     }
 
     @Test
@@ -367,7 +489,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun criteriaCardClearsThinkingAndStoresPayloadWithoutReducerInjectedText() {
+    fun criteriaCardKeepsThinkingForUiExitAnimationAndStoresPayloadWithoutReducerInjectedText() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -393,9 +515,9 @@ class ChatReducerTest {
             ),
         )
 
-        assertFalse(state.nodes.any { it is ThinkingNode })
         assertFalse(state.nodes.any { it is AiStreamNode })
-        val node = state.nodes.single() as CriteriaNode
+        assertTrue(state.nodes.first() is ThinkingNode)
+        val node = state.nodes.single { it is CriteriaNode } as CriteriaNode
         assertEquals(payload, node.payload)
     }
 
@@ -436,7 +558,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun finalDecisionClearsThinkingAndStoresPayloadWithoutTextNode() {
+    fun finalDecisionKeepsThinkingForUiExitAnimationAndStoresPayloadWithoutTextNode() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -456,9 +578,9 @@ class ChatReducerTest {
             ),
         )
 
-        assertFalse(state.nodes.any { it is ThinkingNode })
         assertFalse(state.nodes.any { it is AiStreamNode })
-        val node = state.nodes.single() as FinalDecisionNode
+        assertTrue(state.nodes.first() is ThinkingNode)
+        val node = state.nodes.single { it is FinalDecisionNode } as FinalDecisionNode
         assertEquals(payload, node.payload)
     }
 
@@ -626,14 +748,15 @@ class ChatReducerTest {
     private fun envelope(
         event: AgentEventType,
         nodeId: String,
+        turnId: String = "turn_1",
         deckId: String? = null,
         payload: AgentPayload,
     ) = AgentUiEnvelope(
         event = event,
         sessionId = "sess_1",
-        turnId = "turn_1",
+        turnId = turnId,
         seq = 1,
-        eventId = "turn_1:1",
+        eventId = "$turnId:1",
         nodeId = nodeId,
         deckId = deckId,
         displayMode = null,

@@ -70,12 +70,14 @@ object ChatReducer {
         }
 
         return when (envelope.event) {
-            AgentEventType.Thinking -> base.upsertNode(
-                ThinkingNode(
-                    key = envelope.nodeId,
-                    payload = envelope.payload as ThinkingPayload,
-                    turnId = envelope.turnId,
-                ),
+            AgentEventType.Thinking -> base.upsertThinkingAtTail(
+                (envelope.payload as ThinkingPayload).let { payload ->
+                    ThinkingNode(
+                        key = payload.thinkingNodeKey(envelope),
+                        payload = payload,
+                        turnId = envelope.turnId,
+                    )
+                },
             ).copy(
                 inputState = ChatInputState.Streaming,
                 isStreaming = true,
@@ -98,23 +100,25 @@ object ChatReducer {
             AgentEventType.Done -> {
                 val payload = envelope.payload as DonePayload
                 val awaitingDeckId = payload.deckId?.takeIf { it.isNotBlank() }
+                val finalizedContentBase = contentBase.markTurnTextDone(envelope.turnId)
+                    .markStreamingTextDoneWhenTurnMissing(envelope.turnId)
                 val doneBase = if (
                     payload.finishReason == "awaiting_product_feedback" &&
                     awaitingDeckId != null &&
-                    contentBase.productCountForDeck(awaitingDeckId) >= 2
+                    finalizedContentBase.productCountForDeck(awaitingDeckId) >= 2
                 ) {
-                    contentBase.markDeckAwaitingConvergence(awaitingDeckId)
+                    finalizedContentBase.markDeckAwaitingConvergence(awaitingDeckId)
                 } else {
-                    contentBase
+                    finalizedContentBase
                 }
                 doneBase.copy(
                     inputState = if (payload.finishReason == "canceled" || payload.finishReason == "cancelled") {
                         ChatInputState.Canceled
-                    } else if (contentBase.inputState == ChatInputState.Clarifying ||
-                        contentBase.inputState == ChatInputState.Error ||
-                        contentBase.inputState == ChatInputState.Canceled
+                    } else if (finalizedContentBase.inputState == ChatInputState.Clarifying ||
+                        finalizedContentBase.inputState == ChatInputState.Error ||
+                        finalizedContentBase.inputState == ChatInputState.Canceled
                     ) {
-                        contentBase.inputState
+                        finalizedContentBase.inputState
                     } else {
                         ChatInputState.Idle
                     },
@@ -232,7 +236,7 @@ object ChatReducer {
         return if (pending == null) {
             withoutWaiting
         } else {
-            withoutWaiting.upsertNode(FinalDecisionNode(pending.key, pending.payload))
+            withoutWaiting.upsertNode(FinalDecisionNode(pending.key, pending.payload, turnId = pending.turnId))
         }
     }
 
@@ -241,13 +245,17 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as TextDeltaPayload
-        val messageKey = payload.messageId.ifBlank { envelope.nodeId }
+        val rawMessageKey = payload.messageId.ifBlank { envelope.nodeId }
         val existing = state.nodes.filterIsInstance<AiStreamNode>()
             .firstOrNull {
-                it.key == messageKey ||
-                    (payload.messageId.isNotBlank() && it.messageId == payload.messageId)
+                it.turnId == envelope.turnId &&
+                    (
+                        it.key == rawMessageKey ||
+                            (payload.messageId.isNotBlank() && it.messageId == payload.messageId)
+                        )
             }
-        val textBase = state.withoutThinking(envelope.turnId)
+        val messageKey = existing?.key ?: state.uniqueNodeKeyForTurn(rawMessageKey, envelope.turnId)
+        val textBase = state
         val node = AiStreamNode(
             key = existing?.key ?: messageKey,
             messageId = payload.messageId,
@@ -270,7 +278,11 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         return state.upsertNode(
-            CriteriaNode(envelope.nodeId, envelope.payload as CriteriaCardPayload),
+            CriteriaNode(
+                key = envelope.nodeId,
+                payload = envelope.payload as CriteriaCardPayload,
+                turnId = envelope.turnId,
+            ),
         )
     }
 
@@ -311,9 +323,21 @@ object ChatReducer {
                 key = deckId,
                 deckId = deckId,
                 products = products,
+                turnId = existing?.turnId ?: envelope.turnId,
             ),
         )
         return if (products.size <= 1) nextState.clearDeckConvergence(deckId) else nextState
+    }
+
+    private fun ChatUiState.uniqueNodeKeyForTurn(baseKey: String, turnId: String): String {
+        if (nodes.none { it.key == baseKey }) return baseKey
+        val turnScopedKey = if (turnId.isNotBlank()) "${baseKey}_$turnId" else baseKey
+        if (nodes.none { it.key == turnScopedKey }) return turnScopedKey
+        var index = 2
+        while (nodes.any { it.key == "${turnScopedKey}_$index" }) {
+            index += 1
+        }
+        return "${turnScopedKey}_$index"
     }
 
     private fun reduceFinalDecision(
@@ -338,7 +362,7 @@ object ChatReducer {
                     ),
             )
         } else {
-            state.upsertNode(FinalDecisionNode(envelope.nodeId, payload))
+            state.upsertNode(FinalDecisionNode(envelope.nodeId, payload, turnId = envelope.turnId))
         }
     }
 
@@ -378,10 +402,30 @@ object ChatReducer {
         return copy(nodes = nextNodes)
     }
 
+    private fun ChatUiState.upsertThinkingAtTail(node: ThinkingNode): ChatUiState {
+        val activeTurnId = node.turnId.takeIf { it.isNotBlank() }
+        val nextNodes = nodes.filterNot {
+            it is ThinkingNode &&
+                (
+                    it.key == node.key ||
+                        (activeTurnId != null && it.turnId == activeTurnId && it.payload.stage == node.payload.stage)
+                    )
+        } + node
+        return copy(nodes = nextNodes)
+    }
+
+    private fun ThinkingPayload.thinkingNodeKey(envelope: AgentUiEnvelope<AgentPayload>): String {
+        val stableStage = stage.takeIf { it.isNotBlank() } ?: "thinking"
+        return "${envelope.nodeId}_$stableStage"
+    }
+
     private fun AgentEventType.shouldClearTransientThinking(state: ChatUiState, turnId: String): Boolean =
         when (this) {
             AgentEventType.Thinking,
             AgentEventType.TextDelta,
+            AgentEventType.CriteriaCard,
+            AgentEventType.ProductCard,
+            AgentEventType.FinalDecision,
             AgentEventType.Unknown -> false
             AgentEventType.Clarification -> true
             AgentEventType.Done -> !state.hasClarificationForTurn(turnId)
@@ -401,5 +445,34 @@ object ChatReducer {
         } else {
             copy(nodes = nextNodes)
         }
+    }
+
+    private fun ChatUiState.markTurnTextDone(turnId: String): ChatUiState {
+        if (turnId.isBlank()) return this
+        var changed = false
+        val nextNodes = nodes.map { node ->
+            if (node is AiStreamNode && node.turnId == turnId && !node.done) {
+                changed = true
+                node.copy(done = true)
+            } else {
+                node
+            }
+        }
+        return if (changed) copy(nodes = nextNodes) else this
+    }
+
+    private fun ChatUiState.markStreamingTextDoneWhenTurnMissing(turnId: String): ChatUiState {
+        if (turnId.isNotBlank()) return this
+        val key = streamingTextKey ?: return this
+        var changed = false
+        val nextNodes = nodes.map { node ->
+            if (node is AiStreamNode && node.key == key && !node.done) {
+                changed = true
+                node.copy(done = true)
+            } else {
+                node
+            }
+        }
+        return if (changed) copy(nodes = nextNodes) else this
     }
 }
