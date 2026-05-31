@@ -434,8 +434,8 @@ object ChatReducer {
         val isMultiProductDeckDecision = associatedDeck != null && associatedDeck.products.size >= 2
         val isCurrentDeckScopedConvergence = explicitDeckId != null &&
             envelope.turnId.isNotBlank() &&
-            state.currentTurnId == envelope.turnId &&
-            (state.isStreaming || state.activeConvergenceDeckId == explicitDeckId)
+            (state.currentTurnId == envelope.turnId || state.activeConvergenceDeckId == explicitDeckId) &&
+            state.activeConvergenceDeckId == explicitDeckId
         if (deckId != null && isMultiProductDeckDecision && !isCurrentDeckScopedConvergence) {
             if (state.isDeckFullyHandled(deckId)) {
                 return state.clearDeckConvergence(deckId)
@@ -590,15 +590,36 @@ object ChatReducer {
 
     private fun ChatUiState.upsertThinkingAtTail(node: ThinkingNode): ChatUiState {
         val activeTurnId = node.turnId.takeIf { it.isNotBlank() }
-        val nextNodes = nodes.filterNot {
-            it is ThinkingNode &&
-                (
-                    it.key == node.key ||
-                        (activeTurnId != null && it.turnId == activeTurnId && it.payload.stage == node.payload.stage)
-                    )
+        fun hasSameTurnContentAfter(index: Int): Boolean {
+            if (activeTurnId == null) return false
+            return nodes.drop(index + 1).any { next ->
+                next !is ThinkingNode && next.assistantTurnIdOrNull() == activeTurnId
+            }
+        }
+        val nextNodes = nodes.filterIndexed { index, existing ->
+            if (existing !is ThinkingNode) return@filterIndexed true
+            val sameKey = existing.key == node.key
+            val sameStage = activeTurnId != null &&
+                existing.turnId == activeTurnId &&
+                existing.payload.stage == node.payload.stage
+            val unpairedSameTurnThinking = activeTurnId != null &&
+                existing.turnId == activeTurnId &&
+                !hasSameTurnContentAfter(index)
+            !(sameKey || sameStage || unpairedSameTurnThinking)
         } + node
         return copy(nodes = nextNodes)
     }
+
+    private fun ChatUiNode.assistantTurnIdOrNull(): String? =
+        when (this) {
+            is ThinkingNode -> turnId
+            is AiStreamNode -> turnId
+            is ClarificationNode -> turnId
+            is CriteriaNode -> turnId
+            is ProductDeckNode -> turnId
+            is FinalDecisionNode -> turnId
+            else -> null
+        }?.takeIf { it.isNotBlank() }
 
     private fun ThinkingPayload.thinkingNodeKey(envelope: AgentUiEnvelope<AgentPayload>): String {
         val stableStage = stage.takeIf { it.isNotBlank() } ?: "thinking"
@@ -611,8 +632,8 @@ object ChatReducer {
             AgentEventType.TextDelta,
             AgentEventType.CriteriaCard,
             AgentEventType.ProductCard,
-            AgentEventType.FinalDecision,
             AgentEventType.Unknown -> false
+            AgentEventType.FinalDecision -> true
             AgentEventType.Clarification -> true
             AgentEventType.Done -> !state.hasClarificationForTurn(turnId)
             else -> true
