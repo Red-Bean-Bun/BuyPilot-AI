@@ -167,11 +167,13 @@ object ChatReducer {
         productId: String?,
     ): ChatUiState {
         val products = state.productIdsForDeck(deckId)
-        val selectedProductId = productId
-            ?.takeIf { it in products }
-            ?: products.firstOrNull { it !in state.productSwipeStates[deckId].orEmpty().swipedProductIds }
-            ?: products.firstOrNull()
         val swipeState = state.productSwipeStates[deckId].orEmpty()
+        val handledProductIds = swipeState.swipedProductIds.toSet()
+        val selectedProductId = productId
+            ?.takeIf { it in products && it !in handledProductIds }
+            ?: products.firstOrNull { it !in handledProductIds }
+            ?: productId?.takeIf { it in products }
+            ?: products.firstOrNull()
         return state.copy(
             productSwipeStates = state.productSwipeStates + (
                 deckId to swipeState.copy(currentProductId = selectedProductId)
@@ -191,8 +193,17 @@ object ChatReducer {
 
         val swipeState = state.productSwipeStates[deckId].orEmpty()
         if (feedbackType == "view_detail" || action == "view_detail" || action == "open_evidence") {
+            val handledProductIds = swipeState.swipedProductIds.toSet()
+            val nextCurrentProductId = if (productId in handledProductIds) {
+                swipeState.currentProductId
+                    ?.takeIf { it in products && it !in handledProductIds }
+                    ?: products.firstOrNull { it !in handledProductIds }
+                    ?: productId
+            } else {
+                productId
+            }
             val nextSwipeState = swipeState.copy(
-                currentProductId = productId,
+                currentProductId = nextCurrentProductId,
                 viewedProductIds = (swipeState.viewedProductIds + productId).distinct(),
             )
             return state.copy(productSwipeStates = state.productSwipeStates + (deckId to nextSwipeState))
@@ -201,15 +212,18 @@ object ChatReducer {
         val nextProductId = products.firstOrNull { it !in swiped }
             ?: products.firstOrNull { it != productId }
             ?: productId
+        val nextUndoStack = swipeState.undoStack
+            .filterNot { action -> action.productId == productId && action.isChoiceFeedback() } +
+            ProductSwipeAction(
+                productId = productId,
+                feedbackType = feedbackType,
+                action = action,
+            )
         val nextSwipeState = swipeState.copy(
             currentProductId = nextProductId,
             viewedProductIds = (swipeState.viewedProductIds + productId).distinct(),
             swipedProductIds = swiped,
-            undoStack = swipeState.undoStack + ProductSwipeAction(
-                productId = productId,
-                feedbackType = feedbackType,
-                action = action,
-            ),
+            undoStack = nextUndoStack,
         )
         return state.copy(productSwipeStates = state.productSwipeStates + (deckId to nextSwipeState))
     }
@@ -225,8 +239,12 @@ object ChatReducer {
         return state.copy(productSwipeStates = state.productSwipeStates + (deckId to nextSwipeState))
     }
 
-    fun convergeDeck(state: ChatUiState, deckId: String): ChatUiState {
-        val pending = state.pendingDecisions[deckId]
+    fun convergeDeck(
+        state: ChatUiState,
+        deckId: String,
+        usePendingDecision: Boolean = true,
+    ): ChatUiState {
+        val pending = state.pendingDecisions[deckId].takeIf { usePendingDecision }
         val withoutWaiting = state.copy(
             awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds - deckId,
             pendingDecisions = state.pendingDecisions - deckId,
@@ -326,7 +344,11 @@ object ChatReducer {
                 turnId = existing?.turnId ?: envelope.turnId,
             ),
         )
-        return if (products.size <= 1) nextState.clearDeckConvergence(deckId) else nextState
+        return if (products.size <= 1) {
+            nextState.clearDeckConvergence(deckId)
+        } else {
+            nextState.markDeckAwaitingConvergence(deckId)
+        }
     }
 
     private fun ChatUiState.uniqueNodeKeyForTurn(baseKey: String, turnId: String): String {
@@ -350,9 +372,11 @@ object ChatReducer {
         return if (
             deckId != null &&
             latestDeck.products.size >= 2 &&
-            deckId in state.awaitingConvergenceDeckIds
+            deckId in state.awaitingConvergenceDeckIds &&
+            envelope.turnId == latestDeck.turnId
         ) {
             state.copy(
+                awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds + deckId,
                 pendingDecisions = state.pendingDecisions + (
                     deckId to PendingDecision(
                         key = envelope.nodeId,
@@ -382,6 +406,12 @@ object ChatReducer {
             .size
 
     private fun ProductSwipeState?.orEmpty(): ProductSwipeState = this ?: ProductSwipeState()
+
+    private fun ProductSwipeAction.isChoiceFeedback(): Boolean =
+        feedbackType == "like" ||
+            feedbackType == "not_interested" ||
+            action == "like" ||
+            action == "not_interested"
 
     private fun ChatUiState.markDeckAwaitingConvergence(deckId: String): ChatUiState =
         copy(awaitingConvergenceDeckIds = awaitingConvergenceDeckIds + deckId)

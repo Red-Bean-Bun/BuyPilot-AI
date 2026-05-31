@@ -3,13 +3,17 @@ package com.buypilot.feature.chat.ui
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
+import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.ChatUiNode
+import com.buypilot.feature.chat.model.ClarificationNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
+import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import com.buypilot.feature.chat.state.ChatUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -120,6 +124,36 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun clarificationCardWaitsForQuestionRevealBeforeFollowingNodes() {
+        val clarification = clarification("clarify_category")
+        val deck = deck("deck_after_clarification")
+        val nodes = listOf<ChatUiNode>(clarification, deck)
+        val questionKey = "${clarification.key}_question"
+
+        val beforeQuestionDone = nodes.visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+        val afterQuestionBeforeCardEntered = nodes.visibleTurnNodeKeys(
+            completedTextKeys = setOf(questionKey),
+            textRevealProgress = mapOf(questionKey to TextRevealProgress(visibleLength = 12, totalLength = 12)),
+            enteredStructuredKeys = emptySet(),
+        )
+        val afterCardEntered = nodes.visibleTurnNodeKeys(
+            completedTextKeys = setOf(questionKey),
+            textRevealProgress = mapOf(questionKey to TextRevealProgress(visibleLength = 12, totalLength = 12)),
+            enteredStructuredKeys = setOf(clarification.key),
+        )
+
+        assertTrue(clarification.key in beforeQuestionDone.visibleNodeKeys)
+        assertFalse(deck.key in beforeQuestionDone.visibleNodeKeys)
+        assertTrue(clarification.key in afterQuestionBeforeCardEntered.visibleNodeKeys)
+        assertFalse(deck.key in afterQuestionBeforeCardEntered.visibleNodeKeys)
+        assertTrue(deck.key in afterCardEntered.visibleNodeKeys)
+    }
+
+    @Test
     fun productDeckCanEnterAfterIntroGateAndFinalCardWaitsForDeckAndTextCompletion() {
         val text = text("intro_text")
         val deck = deck("deck_1")
@@ -152,6 +186,124 @@ class TimelineRevealStoreTest {
         assertFalse(final.key in afterIntroGate.visibleNodeKeys)
         assertFalse(final.key in afterDeckEnteredBeforeTextDone.visibleNodeKeys)
         assertTrue(final.key in afterDeckEnteredAndTextDone.visibleNodeKeys)
+    }
+
+    @Test
+    fun settledTurnShowsFinalCardWithoutReplayingTextAfterNavigationReturn() {
+        val text = text("intro_text").copy(done = true)
+        val deck = deck("deck_1")
+        val final = finalDecision("final_decision")
+        val nodes = listOf<ChatUiNode>(text, deck, final)
+
+        val state = nodes.visibleTurnNodeKeys(
+            completedTextKeys = nodes.settledTextRevealKeys(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = nodes.settledStructuredNodeKeys(),
+        )
+
+        assertTrue(text.key in state.visibleNodeKeys)
+        assertTrue(deck.key in state.visibleNodeKeys)
+        assertTrue(final.key in state.visibleNodeKeys)
+        assertTrue(state.textHandoffKeys.isEmpty())
+    }
+
+    @Test
+    fun multiProductDeckDoesNotAutoConvergeAfterAllCandidatesAreHandled() {
+        val products = listOf(
+            product("p1"),
+            product("p2"),
+            product("p3"),
+        )
+
+        assertFalse(
+            shouldAutoConvergeProductDeck(
+                products = products,
+                remainingProducts = products.take(1),
+            ),
+        )
+        assertFalse(
+            shouldAutoConvergeProductDeck(
+                products = products,
+                remainingProducts = emptyList(),
+            ),
+        )
+        assertFalse(
+            shouldAutoConvergeProductDeck(
+                products = listOf(product("single")),
+                remainingProducts = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun productCarouselPrefersFirstUnhandledCandidateAfterFeedback() {
+        val products = listOf(product("p1"), product("p2"), product("p3"))
+
+        assertEquals(
+            1,
+            preferredProductCarouselPage(
+                products = products,
+                swipeState = ProductSwipeState(
+                    currentProductId = "p2",
+                    swipedProductIds = listOf("p1"),
+                ),
+            ),
+        )
+        assertEquals(
+            1,
+            preferredProductCarouselPage(
+                products = products,
+                swipeState = ProductSwipeState(
+                    currentProductId = "p1",
+                    swipedProductIds = listOf("p1"),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun productCarouselOpensCardsAsDetailWhenProductIdExists() {
+        assertTrue(
+            shouldOpenProductCardAsDetail(
+                productId = "p2",
+                singleCandidate = false,
+                handledProductIds = setOf("p1"),
+                deckConverged = false,
+            ),
+        )
+        assertTrue(
+            shouldOpenProductCardAsDetail(
+                productId = "p1",
+                singleCandidate = false,
+                handledProductIds = setOf("p1"),
+                deckConverged = false,
+            ),
+        )
+        assertTrue(
+            shouldOpenProductCardAsDetail(
+                productId = "p2",
+                singleCandidate = false,
+                handledProductIds = setOf("p1"),
+                deckConverged = true,
+            ),
+        )
+        assertFalse(
+            shouldOpenProductCardAsDetail(
+                productId = "",
+                singleCandidate = true,
+                handledProductIds = emptySet(),
+                deckConverged = true,
+            ),
+        )
+    }
+
+    @Test
+    fun productDetailBecomesReadOnlyAfterDeckConverges() {
+        val deck = deck("deck_1")
+        val final = finalDecision("final_decision")
+
+        assertFalse(ChatUiState(nodes = listOf(final, deck)).hasConvergedDecisionForDeck("deck_1"))
+        assertTrue(ChatUiState(nodes = listOf(deck, final)).hasConvergedDecisionForDeck("deck_1"))
     }
 
     @Test
@@ -199,6 +351,7 @@ class TimelineRevealStoreTest {
         assertTrue(
             shouldCompactProductDeckHistory(
                 node = previousDeck,
+                deckConverged = false,
                 isStreaming = true,
                 currentTurnId = "turn_2",
                 latestProductDeckKey = currentDeck.key,
@@ -207,6 +360,7 @@ class TimelineRevealStoreTest {
         assertFalse(
             shouldCompactProductDeckHistory(
                 node = currentDeck,
+                deckConverged = false,
                 isStreaming = true,
                 currentTurnId = "turn_2",
                 latestProductDeckKey = currentDeck.key,
@@ -222,6 +376,7 @@ class TimelineRevealStoreTest {
         assertTrue(
             shouldCompactProductDeckHistory(
                 node = previousDeck,
+                deckConverged = false,
                 isStreaming = false,
                 currentTurnId = null,
                 latestProductDeckKey = latestDeck.key,
@@ -230,8 +385,33 @@ class TimelineRevealStoreTest {
         assertFalse(
             shouldCompactProductDeckHistory(
                 node = latestDeck,
+                deckConverged = false,
                 isStreaming = false,
                 currentTurnId = null,
+                latestProductDeckKey = latestDeck.key,
+            ),
+        )
+    }
+
+    @Test
+    fun productDeckHistoryCompactsLatestDeckAfterDecisionAppears() {
+        val latestDeck = deck("deck_latest", turnId = "turn_1")
+
+        assertTrue(
+            shouldCompactProductDeckHistory(
+                node = latestDeck,
+                deckConverged = true,
+                isStreaming = false,
+                currentTurnId = null,
+                latestProductDeckKey = latestDeck.key,
+            ),
+        )
+        assertTrue(
+            shouldCompactProductDeckHistory(
+                node = latestDeck,
+                deckConverged = true,
+                isStreaming = true,
+                currentTurnId = latestDeck.turnId,
                 latestProductDeckKey = latestDeck.key,
             ),
         )
@@ -271,6 +451,33 @@ class TimelineRevealStoreTest {
         assertSame(first, second)
     }
 
+    @Test
+    fun decisionSummaryDividerUsesAndroidMarkdownRenderer() {
+        val content = "---\n\n优先选小米 17 Ultra。"
+
+        assertTrue(content.needsFinalMarkdownRender())
+        assertTrue(content.requiresAndroidMarkdownRender())
+    }
+
+    @Test
+    fun clarificationManualPromptFollowsMissingSlotContext() {
+        val category = clarificationManualPromptFor(
+            ClarificationPayload(
+                question = "你想买哪一类商品？",
+                requiredSlots = listOf("category"),
+            ),
+        )
+        val budget = clarificationManualPromptFor(
+            ClarificationPayload(
+                question = "这类商品价格跨度比较大，你的预算或价位范围大概是多少？",
+                requiredSlots = listOf("budget"),
+            ),
+        )
+
+        assertEquals("直接输入想买的品类", category)
+        assertEquals("直接输入预算范围", budget)
+    }
+
     private fun thinking(key: String) = ThinkingNode(
         key = key,
         payload = ThinkingPayload(stage = key, message = "thinking"),
@@ -282,6 +489,12 @@ class TimelineRevealStoreTest {
         messageId = key,
         content = "这里是一段正在展开的文字",
         done = false,
+        turnId = "turn_1",
+    )
+
+    private fun clarification(key: String) = ClarificationNode(
+        key = key,
+        payload = ClarificationPayload(question = "你想买哪一类商品？", requiredSlots = listOf("category")),
         turnId = "turn_1",
     )
 
@@ -298,5 +511,9 @@ class TimelineRevealStoreTest {
         key = key,
         payload = FinalDecisionPayload(summary = "done"),
         turnId = "turn_1",
+    )
+
+    private fun product(productId: String) = ProductCardPayload(
+        product = ProductPayload(productId = productId, name = productId),
     )
 }
