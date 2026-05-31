@@ -64,4 +64,8 @@ dependencies {
     implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
+
+    // Coil — singleton ImageLoader for prefetch + AsyncImage cache sharing.
+    implementation(libs.coil)
+    implementation(libs.coil.compose)
 }

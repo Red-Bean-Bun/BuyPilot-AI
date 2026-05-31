@@ -29,6 +29,8 @@ import com.buypilot.feature.chat.state.ChatReducer
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -40,11 +42,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import coil.ImageLoader
+import coil.request.ImageRequest
 
 private const val FALLBACK_THINKING_MIN_MS = 8_000L
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         ChatUiState(
@@ -975,11 +980,38 @@ class ChatViewModel @Inject constructor(
             fallbackThinkingStartedAt.remove(envelope.turnId)
         }
 
+        if (envelope.event == AgentEventType.ProductCard) {
+            prefetchProductImage(envelope)
+        }
+
         applyEnvelope(envelope)
     }
 
     private fun applyEnvelope(envelope: AgentUiEnvelope<AgentPayload>) {
         _uiState.update { ChatReducer.reduce(it, envelope) }
+    }
+
+    // ── Image prefetch ──────────────────────────────────────────────
+    // SSE product_card arrives with image URL; prefetch immediately so
+    // the image is in Coil's cache by the time Compose renders AsyncImage.
+
+    private fun prefetchProductImage(envelope: AgentUiEnvelope<AgentPayload>) {
+        val payload = envelope.payload as? ProductCardPayload ?: return
+        val backendBaseUrl = _uiState.value.backendBaseUrl
+        val imageUrl = payload.product.imageUrl.resolveForBackend(backendBaseUrl) ?: return
+        val imageLoader = ImageLoader(appContext)
+        viewModelScope.launch {
+            imageLoader.execute(
+                ImageRequest.Builder(appContext).data(imageUrl).build(),
+            )
+        }
+    }
+
+    private fun String?.resolveForBackend(baseUrl: String): String? {
+        val raw = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
+        if (raw.startsWith("/")) return baseUrl.trimEnd('/') + raw
+        return raw
     }
 
     private fun localInitialThinkingEnvelope(
