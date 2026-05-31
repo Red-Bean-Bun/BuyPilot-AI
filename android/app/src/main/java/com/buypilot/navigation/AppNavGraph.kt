@@ -13,11 +13,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
@@ -51,7 +51,7 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navController.getBackStackEntry(Routes.ChatGraph)
                 }
                 val viewModel: ChatViewModel = hiltViewModel(parentEntry)
-                val uiState by viewModel.uiState.collectAsState()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 ChatRoute(
                     viewModel = viewModel,
                     onOpenProductDeck = { deckId, productId ->
@@ -87,7 +87,7 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navController.getBackStackEntry(Routes.ChatGraph)
                 }
                 val viewModel: ChatViewModel = hiltViewModel(parentEntry)
-                val uiState by viewModel.uiState.collectAsState()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val deckId = backStackEntry.decodedArg("deckId")
                 val productId = backStackEntry.decodedArg("productId")
 
@@ -154,7 +154,7 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navController.getBackStackEntry(Routes.ChatGraph)
                 }
                 val viewModel: ChatViewModel = hiltViewModel(parentEntry)
-                val uiState by viewModel.uiState.collectAsState()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val deckId = backStackEntry.decodedArg("deckId")
                 val productId = backStackEntry.decodedArg("productId")
 
@@ -193,7 +193,7 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navController.getBackStackEntry(Routes.ChatGraph)
                 }
                 val viewModel: ChatViewModel = hiltViewModel(parentEntry)
-                val uiState by viewModel.uiState.collectAsState()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
                 ProductEvidenceOverlayScreen(
                     state = uiState,
