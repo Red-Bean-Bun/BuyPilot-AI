@@ -209,6 +209,7 @@ import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.QuickActionPayload
+import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.R
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
@@ -256,6 +257,7 @@ import org.commonmark.node.OrderedList
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.StrongEmphasis
+import org.commonmark.node.ThematicBreak
 import org.commonmark.node.Text as MarkdownText
 import org.commonmark.parser.Parser
 import io.noties.markwon.Markwon
@@ -292,7 +294,7 @@ private const val ClarificationQuestionToCardDelayMs = 170L
 private const val ClarificationCardEnterMs = 640
 private const val CriteriaCardEnterMs = 560
 private const val ProductDeckArrivalMs = 1480
-private const val ProductDeckAutoConvergeDelayMs = 360L
+private const val ProductDeckAutoCloseDelayMs = 280L
 private const val ProductSwipeAnimationMs = 430
 private const val DecisionCardEnterMs = 760
 private const val DecisionReasonBaseDelayMs = 240
@@ -300,8 +302,9 @@ private const val DecisionReasonStaggerMs = 120
 private val TimelineNearEndThreshold = 24.dp
 private val TimelineFollowCorrectionTolerance = 8.dp
 private val TimelineSafeGap = 20.dp
-private val TimelineAnchorTopGap = 8.dp
+private val TimelineAnchorTopGap = 28.dp
 private val TimelineAnchorBottomReserve = 420.dp
+private const val TimelineViewportSettleMs = 48L
 private val FloatingPanelComposerGap = 8.dp
 private val TimelineJumpButtonComposerGap = 14.dp
 private val ChipEdgeFadeWidth = 46.dp
@@ -439,13 +442,9 @@ internal data class UserTimelineItem(
 internal data class AssistantTurnTimelineItem(
     val turnId: String,
     val nodes: List<ChatUiNode>,
+    val segmentIndex: Int,
 ) : TimelineRenderItem {
-    override val key: String = buildString {
-        append("assistant_")
-        append(turnId.ifBlank { "unknown" })
-        append('_')
-        append(nodes.firstOrNull()?.key.orEmpty())
-    }
+    override val key: String = "assistant_${turnId.ifBlank { "unknown" }}_$segmentIndex"
 }
 
 @Immutable
@@ -465,6 +464,7 @@ private data class TimelineRenderContext(
     val latestProductDeckKey: String?,
     val productSwipeStates: Map<String, ProductSwipeState>,
     val awaitingConvergenceDeckIds: Set<String>,
+    val latestConvergeableDeckId: String?,
     val pendingDecisions: Map<String, PendingDecision>,
     val convergedDeckIds: Set<String>,
     val lastUserMessage: String?,
@@ -517,6 +517,7 @@ internal class TimelineRevealStore {
     val enteredStructuredNodeKeys = mutableStateMapOf<String, Boolean>()
     val completedTextKeys = mutableStateMapOf<String, Boolean>()
     val textRevealProgressByKey = mutableStateMapOf<String, TextRevealProgress>()
+    private val liveRevealedTextKeys = mutableStateMapOf<String, Boolean>()
     private val latestTextRevealProgressByKey = mutableMapOf<String, TextRevealProgress>()
     private val lastSnapshotTextRevealProgressByKey = mutableMapOf<String, TextRevealProgress>()
 
@@ -540,10 +541,15 @@ internal class TimelineRevealStore {
         completedTextKeys[key] = true
     }
 
+    fun hasLiveRevealedText(key: String): Boolean = liveRevealedTextKeys[key] == true
+
     fun updateTextProgress(key: String, visible: Int, total: Int) {
         val previous = lastSnapshotTextRevealProgressByKey[key]
         val next = TextRevealProgress(visibleLength = visible, totalLength = total)
         latestTextRevealProgressByKey[key] = next
+        if (total > 0 && visible > 0 && visible < total && liveRevealedTextKeys[key] != true) {
+            liveRevealedTextKeys[key] = true
+        }
         val crossedIntroGate = previous?.hasReachedIntroGate != true && next.hasReachedIntroGate
         val completed = total > 0 && visible >= total
         val shouldSnapshot = previous == null ||
@@ -566,6 +572,7 @@ internal class TimelineRevealStore {
         enteredStructuredNodeKeys.keys.retainAll(nodeKeys)
         completedTextKeys.keys.retainAll(nodeKeys)
         textRevealProgressByKey.keys.retainAll(nodeKeys)
+        liveRevealedTextKeys.keys.retainAll(nodeKeys)
         latestTextRevealProgressByKey.keys.retainAll(nodeKeys)
         lastSnapshotTextRevealProgressByKey.keys.retainAll(nodeKeys)
     }
@@ -592,7 +599,8 @@ fun BuyPilotChatScreen(
     var sheetTransitionId by remember { mutableStateOf(0) }
     var dismissedClarificationKeys by remember { mutableStateOf(emptySet<String>()) }
     var dismissingClarificationKey by remember { mutableStateOf<String?>(null) }
-    var revealedMessageKeys by remember { mutableStateOf(emptySet<String>()) }
+    var revealedMessageKeyList by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val revealedMessageKeys = remember(revealedMessageKeyList) { revealedMessageKeyList.toSet() }
     var typingMessageKeys by remember { mutableStateOf(emptySet<String>()) }
     var visualActiveTurnKeys by remember { mutableStateOf(emptySet<String>()) }
     var pendingClarificationAnswer by remember { mutableStateOf<PendingClarificationAnswer?>(null) }
@@ -631,6 +639,7 @@ fun BuyPilotChatScreen(
     }
     val hiddenUserMessageKeysForFlight = hiddenFlightMessageKeys +
         listOfNotNull(pendingFlightMessageKey, activeFlightMessageKey)
+    val assistantVisualActive = typingMessageKeys.isNotEmpty() || visualActiveTurnKeys.isNotEmpty()
 
     fun focusComposer() {
         showAttachmentMenu = false
@@ -850,13 +859,18 @@ fun BuyPilotChatScreen(
                     composerHeightPx = composerHeightPx,
                     imeBottomPx = imeBottomPx,
                     isComposerFocused = composerFocused,
+                    isAssistantVisualActive = assistantVisualActive,
                     dismissingClarificationKey = dismissingClarificationKey,
                     dismissedClarificationKeys = dismissedClarificationKeys,
                     selectedClarificationOption = pendingClarificationAnswer?.selectedOption,
                     hiddenUserMessageKeys = hiddenUserMessageKeysForFlight,
                     activeFlightMessageKey = activeFlightMessageKey,
                     revealedMessageKeys = revealedMessageKeys,
-                    onMessageRevealComplete = { revealedMessageKeys = revealedMessageKeys + it },
+                    onMessageRevealComplete = { key ->
+                        if (key !in revealedMessageKeys) {
+                            revealedMessageKeyList = revealedMessageKeyList + key
+                        }
+                    },
                     onMessageRevealActiveChange = { key, active ->
                         typingMessageKeys = if (active) {
                             typingMessageKeys + key
@@ -899,7 +913,7 @@ fun BuyPilotChatScreen(
             text = input,
             inputState = state.inputState,
             isStreaming = state.isStreaming,
-            isTextRevealing = typingMessageKeys.isNotEmpty() || visualActiveTurnKeys.isNotEmpty(),
+            isTextRevealing = assistantVisualActive,
             awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
             focusRequester = composerFocusRequester,
@@ -1123,6 +1137,7 @@ private fun ConversationStage(
     composerHeightPx: Int,
     imeBottomPx: Int,
     isComposerFocused: Boolean,
+    isAssistantVisualActive: Boolean,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
     selectedClarificationOption: String?,
@@ -1196,6 +1211,7 @@ private fun ConversationStage(
                 composerHeightPx = composerHeightPx,
                 imeBottomPx = imeBottomPx,
                 isComposerFocused = isComposerFocused,
+                isAssistantVisualActive = isAssistantVisualActive,
                 dismissingClarificationKey = dismissingClarificationKey,
                 dismissedClarificationKeys = dismissedClarificationKeys,
                 selectedClarificationOption = selectedClarificationOption,
@@ -1521,6 +1537,7 @@ private fun ChatTimeline(
     composerHeightPx: Int,
     imeBottomPx: Int,
     isComposerFocused: Boolean,
+    isAssistantVisualActive: Boolean,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
     selectedClarificationOption: String?,
@@ -1542,12 +1559,20 @@ private fun ChatTimeline(
     }
     var followStreamingText by remember { mutableStateOf(false) }
     var lastHandledUserMessageKey by remember { mutableStateOf<String?>(null) }
+    var lastAutoSettledUserMessageKey by remember { mutableStateOf<String?>(null) }
     var activeTurnAnchored by remember { mutableStateOf(false) }
+    var lastAnchoredAssistantTurnId by remember { mutableStateOf<String?>(null) }
+    var retainedAnchorUserMessageKey by remember { mutableStateOf<String?>(null) }
+    var retainedAnchorAssistantTurnId by remember { mutableStateOf<String?>(null) }
     var revealScrollTick by remember { mutableIntStateOf(0) }
     var lastRevealScrollAtMs by remember { mutableStateOf(0L) }
     val revealStore = remember { TimelineRevealStore() }
     val hasTimelineError = state.nodes.any { it is ErrorNode }
     val timelineItems = remember(state.nodes) { state.nodes.toTimelineRenderItems() }
+    val latestFinalDecisionKey = remember(state.nodes) {
+        state.nodes.filterIsInstance<FinalDecisionNode>().lastOrNull()?.key
+    }
+    var lastFocusedFinalDecisionKey by rememberSaveable { mutableStateOf(latestFinalDecisionKey) }
     LaunchedEffect(timelineItems, state.nodes) {
         revealStore.pruneToKeys(
             timelineItemKeys = timelineItems.mapTo(mutableSetOf()) { it.key },
@@ -1571,6 +1596,7 @@ private fun ChatTimeline(
         productDeckIdByProductId,
         state.productSwipeStates,
         state.awaitingConvergenceDeckIds,
+        state.latestConvergeableDeckId,
         state.pendingDecisions,
         state.nodes.convergedProductDeckIds(),
         state.lastUserMessage,
@@ -1584,6 +1610,7 @@ private fun ChatTimeline(
             latestProductDeckKey = productDeckNodes.lastOrNull()?.key,
             productSwipeStates = state.productSwipeStates,
             awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds,
+            latestConvergeableDeckId = state.latestConvergeableDeckId,
             pendingDecisions = state.pendingDecisions,
             convergedDeckIds = state.nodes.convergedProductDeckIds(),
             lastUserMessage = state.lastUserMessage,
@@ -1591,12 +1618,16 @@ private fun ChatTimeline(
     }
     fun lastContentIndex(): Int = timelineItems.lastContentIndex(state, hasTimelineError)
     fun requestRevealFollowScroll() {
-        if (!followStreamingText) return
+        if (!followStreamingText && !activeTurnAnchored) return
         val now = System.currentTimeMillis()
         if (now - lastRevealScrollAtMs >= TimelineRevealScrollThrottleMs) {
             lastRevealScrollAtMs = now
             revealScrollTick += 1
         }
+    }
+    fun markStructuredEnteredAndFollow(key: String) {
+        revealStore.markStructuredNodeEntered(key)
+        requestRevealFollowScroll()
     }
     val timelineViewportBottomInset = calculateTimelineViewportBottomInset(
         density = density,
@@ -1615,6 +1646,20 @@ private fun ChatTimeline(
     val followCorrectionTolerancePx = with(density) { TimelineFollowCorrectionTolerance.toPx() }
     val timelineBottomPaddingPx = with(density) { timelineBottomPadding.toPx() }
     val anchorTopOffsetPx = with(density) { TimelineAnchorTopGap.toPx().roundToInt() }
+    suspend fun keepLatestUserMessageAnchored(settleFrames: Int = 1): Boolean {
+        val key = state.lastUserMessageKey ?: return false
+        if (key == activeFlightMessageKey) return false
+        val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
+        if (index < 0) return false
+        scrollTimelineItemToAnchorIfNeeded(
+            listState = listState,
+            itemIndex = index,
+            anchorTopPx = anchorTopOffsetPx,
+            tolerancePx = followCorrectionTolerancePx,
+            settleFrames = settleFrames,
+        )
+        return true
+    }
     val isNearTimelineEnd by remember(
         timelineItems.size,
         state.lastError,
@@ -1638,9 +1683,82 @@ private fun ChatTimeline(
         val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
         if (index >= 0 && key != lastHandledUserMessageKey) {
             lastHandledUserMessageKey = key
+            lastAutoSettledUserMessageKey = null
             activeTurnAnchored = true
+            retainedAnchorUserMessageKey = key
             followStreamingText = false
-            listState.scrollToItem(index = index, scrollOffset = -anchorTopOffsetPx)
+            keepLatestUserMessageAnchored()
+        }
+    }
+
+    LaunchedEffect(
+        activeTurnAnchored,
+        state.lastUserMessageKey,
+        activeFlightMessageKey,
+        composerHeightPx,
+        imeBottomPx,
+        timelineItems.size,
+    ) {
+        if (!activeTurnAnchored || isUserDragging) return@LaunchedEffect
+        val key = state.lastUserMessageKey ?: return@LaunchedEffect
+        if (key == activeFlightMessageKey) return@LaunchedEffect
+        val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
+        if (index < 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(TimelineViewportSettleMs)
+        keepLatestUserMessageAnchored(settleFrames = 2)
+    }
+
+    LaunchedEffect(
+        state.currentTurnId,
+        timelineItems.size,
+        activeTurnAnchored,
+        activeFlightMessageKey,
+    ) {
+        val turnId = state.currentTurnId ?: return@LaunchedEffect
+        if (
+            turnId == lastAnchoredAssistantTurnId ||
+            activeFlightMessageKey != null ||
+            isUserDragging
+        ) {
+            return@LaunchedEffect
+        }
+        val assistantTurnIndex = timelineItems.indexOfFirst {
+            it is AssistantTurnTimelineItem && it.turnId == turnId
+        }
+        if (assistantTurnIndex < 0) return@LaunchedEffect
+        val latestUserIndex = state.lastUserMessageKey?.let { key ->
+            timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
+        } ?: -1
+        val userAnchorBelongsToThisTurn = activeTurnAnchored &&
+            latestUserIndex >= 0 &&
+            latestUserIndex == assistantTurnIndex - 1
+        if (userAnchorBelongsToThisTurn) return@LaunchedEffect
+
+        lastAnchoredAssistantTurnId = turnId
+        activeTurnAnchored = false
+        followStreamingText = false
+        retainedAnchorUserMessageKey = null
+        retainedAnchorAssistantTurnId = turnId
+        kotlinx.coroutines.delay(TimelineViewportSettleMs)
+        animateTimelineItemToAnchor(
+            listState = listState,
+            itemIndex = assistantTurnIndex,
+            anchorTopPx = anchorTopOffsetPx,
+            tolerancePx = followCorrectionTolerancePx,
+        )
+    }
+
+    LaunchedEffect(isComposerFocused, imeBottomPx, composerHeightPx, timelineItems.size) {
+        if (!isComposerFocused || imeBottomPx <= 0 || isUserDragging || activeTurnAnchored) return@LaunchedEffect
+        kotlinx.coroutines.delay(TimelineViewportSettleMs)
+        if (isNearTimelineEnd) {
+            scrollActiveTurnIfNeeded(
+                listState = listState,
+                lastContentIndex = lastContentIndex(),
+                bottomPaddingPx = timelineBottomPaddingPx,
+                tolerancePx = followCorrectionTolerancePx,
+                settleFrames = 2,
+            )
         }
     }
 
@@ -1648,20 +1766,76 @@ private fun ChatTimeline(
         if (isUserDragging && !isNearTimelineEnd) {
             followStreamingText = false
             activeTurnAnchored = false
+            retainedAnchorUserMessageKey = null
+            retainedAnchorAssistantTurnId = null
+            lastAutoSettledUserMessageKey = state.lastUserMessageKey
         }
     }
 
     LaunchedEffect(isUserDragging) {
         if (isUserDragging) {
+            retainedAnchorUserMessageKey = null
+            retainedAnchorAssistantTurnId = null
             onTimelineDrag()
         }
     }
 
-    LaunchedEffect(state.isStreaming) {
-        if (!state.isStreaming) {
+    LaunchedEffect(
+        state.isStreaming,
+        isAssistantVisualActive,
+        isNearTimelineEnd,
+        timelineItems.size,
+        composerHeightPx,
+        imeBottomPx,
+    ) {
+        if (!state.isStreaming && !isAssistantVisualActive) {
+            val activeUserMessageKey = state.lastUserMessageKey
+            if (
+                activeUserMessageKey != null &&
+                activeUserMessageKey == lastHandledUserMessageKey &&
+                activeUserMessageKey != lastAutoSettledUserMessageKey &&
+                !isUserDragging &&
+                !isNearTimelineEnd &&
+                timelineItems.isNotEmpty()
+            ) {
+                if (retainedAnchorUserMessageKey == activeUserMessageKey) {
+                    keepLatestUserMessageAnchored(settleFrames = 2)
+                } else {
+                    val lastContentIndex = lastContentIndex().coerceAtLeast(0)
+                    scrollActiveTurnIfNeeded(
+                        listState = listState,
+                        lastContentIndex = lastContentIndex,
+                        bottomPaddingPx = timelineBottomPaddingPx,
+                        tolerancePx = followCorrectionTolerancePx,
+                        settleFrames = 3,
+                    )
+                }
+                lastAutoSettledUserMessageKey = activeUserMessageKey
+            }
             activeTurnAnchored = false
             followStreamingText = false
         }
+    }
+
+    LaunchedEffect(latestFinalDecisionKey, timelineItems.size, composerHeightPx, imeBottomPx) {
+        val decisionKey = latestFinalDecisionKey ?: return@LaunchedEffect
+        if (decisionKey == lastFocusedFinalDecisionKey || isUserDragging) return@LaunchedEffect
+        val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(decisionKey) }
+        if (decisionItemIndex < 0) return@LaunchedEffect
+        lastFocusedFinalDecisionKey = decisionKey
+        activeTurnAnchored = false
+        followStreamingText = false
+        retainedAnchorUserMessageKey = null
+        retainedAnchorAssistantTurnId = decisionItemIndex
+            .takeIf { it >= 0 }
+            ?.let { (timelineItems[it] as? AssistantTurnTimelineItem)?.turnId }
+        kotlinx.coroutines.delay(140L)
+        animateTimelineItemToAnchor(
+            listState = listState,
+            itemIndex = decisionItemIndex,
+            anchorTopPx = anchorTopOffsetPx,
+            tolerancePx = followCorrectionTolerancePx,
+        )
     }
 
     LaunchedEffect(
@@ -1670,8 +1844,11 @@ private fun ChatTimeline(
         state.isStreaming,
         timelineBottomPadding,
         revealScrollTick,
+        activeTurnAnchored,
     ) {
-        if (followStreamingText && timelineItems.isNotEmpty()) {
+        if (activeTurnAnchored && timelineItems.isNotEmpty()) {
+            keepLatestUserMessageAnchored()
+        } else if (followStreamingText && timelineItems.isNotEmpty()) {
             scrollActiveTurnIfNeeded(
                 listState = listState,
                 lastContentIndex = lastContentIndex(),
@@ -1736,7 +1913,7 @@ private fun ChatTimeline(
                                 onMessageRevealActiveChange = onMessageRevealActiveChange,
                                 onStreamingTextProgress = { requestRevealFollowScroll() },
                                 onTextRevealProgress = { _, _, _ -> },
-                                onStructuredEntered = revealStore::markStructuredNodeEntered,
+                                onStructuredEntered = ::markStructuredEnteredAndFollow,
                                 onUserBubblePositioned = onUserBubblePositioned,
                                 onClarificationCardDismissed = onClarificationCardDismissed,
                             )
@@ -1775,7 +1952,7 @@ private fun ChatTimeline(
                             onTextCompleted = revealStore::markTextCompleted,
                             onTextRevealProgress = revealStore::updateTextProgress,
                             onStructuredStarted = revealStore::markStructuredNodeStarted,
-                            onStructuredEntered = revealStore::markStructuredNodeEntered,
+                            onStructuredEntered = ::markStructuredEnteredAndFollow,
                             onUserBubblePositioned = onUserBubblePositioned,
                             onClarificationCardDismissed = onClarificationCardDismissed,
                         )
@@ -1796,7 +1973,12 @@ private fun ChatTimeline(
                             activeFlightMessageKey = activeFlightMessageKey,
                             revealedMessageKeys = revealedMessageKeys,
                             textRevealProgress = item.node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
-                            textCompleted = item.node.revealTextKey()?.let { revealStore.hasCompletedText(it) } == true,
+                            textCompleted = item.node.revealTextKey()?.let {
+                                revealStore.hasCompletedText(it) || it in revealedMessageKeys
+                            } == true,
+                            textLiveRevealed = item.node.revealTextKey()?.let {
+                                revealStore.hasLiveRevealedText(it) || it in revealedMessageKeys
+                            } == true,
                             dismissingClarificationKey = dismissingClarificationKey,
                             dismissedClarificationKeys = dismissedClarificationKeys,
                             selectedClarificationOption = selectedClarificationOption,
@@ -1820,7 +2002,7 @@ private fun ChatTimeline(
                             onTextRevealProgress = { key, visible, total ->
                                 revealStore.updateTextProgress(key, visible, total)
                             },
-                            onStructuredEntered = revealStore::markStructuredNodeEntered,
+                            onStructuredEntered = ::markStructuredEnteredAndFollow,
                             onUserBubblePositioned = onUserBubblePositioned,
                             onClarificationCardDismissed = onClarificationCardDismissed,
                         )
@@ -1831,12 +2013,18 @@ private fun ChatTimeline(
             if (state.lastError != null && !hasTimelineError) {
                 item("last_error") {
                     Box {
-                        InlineSystemNotice(state.lastError)
+                        InlineSystemNotice(
+                            state.lastError.userFacingErrorReason("这轮回复中断了，可以重试或编辑最近问题。"),
+                        )
                     }
                 }
             }
 
-            if (activeTurnAnchored) {
+            val shouldRetainAnchorSpacer = retainedAnchorUserMessageKey != null &&
+                retainedAnchorUserMessageKey == state.lastUserMessageKey
+            val shouldRetainAssistantAnchorSpacer = retainedAnchorAssistantTurnId != null &&
+                retainedAnchorAssistantTurnId == state.currentTurnId
+            if (activeTurnAnchored || shouldRetainAnchorSpacer || shouldRetainAssistantAnchorSpacer) {
                 item("active_turn_anchor_spacer") {
                     Spacer(Modifier.height(activeTurnBottomReserve))
                 }
@@ -1862,19 +2050,18 @@ private fun ChatTimeline(
         ) {
             FollowLatestBubble(
                 isStreaming = state.isStreaming,
-                motionEnabled = false,
+                motionEnabled = state.isStreaming || isAssistantVisualActive,
                 onClick = {
-                    followStreamingText = state.isStreaming
+                    followStreamingText = state.isStreaming || isAssistantVisualActive
                     activeTurnAnchored = false
+                    retainedAnchorUserMessageKey = null
                     coroutineScope.launch {
                         val lastContentIndex = lastContentIndex().coerceAtLeast(0)
-                        listState.animateScrollToItem(index = lastContentIndex)
-                        scrollActiveTurnIfNeeded(
+                        animateLatestContentIntoView(
                             listState = listState,
                             lastContentIndex = lastContentIndex,
                             bottomPaddingPx = timelineBottomPaddingPx,
                             tolerancePx = followCorrectionTolerancePx,
-                            settleFrames = 2,
                         )
                     }
                 },
@@ -1916,11 +2103,12 @@ private fun AssistantTurnBlock(
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
-    val turnSettled = !renderContext.isStreaming || item.turnId != renderContext.currentTurnId
+    val turnSettled = renderContext.currentTurnId == null || item.turnId != renderContext.currentTurnId
     val coordinator = rememberTurnStreamingCoordinator(
         item = item,
         revealStore = revealStore,
         turnSettled = turnSettled,
+        revealedMessageKeys = revealedMessageKeys,
         onTextCompleted = onTextCompleted,
         onTextRevealProgress = onTextRevealProgress,
         onStructuredEntered = onStructuredEntered,
@@ -2007,7 +2195,10 @@ private fun AssistantTurnBlock(
                             revealedMessageKeys = revealedMessageKeys,
                             textRevealProgress = node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
                             textCompleted = node.revealTextKey()?.let {
-                                turnSettled || revealStore.hasCompletedText(it)
+                                turnSettled || revealStore.hasCompletedText(it) || it in revealedMessageKeys
+                            } == true,
+                            textLiveRevealed = node.revealTextKey()?.let {
+                                revealStore.hasLiveRevealedText(it) || it in revealedMessageKeys
                             } == true,
                             delayTextReveal = !turnSettled &&
                                 node.revealTextKey()?.let { it in coordinator.textHandoffKeys } == true,
@@ -2078,6 +2269,7 @@ private fun rememberTurnStreamingCoordinator(
     item: AssistantTurnTimelineItem,
     revealStore: TimelineRevealStore,
     turnSettled: Boolean,
+    revealedMessageKeys: Set<String>,
     onTextCompleted: (String) -> Unit,
     onTextRevealProgress: (String, Int, Int) -> Unit,
     onStructuredEntered: (String) -> Unit,
@@ -2086,7 +2278,11 @@ private fun rememberTurnStreamingCoordinator(
         item.nodes.settledTextRevealKeys()
     } else {
         item.nodes
-            .mapNotNull { node -> node.revealTextKey()?.takeIf { revealStore.hasCompletedText(it) } }
+            .mapNotNull { node ->
+                node.revealTextKey()?.takeIf {
+                    revealStore.hasCompletedText(it) || it in revealedMessageKeys
+                }
+            }
             .toSet()
     }
     val textRevealProgressByKey = item.nodes
@@ -2365,6 +2561,7 @@ private fun TimelineNodeContent(
     revealedMessageKeys: Set<String>,
     textRevealProgress: TextRevealProgress?,
     textCompleted: Boolean,
+    textLiveRevealed: Boolean = false,
     delayTextReveal: Boolean = false,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
@@ -2399,10 +2596,8 @@ private fun TimelineNodeContent(
             },
         )
         is ThinkingNode -> AssistantInlineStatus(
-            message = node.payload.message,
-            motionEnabled = timelineMotionEnabled &&
-                renderContext.isStreaming &&
-                renderContext.currentTurnId == node.turnId,
+            message = node.payload.userFacingThinkingMessage(),
+            motionEnabled = renderContext.currentTurnId == node.turnId,
         )
         is AiStreamNode -> StreamingAssistantText(
             nodeKey = node.key,
@@ -2410,6 +2605,7 @@ private fun TimelineNodeContent(
             done = node.done,
             revealState = textRevealProgress,
             alreadyCompleted = textCompleted,
+            stablePlainAfterLiveReveal = textLiveRevealed,
             animateInitialCompleted = node.turnId == renderContext.currentTurnId &&
                 node.key !in revealedMessageKeys,
             initialRevealDelayMs = if (delayTextReveal) ThinkingToTextHandoffMs else 0L,
@@ -2449,6 +2645,7 @@ private fun TimelineNodeContent(
             onCardDismissed = onClarificationCardDismissed,
         )
         is CriteriaNode -> CriteriaSummaryCard(
+            motionKey = node.key,
             payload = node.payload,
             motionEnabled = structuredMotionEnabled,
             alreadyEntered = structuredAlreadyEntered,
@@ -2459,7 +2656,8 @@ private fun TimelineNodeContent(
             node = node,
             backendBaseUrl = renderContext.backendBaseUrl,
             swipeState = renderContext.productSwipeStates[node.deckId],
-            awaitingConvergence = node.deckId in renderContext.awaitingConvergenceDeckIds,
+            awaitingConvergence = node.deckId == renderContext.latestConvergeableDeckId &&
+                node.deckId in renderContext.awaitingConvergenceDeckIds,
             hasPendingDecision = node.deckId in renderContext.pendingDecisions,
             deckConverged = node.deckId in renderContext.convergedDeckIds,
             deckStillStreaming = renderContext.isStreaming && renderContext.currentTurnId == node.turnId,
@@ -2478,6 +2676,7 @@ private fun TimelineNodeContent(
             onConverge = { onConvergeRecommendation(node.deckId) },
         )
         is FinalDecisionNode -> DecisionSummaryCard(
+            motionKey = node.key,
             payload = node.payload,
             productsById = renderContext.productsById,
             productDeckIdByProductId = renderContext.productDeckIdByProductId,
@@ -2656,13 +2855,9 @@ private fun AssistantInlineStatus(
             motionEnabled = motionEnabled,
         )
         Spacer(Modifier.width(8.dp))
-        Text(
+        ThinkingShimmerText(
             text = displayMessage,
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 18.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            motionEnabled = motionEnabled,
         )
     }
 }
@@ -2803,15 +2998,33 @@ private val InternalDebugLabelValueRegex = Regex(
 private val InternalDebugLabelRegex = Regex(
     """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id)\b""",
 )
+private val InternalDebugValueRegex = Regex(
+    """(?i)\b(?:not_interested|view_detail|open_evidence|criteria_patch|add_to_cart|show_evidence)\b""",
+)
 private val InternalIdTokenRegex = Regex("""(?i)\b(?:pg|p)_[a-z0-9_-]*\b""")
 
 private fun String.withoutMarkdownBlockQuoteMarkers(): String =
     lineSequence()
         .joinToString("\n") { line -> line.replace(MarkdownBlockQuoteMarkerRegex, "") }
 
+private fun String.withoutStreamingMarkdownChrome(): String =
+    withoutMarkdownBlockQuoteMarkers()
+        .lineSequence()
+        .joinToString("\n") { line ->
+            if (Regex("""^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""").matches(line)) {
+                "────────────"
+            } else {
+                line
+                    .replace(Regex("""^\s{0,3}#{1,6}\s+"""), "")
+                    .replace("**", "")
+                    .replace("`", "")
+            }
+        }
+
 private fun String.withoutInternalDebugTokens(): String =
     replace(InternalDebugLabelValueRegex, "")
         .replace(InternalIdTokenRegex, "")
+        .replace(InternalDebugValueRegex, "")
         .replace(InternalDebugLabelRegex, "")
         .replace(Regex("""[（(]\s*[，,、;；:\s]*[）)]"""), "")
         .replace(Regex("""\s+([，。！？；：、,.!?;:])"""), "$1")
@@ -2906,7 +3119,6 @@ internal fun String.requiresAndroidMarkdownRender(): Boolean {
     if (source.isBlank()) return false
     return source.contains("```") ||
         source.contains("<") ||
-        Regex("""(?m)^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""").containsMatchIn(source) ||
         Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
         source.hasCompletedMarkdownTable()
 }
@@ -2997,6 +3209,14 @@ internal fun String.toNativeMarkdownAnnotatedString(): AnnotatedString {
             push(SpanStyle(fontWeight = FontWeight.SemiBold)) {
                 visitChildren(heading)
             }
+        }
+
+        override fun visit(thematicBreak: ThematicBreak) {
+            appendBlockSeparator()
+            push(SpanStyle(color = BuyPilotColors.Border)) {
+                appendText("────────────")
+            }
+            appendBlockSeparator()
         }
 
         override fun visit(bulletList: BulletList) {
@@ -3149,6 +3369,7 @@ private fun StreamingAssistantText(
     done: Boolean = false,
     revealState: TextRevealProgress? = null,
     alreadyCompleted: Boolean = false,
+    stablePlainAfterLiveReveal: Boolean = false,
     animateInitialCompleted: Boolean = false,
     initialRevealDelayMs: Long = 0L,
     style: TextStyle = TextStyle(
@@ -3181,7 +3402,17 @@ private fun StreamingAssistantText(
                 if (done) onRevealComplete?.invoke()
             }
         }
-        AssistantText(content = content, style = style)
+        if (
+            shouldKeepPlainTextRendererAfterStreaming(
+                stablePlainAfterLiveReveal = stablePlainAfterLiveReveal,
+                hasSeenLiveStream = hasSeenLiveStream,
+                animateInitialCompleted = animateInitialCompleted,
+            )
+        ) {
+            PlainStreamingTextBlock(content = content, style = style)
+        } else {
+            AssistantText(content = content, style = style)
+        }
         return
     }
 
@@ -3258,6 +3489,12 @@ private fun StreamingAssistantText(
     )
 }
 
+internal fun shouldKeepPlainTextRendererAfterStreaming(
+    stablePlainAfterLiveReveal: Boolean,
+    hasSeenLiveStream: Boolean,
+    animateInitialCompleted: Boolean,
+): Boolean = stablePlainAfterLiveReveal || hasSeenLiveStream || animateInitialCompleted
+
 @Composable
 private fun StreamingAssistantText(
     content: String,
@@ -3269,13 +3506,16 @@ internal fun List<ChatUiNode>.toTimelineRenderItems(): List<TimelineRenderItem> 
     val items = mutableListOf<TimelineRenderItem>()
     var assistantTurnId: String? = null
     val assistantNodes = mutableListOf<ChatUiNode>()
+    var assistantSegmentIndex = 0
 
     fun flushAssistantTurn() {
         if (assistantNodes.isNotEmpty()) {
             items += AssistantTurnTimelineItem(
                 turnId = assistantTurnId.orEmpty(),
                 nodes = assistantNodes.toList(),
+                segmentIndex = assistantSegmentIndex,
             )
+            assistantSegmentIndex += 1
             assistantNodes.clear()
             assistantTurnId = null
         }
@@ -3319,6 +3559,15 @@ private fun ChatUiNode.revealTextKey(): String? =
         else -> null
     }
 
+private fun TimelineRenderItem.containsNodeKey(nodeKey: String): Boolean =
+    when (this) {
+        is UserTimelineItem -> node.key == nodeKey
+        is StandaloneTimelineItem -> node.key == nodeKey || node.revealTextKey() == nodeKey
+        is AssistantTurnTimelineItem -> nodes.any { node ->
+            node.key == nodeKey || node.revealTextKey() == nodeKey
+        }
+    }
+
 private fun ClarificationNode.clarificationQuestionRevealKey(): String =
     "${key}_question"
 
@@ -3337,7 +3586,9 @@ private fun PlainStreamingTextBlock(
         lineHeight = 26.sp,
     ),
 ) {
-    val displayContent = remember(content) { content.withoutInternalDebugTokens() }
+    val displayContent = remember(content) {
+        content.withoutStreamingMarkdownChrome().withoutInternalDebugTokens()
+    }
     if (displayContent.isBlank()) return
     Text(
         text = displayContent,
@@ -3546,6 +3797,90 @@ private fun isTimelineNearEnd(
         ?: return false
     val distanceToBottom = viewportBottom - (lastVisibleItem.offset + lastVisibleItem.size)
     return distanceToBottom >= -thresholdPx
+}
+
+private suspend fun scrollTimelineItemToAnchorIfNeeded(
+    listState: LazyListState,
+    itemIndex: Int,
+    anchorTopPx: Int,
+    tolerancePx: Float,
+    settleFrames: Int = 1,
+) {
+    if (itemIndex < 0) return
+
+    repeat(settleFrames.coerceAtLeast(1)) {
+        val layoutInfo = listState.layoutInfo
+        val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
+        val desiredTop = layoutInfo.viewportStartOffset + anchorTopPx
+        val needsCorrection = item == null || abs(item.offset - desiredTop) > tolerancePx
+        if (needsCorrection) {
+            listState.scrollToItem(index = itemIndex, scrollOffset = -anchorTopPx)
+        }
+        kotlinx.coroutines.delay(16L)
+    }
+}
+
+private suspend fun animateTimelineItemToAnchor(
+    listState: LazyListState,
+    itemIndex: Int,
+    anchorTopPx: Int,
+    tolerancePx: Float,
+) {
+    if (itemIndex < 0) return
+    listState.animateScrollToItem(index = itemIndex, scrollOffset = -anchorTopPx)
+    repeat(2) {
+        val layoutInfo = listState.layoutInfo
+        val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
+        val desiredTop = layoutInfo.viewportStartOffset + anchorTopPx
+        if (item != null) {
+            val correction = (item.offset - desiredTop).toFloat()
+            if (abs(correction) > tolerancePx) {
+                listState.animateScrollBy(
+                    value = correction,
+                    animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+                )
+            }
+        }
+        kotlinx.coroutines.delay(16L)
+    }
+}
+
+private suspend fun animateLatestContentIntoView(
+    listState: LazyListState,
+    lastContentIndex: Int,
+    bottomPaddingPx: Float,
+    tolerancePx: Float,
+) {
+    if (lastContentIndex < 0) return
+    repeat(6) { step ->
+        if (
+            isTimelineNearEnd(
+                listState = listState,
+                lastContentIndex = lastContentIndex,
+                bottomPaddingPx = bottomPaddingPx,
+                thresholdPx = tolerancePx,
+            )
+        ) {
+            return
+        }
+        val lastItemVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == lastContentIndex }
+        if (!lastItemVisible && step == 5) {
+            listState.animateScrollToItem(index = lastContentIndex)
+        }
+        scrollActiveTurnIfNeeded(
+            listState = listState,
+            lastContentIndex = lastContentIndex,
+            bottomPaddingPx = bottomPaddingPx,
+            tolerancePx = tolerancePx,
+        )
+    }
+    scrollActiveTurnIfNeeded(
+        listState = listState,
+        lastContentIndex = lastContentIndex,
+        bottomPaddingPx = bottomPaddingPx,
+        tolerancePx = tolerancePx,
+        settleFrames = 2,
+    )
 }
 
 private suspend fun scrollActiveTurnIfNeeded(
@@ -4326,6 +4661,7 @@ private fun rememberCriteriaLabels(): CriteriaLabels =
 
 @Composable
 private fun CriteriaSummaryCard(
+    motionKey: String,
     payload: CriteriaCardPayload,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
@@ -4340,7 +4676,7 @@ private fun CriteriaSummaryCard(
     val headline = criteria.criteriaReceiptHeadline().ifBlank { summary }
 
     StructuredCardMotion(
-        key = headline.ifBlank { properties.joinToString("|") { "${it.label}:${it.value}" } },
+        key = motionKey,
         motionEnabled = motionEnabled,
         alreadyEntered = alreadyEntered,
         durationMillis = CriteriaCardEnterMs,
@@ -4950,6 +5286,9 @@ private fun ProductRecommendationStrip(
     val products = node.products
     if (products.isEmpty()) return
     if (compactHistory) {
+        LaunchedEffect(node.key, alreadyEntered) {
+            if (!alreadyEntered) onEntered()
+        }
         ProductRecommendationHistorySummary(
             node = node,
             backendBaseUrl = backendBaseUrl,
@@ -4959,6 +5298,7 @@ private fun ProductRecommendationStrip(
         return
     }
     val singleCandidate = products.size == 1 && !deckStillStreaming
+    val deckFullyHandled = isProductDeckFullyHandled(products, swipeState)
     val preferredPage = preferredProductCarouselPage(products, swipeState)
 
     val pagerState = rememberPagerState(
@@ -5079,7 +5419,11 @@ private fun ProductRecommendationStrip(
             productCount = products.size,
             activeIndex = activeIndex,
             chromeProgress = chromeProgress,
-            buttonProgress = if (awaitingConvergence) segmentProgress(arrivalProgress, 0.72f, 1f) else 0f,
+            buttonProgress = if (awaitingConvergence && !deckFullyHandled) {
+                segmentProgress(arrivalProgress, 0.72f, 1f)
+            } else {
+                0f
+            },
             buttonLabel = "帮我选",
             onConverge = onConverge,
         )
@@ -5688,6 +6032,7 @@ private fun ProductHeroCard(
 
 @Composable
 private fun DecisionSummaryCard(
+    motionKey: String,
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
@@ -5721,7 +6066,7 @@ private fun DecisionSummaryCard(
             statusBadge?.showCardWhenEmpty == true
         ) {
             StructuredCardMotion(
-                key = payload.summary.ifBlank { winnerProductId.orEmpty() },
+                key = motionKey,
                 motionEnabled = motionEnabled,
                 alreadyEntered = alreadyEntered,
                 durationMillis = DecisionCardEnterMs,
@@ -5947,8 +6292,8 @@ fun ProductSwipeModeScreen(
     deckId: String,
     initialProductId: String?,
     onBack: () -> Unit,
+    onDeckCompleted: (String) -> Unit,
     onOpenDetail: (String, String) -> Unit,
-    onConverge: (String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
     onUndo: (String) -> Unit,
 ) {
@@ -5968,33 +6313,27 @@ fun ProductSwipeModeScreen(
     }
     val haptics = LocalHapticFeedback.current
     val cardStackBridge = remember(deckId) { CardStackBridge() }
-    val deckCompleted = shouldAutoConvergeProductDeck(
+    val deckFullyHandled = isProductDeckFullyHandled(
         products = products,
-        remainingProducts = remainingProducts,
+        swipeState = swipeState,
     )
-    var autoConverged by rememberSaveable(deckId) { mutableStateOf(false) }
-    val latestOnConverge by rememberUpdatedState(onConverge)
+    var autoClosed by rememberSaveable(deckId) { mutableStateOf(false) }
+    val latestOnBack by rememberUpdatedState(onBack)
+    val latestOnDeckCompleted by rememberUpdatedState(onDeckCompleted)
 
-    LaunchedEffect(deckId, deckCompleted) {
-        if (!deckCompleted || autoConverged) return@LaunchedEffect
-        autoConverged = true
-        kotlinx.coroutines.delay(ProductDeckAutoConvergeDelayMs)
-        latestOnConverge(deckId)
-    }
-
-    val closeOrConverge: () -> Unit = {
-        if (deckCompleted) {
-            onConverge(deckId)
-        } else {
-            onBack()
-        }
+    LaunchedEffect(deckId, deckFullyHandled) {
+        if (!deckFullyHandled || autoClosed) return@LaunchedEffect
+        autoClosed = true
+        latestOnDeckCompleted(deckId)
+        kotlinx.coroutines.delay(ProductDeckAutoCloseDelayMs)
+        latestOnBack()
     }
 
     Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ProductSwipeTopBar(
                 title = if (products.size > 1) "商品详情" else "唯一候选",
-                onBack = closeOrConverge,
+                onBack = onBack,
                 canUndo = swipeState.undoStack.isNotEmpty(),
                 onUndo = {
                     cardStackBridge.rewind()
@@ -6259,11 +6598,14 @@ private fun ProductSwipeModeContent(
     }
 }
 
-@Suppress("UNUSED_PARAMETER")
-internal fun shouldAutoConvergeProductDeck(
+internal fun isProductDeckFullyHandled(
     products: List<ProductCardPayload>,
-    remainingProducts: List<ProductCardPayload>,
-): Boolean = false
+    swipeState: ProductSwipeState?,
+): Boolean {
+    if (products.size <= 1) return false
+    val handledProductIds = swipeState?.swipedProductIds.orEmpty().toSet()
+    return products.all { it.product.productId in handledProductIds }
+}
 
 private class CardStackBridge {
     var view: CardStackView? = null
@@ -6945,6 +7287,7 @@ fun ProductHeroDetailScreen(
     onBack: () -> Unit,
     onOpenEvidence: (String, String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
+    onDeckCompleted: (String) -> Unit,
 ) {
     var activeProductId by rememberSaveable(deckId, productId) { mutableStateOf(productId) }
     LaunchedEffect(deckId, productId) {
@@ -6952,10 +7295,13 @@ fun ProductHeroDetailScreen(
     }
     val payload = state.findProduct(deckId, activeProductId)
     val haptics = LocalHapticFeedback.current
+    val latestOnBack by rememberUpdatedState(onBack)
     var submittedFeedback by rememberSaveable(deckId, activeProductId) { mutableStateOf<String?>(null) }
     var pendingAdvanceProductId by rememberSaveable(deckId, activeProductId) { mutableStateOf<String?>(null) }
     val handledProductIds = state.productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
-    val readOnlyByState = state.hasConvergedDecisionForDeck(deckId) ||
+    val deckCanConverge = state.canOpenDeckForConvergence(deckId)
+    val readOnlyByState = !deckCanConverge ||
+        state.hasConvergedDecisionForDeck(deckId) ||
         activeProductId in handledProductIds
     var choiceActionsAvailable by rememberSaveable(deckId, activeProductId) {
         mutableStateOf(!readOnlyByState)
@@ -6967,6 +7313,17 @@ fun ProductHeroDetailScreen(
         .firstOrNull { id ->
             id.isNotBlank() && id != activeProductId && id !in handledProductIds
         }
+    val deckWillBeFullyHandledAfterCurrentChoice = state.findProductDeck(deckId)
+        ?.products
+        .orEmpty()
+        .mapNotNull { it.product.productId.takeIf(String::isNotBlank) }
+        .let { productIds ->
+            productIds.size >= 2 &&
+                activeProductId.isNotBlank() &&
+                productIds.all { id -> id == activeProductId || id in handledProductIds }
+        }
+    var completionRequested by rememberSaveable(deckId) { mutableStateOf(false) }
+    val latestOnDeckCompleted by rememberUpdatedState(onDeckCompleted)
 
     LaunchedEffect(readOnlyByState, submittedFeedback) {
         if (readOnlyByState && submittedFeedback == null) {
@@ -7071,6 +7428,12 @@ fun ProductHeroDetailScreen(
                 pendingAdvanceProductId = null
                 submittedFeedback = null
                 detailListState.scrollToItem(0)
+            } else if (deckWillBeFullyHandledAfterCurrentChoice && deckCanConverge && !completionRequested) {
+                completionRequested = true
+                latestOnDeckCompleted(deckId)
+                latestOnBack()
+            } else {
+                latestOnBack()
             }
             gestureOffsetPx = 0f
         }
@@ -8152,14 +8515,18 @@ private fun CartActionCard(payload: CartActionPayload) {
                 "remove" -> "已移出购物车"
                 "update_quantity" -> "已更新数量"
                 "view" -> "购物车"
-                else -> payload.action
+                else -> "购物车已更新"
             }
         }
         val itemSummary = if (cart.items.isEmpty()) {
             "购物车为空"
         } else {
             cart.items.take(2).joinToString(" · ") { item ->
-                "${item.name.ifBlank { item.productId }} x${item.quantity}"
+                val itemName = item.name
+                    .withoutInternalDebugTokens()
+                    .takeIf { it.isNotBlank() }
+                    ?: "商品"
+                "$itemName x${item.quantity}"
             }
         }
         val moreSummary = if (cart.items.size > 2) "等${cart.items.size}种商品" else null
@@ -8171,10 +8538,11 @@ private fun CartActionCard(payload: CartActionPayload) {
         )
         return
     }
-    val parts = listOf(payload.action, payload.status, payload.productId)
-        .filter { it.isNotBlank() }
-    if (parts.isEmpty()) return
-    InlineSystemNotice(parts.joinToString(" · "))
+    val fallback = when (payload.status) {
+        "failed" -> "购物车操作失败"
+        else -> "购物车状态已更新"
+    }
+    InlineSystemNotice(fallback)
 }
 
 private data class ErrorPresentation(
@@ -8188,31 +8556,87 @@ private fun ErrorNode.presentation(): ErrorPresentation {
     return when {
         "NETWORK" in normalized || "TIMEOUT" in normalized || "CONNECTION" in normalized -> ErrorPresentation(
             title = "网络连接失败",
-            reason = message.ifBlank { "当前连接不稳定，商品证据或模型回复没有完整返回。" },
+            reason = message.userFacingErrorReason("当前连接不稳定，商品证据或模型回复没有完整返回。"),
             action = "可以直接重试，或先编辑问题让条件更短。",
         )
         "MODEL" in normalized || "LLM" in normalized || "GENERATION" in normalized -> ErrorPresentation(
             title = "模型生成失败",
-            reason = message.ifBlank { "模型这轮没有生成出可用答案。" },
+            reason = message.userFacingErrorReason("模型这轮没有生成出可用答案。"),
             action = "保留了最近的问题，可以重新生成。",
         )
         "EVIDENCE" in normalized || "INSUFFICIENT" in normalized -> ErrorPresentation(
             title = "证据不足",
-            reason = message.ifBlank { "当前商品资料不足以支撑可靠推荐。" },
+            reason = message.userFacingErrorReason("当前商品资料不足以支撑可靠推荐。"),
             action = "建议编辑问题，补充预算、肤质或排除项。",
         )
         "IMAGE" in normalized || "VISION" in normalized -> ErrorPresentation(
             title = "图片识别失败",
-            reason = message.ifBlank { "图片主体可能不够清晰，暂时无法稳定识别商品。" },
+            reason = message.userFacingErrorReason("图片主体可能不够清晰，暂时无法稳定识别商品。"),
             action = "可以换一张更清晰的图，或改用文字描述。",
         )
         else -> ErrorPresentation(
             title = "这轮回复中断了",
-            reason = message.ifBlank { "系统没有拿到完整结果。" },
+            reason = message.userFacingErrorReason("系统没有拿到完整结果。"),
             action = "你可以重试，或编辑最近问题后重新发送。",
         )
     }
 }
+
+private val TechnicalErrorMarkerRegex = Regex(
+    """(?i)\b(?:exception|traceback|timeout|failed|failure|network|http|ssl|socket|connect|connection|json|cancelled|canceled|unable|unknown host|econnreset)\b""",
+)
+private val TechnicalErrorCodeRegex = Regex("""\b[A-Z][A-Z0-9_]{2,}\b""")
+
+internal fun String.userFacingErrorReason(fallback: String): String {
+    val clean = withoutInternalDebugTokens().trim()
+    if (clean.isBlank() || clean.looksLikeTechnicalErrorText()) return fallback
+    return clean
+}
+
+private fun String.looksLikeTechnicalErrorText(): Boolean {
+    val text = trim()
+    if (text.isBlank()) return true
+    if (TechnicalErrorMarkerRegex.containsMatchIn(text)) return true
+    if (TechnicalErrorCodeRegex.containsMatchIn(text)) return true
+    if ('{' in text || '}' in text || '[' in text || ']' in text) return true
+    if ("://" in text || "/" in text && Regex("""\b(?:api|v\d+|chat|stream)\b""").containsMatchIn(text)) return true
+    val hasCjk = text.any { it.isCjk() }
+    val asciiLetters = text.count { it in 'A'..'Z' || it in 'a'..'z' }
+    return !hasCjk && asciiLetters >= 8
+}
+
+private fun Char.isCjk(): Boolean =
+    this in '\u3400'..'\u4DBF' ||
+        this in '\u4E00'..'\u9FFF' ||
+        this in '\uF900'..'\uFAFF'
+
+internal fun ThinkingPayload.userFacingThinkingMessage(): String {
+    val clean = message.withoutInternalDebugTokens().trim()
+    if (clean.isNotBlank() && !clean.looksLikeTechnicalStatusText()) return clean
+    return stage.thinkingStageFallbackMessage()
+}
+
+private fun String.looksLikeTechnicalStatusText(): Boolean {
+    val text = trim()
+    if (text.isBlank()) return true
+    if (TechnicalErrorMarkerRegex.containsMatchIn(text)) return true
+    if (TechnicalErrorCodeRegex.containsMatchIn(text)) return true
+    if ('_' in text || ':' in text || '{' in text || '}' in text) return true
+    val hasCjk = text.any { it.isCjk() }
+    val asciiLetters = text.count { it in 'A'..'Z' || it in 'a'..'z' }
+    return !hasCjk && asciiLetters >= 4
+}
+
+private fun String.thinkingStageFallbackMessage(): String =
+    when (trim().lowercase().replace("-", "_")) {
+        "understanding", "intent", "intent_analysis", "analyzing" -> "正在理解你的需求..."
+        "criteria", "criteria_generation", "planning" -> "正在整理筛选条件..."
+        "search", "searching", "retrieval", "retrieving", "matching" -> "正在检索匹配商品..."
+        "ranking", "rerank", "recommend", "recommendation" -> "正在比较候选商品..."
+        "decision", "fallback_decision", "converging" -> "正在收敛推荐建议..."
+        "clarification", "clarifying" -> "正在确认关键信息..."
+        else -> "正在处理..."
+    }
 
 @Composable
 private fun ErrorCard(
@@ -8239,9 +8663,6 @@ private fun ErrorCard(
                 lineHeight = 20.sp,
                 fontWeight = FontWeight.Bold,
             )
-            node.code.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Label, lineHeight = 18.sp)
-            }
             Text(
                 presentation.reason,
                 color = BuyPilotColors.TextSecondary,
@@ -10230,20 +10651,19 @@ internal fun shouldOpenProductCardAsDetail(
 ): Boolean =
     !productId.isNullOrBlank()
 
+fun ChatUiState.canOpenDeckForConvergence(deckId: String): Boolean =
+    latestConvergeableDeckId == deckId &&
+        deckId in awaitingConvergenceDeckIds &&
+        !hasConvergedDecisionForDeck(deckId) &&
+        findProductDeck(deckId)?.products.orEmpty().size >= 2
+
 internal fun ChatUiState.hasConvergedDecisionForDeck(deckId: String): Boolean {
-    return deckId in nodes.convergedProductDeckIds()
+    return nodes.any { it is FinalDecisionNode && it.deckId == deckId }
 }
 
 internal fun List<ChatUiNode>.convergedProductDeckIds(): Set<String> =
-    filterIsInstance<ProductDeckNode>()
-        .mapNotNull { deckNode ->
-            deckNode.deckId.takeIf { deckId ->
-                val deckIndex = indexOfFirst { node ->
-                    node is ProductDeckNode && node.deckId == deckId
-                }
-                deckIndex >= 0 && drop(deckIndex + 1).any { it is FinalDecisionNode }
-            }
-        }
+    filterIsInstance<FinalDecisionNode>()
+        .mapNotNullTo(mutableSetOf()) { it.deckId?.takeIf(String::isNotBlank) }
         .toSet()
 
 private fun ProductDeckSignalSummary.displayLabel(): String? {
@@ -10288,21 +10708,21 @@ private fun FinalDecisionPayload.decisionStatusBadge(): DecisionStatusBadge? =
         else -> null
     }
 
-private fun String.confidenceLabel(): String =
-    when (this) {
+internal fun String.confidenceLabel(): String =
+    when (trim().lowercase()) {
         "high" -> "高"
         "medium" -> "中"
         "low" -> "低"
-        else -> this
+        else -> "待确认"
     }
 
-private fun String.nextStepLabel(): String =
-    when (this) {
+internal fun String.nextStepLabel(): String =
+    when (trim().lowercase()) {
         "adjust_criteria" -> "下一步：调整筛选"
         "replace_deck" -> "下一步：换一组"
         "continue_current_deck" -> "下一步：继续看候选"
         "accept_recommendation" -> "下一步：接受建议"
-        else -> this
+        else -> "下一步：继续补充偏好"
     }
 
 private fun com.buypilot.core.model.CriteriaPayload.budgetLabel(): String {

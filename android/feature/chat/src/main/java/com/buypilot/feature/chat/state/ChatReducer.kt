@@ -6,6 +6,7 @@ import com.buypilot.core.model.AgentUiEnvelope
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
+import com.buypilot.core.model.CriteriaPayload
 import com.buypilot.core.model.DonePayload
 import com.buypilot.core.model.ErrorPayload
 import com.buypilot.core.model.FinalDecisionPayload
@@ -53,6 +54,10 @@ object ChatReducer {
             streamingTextKey = null,
             streamingTextLength = 0,
             awaitingCriteriaAdjustment = false,
+            awaitingConvergenceDeckIds = emptySet(),
+            latestConvergeableDeckId = null,
+            activeConvergenceDeckId = null,
+            pendingDecisions = emptyMap(),
         )
 
     fun reduce(
@@ -105,9 +110,10 @@ object ChatReducer {
                 val doneBase = if (
                     payload.finishReason == "awaiting_product_feedback" &&
                     awaitingDeckId != null &&
-                    finalizedContentBase.productCountForDeck(awaitingDeckId) >= 2
+                    finalizedContentBase.productCountForDeck(awaitingDeckId) >= 2 &&
+                    !finalizedContentBase.isDeckFullyHandled(awaitingDeckId)
                 ) {
-                    finalizedContentBase.markDeckAwaitingConvergence(awaitingDeckId)
+                    finalizedContentBase.markLatestDeckAwaitingConvergence(awaitingDeckId)
                 } else {
                     finalizedContentBase
                 }
@@ -124,6 +130,16 @@ object ChatReducer {
                     },
                     isStreaming = false,
                     awaitingCriteriaAdjustment = payload.finishReason == "awaiting_criteria_adjustment",
+                    activeConvergenceDeckId = if (
+                        doneBase.activeConvergenceDeckId != null &&
+                        doneBase.nodes.none {
+                            it is FinalDecisionNode && it.deckId == doneBase.activeConvergenceDeckId
+                        }
+                    ) {
+                        doneBase.activeConvergenceDeckId
+                    } else {
+                        null
+                    },
                 )
             }
 
@@ -243,18 +259,30 @@ object ChatReducer {
         state: ChatUiState,
         deckId: String,
         usePendingDecision: Boolean = true,
+        allowFullyHandled: Boolean = false,
     ): ChatUiState {
+        if (state.isDeckFullyHandled(deckId) && !allowFullyHandled) {
+            return state.clearDeckConvergence(deckId)
+        }
         val pending = state.pendingDecisions[deckId].takeIf { usePendingDecision }
         val withoutWaiting = state.copy(
             awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds - deckId,
             pendingDecisions = state.pendingDecisions - deckId,
+            activeConvergenceDeckId = deckId.takeIf { !usePendingDecision },
             inputState = ChatInputState.Idle,
             isStreaming = false,
         )
         return if (pending == null) {
             withoutWaiting
         } else {
-            withoutWaiting.upsertNode(FinalDecisionNode(pending.key, pending.payload, turnId = pending.turnId))
+            withoutWaiting.upsertNode(
+                FinalDecisionNode(
+                    key = pending.key,
+                    payload = pending.payload,
+                    turnId = pending.turnId,
+                    deckId = deckId,
+                ),
+            )
         }
     }
 
@@ -263,6 +291,12 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as TextDeltaPayload
+        if (state.isActiveConvergenceTurn(envelope)) {
+            return state
+        }
+        if (payload.delta.isKnownCategoryMismatchedFollowup(state, envelope.turnId)) {
+            return state
+        }
         val rawMessageKey = payload.messageId.ifBlank { envelope.nodeId }
         val existing = state.nodes.filterIsInstance<AiStreamNode>()
             .firstOrNull {
@@ -295,10 +329,17 @@ object ChatReducer {
         state: ChatUiState,
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
+        val payload = envelope.payload as CriteriaCardPayload
+        if (state.isActiveConvergenceTurn(envelope)) {
+            return state
+        }
+        if (payload.criteria.isCategoryMismatchedWithTurnDeck(state, envelope.turnId)) {
+            return state
+        }
         return state.upsertNode(
             CriteriaNode(
                 key = envelope.nodeId,
-                payload = envelope.payload as CriteriaCardPayload,
+                payload = payload,
                 turnId = envelope.turnId,
             ),
         )
@@ -309,6 +350,9 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as ClarificationPayload
+        if (state.isActiveConvergenceTurn(envelope)) {
+            return state
+        }
         return state
             .upsertNode(
                 ClarificationNode(
@@ -331,6 +375,9 @@ object ChatReducer {
     ): ChatUiState {
         val payload = envelope.payload as ProductCardPayload
         val deckId = envelope.deckId ?: envelope.nodeId
+        if (state.isActiveConvergenceTurn(envelope)) {
+            return state
+        }
         val existing = state.nodes.filterIsInstance<ProductDeckNode>()
             .firstOrNull { it.deckId == deckId }
         val products = (existing?.products.orEmpty()
@@ -343,11 +390,11 @@ object ChatReducer {
                 products = products,
                 turnId = existing?.turnId ?: envelope.turnId,
             ),
-        )
-        return if (products.size <= 1) {
+        ).pruneMismatchedTurnCriteriaAndFollowup(envelope.turnId)
+        return if (products.size <= 1 || nextState.isDeckFullyHandled(deckId)) {
             nextState.clearDeckConvergence(deckId)
         } else {
-            nextState.markDeckAwaitingConvergence(deckId)
+            nextState
         }
     }
 
@@ -367,26 +414,61 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as FinalDecisionPayload
-        val latestDeck = state.nodes.filterIsInstance<ProductDeckNode>().lastOrNull()
-        val deckId = latestDeck?.deckId
-        return if (
-            deckId != null &&
-            latestDeck.products.size >= 2 &&
-            deckId in state.awaitingConvergenceDeckIds &&
-            envelope.turnId == latestDeck.turnId
+        val explicitDeckId = envelope.deckId?.takeIf { it.isNotBlank() }
+        if (
+            state.activeConvergenceDeckId != null &&
+            explicitDeckId != null &&
+            explicitDeckId != state.activeConvergenceDeckId
         ) {
-            state.copy(
-                awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds + deckId,
-                pendingDecisions = state.pendingDecisions + (
-                    deckId to PendingDecision(
-                        key = envelope.nodeId,
-                        payload = payload,
-                        turnId = envelope.turnId,
-                    )
-                    ),
-            )
+            return state
+        }
+        val latestDeck = state.nodes.filterIsInstance<ProductDeckNode>().lastOrNull()
+        val associatedDeck = explicitDeckId
+            ?.let { deckId ->
+                state.nodes.filterIsInstance<ProductDeckNode>().firstOrNull { it.deckId == deckId }
+            }
+            ?: latestDeck?.takeIf { deck ->
+                deck.products.size >= 2 && envelope.turnId == deck.turnId
+            }
+        val deckId = associatedDeck?.deckId
+        val isMultiProductDeckDecision = associatedDeck != null && associatedDeck.products.size >= 2
+        val isCurrentDeckScopedConvergence = explicitDeckId != null &&
+            envelope.turnId.isNotBlank() &&
+            state.currentTurnId == envelope.turnId &&
+            (state.isStreaming || state.activeConvergenceDeckId == explicitDeckId)
+        if (deckId != null && isMultiProductDeckDecision && !isCurrentDeckScopedConvergence) {
+            if (state.isDeckFullyHandled(deckId)) {
+                return state.clearDeckConvergence(deckId)
+            }
+            return if (deckId in state.awaitingConvergenceDeckIds) {
+                state.copy(
+                    awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds + deckId,
+                    latestConvergeableDeckId = state.latestConvergeableDeckId.takeIf { it == deckId },
+                    pendingDecisions = state.pendingDecisions + (
+                        deckId to PendingDecision(
+                            key = envelope.nodeId,
+                            payload = payload,
+                            turnId = envelope.turnId,
+                        )
+                        ),
+                )
+            } else {
+                state
+            }
+        }
+
+        val withDecision = state.upsertNode(
+            FinalDecisionNode(
+                key = envelope.nodeId,
+                payload = payload,
+                turnId = envelope.turnId,
+                deckId = deckId,
+            ),
+        )
+        return if (deckId != null && isMultiProductDeckDecision) {
+            withDecision.clearDeckConvergence(deckId)
         } else {
-            state.upsertNode(FinalDecisionNode(envelope.nodeId, payload, turnId = envelope.turnId))
+            withDecision
         }
     }
 
@@ -405,6 +487,74 @@ object ChatReducer {
             .orEmpty()
             .size
 
+    private fun ChatUiState.isActiveConvergenceTurn(envelope: AgentUiEnvelope<AgentPayload>): Boolean =
+        activeConvergenceDeckId != null &&
+            currentTurnId == envelope.turnId &&
+            envelope.turnId.isNotBlank()
+
+    private fun ChatUiState.turnDeckCategories(turnId: String): Set<String> =
+        nodes.filterIsInstance<ProductDeckNode>()
+            .filter { deck -> turnId.isNotBlank() && deck.turnId == turnId }
+            .flatMap { deck -> deck.products.map { it.product.category.normalizedCategory() } }
+            .filter { it.isNotBlank() }
+            .toSet()
+
+    private fun ChatUiState.pruneMismatchedTurnCriteriaAndFollowup(turnId: String): ChatUiState {
+        val deckCategories = turnDeckCategories(turnId)
+        if (deckCategories.isEmpty()) return this
+        val nextNodes = nodes.filterNot { node ->
+            when (node) {
+                is CriteriaNode -> node.turnId == turnId &&
+                    node.payload.criteria.category.normalizedCategory()
+                        .takeIf { it.isNotBlank() }
+                        ?.let { it !in deckCategories } == true
+                is AiStreamNode -> node.turnId == turnId &&
+                    node.content.hasBeautySpecificFollowupCopy() &&
+                    "美妆护肤" !in deckCategories
+                else -> false
+            }
+        }
+        return if (nextNodes.size == nodes.size) this else copy(nodes = nextNodes)
+    }
+
+    private fun CriteriaPayload.isCategoryMismatchedWithTurnDeck(
+        state: ChatUiState,
+        turnId: String,
+    ): Boolean {
+        val criteriaCategory = category.normalizedCategory()
+        if (criteriaCategory.isBlank()) return false
+        val deckCategories = state.turnDeckCategories(turnId)
+        if (deckCategories.isEmpty()) return false
+        return criteriaCategory !in deckCategories
+    }
+
+    private fun String.isKnownCategoryMismatchedFollowup(
+        state: ChatUiState,
+        turnId: String,
+    ): Boolean {
+        val text = trim()
+        if (text.isBlank() || !text.hasBeautySpecificFollowupCopy()) return false
+        val deckCategories = state.turnDeckCategories(turnId)
+        if (deckCategories.isEmpty()) return false
+        return "美妆护肤" !in deckCategories
+    }
+
+    private fun String.hasBeautySpecificFollowupCopy(): Boolean =
+        contains("再温和一点") ||
+            contains("不要酒精") ||
+            contains("预算再低一点") ||
+            contains("预算低一点")
+
+    private fun String.normalizedCategory(): String =
+        trim()
+
+    private fun ChatUiState.isDeckFullyHandled(deckId: String): Boolean {
+        val products = productIdsForDeck(deckId)
+        if (products.size <= 1) return false
+        val handledProductIds = productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
+        return products.all { it in handledProductIds }
+    }
+
     private fun ProductSwipeState?.orEmpty(): ProductSwipeState = this ?: ProductSwipeState()
 
     private fun ProductSwipeAction.isChoiceFeedback(): Boolean =
@@ -413,12 +563,18 @@ object ChatReducer {
             action == "like" ||
             action == "not_interested"
 
-    private fun ChatUiState.markDeckAwaitingConvergence(deckId: String): ChatUiState =
-        copy(awaitingConvergenceDeckIds = awaitingConvergenceDeckIds + deckId)
+    private fun ChatUiState.markLatestDeckAwaitingConvergence(deckId: String): ChatUiState =
+        copy(
+            awaitingConvergenceDeckIds = setOf(deckId),
+            latestConvergeableDeckId = deckId,
+            pendingDecisions = pendingDecisions.filterKeys { it == deckId },
+        )
 
     private fun ChatUiState.clearDeckConvergence(deckId: String): ChatUiState =
         copy(
             awaitingConvergenceDeckIds = awaitingConvergenceDeckIds - deckId,
+            latestConvergeableDeckId = latestConvergeableDeckId.takeIf { it != deckId },
+            activeConvergenceDeckId = activeConvergenceDeckId.takeIf { it != deckId },
             pendingDecisions = pendingDecisions - deckId,
         )
 

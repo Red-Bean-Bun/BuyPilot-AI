@@ -68,6 +68,7 @@ data class FinalDecisionNode(
     override val key: String,
     val payload: FinalDecisionPayload,
     val turnId: String = "",
+    val deckId: String? = null,
 ) : ChatUiNode {
     val alternatives: List<AlternativePayload> = payload.alternatives
     val nextActions: List<QuickActionPayload> = payload.nextActions

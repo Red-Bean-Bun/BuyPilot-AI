@@ -30,6 +30,7 @@ class TimelineRevealStoreTest {
 
         assertEquals(1, store.textRevealProgressByKey["text_1"]?.visibleLength)
         assertEquals(2, store.textRevealProgress("text_1")?.visibleLength)
+        assertTrue(store.hasLiveRevealedText("text_1"))
 
         store.updateTextProgress(key = "text_1", visible = 25, total = 100)
 
@@ -51,6 +52,7 @@ class TimelineRevealStoreTest {
         store.markTextCompleted("old_text")
         store.updateTextProgress(key = "text_1", visible = 7, total = 100)
         store.updateTextProgress(key = "old_text", visible = 25, total = 100)
+        assertTrue(store.hasLiveRevealedText("old_text"))
 
         store.pruneToKeys(
             timelineItemKeys = setOf("turn_1"),
@@ -67,6 +69,8 @@ class TimelineRevealStoreTest {
         assertFalse(store.hasCompletedText("old_text"))
         assertEquals(7, store.textRevealProgress("text_1")?.visibleLength)
         assertEquals(null, store.textRevealProgress("old_text"))
+        assertTrue(store.hasLiveRevealedText("text_1"))
+        assertFalse(store.hasLiveRevealedText("old_text"))
     }
 
     @Test
@@ -208,7 +212,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun multiProductDeckDoesNotAutoConvergeAfterAllCandidatesAreHandled() {
+    fun multiProductDeckAutoClosesOnlyAfterAllCandidatesAreHandled() {
         val products = listOf(
             product("p1"),
             product("p2"),
@@ -216,21 +220,21 @@ class TimelineRevealStoreTest {
         )
 
         assertFalse(
-            shouldAutoConvergeProductDeck(
+            isProductDeckFullyHandled(
                 products = products,
-                remainingProducts = products.take(1),
+                swipeState = ProductSwipeState(swipedProductIds = listOf("p1", "p2")),
+            ),
+        )
+        assertTrue(
+            isProductDeckFullyHandled(
+                products = products,
+                swipeState = ProductSwipeState(swipedProductIds = listOf("p1", "p2", "p3")),
             ),
         )
         assertFalse(
-            shouldAutoConvergeProductDeck(
-                products = products,
-                remainingProducts = emptyList(),
-            ),
-        )
-        assertFalse(
-            shouldAutoConvergeProductDeck(
+            isProductDeckFullyHandled(
                 products = listOf(product("single")),
-                remainingProducts = emptyList(),
+                swipeState = ProductSwipeState(swipedProductIds = listOf("single")),
             ),
         )
     }
@@ -300,10 +304,11 @@ class TimelineRevealStoreTest {
     @Test
     fun productDetailBecomesReadOnlyAfterDeckConverges() {
         val deck = deck("deck_1")
-        val final = finalDecision("final_decision")
+        val unrelatedFinal = finalDecision("final_decision_other_deck", deckId = "deck_2")
+        val final = finalDecision("final_decision", deckId = "deck_1")
 
-        assertFalse(ChatUiState(nodes = listOf(final, deck)).hasConvergedDecisionForDeck("deck_1"))
-        assertTrue(ChatUiState(nodes = listOf(deck, final)).hasConvergedDecisionForDeck("deck_1"))
+        assertFalse(ChatUiState(nodes = listOf(deck, unrelatedFinal)).hasConvergedDecisionForDeck("deck_1"))
+        assertTrue(ChatUiState(nodes = listOf(final, deck)).hasConvergedDecisionForDeck("deck_1"))
     }
 
     @Test
@@ -341,6 +346,39 @@ class TimelineRevealStoreTest {
 
         assertEquals(2, assistantKeys.size)
         assertEquals(assistantKeys.size, assistantKeys.toSet().size)
+    }
+
+    @Test
+    fun assistantTurnKeyStaysStableWhenTransientThinkingIsRemoved() {
+        val thinking = thinking("thinking_search")
+        val text = text("intro_text")
+        val withThinking = listOf<ChatUiNode>(thinking, text)
+            .toTimelineRenderItems()
+            .filterIsInstance<AssistantTurnTimelineItem>()
+            .single()
+        val withoutThinking = listOf<ChatUiNode>(text)
+            .toTimelineRenderItems()
+            .filterIsInstance<AssistantTurnTimelineItem>()
+            .single()
+
+        assertEquals(withThinking.key, withoutThinking.key)
+    }
+
+    @Test
+    fun revealedTextKeysCountAsCompletedAfterTimelineRecreation() {
+        val intro = text("intro_text")
+        val deck = deck("deck_1")
+        val nodes = listOf<ChatUiNode>(intro, deck)
+
+        val state = nodes.visibleTurnNodeKeys(
+            completedTextKeys = setOf(intro.key),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertTrue(intro.key in state.visibleNodeKeys)
+        assertTrue(deck.key in state.visibleNodeKeys)
+        assertTrue(state.textHandoffKeys.isEmpty())
     }
 
     @Test
@@ -452,11 +490,77 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun decisionSummaryDividerUsesAndroidMarkdownRenderer() {
+    fun decisionSummaryDividerUsesNativeMarkdownRendererWithoutAndroidViewSwap() {
         val content = "---\n\n优先选小米 17 Ultra。"
+        val rendered = content.toNativeMarkdownAnnotatedString()
 
         assertTrue(content.needsFinalMarkdownRender())
-        assertTrue(content.requiresAndroidMarkdownRender())
+        assertFalse(content.requiresAndroidMarkdownRender())
+        assertEquals("────────────\n优先选小米 17 Ultra。", rendered.text)
+        assertTrue(rendered.spanStyles.isNotEmpty())
+    }
+
+    @Test
+    fun decisionMetaLabelsNeverExposeBackendTokens() {
+        assertEquals("低", "low".confidenceLabel())
+        assertEquals("下一步：继续看候选", "continue_current_deck".nextStepLabel())
+        assertEquals("待确认", "unknown_confidence".confidenceLabel())
+        assertEquals("下一步：继续补充偏好", "backend_next_step".nextStepLabel())
+    }
+
+    @Test
+    fun technicalErrorMessagesUseChineseFallbackReason() {
+        val fallback = "当前连接不稳定，商品证据或模型回复没有完整返回。"
+
+        assertEquals(fallback, "Failed to connect to /chat/stream".userFacingErrorReason(fallback))
+        assertEquals(fallback, "HTTP 500 NETWORK_ERROR".userFacingErrorReason(fallback))
+        assertEquals(fallback, """{"detail":"timeout"}""".userFacingErrorReason(fallback))
+        assertEquals("图片主体不够清晰。", "图片主体不够清晰。".userFacingErrorReason(fallback))
+    }
+
+    @Test
+    fun thinkingStatusNeverFallsBackToEnglishTechnicalText() {
+        assertEquals(
+            "正在检索匹配商品...",
+            ThinkingPayload(stage = "searching", message = "Searching products").userFacingThinkingMessage(),
+        )
+        assertEquals(
+            "正在处理...",
+            ThinkingPayload(stage = "backend_phase", message = "fallback_decision").userFacingThinkingMessage(),
+        )
+        assertEquals(
+            "正在比较候选商品...",
+            ThinkingPayload(stage = "ranking", message = "").userFacingThinkingMessage(),
+        )
+        assertEquals(
+            "正在确认你的预算范围...",
+            ThinkingPayload(stage = "clarification", message = "正在确认你的预算范围...").userFacingThinkingMessage(),
+        )
+    }
+
+    @Test
+    fun streamedTextKeepsPlainRendererAfterCompletion() {
+        assertTrue(
+            shouldKeepPlainTextRendererAfterStreaming(
+                stablePlainAfterLiveReveal = false,
+                hasSeenLiveStream = true,
+                animateInitialCompleted = false,
+            ),
+        )
+        assertTrue(
+            shouldKeepPlainTextRendererAfterStreaming(
+                stablePlainAfterLiveReveal = false,
+                hasSeenLiveStream = false,
+                animateInitialCompleted = true,
+            ),
+        )
+        assertFalse(
+            shouldKeepPlainTextRendererAfterStreaming(
+                stablePlainAfterLiveReveal = false,
+                hasSeenLiveStream = false,
+                animateInitialCompleted = false,
+            ),
+        )
     }
 
     @Test
@@ -507,10 +611,11 @@ class TimelineRevealStoreTest {
         turnId = turnId,
     )
 
-    private fun finalDecision(key: String) = FinalDecisionNode(
+    private fun finalDecision(key: String, deckId: String? = null) = FinalDecisionNode(
         key = key,
         payload = FinalDecisionPayload(summary = "done"),
         turnId = "turn_1",
+        deckId = deckId,
     )
 
     private fun product(productId: String) = ProductCardPayload(

@@ -26,6 +26,7 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import com.buypilot.feature.chat.ChatRoute
 import com.buypilot.feature.chat.ChatViewModel
+import com.buypilot.feature.chat.ui.canOpenDeckForConvergence
 import com.buypilot.feature.chat.ui.ProductEvidenceOverlayScreen
 import com.buypilot.feature.chat.ui.ProductHeroDetailScreen
 import com.buypilot.feature.chat.ui.ProductSwipeModeScreen
@@ -50,10 +51,16 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navController.getBackStackEntry(Routes.ChatGraph)
                 }
                 val viewModel: ChatViewModel = hiltViewModel(parentEntry)
+                val uiState by viewModel.uiState.collectAsState()
                 ChatRoute(
                     viewModel = viewModel,
                     onOpenProductDeck = { deckId, productId ->
-                        navController.navigate(Routes.productDeck(deckId, productId))
+                        val targetProductId = productId.orEmpty()
+                        if (uiState.canOpenDeckForConvergence(deckId)) {
+                            navController.navigate(Routes.productDeck(deckId, productId))
+                        } else if (targetProductId.isNotBlank()) {
+                            navController.navigate(Routes.productDetail(deckId, targetProductId))
+                        }
                     },
                     onOpenProductDetail = { deckId, productId ->
                         navController.navigate(Routes.productDetail(deckId, productId))
@@ -84,6 +91,18 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 val deckId = backStackEntry.decodedArg("deckId")
                 val productId = backStackEntry.decodedArg("productId")
 
+                androidx.compose.runtime.LaunchedEffect(deckId, productId, uiState.latestConvergeableDeckId) {
+                    if (!uiState.canOpenDeckForConvergence(deckId)) {
+                        if (productId.isNotBlank()) {
+                            navController.navigate(Routes.productDetail(deckId, productId)) {
+                                popUpTo(Routes.ChatDeck) { inclusive = true }
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                    }
+                }
+
                 androidx.compose.runtime.LaunchedEffect(deckId, productId) {
                     viewModel.selectProduct(deckId, productId)
                 }
@@ -93,12 +112,15 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     deckId = deckId,
                     initialProductId = productId,
                     onBack = { navController.popBackStack() },
+                    onDeckCompleted = { completedDeckId ->
+                        viewModel.convergeProductDeck(
+                            deckId = completedDeckId,
+                            showUserMessage = false,
+                            allowFullyHandled = true,
+                        )
+                    },
                     onOpenDetail = { targetDeckId, targetProductId ->
                         navController.navigate(Routes.productDetail(targetDeckId, targetProductId))
-                    },
-                    onConverge = { targetDeckId ->
-                        viewModel.convergeProductDeck(targetDeckId)
-                        navController.popBackStack(Routes.ChatHome, false)
                     },
                     onSwipe = viewModel::swipeProduct,
                     onUndo = viewModel::undoSwipe,
@@ -146,6 +168,13 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                         navController.navigate(Routes.productEvidence(targetDeckId, targetProductId))
                     },
                     onSwipe = viewModel::swipeProduct,
+                    onDeckCompleted = { completedDeckId ->
+                        viewModel.convergeProductDeck(
+                            deckId = completedDeckId,
+                            showUserMessage = false,
+                            allowFullyHandled = true,
+                        )
+                    },
                 )
             }
 

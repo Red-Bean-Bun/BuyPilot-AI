@@ -613,6 +613,341 @@ class ChatReducerTest {
     }
 
     @Test
+    fun productCardsDoNotAwaitConvergenceBeforeBackendDone() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+
+        val firstSwipe = ChatReducer.swipeProduct(
+            state = deckState,
+            deckId = "deck_1",
+            productId = "p1",
+            feedbackType = "like",
+            action = "like",
+        )
+        val secondSwipe = ChatReducer.swipeProduct(
+            state = firstSwipe,
+            deckId = "deck_1",
+            productId = "p2",
+            feedbackType = "not_interested",
+            action = "not_interested",
+        )
+
+        assertFalse("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in firstSwipe.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in secondSwipe.awaitingConvergenceDeckIds)
+        assertEquals(null, deckState.latestConvergeableDeckId)
+        assertFalse("deck_1" in secondSwipe.pendingDecisions)
+    }
+
+    @Test
+    fun lateFinalDecisionIsIgnoredAfterAllProductsAreSwiped() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val swipedAll = listOf("p1", "p2").fold(deckState) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }
+
+        val lateDecision = ChatReducer.reduce(
+            swipedAll,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "迟到的自动结论不应该展示。",
+                    decisionStatus = "needs_more_signal",
+                    confidence = "low",
+                    nextStep = "continue_current_deck",
+                ),
+            ),
+        )
+
+        assertFalse(lateDecision.nodes.any { it is FinalDecisionNode })
+        assertFalse("deck_1" in lateDecision.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in lateDecision.pendingDecisions)
+    }
+
+    @Test
+    fun deckScopedFinalDecisionFromLaterTurnIsIgnoredAfterAllProductsAreSwiped() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val swipedAll = listOf("p1", "p2").fold(deckState) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }
+
+        val lateDecision = ChatReducer.reduce(
+            swipedAll,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_converge_turn",
+                turnId = "converge_turn_2",
+                deckId = "deck_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "另一个 turn 回来的迟到结论也不应该展示。",
+                    decisionStatus = "needs_more_signal",
+                    confidence = "low",
+                    nextStep = "continue_current_deck",
+                ),
+            ),
+        )
+
+        assertFalse(lateDecision.nodes.any { it is FinalDecisionNode })
+        assertFalse("deck_1" in lateDecision.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in lateDecision.pendingDecisions)
+    }
+
+    @Test
+    fun currentDeckScopedFinalDecisionDisplaysAfterAllProductsAreSwiped() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val swipedAll = listOf("p1", "p2").fold(deckState) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }.copy(
+            currentTurnId = "converge_turn_2",
+            isStreaming = true,
+            awaitingConvergenceDeckIds = setOf("deck_1"),
+            latestConvergeableDeckId = "deck_1",
+        )
+
+        val finalDecision = ChatReducer.reduce(
+            swipedAll,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_converge_turn",
+                turnId = "converge_turn_2",
+                deckId = "deck_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "滑完后的当前收敛结论应该展示。",
+                    decisionStatus = "selected",
+                    confidence = "high",
+                    nextStep = "completed",
+                ),
+            ),
+        )
+
+        assertTrue(finalDecision.nodes.any { it is FinalDecisionNode })
+        assertEquals("deck_1", (finalDecision.nodes.last { it is FinalDecisionNode } as FinalDecisionNode).deckId)
+        assertFalse("deck_1" in finalDecision.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in finalDecision.pendingDecisions)
+    }
+
+    @Test
+    fun fullyHandledDeckCanStartExplicitConvergenceAndIgnoreReturnedCards() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val awaitableDeckState = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+        val swipedAll = listOf("p1", "p2").fold(awaitableDeckState) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }
+
+        val converging = ChatReducer.convergeDeck(
+            state = swipedAll.copy(currentTurnId = "converge_turn", isStreaming = true),
+            deckId = "deck_1",
+            usePendingDecision = false,
+            allowFullyHandled = true,
+        )
+        val ignoredProduct = ChatReducer.reduce(
+            converging,
+            product(rank = 1, productId = "p_new", turnId = "converge_turn"),
+        )
+        val ignoredCriteria = ChatReducer.reduce(
+            ignoredProduct,
+            criteria(
+                nodeId = "criteria_converge",
+                turnId = "converge_turn",
+                category = "美妆护肤",
+            ),
+        )
+        val finalDecision = ChatReducer.reduce(
+            ignoredCriteria,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_converge_turn",
+                turnId = "converge_turn",
+                deckId = "deck_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "滑完后的收敛结论应该展示。",
+                    decisionStatus = "selected",
+                    confidence = "high",
+                ),
+            ),
+        )
+
+        assertEquals("deck_1", converging.activeConvergenceDeckId)
+        assertFalse(ignoredCriteria.nodes.any { it is CriteriaNode && it.key == "criteria_converge" })
+        assertFalse(
+            ignoredCriteria.nodes
+                .filterIsInstance<ProductDeckNode>()
+                .any { deck -> deck.products.any { it.product.productId == "p_new" } },
+        )
+        assertTrue(finalDecision.nodes.any { it is FinalDecisionNode })
+        assertEquals(null, finalDecision.activeConvergenceDeckId)
+    }
+
+    @Test
+    fun convergenceDoneWithoutDecisionKeepsActiveDeckForFallbackDecision() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val converging = ChatReducer.convergeDeck(
+            state = deckState.copy(currentTurnId = "converge_turn", isStreaming = true),
+            deckId = "deck_1",
+            usePendingDecision = false,
+            allowFullyHandled = true,
+        )
+
+        val done = ChatReducer.reduce(
+            converging,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_converge",
+                turnId = "converge_turn",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+
+        assertEquals("deck_1", done.activeConvergenceDeckId)
+        assertFalse(done.isStreaming)
+    }
+
+    @Test
+    fun mismatchedBeautyCriteriaAndFollowupAreRemovedFromDigitalProductTurn() {
+        val withBeautyCriteria = ChatReducer.reduce(
+            ChatUiState(),
+            criteria(
+                nodeId = "criteria_bad",
+                turnId = "turn_phone",
+                category = "美妆护肤",
+            ),
+        )
+        val withBeautyFollowup = ChatReducer.reduce(
+            withBeautyCriteria,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "followup_turn_phone",
+                turnId = "turn_phone",
+                payload = TextDeltaPayload(
+                    messageId = "followup_turn_phone",
+                    delta = "你先看看这几款候选。如果想调整筛选范围，可以直接说「再温和一点」「不要酒精」「预算再低一点」，也可以点筛选卡修改。",
+                    done = true,
+                ),
+            ),
+        )
+
+        val withDigitalProduct = ChatReducer.reduce(
+            withBeautyFollowup,
+            product(rank = 1, productId = "p_phone_1", turnId = "turn_phone", category = "数码电子"),
+        )
+
+        assertTrue(withBeautyFollowup.nodes.any { it is CriteriaNode && it.key == "criteria_bad" })
+        assertTrue(withBeautyFollowup.nodes.any { it is AiStreamNode && it.key == "followup_turn_phone" })
+        assertFalse(withDigitalProduct.nodes.any { it is CriteriaNode && it.key == "criteria_bad" })
+        assertFalse(withDigitalProduct.nodes.any { it is AiStreamNode && it.key == "followup_turn_phone" })
+    }
+
+    @Test
+    fun lateDoneDoesNotReopenConvergenceAfterAllProductsAreSwiped() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val swipedAll = listOf("p1", "p2").fold(deckState) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }
+
+        val done = ChatReducer.reduce(
+            swipedAll,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+
+        assertFalse("deck_1" in done.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in done.pendingDecisions)
+    }
+
+    @Test
+    fun lateProductCardDoesNotReopenConvergenceAfterAllProductsAreSwiped() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val swipedAll = listOf("p1", "p2").fold(deckState) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }
+
+        val lateProduct = ChatReducer.reduce(
+            swipedAll,
+            product(rank = 2, productId = "p2"),
+        )
+
+        assertFalse("deck_1" in lateProduct.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in lateProduct.pendingDecisions)
+    }
+
+    @Test
     fun selectProductDoesNotReopenAlreadyHandledProductInSwipeDeck() {
         val deckState = listOf(
             product(rank = 1, productId = "p1"),
@@ -639,14 +974,60 @@ class ChatReducerTest {
     }
 
     @Test
+    fun convergeDeckDoesNotShowCachedDecisionAfterAllProductsAreSwiped() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val earlyDecision = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "这个缓存结论不应该在滑完后出现。",
+                    decisionStatus = "needs_more_signal",
+                    confidence = "low",
+                    nextStep = "continue_current_deck",
+                ),
+            ),
+        )
+        val swipedAll = listOf("p1", "p2").fold(earlyDecision) { acc, productId ->
+            ChatReducer.swipeProduct(
+                state = acc,
+                deckId = "deck_1",
+                productId = productId,
+                feedbackType = if (productId == "p1") "like" else "not_interested",
+                action = if (productId == "p1") "like" else "not_interested",
+            )
+        }
+
+        val converged = ChatReducer.convergeDeck(swipedAll, "deck_1")
+
+        assertFalse(converged.nodes.any { it is FinalDecisionNode })
+        assertFalse("deck_1" in converged.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in converged.pendingDecisions)
+    }
+
+    @Test
     fun multiProductDeckAwaitsConvergenceAndCachesInitialDecisionBeforeDone() {
         val deckState = listOf(
             product(rank = 1, productId = "p1"),
             product(rank = 2, productId = "p2"),
         ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val awaitableDeckState = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
 
         val earlyDecision = ChatReducer.reduce(
-            deckState,
+            awaitableDeckState,
             envelope(
                 event = AgentEventType.FinalDecision,
                 nodeId = "decision_turn_1",
@@ -661,11 +1042,14 @@ class ChatReducerTest {
         )
         val converged = ChatReducer.convergeDeck(earlyDecision, "deck_1")
 
-        assertTrue("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertFalse("deck_1" in deckState.awaitingConvergenceDeckIds)
+        assertTrue("deck_1" in awaitableDeckState.awaitingConvergenceDeckIds)
+        assertEquals("deck_1", awaitableDeckState.latestConvergeableDeckId)
         assertFalse(earlyDecision.nodes.any { it is FinalDecisionNode })
         assertTrue("deck_1" in earlyDecision.pendingDecisions)
         assertFalse("deck_1" in converged.awaitingConvergenceDeckIds)
         assertTrue(converged.nodes.any { it is FinalDecisionNode })
+        assertEquals("deck_1", (converged.nodes.last { it is FinalDecisionNode } as FinalDecisionNode).deckId)
     }
 
     @Test
@@ -674,8 +1058,17 @@ class ChatReducerTest {
             product(rank = 1, productId = "p1"),
             product(rank = 2, productId = "p2"),
         ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
-        val earlyDecision = ChatReducer.reduce(
+        val awaitableDeckState = ChatReducer.reduce(
             deckState,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+        val earlyDecision = ChatReducer.reduce(
+            awaitableDeckState,
             envelope(
                 event = AgentEventType.FinalDecision,
                 nodeId = "decision_turn_1",
@@ -718,6 +1111,7 @@ class ChatReducerTest {
         )
 
         assertTrue("deck_1" in done.awaitingConvergenceDeckIds)
+        assertEquals("deck_1", done.latestConvergeableDeckId)
     }
 
     @Test
@@ -738,6 +1132,7 @@ class ChatReducerTest {
 
         assertFalse("deck_1" in deckState.awaitingConvergenceDeckIds)
         assertFalse("deck_1" in done.awaitingConvergenceDeckIds)
+        assertEquals(null, done.latestConvergeableDeckId)
     }
 
     @Test
@@ -759,12 +1154,18 @@ class ChatReducerTest {
     @Test
     fun newUserMessageClearsCriteriaAdjustmentState() {
         val state = ChatReducer.addUserMessage(
-            state = ChatUiState(awaitingCriteriaAdjustment = true),
+            state = ChatUiState(
+                awaitingCriteriaAdjustment = true,
+                awaitingConvergenceDeckIds = setOf("deck_1"),
+                latestConvergeableDeckId = "deck_1",
+            ),
             key = "user_1",
             content = "预算放宽到 500",
         )
 
         assertFalse(state.awaitingCriteriaAdjustment)
+        assertTrue(state.awaitingConvergenceDeckIds.isEmpty())
+        assertEquals(null, state.latestConvergeableDeckId)
     }
 
     @Test
@@ -865,14 +1266,37 @@ class ChatReducerTest {
         assertEquals("not_interested", swipeState?.undoStack?.single()?.feedbackType)
     }
 
-    private fun product(rank: Int, productId: String) = envelope(
+    private fun product(
+        rank: Int,
+        productId: String,
+        turnId: String = "turn_1",
+        category: String = "",
+    ) = envelope(
         event = AgentEventType.ProductCard,
         nodeId = "product_$productId",
+        turnId = turnId,
         deckId = "deck_1",
         payload = ProductCardPayload(
             rank = rank,
-            product = ProductPayload(productId = productId, name = productId),
+            product = ProductPayload(productId = productId, name = productId, category = category),
             reason = "reason",
+        ),
+    )
+
+    private fun criteria(
+        nodeId: String,
+        turnId: String,
+        category: String,
+    ) = envelope(
+        event = AgentEventType.CriteriaCard,
+        nodeId = nodeId,
+        turnId = turnId,
+        payload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = nodeId,
+                category = category,
+                summary = category,
+            ),
         ),
     )
 

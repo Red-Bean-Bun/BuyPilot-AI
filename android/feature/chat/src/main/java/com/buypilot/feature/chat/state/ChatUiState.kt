@@ -28,6 +28,8 @@ data class ChatUiState(
     val streamingTextLength: Int = 0,
     val productSwipeStates: Map<String, ProductSwipeState> = emptyMap(),
     val awaitingConvergenceDeckIds: Set<String> = emptySet(),
+    val latestConvergeableDeckId: String? = null,
+    val activeConvergenceDeckId: String? = null,
     val awaitingCriteriaAdjustment: Boolean = false,
     val pendingDecisions: Map<String, PendingDecision> = emptyMap(),
     val backendBaseUrl: String = "",
