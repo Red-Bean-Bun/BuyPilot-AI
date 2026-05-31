@@ -13,6 +13,10 @@ from src.services.request_context import RequestContext, clear_request_context, 
 
 REQUEST_LOG_EXCLUDED_PATHS = {"/health", "/health/"}
 
+# Static file paths — skip all middleware processing (UUID, audit, context).
+# These are immutable content-addressed files; per-request overhead is wasted.
+_STATIC_PATH_PREFIXES = ("/assets/", "/uploads/")
+
 
 class RequestContextMiddleware:
     def __init__(self, app: ASGIApp) -> None:
@@ -20,6 +24,12 @@ class RequestContextMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Skip all middleware overhead for static assets — no UUID, no audit, no context.
+        path = scope["path"]
+        if path.startswith(_STATIC_PATH_PREFIXES):
             await self.app(scope, receive, send)
             return
 
@@ -56,7 +66,6 @@ class RequestContextMiddleware:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             client = scope.get("client")
             client_ip = client[0] if client else None
-            path = scope["path"]
             if path not in REQUEST_LOG_EXCLUDED_PATHS:
                 await record_api_request(
                     method=scope["method"],
