@@ -192,6 +192,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
@@ -302,6 +305,8 @@ private const val DecisionReasonStaggerMs = 120
 private val TimelineNearEndThreshold = 24.dp
 private val TimelineFollowCorrectionTolerance = 8.dp
 private val TimelineSafeGap = 20.dp
+private val TimelineBottomReadingBuffer = 156.dp
+private val TimelineKeyboardBottomReadingBuffer = 220.dp
 private val TimelineAnchorTopGap = 28.dp
 private val TimelineAnchorBottomReserve = 420.dp
 private const val TimelineViewportSettleMs = 48L
@@ -651,6 +656,9 @@ fun BuyPilotChatScreen(
     val hiddenUserMessageKeysForFlight = hiddenFlightMessageKeys +
         listOfNotNull(pendingFlightMessageKey, activeFlightMessageKey)
     val assistantVisualActive = typingMessageKeys.isNotEmpty() || visualActiveTurnKeys.isNotEmpty()
+    val clarificationFlightActive = dismissingClarificationKey != null ||
+        pendingClarificationAnswer?.awaitsFlight == true ||
+        activeClarificationFlight != null
 
     LaunchedEffect(shouldDismissWelcomeContent) {
         if (shouldDismissWelcomeContent) {
@@ -910,6 +918,7 @@ fun BuyPilotChatScreen(
                     imeBottomPx = imeBottomPx,
                     isComposerFocused = composerFocused,
                     isAssistantVisualActive = assistantVisualActive,
+                    isClarificationFlightActive = clarificationFlightActive,
                     dismissingClarificationKey = dismissingClarificationKey,
                     dismissedClarificationKeys = dismissedClarificationKeys,
                     selectedClarificationOption = pendingClarificationAnswer?.selectedOption,
@@ -936,7 +945,7 @@ fun BuyPilotChatScreen(
                         }
                     },
                     onUserBubblePositioned = { key, snapshot ->
-                        if (userBubbleSnapshots[key] != snapshot) {
+                        if (key !in userBubbleSnapshots) {
                             userBubbleSnapshots = userBubbleSnapshots + (key to snapshot)
                         }
                     },
@@ -1189,6 +1198,7 @@ private fun ConversationStage(
     imeBottomPx: Int,
     isComposerFocused: Boolean,
     isAssistantVisualActive: Boolean,
+    isClarificationFlightActive: Boolean,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
     selectedClarificationOption: String?,
@@ -1264,6 +1274,7 @@ private fun ConversationStage(
                 imeBottomPx = imeBottomPx,
                 isComposerFocused = isComposerFocused,
                 isAssistantVisualActive = isAssistantVisualActive,
+                isClarificationFlightActive = isClarificationFlightActive,
                 dismissingClarificationKey = dismissingClarificationKey,
                 dismissedClarificationKeys = dismissedClarificationKeys,
                 selectedClarificationOption = selectedClarificationOption,
@@ -1629,6 +1640,7 @@ private fun ChatTimeline(
     imeBottomPx: Int,
     isComposerFocused: Boolean,
     isAssistantVisualActive: Boolean,
+    isClarificationFlightActive: Boolean,
     dismissingClarificationKey: String?,
     dismissedClarificationKeys: Set<String>,
     selectedClarificationOption: String?,
@@ -1641,9 +1653,12 @@ private fun ChatTimeline(
     onUserBubblePositioned: (String, ClarificationChipSnapshot) -> Unit,
     onClarificationCardDismissed: (String) -> Unit,
 ) {
-    val listState = rememberLazyListState()
+    val listState = rememberSaveable(saver = LazyListState.Saver) {
+        LazyListState()
+    }
     val coroutineScope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     val timelineMotionEnabled by remember {
         derivedStateOf { !listState.isScrollInProgress }
@@ -1657,13 +1672,51 @@ private fun ChatTimeline(
     var retainedAnchorAssistantTurnId by remember { mutableStateOf<String?>(null) }
     var revealScrollTick by remember { mutableIntStateOf(0) }
     var lastRevealScrollAtMs by remember { mutableStateOf(0L) }
+    var suppressReturnAutoFocus by rememberSaveable { mutableStateOf(false) }
+    var routeReturnAnchorCaptured by rememberSaveable { mutableStateOf(false) }
+    var routeReturnRestorePending by rememberSaveable { mutableStateOf(false) }
+    var routeReturnWasCovered by rememberSaveable { mutableStateOf(false) }
+    var routeReturnItemKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var routeReturnItemIndex by rememberSaveable { mutableStateOf(0) }
+    var routeReturnScrollOffset by rememberSaveable { mutableStateOf(0) }
+    var routeReturnFinalDecisionKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var clarificationFreezeCaptured by remember { mutableStateOf(false) }
+    var clarificationFreezeItemKey by remember { mutableStateOf<String?>(null) }
+    var clarificationFreezeItemIndex by remember { mutableStateOf(0) }
+    var clarificationFreezeScrollOffset by remember { mutableStateOf(0) }
+    val suppressTimelineAutoFocus = suppressReturnAutoFocus || isClarificationFlightActive
     val revealStore = remember { TimelineRevealStore() }
     val hasTimelineError = state.nodes.any { it is ErrorNode }
     val timelineItems = remember(state.nodes) { state.nodes.toTimelineRenderItems() }
     val latestFinalDecisionKey = remember(state.nodes) {
         state.nodes.filterIsInstance<FinalDecisionNode>().lastOrNull()?.key
     }
+    val finalDecisionKeys = remember(state.nodes) {
+        state.nodes.filterIsInstance<FinalDecisionNode>().mapTo(mutableSetOf()) { it.key }
+    }
     var lastFocusedFinalDecisionKey by rememberSaveable { mutableStateOf(latestFinalDecisionKey) }
+    fun captureRouteReturnAnchor() {
+        if (timelineItems.isEmpty()) return
+        val index = listState.firstVisibleItemIndex.coerceIn(0, timelineItems.lastIndex)
+        routeReturnItemIndex = index
+        routeReturnScrollOffset = listState.firstVisibleItemScrollOffset
+        routeReturnItemKey = timelineItems.getOrNull(index)?.key
+        routeReturnFinalDecisionKey = latestFinalDecisionKey
+        routeReturnAnchorCaptured = true
+        routeReturnRestorePending = false
+    }
+    fun prepareForSecondaryPageOpen() {
+        captureRouteReturnAnchor()
+        suppressReturnAutoFocus = true
+    }
+    val openProductFromTimeline: (String, String?) -> Unit = { deckId, productId ->
+        prepareForSecondaryPageOpen()
+        onProductOpen(deckId, productId)
+    }
+    val openProductDetailFromTimeline: (String, String) -> Unit = { deckId, productId ->
+        prepareForSecondaryPageOpen()
+        onProductDetailOpen(deckId, productId)
+    }
     LaunchedEffect(timelineItems, state.nodes) {
         revealStore.pruneToKeys(
             timelineItemKeys = timelineItems.mapTo(mutableSetOf()) { it.key },
@@ -1709,7 +1762,13 @@ private fun ChatTimeline(
     }
     fun lastContentIndex(): Int = timelineItems.lastContentIndex(state, hasTimelineError)
     fun requestRevealFollowScroll() {
-        if (!followStreamingText && !activeTurnAnchored) return
+        if (suppressTimelineAutoFocus) return
+        if (
+            !followStreamingText &&
+            !activeTurnAnchored &&
+            retainedAnchorUserMessageKey == null &&
+            retainedAnchorAssistantTurnId == null
+        ) return
         val now = System.currentTimeMillis()
         if (now - lastRevealScrollAtMs >= TimelineRevealScrollThrottleMs) {
             lastRevealScrollAtMs = now
@@ -1718,7 +1777,9 @@ private fun ChatTimeline(
     }
     fun markStructuredEnteredAndFollow(key: String) {
         revealStore.markStructuredNodeEntered(key)
-        requestRevealFollowScroll()
+        if (key !in finalDecisionKeys) {
+            requestRevealFollowScroll()
+        }
     }
     val timelineViewportBottomInset = calculateTimelineViewportBottomInset(
         density = density,
@@ -1726,6 +1787,11 @@ private fun ChatTimeline(
         imeBottomPx = imeBottomPx,
     )
     val timelineBottomPadding = TimelineSafeGap
+    val timelineReadingBuffer = if (imeBottomPx > 0) {
+        TimelineKeyboardBottomReadingBuffer
+    } else {
+        TimelineBottomReadingBuffer
+    }
     val jumpButtonBottomPadding = timelineViewportBottomInset + TimelineJumpButtonComposerGap
     val activeTurnBottomReserve = with(density) {
         maxOf(
@@ -1735,7 +1801,9 @@ private fun ChatTimeline(
     }
     val nearEndThresholdPx = with(density) { TimelineNearEndThreshold.toPx() }
     val followCorrectionTolerancePx = with(density) { TimelineFollowCorrectionTolerance.toPx() }
-    val timelineBottomPaddingPx = with(density) { timelineBottomPadding.toPx() }
+    val latestContentBottomPaddingPx = with(density) {
+        timelineBottomPadding.toPx() + timelineReadingBuffer.toPx()
+    }
     val anchorTopOffsetPx = with(density) { TimelineAnchorTopGap.toPx().roundToInt() }
     suspend fun keepLatestUserMessageAnchored(settleFrames: Int = 1): Boolean {
         val key = state.lastUserMessageKey ?: return false
@@ -1751,24 +1819,159 @@ private fun ChatTimeline(
         )
         return true
     }
+    suspend fun keepAssistantTurnAnchored(turnId: String?, settleFrames: Int = 1): Boolean {
+        val targetTurnId = turnId?.takeIf { it.isNotBlank() } ?: return false
+        val index = timelineItems.indexOfFirst {
+            it is AssistantTurnTimelineItem && it.turnId == targetTurnId
+        }
+        if (index < 0) return false
+        scrollTimelineItemToAnchorIfNeeded(
+            listState = listState,
+            itemIndex = index,
+            anchorTopPx = anchorTopOffsetPx,
+            tolerancePx = followCorrectionTolerancePx,
+            settleFrames = settleFrames,
+        )
+        return true
+    }
     val isNearTimelineEnd by remember(
         timelineItems.size,
         state.lastError,
         hasTimelineError,
         timelineBottomPadding,
+        latestContentBottomPaddingPx,
         nearEndThresholdPx,
     ) {
         derivedStateOf {
             isTimelineNearEnd(
                 listState = listState,
                 lastContentIndex = lastContentIndex(),
-                bottomPaddingPx = timelineBottomPaddingPx,
+                bottomPaddingPx = latestContentBottomPaddingPx,
                 thresholdPx = nearEndThresholdPx,
             )
         }
     }
+    val followLatestActive = followStreamingText && (state.isStreaming || isAssistantVisualActive)
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE,
+                Lifecycle.Event.ON_STOP -> {
+                    if (routeReturnAnchorCaptured) {
+                        routeReturnWasCovered = true
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (routeReturnAnchorCaptured && routeReturnWasCovered) {
+                        suppressReturnAutoFocus = true
+                        routeReturnRestorePending = true
+                        routeReturnWasCovered = false
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (routeReturnAnchorCaptured) {
+                routeReturnWasCovered = true
+                routeReturnRestorePending = true
+            }
+            suppressReturnAutoFocus = true
+        }
+    }
+
+    LaunchedEffect(suppressReturnAutoFocus, routeReturnRestorePending) {
+        if (!suppressReturnAutoFocus) return@LaunchedEffect
+        activeTurnAnchored = false
+        followStreamingText = false
+        retainedAnchorUserMessageKey = null
+        retainedAnchorAssistantTurnId = null
+        if (routeReturnRestorePending) return@LaunchedEffect
+        kotlinx.coroutines.delay(420L)
+        suppressReturnAutoFocus = false
+    }
+
+    LaunchedEffect(routeReturnRestorePending, timelineItems.size, latestFinalDecisionKey) {
+        if (!routeReturnRestorePending || timelineItems.isEmpty()) return@LaunchedEffect
+        suppressReturnAutoFocus = true
+        activeTurnAnchored = false
+        followStreamingText = false
+        retainedAnchorUserMessageKey = null
+        retainedAnchorAssistantTurnId = null
+        kotlinx.coroutines.delay(48L)
+        val newFinalDecisionKey = latestFinalDecisionKey
+            ?.takeIf { it != routeReturnFinalDecisionKey }
+        if (newFinalDecisionKey != null) {
+            val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(newFinalDecisionKey) }
+            if (decisionItemIndex >= 0) {
+                lastFocusedFinalDecisionKey = newFinalDecisionKey
+                animateTimelineItemToAnchor(
+                    listState = listState,
+                    itemIndex = decisionItemIndex,
+                    anchorTopPx = anchorTopOffsetPx,
+                    tolerancePx = followCorrectionTolerancePx,
+                )
+            }
+        } else {
+            val keyedIndex = routeReturnItemKey
+                ?.let { key -> timelineItems.indexOfFirst { it.key == key } }
+                ?: -1
+            val targetIndex = keyedIndex
+                .takeIf { it >= 0 }
+                ?: routeReturnItemIndex.coerceIn(0, timelineItems.lastIndex)
+            listState.scrollToItem(
+                index = targetIndex,
+                scrollOffset = routeReturnScrollOffset.coerceAtLeast(0),
+            )
+        }
+        kotlinx.coroutines.delay(360L)
+        routeReturnRestorePending = false
+        routeReturnAnchorCaptured = false
+        routeReturnWasCovered = false
+        routeReturnItemKey = null
+        suppressReturnAutoFocus = false
+    }
+
+    LaunchedEffect(isClarificationFlightActive) {
+        if (isClarificationFlightActive && timelineItems.isNotEmpty()) {
+            val index = listState.firstVisibleItemIndex.coerceIn(0, timelineItems.lastIndex)
+            clarificationFreezeItemIndex = index
+            clarificationFreezeScrollOffset = listState.firstVisibleItemScrollOffset
+            clarificationFreezeItemKey = timelineItems.getOrNull(index)?.key
+            clarificationFreezeCaptured = true
+        } else {
+            kotlinx.coroutines.delay(80L)
+            clarificationFreezeCaptured = false
+            clarificationFreezeItemKey = null
+        }
+    }
+
+    LaunchedEffect(
+        isClarificationFlightActive,
+        timelineItems.size,
+        composerHeightPx,
+        imeBottomPx,
+    ) {
+        if (!isClarificationFlightActive || !clarificationFreezeCaptured || timelineItems.isEmpty()) {
+            return@LaunchedEffect
+        }
+        val keyedIndex = clarificationFreezeItemKey
+            ?.let { key -> timelineItems.indexOfFirst { it.key == key } }
+            ?: -1
+        val targetIndex = keyedIndex
+            .takeIf { it >= 0 }
+            ?: clarificationFreezeItemIndex.coerceIn(0, timelineItems.lastIndex)
+        listState.scrollToItem(
+            index = targetIndex,
+            scrollOffset = clarificationFreezeScrollOffset.coerceAtLeast(0),
+        )
+    }
 
     LaunchedEffect(state.lastUserMessageKey, activeFlightMessageKey) {
+        if (suppressTimelineAutoFocus) return@LaunchedEffect
         val key = state.lastUserMessageKey ?: return@LaunchedEffect
         if (key == activeFlightMessageKey) return@LaunchedEffect
         val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
@@ -1777,6 +1980,7 @@ private fun ChatTimeline(
             lastAutoSettledUserMessageKey = null
             activeTurnAnchored = true
             retainedAnchorUserMessageKey = key
+            retainedAnchorAssistantTurnId = null
             followStreamingText = false
             keepLatestUserMessageAnchored()
         }
@@ -1790,6 +1994,7 @@ private fun ChatTimeline(
         imeBottomPx,
         timelineItems.size,
     ) {
+        if (suppressTimelineAutoFocus) return@LaunchedEffect
         if (!activeTurnAnchored || isUserDragging) return@LaunchedEffect
         val key = state.lastUserMessageKey ?: return@LaunchedEffect
         if (key == activeFlightMessageKey) return@LaunchedEffect
@@ -1805,6 +2010,7 @@ private fun ChatTimeline(
         activeTurnAnchored,
         activeFlightMessageKey,
     ) {
+        if (suppressTimelineAutoFocus) return@LaunchedEffect
         val turnId = state.currentTurnId ?: return@LaunchedEffect
         if (
             turnId == lastAnchoredAssistantTurnId ||
@@ -1840,13 +2046,14 @@ private fun ChatTimeline(
     }
 
     LaunchedEffect(isComposerFocused, imeBottomPx, composerHeightPx, timelineItems.size) {
+        if (suppressTimelineAutoFocus) return@LaunchedEffect
         if (!isComposerFocused || imeBottomPx <= 0 || isUserDragging || activeTurnAnchored) return@LaunchedEffect
         kotlinx.coroutines.delay(TimelineViewportSettleMs)
         if (isNearTimelineEnd) {
             scrollActiveTurnIfNeeded(
                 listState = listState,
                 lastContentIndex = lastContentIndex(),
-                bottomPaddingPx = timelineBottomPaddingPx,
+                bottomPaddingPx = latestContentBottomPaddingPx,
                 tolerancePx = followCorrectionTolerancePx,
                 settleFrames = 2,
             )
@@ -1879,12 +2086,11 @@ private fun ChatTimeline(
             lastAutoSettledUserMessageKey = state.lastUserMessageKey
             activeTurnAnchored = false
             followStreamingText = false
-            retainedAnchorUserMessageKey = null
-            retainedAnchorAssistantTurnId = null
         }
     }
 
     LaunchedEffect(latestFinalDecisionKey, timelineItems.size, composerHeightPx, imeBottomPx) {
+        if (suppressTimelineAutoFocus) return@LaunchedEffect
         val decisionKey = latestFinalDecisionKey ?: return@LaunchedEffect
         if (decisionKey == lastFocusedFinalDecisionKey || isUserDragging) return@LaunchedEffect
         val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(decisionKey) }
@@ -1893,10 +2099,8 @@ private fun ChatTimeline(
         activeTurnAnchored = false
         followStreamingText = false
         retainedAnchorUserMessageKey = null
-        retainedAnchorAssistantTurnId = decisionItemIndex
-            .takeIf { it >= 0 }
-            ?.let { (timelineItems[it] as? AssistantTurnTimelineItem)?.turnId }
-        kotlinx.coroutines.delay(140L)
+        retainedAnchorAssistantTurnId = null
+        kotlinx.coroutines.delay(220L)
         animateTimelineItemToAnchor(
             listState = listState,
             itemIndex = decisionItemIndex,
@@ -1909,20 +2113,47 @@ private fun ChatTimeline(
         timelineItems.size,
         state.streamingTextKey,
         state.isStreaming,
-        timelineBottomPadding,
+        latestContentBottomPaddingPx,
         revealScrollTick,
         activeTurnAnchored,
+        retainedAnchorUserMessageKey,
+        retainedAnchorAssistantTurnId,
     ) {
-        if (activeTurnAnchored && timelineItems.isNotEmpty()) {
+        if (suppressTimelineAutoFocus) return@LaunchedEffect
+        if ((activeTurnAnchored || retainedAnchorUserMessageKey != null) && timelineItems.isNotEmpty()) {
             keepLatestUserMessageAnchored()
+        } else if (retainedAnchorAssistantTurnId != null && timelineItems.isNotEmpty()) {
+            keepAssistantTurnAnchored(retainedAnchorAssistantTurnId)
         } else if (followStreamingText && timelineItems.isNotEmpty()) {
             scrollActiveTurnIfNeeded(
                 listState = listState,
                 lastContentIndex = lastContentIndex(),
-                bottomPaddingPx = timelineBottomPaddingPx,
+                bottomPaddingPx = latestContentBottomPaddingPx,
                 tolerancePx = followCorrectionTolerancePx,
                 settleFrames = 2,
             )
+        }
+    }
+
+    LaunchedEffect(
+        followLatestActive,
+        timelineItems.size,
+        state.streamingTextKey,
+        latestContentBottomPaddingPx,
+        suppressTimelineAutoFocus,
+        isUserDragging,
+    ) {
+        if (!followLatestActive || suppressTimelineAutoFocus || isUserDragging) return@LaunchedEffect
+        while (true) {
+            if (timelineItems.isNotEmpty()) {
+                scrollActiveTurnIfNeeded(
+                    listState = listState,
+                    lastContentIndex = lastContentIndex(),
+                    bottomPaddingPx = latestContentBottomPaddingPx,
+                    tolerancePx = followCorrectionTolerancePx,
+                )
+            }
+            kotlinx.coroutines.delay(72L)
         }
     }
 
@@ -1969,8 +2200,8 @@ private fun ChatTimeline(
                                 onClarificationManualInput = onClarificationManualInput,
                                 onClarificationManualSource = onClarificationManualSource,
                                 onCriteriaEdit = onCriteriaEdit,
-                                onProductOpen = onProductOpen,
-                                onProductDetailOpen = onProductDetailOpen,
+                                onProductOpen = openProductFromTimeline,
+                                onProductDetailOpen = openProductDetailFromTimeline,
                                 onConvergeRecommendation = onConvergeRecommendation,
                                 onDecisionEvidence = onDecisionEvidence,
                                 onRetryLastMessage = onRetryLastMessage,
@@ -1987,7 +2218,7 @@ private fun ChatTimeline(
                         }
                     }
                     is AssistantTurnTimelineItem -> TimelineItemMotion(
-                        animateEnter = timelineMotionEnabled,
+                        animateEnter = false,
                         hasEntered = revealStore.hasEnteredTimelineItem(item.key),
                         onEntered = { revealStore.markTimelineItemEntered(item.key) },
                     ) {
@@ -2005,8 +2236,8 @@ private fun ChatTimeline(
                             onClarificationManualInput = onClarificationManualInput,
                             onClarificationManualSource = onClarificationManualSource,
                             onCriteriaEdit = onCriteriaEdit,
-                            onProductOpen = onProductOpen,
-                            onProductDetailOpen = onProductDetailOpen,
+                            onProductOpen = openProductFromTimeline,
+                            onProductDetailOpen = openProductDetailFromTimeline,
                             onConvergeRecommendation = onConvergeRecommendation,
                             onDecisionEvidence = onDecisionEvidence,
                             onRetryLastMessage = onRetryLastMessage,
@@ -2053,8 +2284,8 @@ private fun ChatTimeline(
                             onClarificationManualInput = onClarificationManualInput,
                             onClarificationManualSource = onClarificationManualSource,
                             onCriteriaEdit = onCriteriaEdit,
-                            onProductOpen = onProductOpen,
-                            onProductDetailOpen = onProductDetailOpen,
+                            onProductOpen = openProductFromTimeline,
+                            onProductDetailOpen = openProductDetailFromTimeline,
                             onConvergeRecommendation = onConvergeRecommendation,
                             onDecisionEvidence = onDecisionEvidence,
                             onRetryLastMessage = onRetryLastMessage,
@@ -2091,15 +2322,24 @@ private fun ChatTimeline(
                 retainedAnchorUserMessageKey == state.lastUserMessageKey
             val shouldRetainAssistantAnchorSpacer = retainedAnchorAssistantTurnId != null &&
                 retainedAnchorAssistantTurnId == state.currentTurnId
-            if (activeTurnAnchored || shouldRetainAnchorSpacer || shouldRetainAssistantAnchorSpacer) {
-                item("active_turn_anchor_spacer") {
-                    Spacer(Modifier.height(activeTurnBottomReserve))
+            val endReadingBuffer = if (
+                activeTurnAnchored ||
+                shouldRetainAnchorSpacer ||
+                shouldRetainAssistantAnchorSpacer
+            ) {
+                activeTurnBottomReserve
+            } else {
+                timelineReadingBuffer
+            }
+            if (timelineItems.isNotEmpty()) {
+                item("timeline_bottom_reading_buffer") {
+                    Spacer(Modifier.height(endReadingBuffer))
                 }
             }
         }
 
         AnimatedVisibility(
-            visible = !isNearTimelineEnd && (!followStreamingText || !state.isStreaming),
+            visible = !isNearTimelineEnd && !followLatestActive,
             enter = fadeIn(animationSpec = tween(durationMillis = 160, easing = MenuEaseOut)) +
                 slideInVertically(
                     animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
@@ -2116,18 +2356,19 @@ private fun ChatTimeline(
                 .zIndex(2f),
         ) {
             FollowLatestBubble(
-                isStreaming = state.isStreaming,
-                motionEnabled = state.isStreaming || isAssistantVisualActive,
                 onClick = {
                     followStreamingText = state.isStreaming || isAssistantVisualActive
                     activeTurnAnchored = false
                     retainedAnchorUserMessageKey = null
+                    retainedAnchorAssistantTurnId = null
+                    lastRevealScrollAtMs = 0L
+                    revealScrollTick += 1
                     coroutineScope.launch {
                         val lastContentIndex = lastContentIndex().coerceAtLeast(0)
                         animateLatestContentIntoView(
                             listState = listState,
                             lastContentIndex = lastContentIndex,
-                            bottomPaddingPx = timelineBottomPaddingPx,
+                            bottomPaddingPx = latestContentBottomPaddingPx,
                             tolerancePx = followCorrectionTolerancePx,
                         )
                     }
@@ -2679,12 +2920,10 @@ private fun TimelineNodeContent(
         )
         is ThinkingNode -> {
             val statusMessage = node.payload.userFacingThinkingMessage()
-            if (statusMessage.isNotBlank()) {
-                AssistantInlineStatus(
-                    message = statusMessage,
-                    motionEnabled = renderContext.currentTurnId == node.turnId,
-                )
-            }
+            AssistantInlineStatus(
+                message = statusMessage,
+                motionEnabled = renderContext.currentTurnId == node.turnId,
+            )
         }
         is AiStreamNode -> StreamingAssistantText(
             nodeKey = node.key,
@@ -2788,8 +3027,6 @@ private fun TimelineNodeContent(
 
 @Composable
 private fun FollowLatestBubble(
-    isStreaming: Boolean,
-    motionEnabled: Boolean,
     onClick: () -> Unit,
 ) {
     Box(
@@ -2807,41 +3044,14 @@ private fun FollowLatestBubble(
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (isStreaming) {
-            StreamingFollowGlyph(motionEnabled = motionEnabled)
-        } else {
-            Icon(
-                painter = painterResource(R.drawable.ic_arrow_upward_24),
-                contentDescription = "回到底部",
-                tint = BuyPilotColors.PrimaryDark,
-                modifier = Modifier
-                    .size(18.dp)
-                    .rotate(180f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun StreamingFollowGlyph(
-    motionEnabled: Boolean,
-) {
-    Row(
-        modifier = Modifier
-            .size(width = 24.dp, height = 16.dp)
-            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.92f), CircleShape),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val dotAlphas = if (motionEnabled) listOf(0.48f, 0.68f, 0.88f) else listOf(0.56f, 0.56f, 0.56f)
-        repeat(3) { index ->
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 1.25.dp)
-                    .size(3.6.dp)
-                    .background(BuyPilotColors.PrimaryDark.copy(alpha = dotAlphas[index]), CircleShape),
-            )
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_upward_24),
+            contentDescription = "回到底部",
+            tint = BuyPilotColors.PrimaryDark,
+            modifier = Modifier
+                .size(18.dp)
+                .rotate(180f),
+        )
     }
 }
 
@@ -2931,7 +3141,7 @@ private fun AssistantInlineStatus(
     message: String,
     motionEnabled: Boolean,
 ) {
-    val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() } ?: return
+    val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2942,11 +3152,13 @@ private fun AssistantInlineStatus(
             modifier = Modifier.size(28.dp),
             motionEnabled = motionEnabled,
         )
-        Spacer(Modifier.width(8.dp))
-        ThinkingShimmerText(
-            text = displayMessage,
-            motionEnabled = motionEnabled,
-        )
+        if (displayMessage != null) {
+            Spacer(Modifier.width(8.dp))
+            ThinkingShimmerText(
+                text = displayMessage,
+                motionEnabled = motionEnabled,
+            )
+        }
     }
 }
 
@@ -6152,7 +6364,12 @@ private fun DecisionSummaryCard(
     val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        AssistantText(payload.decisionSummaryMarkdown(statusBadge?.label))
+        DecisionSummaryIntro(
+            motionKey = motionKey,
+            summary = payload.decisionSummaryText(),
+            motionEnabled = motionEnabled,
+            alreadyEntered = alreadyEntered,
+        )
         if (
             winner != null ||
             !winnerProductId.isNullOrBlank() ||
@@ -6272,9 +6489,6 @@ private fun DecisionSummaryCard(
                             if (notForItems.isNotEmpty()) {
                                 WarningBox(notForItems.joinToString("；"))
                             }
-                            if (payload.decisionStatus == "selected" && payload.confidence == "low") {
-                                DecisionLowConfidenceNotice()
-                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End,
@@ -6297,36 +6511,68 @@ private fun DecisionSummaryCard(
     }
 }
 
-private fun String.withDecisionSummaryDivider(): String {
-    val summary = trim()
-    if (summary.isBlank()) return summary
-    if (
-        summary.startsWith("---") ||
-        summary.startsWith("***") ||
-        summary.startsWith("___")
-    ) return summary
-    return "---\n\n$summary"
-}
-
-private fun FinalDecisionPayload.decisionSummaryMarkdown(statusLabel: String?): String {
-    val summary = this.summary.withoutInternalDebugTokens().trim()
-    val headline = statusLabel
-        ?.withoutInternalDebugTokens()
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-    val body = buildString {
-        if (headline != null) {
-            append("**")
-            append(headline)
-            append("**")
-        }
-        if (summary.isNotBlank()) {
-            if (isNotEmpty()) append("\n\n")
-            append(summary)
+@Composable
+private fun DecisionSummaryIntro(
+    motionKey: String,
+    summary: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+) {
+    if (summary.isBlank()) return
+    val shouldAnimate = motionEnabled && !alreadyEntered
+    val progress = remember(motionKey) {
+        Animatable(if (shouldAnimate) 0f else 1f)
+    }
+    LaunchedEffect(motionKey, shouldAnimate) {
+        if (shouldAnimate) {
+            progress.snapTo(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 420,
+                    easing = PremiumRevealEase,
+                ),
+            )
+        } else {
+            progress.snapTo(1f)
         }
     }
-    return body.withDecisionSummaryDivider()
+
+    val lineProgress = segmentProgress(progress.value, 0f, 0.72f)
+    val textProgress = segmentProgress(progress.value, 0.24f, 1f)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .graphicsLayer {
+                    alpha = lineProgress
+                    scaleX = lineProgress
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                }
+                .background(BuyPilotColors.Border.copy(alpha = 0.72f), CircleShape),
+        )
+        Box(
+            modifier = Modifier.graphicsLayer {
+                alpha = textProgress
+                translationY = (1f - textProgress) * 6f
+            },
+        ) {
+            AssistantText(summary)
+        }
+    }
 }
+
+private fun FinalDecisionPayload.decisionSummaryText(): String {
+    val summary = this.summary.withoutInternalDebugTokens().trim()
+    return summary.withoutLeadingMarkdownDivider()
+}
+
+private fun String.withoutLeadingMarkdownDivider(): String =
+    replaceFirst(Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*"""), "").trimStart()
 
 @Composable
 private fun DecisionStateMetaRow(
@@ -6340,23 +6586,6 @@ private fun DecisionStateMetaRow(
         payload.nextStep?.takeIf { it.isNotBlank() }?.let {
             DecisionMetaPill(it.nextStepLabel(), BuyPilotColors.TextSecondary)
         }
-    }
-}
-
-@Composable
-private fun DecisionLowConfidenceNotice() {
-    Surface(
-        color = Color(0xFFFFF7E8),
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Warning.copy(alpha = 0.24f)),
-    ) {
-        Text(
-            text = "当前偏好信号还不多，这条建议置信度偏低。继续补充偏好后判断会更稳。",
-            color = BuyPilotColors.TextSecondary,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 18.sp,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-        )
     }
 }
 
@@ -7293,9 +7522,9 @@ private class ProductCardStackAdapter(
             }
             detailRows.removeAllViews()
             val detailItems = listOf(
-                "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback("按当前需求匹配"),
-                "匹配标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.userFacingJoinedOrFallback("按当前需求匹配"),
-                "使用场景" to product.useScenario.userFacingJoinedOrFallback("按当前需求匹配"),
+                "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback(),
+                "匹配标签" to product.ingredientTags.userFacingJoinedOrFallback(),
+                "使用场景" to product.useScenario.userFacingJoinedOrFallback(),
             ).filter { (_, value) -> value.isNotBlank() }
             detailRows.visibility = if (detailItems.isEmpty()) View.GONE else View.VISIBLE
             detailItems.take(3).forEach { (label, value) ->
@@ -7901,22 +8130,28 @@ private fun CinematicProductDetailPanel(
                 }
             }
         }
-        ImmersiveSectionTitle("BuyPilot AI 核心推荐")
-        MarkdownTextBlock(
-            content = payload.reason.ifBlank { "这款商品进入了当前候选，详细推荐解释还在补充中。" },
-            style = TextStyle(
-                color = BuyPilotColors.TextSecondary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 23.sp,
-            ),
-        )
+        payload.reason
+            .withoutInternalDebugTokens()
+            .trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { reason ->
+                ImmersiveSectionTitle("BuyPilot AI 核心推荐")
+                MarkdownTextBlock(
+                    content = reason,
+                    style = TextStyle(
+                        color = BuyPilotColors.TextSecondary,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 23.sp,
+                    ),
+                )
+            }
         Spacer(Modifier.height(20.dp))
         CinematicDetailDivider(progress)
         ImmersiveSectionTitle("详细信息")
         if (payload.riskNotes.isNotEmpty()) {
             ImmersiveWarningBox(payload.riskNotes.joinToString("；"))
         }
-        ProductAttributeRowsDark(product = product, payload = payload)
+        ProductAttributeRowsDark(product = product)
         Spacer(Modifier.height(14.dp))
     }
 }
@@ -8002,11 +8237,11 @@ private fun ImmersiveWarningBox(text: String) {
 }
 
 @Composable
-private fun ProductAttributeRowsDark(product: ProductPayload, payload: ProductCardPayload) {
+private fun ProductAttributeRowsDark(product: ProductPayload) {
     val rows = listOf(
-        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback("按当前需求匹配"),
-        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.userFacingJoinedOrFallback("按当前需求匹配"),
-        "使用场景" to product.useScenario.userFacingJoinedOrFallback("按当前需求匹配"),
+        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback(),
+        "成分标签" to product.ingredientTags.userFacingJoinedOrFallback(),
+        "使用场景" to product.useScenario.userFacingJoinedOrFallback(),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEach { (label, value) ->
@@ -8052,14 +8287,7 @@ fun ProductEvidenceOverlayScreen(
     }
 
     val product = payload.product
-    val evidenceItems = payload.evidence.ifEmpty {
-        listOf(
-            EvidencePayload(
-                sourceType = "推荐理由",
-                snippet = payload.reason.ifBlank { "当前先展示推荐解释，独立证据片段稍后补充。" },
-            ),
-        )
-    }
+    val evidenceItems = payload.evidence
     val highlightTags = payload.displayTags()
     val routeProgressState = rememberRouteEnterProgress(
         key = "evidence_${deckId}_${productId}",
@@ -8095,14 +8323,16 @@ fun ProductEvidenceOverlayScreen(
             item("header") {
                 MagazineProductHeader(product = product)
             }
-            item("reason") {
-                Text(
-                    text = payload.reason.ifBlank { "推荐理由生成中..." },
-                    color = Color.White.copy(alpha = 0.92f),
-                    fontSize = 22.sp,
-                    lineHeight = 34.sp,
-                    fontWeight = FontWeight.Normal,
-                )
+            payload.reason.withoutInternalDebugTokens().trim().takeIf { it.isNotBlank() }?.let { reason ->
+                item("reason") {
+                    Text(
+                        text = reason,
+                        color = Color.White.copy(alpha = 0.92f),
+                        fontSize = 22.sp,
+                        lineHeight = 34.sp,
+                        fontWeight = FontWeight.Normal,
+                    )
+                }
             }
             if (highlightTags.isNotEmpty()) {
                 item("highlights") {
@@ -8239,6 +8469,8 @@ private fun MagazineRiskCard(notes: List<String>) {
 
 @Composable
 private fun MagazineEvidenceQuote(evidence: EvidencePayload) {
+    val snippet = evidence.snippet.withoutInternalDebugTokens().trim()
+    if (snippet.isBlank()) return
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
@@ -8248,7 +8480,7 @@ private fun MagazineEvidenceQuote(evidence: EvidencePayload) {
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = "“${evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" }}”",
+            text = "“$snippet”",
             color = Color.White.copy(alpha = 0.85f),
             fontSize = 18.sp,
             lineHeight = 28.sp,
@@ -8342,6 +8574,8 @@ private fun ImmersiveEvidenceQuote(
     evidence: EvidencePayload,
     index: Int,
 ) {
+    val snippet = evidence.snippet.withoutInternalDebugTokens().trim()
+    if (snippet.isBlank()) return
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -8370,7 +8604,7 @@ private fun ImmersiveEvidenceQuote(
             }
         }
         Text(
-            text = "“${evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" }}”",
+            text = "“$snippet”",
             color = BuyPilotColors.TextPrimary,
             fontSize = 28.sp,
             lineHeight = 40.sp,
@@ -8507,11 +8741,11 @@ private fun DetailSection(
 }
 
 @Composable
-private fun ProductAttributeRows(product: ProductPayload, payload: ProductCardPayload) {
+private fun ProductAttributeRows(product: ProductPayload) {
     val rows = listOf(
-        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback("按当前需求匹配"),
-        "成分标签" to product.ingredientTags.ifEmpty { payload.tagsFromText() }.userFacingJoinedOrFallback("按当前需求匹配"),
-        "使用场景" to product.useScenario.userFacingJoinedOrFallback("按当前需求匹配"),
+        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback(),
+        "成分标签" to product.ingredientTags.userFacingJoinedOrFallback(),
+        "使用场景" to product.useScenario.userFacingJoinedOrFallback(),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEach { (label, value) ->
@@ -8648,28 +8882,8 @@ private fun Char.isCjk(): Boolean =
 
 internal fun ThinkingPayload.userFacingThinkingMessage(): String {
     val clean = message.withoutInternalDebugTokens().trim()
-    if (clean.isGenericUnderstandingThinkingMessage()) return ""
     if (clean.isNotBlank() && !clean.looksLikeTechnicalStatusText()) return clean
-    return stage.thinkingStageFallbackMessage()
-}
-
-private fun String.isGenericUnderstandingThinkingMessage(): Boolean {
-    val text = trim()
-        .replace("...", "")
-        .replace("…", "")
-        .replace(".", "")
-        .replace("。", "")
-        .replace("！", "")
-        .replace("!", "")
-        .replace("，", "")
-        .replace(",", "")
-        .replace(" ", "")
-    return text in setOf(
-        "正在理解您的需求",
-        "正在理解你的需求",
-        "正在理解需求",
-        "正在理解用户需求",
-    )
+    return ""
 }
 
 private fun String.looksLikeTechnicalStatusText(): Boolean {
@@ -8682,17 +8896,6 @@ private fun String.looksLikeTechnicalStatusText(): Boolean {
     val asciiLetters = text.count { it in 'A'..'Z' || it in 'a'..'z' }
     return !hasCjk && asciiLetters >= 4
 }
-
-private fun String.thinkingStageFallbackMessage(): String =
-    when (trim().lowercase().replace("-", "_")) {
-        "understanding", "intent", "intent_analysis", "analyzing" -> ""
-        "criteria", "criteria_generation", "planning" -> "正在整理筛选条件..."
-        "search", "searching", "retrieval", "retrieving", "matching" -> "正在检索匹配商品..."
-        "ranking", "rerank", "recommend", "recommendation" -> "正在比较候选商品..."
-        "decision", "fallback_decision", "converging" -> "正在收敛推荐建议..."
-        "clarification", "clarifying" -> "正在确认关键信息..."
-        else -> "正在处理..."
-    }
 
 @Composable
 private fun ErrorCard(
@@ -10071,6 +10274,8 @@ private fun EvidenceSection(title: String, items: List<String>, numbered: Boolea
 
 @Composable
 private fun EvidenceBlock(evidence: EvidencePayload) {
+    val snippet = evidence.snippet.withoutInternalDebugTokens().trim()
+    if (snippet.isBlank()) return
     Surface(
         color = BuyPilotColors.SurfaceBg,
         shape = RoundedCornerShape(16.dp),
@@ -10082,7 +10287,7 @@ private fun EvidenceBlock(evidence: EvidencePayload) {
                 evidence.trustLabel?.withoutInternalDebugTokens()?.takeIf { it.isNotBlank() }?.let { PillLabel(it) }
             }
             MarkdownTextBlock(
-                content = evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" },
+                content = snippet,
                 style = TextStyle(
                     color = BuyPilotColors.TextPrimary,
                     fontSize = BuyPilotType.LargeBody,
@@ -11103,7 +11308,7 @@ private fun ProductPayload.brandLabel(): String =
         ?: category.withoutInternalDebugTokens().takeIf { it.isNotBlank() }
         ?: "BuyPilot 推荐"
 
-private fun List<String>.userFacingJoinedOrFallback(fallback: String = "未返回"): String =
+private fun List<String>.userFacingJoinedOrFallback(fallback: String = ""): String =
     map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
         .filter { it.isNotBlank() }
         .distinct()
@@ -11126,22 +11331,7 @@ private fun ProductCardPayload.displayTags(): List<String> =
         .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
         .filter { it.isNotBlank() }
         .distinct()
-        .ifEmpty { tagsFromText() }
         .take(6)
-
-private fun ProductCardPayload.tagsFromText(): List<String> {
-    val text = listOf(reason, riskNotes.joinToString(" ")).joinToString(" ")
-    return listOf(
-        "预算友好" to listOf("预算", "价格", "便宜", "性价比"),
-        "温和" to listOf("温和", "敏感", "不刺激"),
-        "控油" to listOf("控油", "油皮", "清爽"),
-        "证据充分" to listOf("证据", "评价", "资料"),
-        "风险可控" to listOf("风险", "注意", "谨慎"),
-    ).filter { (_, needles) -> needles.any { it in text } }
-        .map { it.first }
-        .ifEmpty { listOf("需求匹配", "可进一步确认") }
-        .take(2)
-}
 
 private fun String?.resolveProductImageUrl(backendBaseUrl: String): String? {
     val raw = this?.trim()?.takeIf { it.isNotBlank() } ?: return null

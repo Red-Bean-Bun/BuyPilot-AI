@@ -49,13 +49,6 @@ import coil.request.ImageRequest
 
 private const val CONVERGENCE_TIMEOUT_MS = 60_000L
 private const val CONVERGENCE_LOG_TAG = "BuyPilotConverge"
-private val GENERIC_FALLBACK_THINKING_STAGES = setOf(
-    "understanding",
-    "intent",
-    "intent_analysis",
-    "analyzing",
-)
-
 private data class PendingConvergenceRequest(
     val userMessage: String,
     val showUserMessage: Boolean,
@@ -967,32 +960,11 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun applyEnvelopeWithFallbackDelay(envelope: AgentUiEnvelope<AgentPayload>) {
-        if (envelope.isGenericFallbackThinking()) {
-            logConvergence {
-                "generic fallback thinking ignored turn=${envelope.turnId} stage=${(envelope.payload as? ThinkingPayload)?.stage}"
-            }
-            return
-        }
         if (envelope.event == AgentEventType.ProductCard) {
             prefetchProductImage(envelope)
         }
 
         applyEnvelope(envelope)
-    }
-
-    private fun AgentUiEnvelope<AgentPayload>.isGenericFallbackThinking(): Boolean {
-        if (event != AgentEventType.Thinking) return false
-        val thinking = payload as? ThinkingPayload ?: return false
-        val stage = thinking.stage.normalizedThinkingStage()
-        val message = thinking.message.normalizedThinkingMessage()
-        val isGenericUnderstandingMessage = message in setOf(
-            "正在理解您的需求",
-            "正在理解你的需求",
-            "正在理解需求",
-            "正在理解用户需求",
-        )
-        if (isGenericUnderstandingMessage) return true
-        return stage in GENERIC_FALLBACK_THINKING_STAGES && message.isBlank()
     }
 
     private fun applyEnvelope(envelope: AgentUiEnvelope<AgentPayload>) {
@@ -1079,21 +1051,6 @@ class ChatViewModel @Inject constructor(
         if (raw.startsWith("/")) return baseUrl.trimEnd('/') + raw
         return raw
     }
-
-    private fun String.normalizedThinkingStage(): String =
-        trim().lowercase().replace("-", "_")
-
-    private fun String.normalizedThinkingMessage(): String =
-        trim()
-            .replace("...", "")
-            .replace("…", "")
-            .replace(".", "")
-            .replace("。", "")
-            .replace("！", "")
-            .replace("!", "")
-            .replace("，", "")
-            .replace(",", "")
-            .replace(" ", "")
 
     private fun logConvergence(message: () -> String) {
         if (BuildConfig.DEBUG) {
