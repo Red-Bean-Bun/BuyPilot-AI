@@ -38,8 +38,32 @@ class ChatReducerTest {
         val state = ChatReducer.reduce(ChatReducer.reduce(ChatUiState(), first), second)
 
         assertEquals("sess_1", state.sessionId)
-        assertEquals(2, state.nodes.size)
+        assertEquals(1, state.nodes.size)
         assertEquals("B", (state.nodes.last() as ThinkingNode).payload.message)
+    }
+
+    @Test
+    fun consecutiveThinkingInSameTurnReplacesUnpairedPreviousThinking() {
+        val firstThinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            firstThinking,
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "decision", message = "正在结合你的反馈生成最终建议"),
+            ),
+        )
+
+        assertEquals(1, state.nodes.filterIsInstance<ThinkingNode>().size)
+        assertEquals("正在结合你的反馈生成最终建议", (state.nodes.single() as ThinkingNode).payload.message)
     }
 
     @Test
@@ -558,7 +582,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun finalDecisionKeepsThinkingForUiExitAnimationAndStoresPayloadWithoutTextNode() {
+    fun finalDecisionClearsThinkingAndStoresPayloadWithoutTextNode() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -579,7 +603,7 @@ class ChatReducerTest {
         )
 
         assertFalse(state.nodes.any { it is AiStreamNode })
-        assertTrue(state.nodes.first() is ThinkingNode)
+        assertFalse(state.nodes.any { it is ThinkingNode })
         val node = state.nodes.single { it is FinalDecisionNode } as FinalDecisionNode
         assertEquals(payload, node.payload)
     }
@@ -734,6 +758,7 @@ class ChatReducerTest {
             isStreaming = true,
             awaitingConvergenceDeckIds = setOf("deck_1"),
             latestConvergeableDeckId = "deck_1",
+            activeConvergenceDeckId = "deck_1",
         )
 
         val finalDecision = ChatReducer.reduce(
@@ -830,7 +855,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun convergenceDoneWithoutDecisionKeepsActiveDeckForFallbackDecision() {
+    fun convergenceDoneWithoutDecisionKeepsActiveDeckForContractError() {
         val deckState = listOf(
             product(rank = 1, productId = "p1"),
             product(rank = 2, productId = "p2"),

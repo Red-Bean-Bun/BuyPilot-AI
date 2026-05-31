@@ -205,7 +205,6 @@ import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.EvidencePayload
-import com.buypilot.core.model.ReasonAtomPayload
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
@@ -616,8 +615,11 @@ fun BuyPilotChatScreen(
     var timelineTopPx by remember { mutableStateOf(0f) }
     var composerHeightPx by remember { mutableIntStateOf(0) }
     var composerFocused by remember { mutableStateOf(false) }
+    var welcomePromptDismissed by remember { mutableStateOf(false) }
+    var welcomePromptHasAppeared by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val keyboardVisible = imeBottomPx > 0
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val focusManager = LocalFocusManager.current
     val composerFocusRequester = remember { FocusRequester() }
@@ -625,6 +627,13 @@ fun BuyPilotChatScreen(
     val coroutineScope = rememberCoroutineScope()
     val defaultSkinTypeOptions = stringArrayResource(R.array.default_skin_type_options).toSet()
     val showWelcome = state.nodes.isEmpty() && input.isBlank()
+    val shouldDismissWelcomeContent = showWelcome &&
+        (showAttachmentMenu || keyboardVisible || (composerFocused && welcomePromptHasAppeared))
+    val welcomeContentVisible = showWelcome &&
+        !welcomePromptDismissed &&
+        !showAttachmentMenu &&
+        !composerFocused &&
+        !keyboardVisible
     val activeClarificationKey = state.nodes
         .filterIsInstance<ClarificationNode>()
         .lastOrNull { it.key !in dismissedClarificationKeys }
@@ -642,6 +651,18 @@ fun BuyPilotChatScreen(
     val hiddenUserMessageKeysForFlight = hiddenFlightMessageKeys +
         listOfNotNull(pendingFlightMessageKey, activeFlightMessageKey)
     val assistantVisualActive = typingMessageKeys.isNotEmpty() || visualActiveTurnKeys.isNotEmpty()
+
+    LaunchedEffect(shouldDismissWelcomeContent) {
+        if (shouldDismissWelcomeContent) {
+            welcomePromptDismissed = true
+        }
+    }
+
+    LaunchedEffect(welcomeContentVisible) {
+        if (welcomeContentVisible) {
+            welcomePromptHasAppeared = true
+        }
+    }
 
     fun focusComposer() {
         showAttachmentMenu = false
@@ -714,6 +735,8 @@ fun BuyPilotChatScreen(
         sheetTransitionId += 1
         dismissedClarificationKeys = emptySet()
         dismissingClarificationKey = null
+        welcomePromptDismissed = false
+        welcomePromptHasAppeared = false
         revealedMessageKeyList = emptyList()
         typingMessageKeys = emptySet()
         visualActiveTurnKeys = emptySet()
@@ -853,6 +876,7 @@ fun BuyPilotChatScreen(
             ) {
                 ConversationStage(
                     showWelcome = showWelcome,
+                    welcomeContentVisible = welcomeContentVisible,
                     state = state,
                     onClarificationOption = { label, snapshot ->
                         answerClarification(
@@ -1146,6 +1170,7 @@ private val WelcomePrompts = listOf(
 @Composable
 private fun ConversationStage(
     showWelcome: Boolean,
+    welcomeContentVisible: Boolean,
     state: ChatUiState,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
@@ -1196,6 +1221,7 @@ private fun ConversationStage(
             ),
         ) {
             WelcomeHome(
+                contentVisible = welcomeContentVisible,
                 composerHeightPx = composerHeightPx,
                 imeBottomPx = imeBottomPx,
                 onWelcomePromptClick = onWelcomePromptClick,
@@ -1429,6 +1455,7 @@ private fun M3IconButton(
 
 @Composable
 private fun WelcomeHome(
+    contentVisible: Boolean,
     composerHeightPx: Int,
     imeBottomPx: Int,
     onWelcomePromptClick: (String) -> Unit,
@@ -1450,51 +1477,88 @@ private fun WelcomeHome(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(92.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        AnimatedVisibility(
+            visible = contentVisible,
+            enter = fadeIn(
+                animationSpec = tween(durationMillis = 260, delayMillis = 40, easing = MenuEaseOut),
+            ) + slideInVertically(
+                animationSpec = tween(durationMillis = 300, delayMillis = 40, easing = MenuEaseOut),
+                initialOffsetY = { -it / 28 },
+            ) + scaleIn(
+                animationSpec = tween(durationMillis = 300, delayMillis = 40, easing = MenuEaseOut),
+                initialScale = 0.992f,
+            ),
+            exit = fadeOut(
+                animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+            ) + slideOutVertically(
+                animationSpec = tween(durationMillis = 160, easing = MenuEaseIn),
+                targetOffsetY = { -it / 20 },
+            ) + scaleOut(
+                animationSpec = tween(durationMillis = 160, easing = MenuEaseIn),
+                targetScale = 0.99f,
+            ),
         ) {
-            Text(
-                text = "开启",
-                color = BuyPilotColors.TextPrimary.copy(alpha = 0.86f),
-                fontSize = 32.sp,
-                lineHeight = 38.sp,
-                fontWeight = FontWeight.Normal,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = "你的购物",
-                color = BuyPilotColors.Primary,
-                fontSize = 52.sp,
-                lineHeight = 58.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = "新体验🌟",
-                color = BuyPilotColors.TextPrimary.copy(alpha = 0.92f),
-                fontSize = 30.sp,
-                lineHeight = 36.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 12.dp),
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "开启",
+                    color = BuyPilotColors.TextPrimary.copy(alpha = 0.86f),
+                    fontSize = 32.sp,
+                    lineHeight = 38.sp,
+                    fontWeight = FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "你的购物",
+                    color = BuyPilotColors.Primary,
+                    fontSize = 52.sp,
+                    lineHeight = 58.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "新体验🌟",
+                    color = BuyPilotColors.TextPrimary.copy(alpha = 0.92f),
+                    fontSize = 30.sp,
+                    lineHeight = 36.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        AnimatedVisibility(
+            visible = contentVisible,
+            enter = fadeIn(
+                animationSpec = tween(durationMillis = 250, delayMillis = 90, easing = MenuEaseOut),
+            ) + slideInVertically(
+                animationSpec = tween(durationMillis = 300, delayMillis = 90, easing = MenuEaseOut),
+                initialOffsetY = { it / 10 },
+            ),
+            exit = fadeOut(
+                animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+            ) + slideOutVertically(
+                animationSpec = tween(durationMillis = 150, easing = MenuEaseIn),
+                targetOffsetY = { it / 10 },
+            ),
+        ) {
+            PromptSuggestions(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        bottom = calculateFloatingPanelBottomPadding(
+                            density = density,
+                            composerHeightPx = composerHeightPx,
+                            imeBottomPx = imeBottomPx,
+                        ),
+                    ),
+                onPromptClick = onWelcomePromptClick,
             )
         }
-
-        Spacer(Modifier.weight(1f))
-        PromptSuggestions(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    bottom = calculateFloatingPanelBottomPadding(
-                        density = density,
-                        composerHeightPx = composerHeightPx,
-                        imeBottomPx = imeBottomPx,
-                    ),
-                ),
-            onPromptClick = onWelcomePromptClick,
-        )
     }
 }
 
@@ -1810,37 +1874,13 @@ private fun ChatTimeline(
     LaunchedEffect(
         state.isStreaming,
         isAssistantVisualActive,
-        isNearTimelineEnd,
-        timelineItems.size,
-        composerHeightPx,
-        imeBottomPx,
     ) {
         if (!state.isStreaming && !isAssistantVisualActive) {
-            val activeUserMessageKey = state.lastUserMessageKey
-            if (
-                activeUserMessageKey != null &&
-                activeUserMessageKey == lastHandledUserMessageKey &&
-                activeUserMessageKey != lastAutoSettledUserMessageKey &&
-                !isUserDragging &&
-                !isNearTimelineEnd &&
-                timelineItems.isNotEmpty()
-            ) {
-                if (retainedAnchorUserMessageKey == activeUserMessageKey) {
-                    keepLatestUserMessageAnchored(settleFrames = 2)
-                } else {
-                    val lastContentIndex = lastContentIndex().coerceAtLeast(0)
-                    scrollActiveTurnIfNeeded(
-                        listState = listState,
-                        lastContentIndex = lastContentIndex,
-                        bottomPaddingPx = timelineBottomPaddingPx,
-                        tolerancePx = followCorrectionTolerancePx,
-                        settleFrames = 3,
-                    )
-                }
-                lastAutoSettledUserMessageKey = activeUserMessageKey
-            }
+            lastAutoSettledUserMessageKey = state.lastUserMessageKey
             activeTurnAnchored = false
             followStreamingText = false
+            retainedAnchorUserMessageKey = null
+            retainedAnchorAssistantTurnId = null
         }
     }
 
@@ -2208,10 +2248,15 @@ private fun AssistantTurnBlock(
                             )
                         }
                     } else if (nodeVisible) {
+                        val productConvergeActionReady = turnSettled || (
+                            (!renderContext.isStreaming || renderContext.currentTurnId != item.turnId) &&
+                                item.nodes.allTurnTextRevealed(revealStore, revealedMessageKeys)
+                            )
                         TimelineNodeContent(
                             node = node,
                             renderContext = renderContext,
                             timelineMotionEnabled = timelineMotionEnabled,
+                            productConvergeActionReady = productConvergeActionReady,
                             structuredMotionEnabled = !turnSettled &&
                                 timelineMotionEnabled &&
                                 !revealStore.hasStartedStructuredNode(node.key),
@@ -2487,6 +2532,15 @@ internal fun List<ChatUiNode>.hasUnsettledTurnVisual(
         }
     }
 
+private fun List<ChatUiNode>.allTurnTextRevealed(
+    revealStore: TimelineRevealStore,
+    revealedMessageKeys: Set<String>,
+): Boolean =
+    all { node ->
+        val revealKey = node.revealTextKey()
+        revealKey == null || revealStore.hasCompletedText(revealKey) || revealKey in revealedMessageKeys
+    }
+
 private fun ChatUiNode.isTextOrThinkingNode(): Boolean =
     this is AiStreamNode || this is ThinkingNode
 
@@ -2581,6 +2635,7 @@ private fun TimelineNodeContent(
     node: ChatUiNode,
     renderContext: TimelineRenderContext,
     timelineMotionEnabled: Boolean,
+    productConvergeActionReady: Boolean = true,
     structuredMotionEnabled: Boolean = timelineMotionEnabled,
     structuredAlreadyEntered: Boolean = false,
     hiddenUserMessage: Boolean,
@@ -2622,10 +2677,15 @@ private fun TimelineNodeContent(
                 null
             },
         )
-        is ThinkingNode -> AssistantInlineStatus(
-            message = node.payload.userFacingThinkingMessage(),
-            motionEnabled = renderContext.currentTurnId == node.turnId,
-        )
+        is ThinkingNode -> {
+            val statusMessage = node.payload.userFacingThinkingMessage()
+            if (statusMessage.isNotBlank()) {
+                AssistantInlineStatus(
+                    message = statusMessage,
+                    motionEnabled = renderContext.currentTurnId == node.turnId,
+                )
+            }
+        }
         is AiStreamNode -> StreamingAssistantText(
             nodeKey = node.key,
             content = node.content,
@@ -2688,6 +2748,7 @@ private fun TimelineNodeContent(
             hasPendingDecision = node.deckId in renderContext.pendingDecisions,
             deckConverged = node.deckId in renderContext.convergedDeckIds,
             deckStillStreaming = renderContext.isStreaming && renderContext.currentTurnId == node.turnId,
+            convergeActionReady = productConvergeActionReady,
             compactHistory = shouldCompactProductDeckHistory(
                 node = node,
                 deckConverged = node.deckId in renderContext.convergedDeckIds,
@@ -5302,6 +5363,7 @@ private fun ProductRecommendationStrip(
     hasPendingDecision: Boolean,
     deckConverged: Boolean,
     deckStillStreaming: Boolean,
+    convergeActionReady: Boolean,
     compactHistory: Boolean,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
@@ -5347,6 +5409,16 @@ private fun ProductRecommendationStrip(
         onEntered = onEntered,
     )
     val chromeProgress = segmentProgress(arrivalProgress, 0.46f, 1f)
+    val convergeButtonTargetProgress = if (awaitingConvergence && !deckFullyHandled && convergeActionReady) {
+        segmentProgress(arrivalProgress, 0.72f, 1f)
+    } else {
+        0f
+    }
+    val convergeButtonProgress by animateFloatAsState(
+        targetValue = convergeButtonTargetProgress,
+        animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+        label = "product_deck_converge_button_progress",
+    )
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
@@ -5446,11 +5518,7 @@ private fun ProductRecommendationStrip(
             productCount = products.size,
             activeIndex = activeIndex,
             chromeProgress = chromeProgress,
-            buttonProgress = if (awaitingConvergence && !deckFullyHandled) {
-                segmentProgress(arrivalProgress, 0.72f, 1f)
-            } else {
-                0f
-            },
+            buttonProgress = convergeButtonProgress,
             buttonLabel = "帮我选",
             onConverge = onConverge,
         )
@@ -7319,9 +7387,6 @@ fun ProductHeroDetailScreen(
     onDeckCompleted: (String) -> Unit,
 ) {
     var activeProductId by rememberSaveable(deckId, productId) { mutableStateOf(productId) }
-    LaunchedEffect(deckId, productId) {
-        activeProductId = productId
-    }
     val payload = state.findProduct(deckId, activeProductId)
     val haptics = LocalHapticFeedback.current
     val latestOnBack by rememberUpdatedState(onBack)
@@ -8024,7 +8089,7 @@ fun ProductEvidenceOverlayScreen(
                     translationY = (1f - contentEnter) * 36f
                 }
                 .navigationBarsPadding(),
-            contentPadding = PaddingValues(start = 28.dp, end = 28.dp, top = 96.dp, bottom = 64.dp),
+            contentPadding = PaddingValues(start = 28.dp, end = 28.dp, top = 132.dp, bottom = 64.dp),
             verticalArrangement = Arrangement.spacedBy(32.dp),
         ) {
             item("header") {
@@ -8044,23 +8109,6 @@ fun ProductEvidenceOverlayScreen(
                     MagazineHighlightChips(tags = highlightTags)
                 }
             }
-            if (payload.reasonAtoms.isNotEmpty()) {
-                item("dimensions") {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            text = "匹配维度",
-                            color = Color.White.copy(alpha = 0.45f),
-                            fontSize = 13.sp,
-                            lineHeight = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 1.sp,
-                        )
-                        payload.reasonAtoms.forEach { atom ->
-                            MagazineDimensionCard(atom = atom)
-                        }
-                    }
-                }
-            }
             if (payload.riskNotes.isNotEmpty()) {
                 item("risks") {
                     MagazineRiskCard(notes = payload.riskNotes)
@@ -8077,8 +8125,8 @@ fun ProductEvidenceOverlayScreen(
                         letterSpacing = 1.sp,
                     )
                 }
-                itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { index, evidence ->
-                    MagazineEvidenceQuote(evidence = evidence, index = index + 1)
+                itemsIndexed(evidenceItems, key = { index, item -> item.evidenceId ?: item.sourceId ?: "${item.sourceType}_$index" }) { _, evidence ->
+                    MagazineEvidenceQuote(evidence = evidence)
                 }
             }
         }
@@ -8159,38 +8207,6 @@ private fun MagazineHighlightChips(tags: List<String>) {
 }
 
 @Composable
-private fun MagazineDimensionCard(atom: ReasonAtomPayload) {
-    val label = atom.dimension.userFacingReasonDimensionLabel()
-    val value = listOf(
-        atom.value.withoutInternalDebugTokens().takeIf { it.isNotBlank() },
-        atom.text.withoutInternalDebugTokens().takeIf { it.isNotBlank() },
-    ).filterNotNull().joinToString(" · ")
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = label,
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = value.ifBlank { "匹配" },
-            color = Color.White.copy(alpha = 0.92f),
-            fontSize = 15.sp,
-            lineHeight = 22.sp,
-        )
-    }
-}
-
-@Composable
 private fun MagazineRiskCard(notes: List<String>) {
     Column(
         modifier = Modifier
@@ -8222,25 +8238,15 @@ private fun MagazineRiskCard(notes: List<String>) {
 }
 
 @Composable
-private fun MagazineEvidenceQuote(evidence: EvidencePayload, index: Int) {
+private fun MagazineEvidenceQuote(evidence: EvidencePayload) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "#${index.toString().padStart(2, '0')}",
-                color = BuyPilotColors.Primary.copy(alpha = 0.8f),
-                fontSize = 12.sp,
-                lineHeight = 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
-                color = Color.White.copy(alpha = 0.4f),
-                fontSize = 12.sp,
-                lineHeight = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+        Text(
+            text = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
         Text(
             text = "“${evidence.snippet.withoutInternalDebugTokens().ifBlank { "暂未补充证据片段" }}”",
             color = Color.White.copy(alpha = 0.85f),
@@ -8642,8 +8648,28 @@ private fun Char.isCjk(): Boolean =
 
 internal fun ThinkingPayload.userFacingThinkingMessage(): String {
     val clean = message.withoutInternalDebugTokens().trim()
+    if (clean.isGenericUnderstandingThinkingMessage()) return ""
     if (clean.isNotBlank() && !clean.looksLikeTechnicalStatusText()) return clean
     return stage.thinkingStageFallbackMessage()
+}
+
+private fun String.isGenericUnderstandingThinkingMessage(): Boolean {
+    val text = trim()
+        .replace("...", "")
+        .replace("…", "")
+        .replace(".", "")
+        .replace("。", "")
+        .replace("！", "")
+        .replace("!", "")
+        .replace("，", "")
+        .replace(",", "")
+        .replace(" ", "")
+    return text in setOf(
+        "正在理解您的需求",
+        "正在理解你的需求",
+        "正在理解需求",
+        "正在理解用户需求",
+    )
 }
 
 private fun String.looksLikeTechnicalStatusText(): Boolean {
@@ -8659,7 +8685,7 @@ private fun String.looksLikeTechnicalStatusText(): Boolean {
 
 private fun String.thinkingStageFallbackMessage(): String =
     when (trim().lowercase().replace("-", "_")) {
-        "understanding", "intent", "intent_analysis", "analyzing" -> "正在理解你的需求..."
+        "understanding", "intent", "intent_analysis", "analyzing" -> ""
         "criteria", "criteria_generation", "planning" -> "正在整理筛选条件..."
         "search", "searching", "retrieval", "retrieving", "matching" -> "正在检索匹配商品..."
         "ranking", "rerank", "recommend", "recommendation" -> "正在比较候选商品..."
@@ -11084,27 +11110,12 @@ private fun List<String>.userFacingJoinedOrFallback(fallback: String = "未返�
         .joinToString("、")
         .ifBlank { fallback }
 
-private fun String.userFacingReasonDimensionLabel(): String =
-    when (trim().lowercase()) {
-        "skin_type", "skin_type_match", "skin" -> "适用对象"
-        "ingredient", "ingredient_tags", "ingredient_prefer" -> "成分标签"
-        "ingredient_avoid" -> "避开成分"
-        "use_scenario", "scenario" -> "使用场景"
-        "budget", "price", "base_price" -> "价格预算"
-        "brand" -> "品牌"
-        "category" -> "品类"
-        "sub_category", "product_type" -> "商品类型"
-        "storage" -> "存储容量"
-        "screen_size" -> "屏幕尺寸"
-        else -> withoutMarkdownMarkup().withoutInternalDebugTokens().trim().ifBlank { "匹配维度" }
-    }
-
 private fun String.userFacingEvidenceSourceLabel(fallback: String): String {
     val clean = withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
     return when (clean.lowercase().replace("-", "_")) {
         "official_faq", "faq" -> "官方问答"
         "user_review", "review", "reviews" -> "用户评价"
-        "marketing_description", "description", "product_description" -> "商品资料"
+        "marketing_description", "description", "product_description", "product_chunk", "chunk" -> "商品资料"
         "recommendation_reason", "reason" -> "推荐理由"
         else -> clean.ifBlank { fallback }
     }

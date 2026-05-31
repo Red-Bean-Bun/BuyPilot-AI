@@ -521,6 +521,14 @@ class TimelineRevealStoreTest {
     @Test
     fun thinkingStatusNeverFallsBackToEnglishTechnicalText() {
         assertEquals(
+            "",
+            ThinkingPayload(stage = "understanding", message = "正在理解您的需求...").userFacingThinkingMessage(),
+        )
+        assertEquals(
+            "",
+            ThinkingPayload(stage = "intent_analysis", message = "").userFacingThinkingMessage(),
+        )
+        assertEquals(
             "正在检索匹配商品...",
             ThinkingPayload(stage = "searching", message = "Searching products").userFacingThinkingMessage(),
         )
