@@ -8,7 +8,8 @@
 
 - 只做购物车，不做支付、订单、库存和商家后台，符合项目裁剪范围。
 - 用 `session_id` 绑定临时购物车，不引入登录用户体系。
-- 同一 `session_id + product_id` 再次加购时服务层递增 `quantity`，不重复创建多行。
+- 同一 `session_id + product_id` 再次加购时通过数据库唯一约束和 upsert 原子递增 `quantity`，不重复创建多行。
+- 创建运行时索引前会合并老库中已有的重复购物车行，避免唯一约束上线时被历史数据阻塞。
 
 ## 字段说明
 
@@ -24,8 +25,9 @@
 
 - 外键：`product_id -> products.id`。
 - 索引：`ix_cart_items_session_id`。
+- 唯一约束/索引：`uq_cart_items_session_product(session_id, product_id)`。
 
 ## Review 关注点
 
 - 当前没有 SKU 级选择，`product_id` 表示商品级加购。后续要做真实下单时需要增加 `sku_id`、价格快照和库存校验。
-- 没有唯一约束 `session_id + product_id`，去重和递增在 `repos/cart_items.py` 中完成；并发写入扩大后应补唯一索引。
+- 当前唯一键是商品级；后续如支持 SKU 选择，应迁移为 `session_id + product_id + sku_id`，并增加 `price_snapshot`。

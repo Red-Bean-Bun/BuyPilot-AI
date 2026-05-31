@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, Index, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from src.repos.vector import EMBEDDING_DIMENSIONS, EmbeddingType
@@ -18,6 +18,11 @@ def utc_now() -> datetime:
 
 class Product(SQLModel, table=True):
     __tablename__ = "products"
+    __table_args__ = (
+        Index("idx_products_category_price", "category", "price"),
+        Index("idx_products_category_sub_category", "category", "sub_category"),
+        Index("idx_products_brand", "brand"),
+    )
 
     id: str = Field(primary_key=True)
     name: str
@@ -69,6 +74,7 @@ class Feedback(SQLModel, table=True):
 
 class CartItem(SQLModel, table=True):
     __tablename__ = "cart_items"
+    __table_args__ = (UniqueConstraint("session_id", "product_id", name="uq_cart_items_session_product"),)
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     session_id: str = Field(index=True)
@@ -112,6 +118,10 @@ class EvalRun(SQLModel, table=True):
 
 class RetrievalTrace(SQLModel, table=True):
     __tablename__ = "retrieval_traces"
+    __table_args__ = (
+        Index("idx_retrieval_traces_conversation_id", "conversation_id"),
+        Index("idx_retrieval_traces_created_at", "created_at"),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     conversation_id: str | None = Field(default=None, foreign_key="conversations.id")
@@ -127,6 +137,10 @@ class RetrievalTrace(SQLModel, table=True):
 
 class EvidenceLink(SQLModel, table=True):
     __tablename__ = "evidence_links"
+    __table_args__ = (
+        Index("idx_evidence_links_conversation_id", "conversation_id"),
+        Index("idx_evidence_links_product_id", "product_id"),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     conversation_id: str | None = Field(default=None, foreign_key="conversations.id")
@@ -189,3 +203,11 @@ class AuditEvent(SQLModel, table=True):
     after_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     audit_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column("metadata", JSON))
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class SystemMetadata(SQLModel, table=True):
+    __tablename__ = "system_metadata"
+
+    key: str = Field(primary_key=True)
+    value_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column("value", JSON))
+    updated_at: datetime = Field(default_factory=utc_now)

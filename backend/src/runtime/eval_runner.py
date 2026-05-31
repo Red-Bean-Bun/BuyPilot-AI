@@ -240,7 +240,10 @@ def _collect_event(event: Any, capture: PipelineCapture) -> None:
 
     if event_type == "criteria_card" and isinstance(event, CriteriaCardEvent):
         capture.criteria_chips = event.criteria.chips
-        capture.criteria_constraints = event.criteria.constraints.model_dump()
+        capture.criteria_constraints = {
+            **event.criteria.constraints.model_dump(),
+            "category": event.criteria.category,
+        }
         capture.extracted_constraints = capture.criteria_constraints
 
     elif event_type == "text_delta":

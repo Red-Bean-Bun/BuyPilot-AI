@@ -4,7 +4,7 @@ from src.services.product_ingest import seed_products
 from src.config.domain_terms import normalize_product_type
 from src.repos.documents import ChunkDocument, VectorChunkHit
 from src.repos.products import list_products
-from src.services.retriever import retrieve, retrieve_with_evidence
+from src.services.retriever import RetrievalFilters, _sql_filters_for_recall, retrieve, retrieve_with_evidence
 from src.types.sse_events import Constraints, CriteriaPayload
 
 
@@ -108,6 +108,11 @@ async def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, 
     assert evidence[0].source_id
     assert evidence[0].source_id.startswith(products[0].product_id)
     assert evidence[0].snippet
+    sql_filters = retrieval.trace_details["filters_applied"]["sql_filters_applied"]
+    assert sql_filters["category"] == "美妆护肤"
+    assert sql_filters["budget_max"] == 200
+    filters_applied = retrieval.trace_details["filters_applied"]
+    assert filters_applied["pre_filter_count"] >= filters_applied["post_filter_count"]
 
 
 @pytest.mark.asyncio
@@ -130,13 +135,37 @@ async def test_retrieve_relaxes_budget_but_not_product_type():
     assert any(step["step"] == "without_budget_max" for step in steps)
 
 
+def test_sql_filters_include_structured_hard_constraints():
+    criteria = CriteriaPayload(
+        category="美妆护肤",
+        constraints=Constraints(
+            budget_max=200,
+            product_type="洗面奶",
+            brand_avoid=["SK-II"],
+            origin_avoid=["日系"],
+        ),
+    )
+
+    filters = _sql_filters_for_recall(criteria, RetrievalFilters(avoid_products=frozenset({"p_beauty_001"})))
+
+    assert filters.category == "美妆护肤"
+    assert filters.budget_max == 200
+    assert "洁面" in filters.product_type_aliases
+    assert "洗面奶" in filters.product_type_aliases
+    assert "SK-II" in filters.brand_avoid
+    assert "资生堂" in filters.brand_avoid
+    assert filters.avoid_product_ids == ("p_beauty_001",)
+
+
 @pytest.mark.asyncio
 async def test_retrieve_prefers_pgvector_hits(monkeypatch):
     product = list_products()[0]
 
-    async def fake_pgvector_hits(query_embedding, limit):
+    async def fake_pgvector_hits(query_embedding, limit, filters=None):
         assert query_embedding
         assert limit == 200
+        assert filters is not None
+        assert filters.category == product.category
         return [
             VectorChunkHit(
                 document=ChunkDocument(

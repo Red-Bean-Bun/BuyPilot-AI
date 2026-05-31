@@ -2,7 +2,7 @@
 
 ## 服务对象
 
-`active_chat_turns` 记录正在执行的 `/chat/stream` turn，用于取消接口判断某个 turn 是否仍在进行。正常情况下流式请求结束后会清理，所以当前 dev.db 行数为 0 是预期状态。
+`active_chat_turns` 记录正在执行的 `/chat/stream` turn，用于取消接口判断某个 turn 是否仍在进行。正常情况下流式请求结束后会清理，所以运行库中行数长期接近 0 是预期状态。
 
 ## 为什么这样设计
 

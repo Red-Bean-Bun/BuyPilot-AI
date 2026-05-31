@@ -2,7 +2,7 @@
 
 ## 服务对象
 
-`products` 是商品主表，服务推荐检索、硬过滤、商品卡片渲染和购物车引用。它承载官方脱敏电商数据中每个商品的稳定事实，是防止 LLM 编造商品、价格、品类和图片的第一层约束。
+`products` 是商品主表，服务推荐检索、硬过滤、商品卡片渲染和购物车引用。`data/raw/ecommerce_agent_dataset` 是 seed 输入；`products` 是运行时事实快照，承载官方脱敏电商数据中每个商品的稳定事实，是防止 LLM 编造商品、价格、品类和图片的第一层约束。
 
 ## 为什么这样设计
 
@@ -21,7 +21,7 @@
 | `price` | `FLOAT`, nullable | 基础价格，单位按商品数据理解为人民币。 | 支撑预算硬过滤和卡片价格展示。 |
 | `brand` | `VARCHAR`, nullable | 品牌名。 | 支撑品牌偏好、品牌问答和商品卡片展示。 |
 | `image_urls` | `JSON`, nullable | 图片路径列表，当前保存原始相对路径。 | 商品可能多图，JSON list 比单列更有扩展性。 |
-| `product_url` | `VARCHAR`, nullable | 外部商品详情页 URL。当前 dev.db 多为空。 | 为将来接真实电商详情页预留，不影响当前 demo。 |
+| `product_url` | `VARCHAR`, nullable | 外部商品详情页 URL。当前数据多为空。 | 为将来接真实电商详情页预留，不影响当前 demo。 |
 | `metadata` | `JSON`, nullable | 商品扩展事实：`source_file`、`skus`、`rag_knowledge`、`knowledge_package`。 | 承载品类属性、SKU、FAQ、评论和导购知识包，避免扩表。 |
 
 ## `metadata` 结构
@@ -30,18 +30,23 @@
 
 | key | 含义 |
 | --- | --- |
+| `dataset_version` | 商品数据集版本，当前为 `ecommerce_agent_dataset:v1`。 |
+| `source_hash` | 单个 raw 商品 JSON 的 SHA-256 摘要，用于检查事实快照是否与 raw 输入一致。 |
 | `source_file` | 原始商品 JSON 在 `data/raw/ecommerce_agent_dataset` 下的相对路径。 |
 | `skus` | 官方数据中的规格列表，用于后续 SKU 选择或价格扩展。 |
 | `rag_knowledge` | 原始 `marketing_description`、`official_faq`、`user_reviews`。 |
 | `knowledge_package` | 由 `chunking.py` 派生的导购知识包，包含基础信息、属性、别名、证据摘要和风险摘要。 |
+| `chunking_version` | 当前 chunking 策略版本，便于 reindex 后审计。 |
+| `embedding_model` | 当前索引使用的 embedding 模型名。 |
+| `indexed_at` | 本次 seed/reindex 写入时间。 |
 
 ## 关系和索引
 
 - 主键：`products.id`。
 - 被 `product_chunks.product_id`、`cart_items.product_id`、`evidence_links.product_id` 外键引用。
-- 当前没有单独为 `category/price/brand` 建索引，因为 dev 数据只有 100 条；生产规模扩大后可补 `category`、`price`、`brand` 组合索引。
+- 索引：`idx_products_category_price`、`idx_products_category_sub_category`、`idx_products_brand`。这些索引用于 pgvector 召回前的 SQL 硬过滤下推。
 
 ## Review 关注点
 
-- 当前 `metadata` 同时保存原始 `rag_knowledge` 和派生 `knowledge_package`，空间换取可解释性和可回溯性，适合 demo 和评审。
+- 当前 `metadata` 同时保存原始 `rag_knowledge`、派生 `knowledge_package` 和版本/hash 信息，空间换取可解释性和可回溯性，适合 demo 和评审。
 - 如果未来数据量扩大，`metadata.rag_knowledge` 可拆到文档表，`products` 只保留结构化摘要。

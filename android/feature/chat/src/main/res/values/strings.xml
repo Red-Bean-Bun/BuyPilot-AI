@@ -29,8 +29,8 @@
     <string name="criteria_reset">重置</string>
     <string name="criteria_apply">应用并重新推荐</string>
 
-    <string name="decision_badge_no_match">无匹配</string>
-    <string name="decision_badge_no_suitable_winner">不强行推荐</string>
-    <string name="decision_badge_needs_more_signal">还需偏好</string>
-    <string name="decision_badge_low_confidence">低置信建议</string>
+    <string name="decision_badge_no_match">暂无匹配</string>
+    <string name="decision_badge_no_suitable_winner">暂不推荐</string>
+    <string name="decision_badge_needs_more_signal">还差一点偏好</string>
+    <string name="decision_badge_low_confidence">先看这款</string>
 </resources>

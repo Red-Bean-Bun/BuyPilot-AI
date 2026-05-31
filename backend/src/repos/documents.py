@@ -35,6 +35,15 @@ class VectorChunkHit:
     distance: float
 
 
+@dataclass(frozen=True)
+class VectorSearchFilters:
+    category: str | None = None
+    budget_max: float | None = None
+    product_type_aliases: tuple[str, ...] = ()
+    brand_avoid: tuple[str, ...] = ()
+    avoid_product_ids: tuple[str, ...] = ()
+
+
 async def list_embedded_chunks() -> list[ChunkDocument]:
     await create_db_and_tables()
     try:
@@ -57,35 +66,44 @@ async def list_embedded_chunks() -> list[ChunkDocument]:
     ]
 
 
-async def list_vector_chunks_by_similarity(query_embedding: list[float], limit: int) -> list[VectorChunkHit]:
+async def list_vector_chunks_by_similarity(
+    query_embedding: list[float],
+    limit: int,
+    filters: VectorSearchFilters | None = None,
+) -> list[VectorChunkHit]:
     await create_db_and_tables()
     engine = get_async_engine()
     if not is_postgres_engine(engine) or not query_embedding:
         return []
 
+    filters = filters or VectorSearchFilters()
+    sql_filter, params = _pgvector_sql_filters(filters)
+    params.update({"query_embedding": vector_to_pg_literal(query_embedding), "limit": limit})
     try:
         async with engine.connect() as conn:
             rows = (
                 (
                     await conn.execute(
                         text(
-                            """
+                            f"""
                     SELECT
-                        id,
-                        product_id,
-                        chunk_text,
-                        chunk_index,
-                        embedding,
-                        "metadata" AS chunk_metadata,
-                        embedding <=> CAST(:query_embedding AS vector) AS distance
-                    FROM product_chunks
-                    WHERE embedding IS NOT NULL
-                      AND COALESCE("metadata"->>'retrieval_role', '') <> 'risk'
-                    ORDER BY embedding <=> CAST(:query_embedding AS vector)
+                        pc.id,
+                        pc.product_id,
+                        pc.chunk_text,
+                        pc.chunk_index,
+                        pc.embedding,
+                        pc."metadata" AS chunk_metadata,
+                        pc.embedding <=> CAST(:query_embedding AS vector) AS distance
+                    FROM product_chunks pc
+                    JOIN products p ON p.id = pc.product_id
+                    WHERE pc.embedding IS NOT NULL
+                      AND COALESCE(pc."metadata"->>'retrieval_role', '') <> 'risk'
+                      {sql_filter}
+                    ORDER BY pc.embedding <=> CAST(:query_embedding AS vector)
                     LIMIT :limit
                     """
                         ),
-                        {"query_embedding": vector_to_pg_literal(query_embedding), "limit": limit},
+                        params,
                     )
                 )
                 .mappings()
@@ -111,6 +129,38 @@ async def list_vector_chunks_by_similarity(query_embedding: list[float], limit: 
             )
         )
     return hits
+
+
+def _pgvector_sql_filters(filters: VectorSearchFilters) -> tuple[str, dict[str, Any]]:
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if filters.category:
+        clauses.append("AND p.category = :category")
+        params["category"] = filters.category
+    if filters.budget_max is not None:
+        clauses.append("AND (p.price IS NULL OR p.price <= :budget_max)")
+        params["budget_max"] = filters.budget_max
+    if filters.product_type_aliases:
+        placeholders = _named_placeholders("product_type", filters.product_type_aliases, params, lowercase=True)
+        clauses.append(f"AND lower(COALESCE(p.sub_category, '')) IN ({placeholders})")
+    if filters.brand_avoid:
+        placeholders = _named_placeholders("brand_avoid", filters.brand_avoid, params, lowercase=True)
+        clauses.append(f"AND lower(COALESCE(p.brand, '')) NOT IN ({placeholders})")
+    if filters.avoid_product_ids:
+        placeholders = _named_placeholders("avoid_product", filters.avoid_product_ids, params)
+        clauses.append(f"AND pc.product_id NOT IN ({placeholders})")
+
+    return ("\n                      " + "\n                      ".join(clauses)) if clauses else "", params
+
+
+def _named_placeholders(prefix: str, values: tuple[str, ...], params: dict[str, Any], lowercase: bool = False) -> str:
+    names: list[str] = []
+    for index, value in enumerate(dict.fromkeys(item.strip() for item in values if item and item.strip())):
+        name = f"{prefix}_{index}"
+        params[name] = value.casefold() if lowercase else value
+        names.append(f":{name}")
+    return ", ".join(names) if names else "NULL"
 
 
 def evidence_for_chunk(chunk: ChunkDocument, max_chars: int = 180) -> EvidencePayload:

@@ -57,6 +57,11 @@ def _equals(actual_value: Any, expected_value: Any) -> bool:
 
 
 CONSTRAINT_COMPARATORS: dict[str, ConstraintComparator] = {
+    "brand_prefer": _expected_subset,
+    "must_match_terms": _expected_subset,
+    "forbidden_terms": _expected_subset,
+    "budget_max": _max_price_match,
+    "budget_min": _min_price_match,
     "must_have_features": _expected_subset,
     "forbidden_features": _expected_subset,
     "max_price": _max_price_match,
@@ -114,9 +119,10 @@ SatisfactionRule = Callable[[dict[str, Any], dict[str, Any]], list[bool]]
 
 
 def _price_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
-    if not constraints.get("max_price"):
+    max_price = constraints.get("budget_max", constraints.get("max_price"))
+    if not max_price:
         return []
-    return [product_metadata.get("price", float("inf")) <= constraints["max_price"]]
+    return [product_metadata.get("price", float("inf")) <= max_price]
 
 
 def _category_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
@@ -126,7 +132,7 @@ def _category_satisfaction(product_metadata: dict[str, Any], constraints: dict[s
 
 
 def _forbidden_feature_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
-    features = constraints.get("forbidden_features")
+    features = constraints.get("forbidden_terms") or constraints.get("forbidden_features")
     if not features:
         return []
     product_text = str(product_metadata).lower()
@@ -134,7 +140,7 @@ def _forbidden_feature_satisfaction(product_metadata: dict[str, Any], constraint
 
 
 def _must_have_feature_satisfaction(product_metadata: dict[str, Any], constraints: dict[str, Any]) -> list[bool]:
-    features = constraints.get("must_have_features")
+    features = constraints.get("must_match_terms") or constraints.get("must_have_features")
     if not features:
         return []
     product_text = str(product_metadata).lower()

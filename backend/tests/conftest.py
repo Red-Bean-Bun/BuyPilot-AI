@@ -86,7 +86,8 @@ def _patch_vector_search_for_sqlite_tests(monkeypatch, mock_external_ai):
 
     from src.repos.documents import list_embedded_chunks
 
-    async def _sqlite_vector_similarity(query_embedding, limit):
+    async def _sqlite_vector_similarity(query_embedding, limit, filters=None):
+        del filters
         chunks = await list_embedded_chunks()
         if not chunks or not query_embedding:
             return []

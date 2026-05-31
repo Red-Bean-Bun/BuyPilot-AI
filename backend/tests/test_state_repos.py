@@ -1,9 +1,11 @@
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 import src.config.settings as settings_module
 from src.services import cart
 from src.repos import cart_items, conversations, feedbacks
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.runtime.pipeline import chat_stream
 from src.types.schemas import ChatStreamRequest
 from src.types.sse_events import Constraints, CriteriaPayload
@@ -64,6 +66,46 @@ async def test_cart_repo_updates_and_removes_items(temp_database):
     assert removed is not None
     cart = await cart_items.get_cart("sess_cart_update")
     assert cart.items == []
+
+
+@pytest.mark.asyncio
+async def test_cart_unique_index_merges_existing_duplicate_rows(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'legacy_cart.db'}")
+    settings_module._settings = None
+    engine = get_async_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE cart_items (
+                    id VARCHAR PRIMARY KEY,
+                    session_id VARCHAR NOT NULL,
+                    product_id VARCHAR NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    added_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO cart_items (id, session_id, product_id, quantity, added_at)
+                VALUES
+                    ('legacy_1', 'sess_legacy_cart', 'p_beauty_011', 1, '2026-05-30T00:00:00'),
+                    ('legacy_2', 'sess_legacy_cart', 'p_beauty_011', 2, '2026-05-31T00:00:00')
+                """
+            )
+        )
+
+    await create_db_and_tables()
+    await cart_items.add_to_cart("sess_legacy_cart", "p_beauty_011", quantity=4)
+
+    restored = await cart_items.get_cart("sess_legacy_cart")
+
+    assert len(restored.items) == 1
+    assert restored.items[0].quantity == 7
+    settings_module._settings = None
 
 
 @pytest.mark.asyncio

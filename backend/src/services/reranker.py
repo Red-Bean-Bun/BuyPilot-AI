@@ -113,10 +113,13 @@ def _resolve_rerank_profile(profile_name: str) -> RerankProfile:
 async def _rerank_request(profile: RerankProfile, query: str, documents: list[str], top_n: int) -> list[int]:
     payload: dict[str, Any] = {
         "model": profile.model,
-        "query": query,
-        "documents": documents,
-        "top_n": min(top_n, len(documents)),
-        "instruct": "Rank ecommerce product passages by relevance to the shopper's buying criteria.",
+        "input": {
+            "query": query,
+            "documents": documents,
+        },
+        "parameters": {
+            "top_n": min(top_n, len(documents)),
+        },
     }
     endpoint = _rerank_endpoint(profile)
     headers = {
@@ -127,7 +130,7 @@ async def _rerank_request(profile: RerankProfile, query: str, documents: list[st
     response = await client.post(endpoint, headers=headers, json=payload, timeout=profile.timeout_seconds)
     response.raise_for_status()
     data = response.json()
-    results = data.get("results") if isinstance(data, dict) else None
+    results = data.get("output", {}).get("results") if isinstance(data, dict) else None
     if not isinstance(results, list):
         return []
     ranked: list[tuple[int, float]] = []

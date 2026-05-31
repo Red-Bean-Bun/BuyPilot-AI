@@ -381,3 +381,11 @@ def avoid_trait_matches_text(token: str, text: str) -> bool:
     if aliases:
         return contains_any_casefold(text, aliases)
     return normalized.lower() in text.lower()
+
+
+def avoid_trait_aliases(token: str) -> tuple[str, ...]:
+    normalized = token.strip()
+    if not normalized:
+        return ()
+    aliases = AVOID_TRAIT_MATCH_TERMS.get(normalized.lower()) or AVOID_TRAIT_MATCH_TERMS.get(normalized)
+    return aliases or (normalized,)

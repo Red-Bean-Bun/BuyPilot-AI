@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from src.config.domain_terms import (
+    avoid_trait_aliases,
     avoid_trait_matches_text,
     normalize_category,
     normalize_product_type,
@@ -22,6 +23,7 @@ from src.config.tuning import (
 )
 from src.repos.documents import (
     ChunkDocument,
+    VectorSearchFilters,
     evidence_for_chunk,
     list_vector_chunks_by_similarity,
 )
@@ -55,6 +57,14 @@ class RetrievalOutput:
     trace_details: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class VectorRecallResult:
+    hits: list[ProductHit]
+    sql_filters_applied: dict[str, object]
+    pre_filter_count: int
+    post_filter_count: int
+
+
 async def retrieve(
     criteria: CriteriaPayload,
     top_n: int = 5,
@@ -70,9 +80,11 @@ async def retrieve_with_evidence(
 ) -> RetrievalOutput:
     filters = _retrieval_filters(feedback)
     query_embedding = await embed_text(criteria_query_text(criteria))
-    chunk_hits = await _vector_recall_from_db(criteria, query_embedding, filters)
+    recall_result = await _vector_recall_from_db(criteria, query_embedding, filters)
+    chunk_hits = recall_result.hits
     recall_criteria = criteria
     recall_filters = filters
+    recall_stats = recall_result
     relaxation_steps: list[dict[str, object]] = [
         {
             "step": "strict",
@@ -83,7 +95,8 @@ async def retrieve_with_evidence(
     ]
     if not chunk_hits:
         for step, relaxed_criteria, relaxed_filters, relaxed_fields in _relaxation_attempts(criteria, filters):
-            relaxed_hits = await _vector_recall_from_db(relaxed_criteria, query_embedding, relaxed_filters)
+            relaxed_result = await _vector_recall_from_db(relaxed_criteria, query_embedding, relaxed_filters)
+            relaxed_hits = relaxed_result.hits
             relaxation_steps.append(
                 {
                     "step": step,
@@ -96,6 +109,7 @@ async def retrieve_with_evidence(
                 chunk_hits = relaxed_hits
                 recall_criteria = relaxed_criteria
                 recall_filters = relaxed_filters
+                recall_stats = relaxed_result
                 break
     if not chunk_hits:
         return RetrievalOutput(products=[], evidence_by_product={})
@@ -113,6 +127,7 @@ async def retrieve_with_evidence(
             candidate_hits=candidate_hits,
             ranked_hits=ranked_hits,
             relaxation_steps=relaxation_steps,
+            recall_stats=recall_stats,
         ),
     )
 
@@ -121,7 +136,7 @@ async def _vector_recall_from_db(
     criteria: CriteriaPayload,
     query_embedding: list[float],
     filters: RetrievalFilters,
-) -> list[ProductHit]:
+) -> VectorRecallResult:
     return await _vector_recall_from_pgvector(criteria, query_embedding, filters)
 
 
@@ -129,9 +144,15 @@ async def _vector_recall_from_pgvector(
     criteria: CriteriaPayload,
     query_embedding: list[float],
     filters: RetrievalFilters,
-) -> list[ProductHit]:
+) -> VectorRecallResult:
     hits: list[ProductHit] = []
-    for vector_hit in await list_vector_chunks_by_similarity(query_embedding, limit=PGVECTOR_RECALL_LIMIT):
+    sql_filters = _sql_filters_for_recall(criteria, filters)
+    vector_hits = await list_vector_chunks_by_similarity(
+        query_embedding,
+        limit=PGVECTOR_RECALL_LIMIT,
+        filters=sql_filters,
+    )
+    for vector_hit in vector_hits:
         chunk = vector_hit.document
         product = get_product(chunk.product_id)
         if product is None or not _passes_hard_filters(criteria, product, filters):
@@ -144,7 +165,12 @@ async def _vector_recall_from_pgvector(
                 chunk=chunk,
             )
         )
-    return hits
+    return VectorRecallResult(
+        hits=hits,
+        sql_filters_applied=_sql_filter_payload(sql_filters),
+        pre_filter_count=len(vector_hits),
+        post_filter_count=len(hits),
+    )
 
 
 def _rank_hits(criteria: CriteriaPayload, hits: list[ProductHit]) -> list[ProductHit]:
@@ -194,6 +220,7 @@ def _trace_details_for_chunk_retrieval(
     candidate_hits: list[ProductHit],
     ranked_hits: list[ProductHit],
     relaxation_steps: list[dict[str, object]],
+    recall_stats: VectorRecallResult,
 ) -> dict[str, object]:
     vector_hits = sorted(chunk_hits, key=lambda hit: hit.vector_score, reverse=True)[:TRACE_VECTOR_TOP_K_LIMIT]
     return {
@@ -207,6 +234,9 @@ def _trace_details_for_chunk_retrieval(
             "avoid_traits": list(filters.avoid_traits),
             "effective_budget_max": recall_criteria.constraints.budget_max,
             "effective_product_type": recall_criteria.constraints.product_type,
+            "sql_filters_applied": recall_stats.sql_filters_applied,
+            "pre_filter_count": recall_stats.pre_filter_count,
+            "post_filter_count": recall_stats.post_filter_count,
             "relaxation_steps": relaxation_steps,
         },
         "vector_top_k": [_trace_hit_payload(hit, rank) for rank, hit in enumerate(vector_hits, start=1)],
@@ -421,6 +451,35 @@ def _retrieval_filters(feedback: Mapping[str, list[str]] | None) -> RetrievalFil
     )
 
 
+def _sql_filters_for_recall(criteria: CriteriaPayload, filters: RetrievalFilters) -> VectorSearchFilters:
+    constraints = criteria.constraints
+    return VectorSearchFilters(
+        category=normalize_category(criteria.category),
+        budget_max=constraints.budget_max,
+        product_type_aliases=tuple(product_type_aliases(constraints.product_type)),
+        brand_avoid=_brand_avoid_terms(criteria),
+        avoid_product_ids=tuple(sorted(filters.avoid_products)),
+    )
+
+
+def _brand_avoid_terms(criteria: CriteriaPayload) -> tuple[str, ...]:
+    terms: list[str] = []
+    terms.extend(criteria.constraints.brand_avoid)
+    for origin in criteria.constraints.origin_avoid:
+        terms.extend(avoid_trait_aliases(origin))
+    return tuple(dict.fromkeys(term for term in terms if term))
+
+
+def _sql_filter_payload(filters: VectorSearchFilters) -> dict[str, object]:
+    return {
+        "category": filters.category,
+        "budget_max": filters.budget_max,
+        "product_type_aliases": list(filters.product_type_aliases),
+        "brand_avoid": list(filters.brand_avoid),
+        "avoid_product_ids": list(filters.avoid_product_ids),
+    }
+
+
 def filter_products(
     products: list[ProductPayload],
     criteria: CriteriaPayload,
@@ -434,10 +493,7 @@ def filter_products(
     brand_avoid / origin_avoid that the speculative CriteriaPayload lacked).
     """
     filters = _retrieval_filters(feedback)
-    return [
-        p for p in products
-        if _passes_hard_filters(criteria, p, filters)
-    ][:max_products]
+    return [p for p in products if _passes_hard_filters(criteria, p, filters)][:max_products]
 
 
 def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:

@@ -56,6 +56,7 @@ async def create_db_and_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
         await conn.run_sync(_ensure_model_columns_sync)
+        await ensure_runtime_indexes(conn)
     if is_postgres_engine(engine):
         await ensure_pgvector_indexes(engine)
     with _CREATE_TABLES_LOCK:
@@ -125,6 +126,71 @@ async def ensure_pgvector_indexes(engine: AsyncEngine) -> None:
                 "ON product_chunks USING hnsw (embedding vector_cosine_ops)"
             )
         )
+
+
+async def ensure_runtime_indexes(conn) -> None:
+    """Create non-destructive indexes used by retrieval, cart, trace, and evidence queries."""
+
+    await _merge_duplicate_cart_items(conn)
+
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_products_category_price ON products (category, price)",
+        "CREATE INDEX IF NOT EXISTS idx_products_category_sub_category ON products (category, sub_category)",
+        "CREATE INDEX IF NOT EXISTS idx_products_brand ON products (brand)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_cart_items_session_product ON cart_items (session_id, product_id)",
+        "CREATE INDEX IF NOT EXISTS idx_retrieval_traces_conversation_id ON retrieval_traces (conversation_id)",
+        "CREATE INDEX IF NOT EXISTS idx_retrieval_traces_created_at ON retrieval_traces (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_evidence_links_conversation_id ON evidence_links (conversation_id)",
+        "CREATE INDEX IF NOT EXISTS idx_evidence_links_product_id ON evidence_links (product_id)",
+    )
+    for statement in statements:
+        await conn.execute(text(statement))
+
+
+async def _merge_duplicate_cart_items(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            WITH ranked AS (
+                SELECT
+                    id,
+                    SUM(quantity) OVER (PARTITION BY session_id, product_id) AS total_quantity,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY session_id, product_id
+                        ORDER BY added_at ASC, id ASC
+                    ) AS row_num
+                FROM cart_items
+            )
+            UPDATE cart_items
+            SET quantity = (
+                SELECT total_quantity
+                FROM ranked
+                WHERE ranked.id = cart_items.id
+            )
+            WHERE id IN (SELECT id FROM ranked WHERE row_num = 1)
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            DELETE FROM cart_items
+            WHERE id IN (
+                SELECT id
+                FROM (
+                    SELECT
+                        id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY session_id, product_id
+                            ORDER BY added_at ASC, id ASC
+                        ) AS row_num
+                    FROM cart_items
+                ) ranked
+                WHERE row_num > 1
+            )
+            """
+        )
+    )
 
 
 async def get_session():

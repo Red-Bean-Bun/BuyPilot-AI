@@ -27,6 +27,7 @@ from src.runtime.stages.slot_checker import build_clarification_question
 from src.runtime.streaming import (
     StageResult,
     StreamContext,
+    TimedTask,
     run_with_heartbeat,
     start_stage_task,
 )
@@ -310,10 +311,10 @@ async def handle_recommendation(
 
     # ── Fire DB reads before intro text: overlap with typewriter animation ──
     feedback_task = asyncio.create_task(get_feedback_context(ctx.session_id))
-    ctx.background_tasks.append(feedback_task)
+    ctx.background_tasks.append(TimedTask(task=feedback_task, started_at=time.perf_counter()))
     if _is_replace_deck_request(body):
         product_ids_task = asyncio.create_task(get_previous_product_ids(ctx.session_id))
-        ctx.background_tasks.append(product_ids_task)
+        ctx.background_tasks.append(TimedTask(task=product_ids_task, started_at=time.perf_counter()))
     else:
         product_ids_task = None
 

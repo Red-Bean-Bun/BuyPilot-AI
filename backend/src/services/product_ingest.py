@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import dataclass
+from datetime import timezone
 from typing import Callable
 
 from sqlalchemy import delete, func, text
@@ -11,13 +14,16 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.domain_terms import normalize_category
+from src.config.settings import get_settings
 from src.repos.database import create_db_and_tables, get_async_engine, is_postgres_engine
-from src.repos.models import Product, ProductChunk
+from src.repos.models import Product, ProductChunk, SystemMetadata, utc_now
 from src.repos.products import list_raw_products
 from src.services.chunking import build_product_chunks, build_product_knowledge_package
 from src.services.embedding import embed_texts
 
 EXPECTED_EMBEDDING_DIMENSIONS = 1024
+DATASET_VERSION = "ecommerce_agent_dataset:v1"
+CHUNKING_VERSION = "semantic_v1"
 
 
 ProgressCallback = Callable[[int, int], None]
@@ -37,6 +43,8 @@ async def seed_products(
 ) -> dict[str, int]:
     await create_db_and_tables()
     products = list_raw_products()
+    indexed_at = utc_now().astimezone(timezone.utc).isoformat()
+    embedding_model = _embedding_model_name()
     chunk_rows = _build_chunk_rows(products)
     embeddings = await _embed_chunks(chunk_rows, expected_dimensions=expected_embedding_dimensions, progress=progress)
 
@@ -44,6 +52,7 @@ async def seed_products(
         for raw in products:
             product_id = str(raw["product_id"])
             source_category = str(raw.get("category") or "")
+            source_hash = _source_hash(raw)
             knowledge_package = build_product_knowledge_package(raw)
             await session.exec(delete(ProductChunk).where(ProductChunk.product_id == product_id))
             await session.merge(
@@ -56,11 +65,16 @@ async def seed_products(
                     brand=raw.get("brand"),
                     image_urls=[str(raw.get("image_path") or "")],
                     product_metadata={
+                        "dataset_version": DATASET_VERSION,
+                        "source_hash": source_hash,
                         "source_category": source_category,
                         "source_file": raw.get("_source_file"),
                         "skus": raw.get("skus") or [],
                         "rag_knowledge": raw.get("rag_knowledge") or {},
                         "knowledge_package": knowledge_package,
+                        "chunking_version": CHUNKING_VERSION,
+                        "embedding_model": embedding_model,
+                        "indexed_at": indexed_at,
                     },
                 )
             )
@@ -72,9 +86,31 @@ async def seed_products(
                     chunk_text=row.chunk_text,
                     chunk_index=row.chunk_index,
                     embedding=embedding,
-                    chunk_metadata=row.metadata,
+                    chunk_metadata={
+                        **row.metadata,
+                        "dataset_version": DATASET_VERSION,
+                        "chunking_version": CHUNKING_VERSION,
+                        "embedding_model": embedding_model,
+                        "embedded_at": indexed_at,
+                    },
                 )
             )
+        await session.merge(
+            SystemMetadata(
+                key="dataset_index",
+                value_json={
+                    "dataset_version": DATASET_VERSION,
+                    "dataset_hash": _dataset_hash(products),
+                    "chunking_version": CHUNKING_VERSION,
+                    "embedding_model": embedding_model,
+                    "embedding_dimensions": expected_embedding_dimensions or EXPECTED_EMBEDDING_DIMENSIONS,
+                    "product_count": len(products),
+                    "chunk_count": len(chunk_rows),
+                    "indexed_at": indexed_at,
+                },
+                updated_at=utc_now(),
+            )
+        )
         await session.commit()
 
     return {"products": len(products), "chunks": len(chunk_rows)}
@@ -161,13 +197,14 @@ def _build_chunk_rows(products: list[dict]) -> list[ChunkSeedRow]:
     rows: list[ChunkSeedRow] = []
     for raw in products:
         product_id = str(raw["product_id"])
+        source_hash = _source_hash(raw)
         for chunk in build_product_chunks(raw):
             rows.append(
                 ChunkSeedRow(
                     product_id=product_id,
                     chunk_text=chunk.chunk_text,
                     chunk_index=chunk.chunk_index,
-                    metadata=chunk.metadata,
+                    metadata={**chunk.metadata, "source_hash": source_hash},
                 )
             )
     return rows
@@ -193,6 +230,30 @@ async def _embed_chunks(
         if progress is not None:
             progress(len(vectors), len(rows))
     return vectors
+
+
+def _source_hash(raw: dict) -> str:
+    payload = {key: value for key, value in raw.items() if key != "_source_file"}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _dataset_hash(products: list[dict]) -> str:
+    rows = sorted(
+        ({"product_id": str(raw.get("product_id") or ""), "source_hash": _source_hash(raw)} for raw in products),
+        key=lambda row: (row["product_id"], row["source_hash"]),
+    )
+    encoded = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _embedding_model_name() -> str:
+    settings = get_settings()
+    profile_name = (settings.task_model_map.get("embedding") or {}).get("primary")
+    if not profile_name:
+        return "unknown"
+    raw = settings.llm_profiles.get("profiles", {}).get(profile_name) or {}
+    return str(raw.get("model") or profile_name)
 
 
 if __name__ == "__main__":

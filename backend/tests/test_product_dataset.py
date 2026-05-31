@@ -2,7 +2,7 @@ import pytest
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.models import Product, ProductChunk
+from src.repos.models import Product, ProductChunk, SystemMetadata
 from src.repos.products import PRODUCT_ASSET_URL_PREFIX, get_raw_product, list_products, list_raw_products
 from src.services.product_ingest import chunk_embedding_stats, seed_products, seed_products_if_needed
 
@@ -48,6 +48,7 @@ async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         products = (await session.exec(select(Product))).all()
         chunks = (await session.exec(select(ProductChunk))).all()
+        metadata = await session.get(SystemMetadata, "dataset_index")
         product_count = len(products)
         chunk_count = len(chunks)
 
@@ -55,7 +56,13 @@ async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
     assert product_count == 100
     assert chunk_count == result["chunks"]
     assert chunks[0].embedding
+    assert metadata is not None
+    assert metadata.value_json["dataset_version"] == "ecommerce_agent_dataset:v1"
+    assert metadata.value_json["chunking_version"] == "semantic_v1"
+    assert metadata.value_json["embedding_model"] == "text-embedding-v3"
     assert products[0].product_metadata["knowledge_package"]["basic"]["product_id"] == products[0].id
+    assert products[0].product_metadata["source_hash"]
+    assert products[0].product_metadata["chunking_version"] == "semantic_v1"
     food_product = next(product for product in products if product.id == "p_food_001")
     assert food_product.category == "食品生活"
     assert food_product.product_metadata["source_category"] == "食品饮料"

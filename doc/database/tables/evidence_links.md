@@ -29,7 +29,7 @@
 - 外键：`conversation_id -> conversations.id`。
 - 外键：`product_id -> products.id`。
 - 外键：`chunk_id -> product_chunks.id`。
-- 当前只有主键索引；数据量扩大后建议加 `conversation_id` 和 `product_id` 索引。
+- 索引：`idx_evidence_links_conversation_id`、`idx_evidence_links_product_id`。
 
 ## Review 关注点
 

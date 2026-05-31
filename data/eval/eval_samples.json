@@ -6,12 +6,13 @@
     "difficulty": "easy",
     "tags": ["beauty", "budget", "skin_type"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "美妆护肤",
-        "max_price": 200,
+        "budget_max": 200,
         "skin_type": "油性",
-        "must_have_features": ["洁面", "洗面奶"]
+        "must_match_terms": ["洁面", "洗面奶"]
       },
       "relevant_product_ids": ["p_beauty_011"],
       "expected_criteria_chips": ["美妆护肤", "油性肌肤", "200元内", "洁面"],
@@ -25,11 +26,12 @@
     "difficulty": "medium",
     "tags": ["digital", "budget", "anc"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "数码电子",
-        "max_price": 1500,
-        "must_have_features": ["降噪", "蓝牙耳机"]
+        "budget_max": 1500,
+        "must_match_terms": ["降噪", "蓝牙耳机"]
       },
       "relevant_product_ids": [],
       "expected_criteria_chips": ["数码电子", "1500元内", "降噪"],
@@ -43,10 +45,11 @@
     "difficulty": "easy",
     "tags": ["sports", "running", "budget"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "服饰运动",
-        "use_case": "跑步"
+        "use_scenario": "跑步"
       },
       "relevant_product_ids": ["p_clothes_007"],
       "expected_criteria_chips": ["服饰运动", "跑步", "500元内"],
@@ -60,11 +63,12 @@
     "difficulty": "medium",
     "tags": ["beauty", "gift", "dry_skin"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "美妆护肤",
         "skin_type": "干性",
-        "use_case": "送礼"
+        "use_scenario": "送礼"
       },
       "relevant_product_ids": ["p_beauty_001", "p_beauty_003", "p_beauty_007", "p_beauty_008"],
       "expected_criteria_chips": ["美妆护肤", "干性肌肤", "送礼"],
@@ -78,11 +82,12 @@
     "difficulty": "medium",
     "tags": ["beauty", "exclusion", "sunscreen"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "美妆护肤",
-        "forbidden_features": ["酒精"],
-        "must_have_features": ["防晒"]
+        "forbidden_terms": ["酒精"],
+        "must_match_terms": ["防晒"]
       },
       "relevant_product_ids": ["p_beauty_006", "p_beauty_010", "p_beauty_023"],
       "expected_criteria_chips": ["美妆护肤", "防晒", "不要酒精"],
@@ -96,11 +101,12 @@
     "difficulty": "easy",
     "tags": ["food", "gift", "nuts"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "食品生活",
-        "use_case": "送礼",
-        "must_have_features": ["坚果"]
+        "use_scenario": "送礼",
+        "must_match_terms": ["坚果"]
       },
       "relevant_product_ids": ["p_food_009", "p_food_019"],
       "expected_criteria_chips": ["食品生活", "送礼", "坚果"],
@@ -114,10 +120,11 @@
     "difficulty": "easy",
     "tags": ["food", "sugar_free", "tea"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "食品生活",
-        "must_have_features": ["无糖", "茶"]
+        "must_match_terms": ["无糖", "茶"]
       },
       "relevant_product_ids": ["p_food_003", "p_food_014"],
       "expected_criteria_chips": ["食品生活", "无糖", "茶"],
@@ -131,6 +138,7 @@
     "difficulty": "hard",
     "tags": ["lifestyle", "ambiguous"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "食品生活"
@@ -147,11 +155,12 @@
     "difficulty": "easy",
     "tags": ["sports", "budget", "t-shirt"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "服饰运动",
-        "max_price": 200,
-        "must_have_features": ["T恤"]
+        "budget_max": 200,
+        "must_match_terms": ["T恤"]
       },
       "relevant_product_ids": ["p_clothes_001", "p_clothes_002", "p_clothes_003"],
       "expected_criteria_chips": ["服饰运动", "200元内", "T恤"],
@@ -165,10 +174,11 @@
     "difficulty": "easy",
     "tags": ["food", "sports", "energy"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "食品生活",
-        "use_case": "运动"
+        "use_scenario": "运动"
       },
       "relevant_product_ids": ["p_food_005", "p_food_006"],
       "expected_criteria_chips": ["食品生活", "运动", "功能饮料"],
@@ -182,10 +192,11 @@
     "difficulty": "easy",
     "tags": ["digital", "brand", "huawei"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "数码电子",
-        "brands": ["华为"]
+        "brand_prefer": ["华为"]
       },
       "relevant_product_ids": ["p_digital_007"],
       "expected_criteria_chips": ["数码电子", "华为"],
@@ -199,10 +210,11 @@
     "difficulty": "easy",
     "tags": ["sports", "running", "commute"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "服饰运动",
-        "use_case": "通勤"
+        "use_scenario": "通勤"
       },
       "relevant_product_ids": ["p_clothes_007", "p_clothes_008", "p_clothes_009"],
       "expected_criteria_chips": ["服饰运动", "跑鞋", "通勤"],
@@ -216,6 +228,7 @@
     "difficulty": "hard",
     "tags": ["ambiguous", "clarification"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "clarify",
       "constraints": {},
       "relevant_product_ids": [],
@@ -230,10 +243,11 @@
     "difficulty": "medium",
     "tags": ["digital", "laptop", "value"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "数码电子",
-        "must_have_features": ["笔记本"]
+        "must_match_terms": ["笔记本"]
       },
       "relevant_product_ids": ["p_digital_004", "p_digital_023"],
       "expected_criteria_chips": ["数码电子", "笔记本", "性价比"],
@@ -247,11 +261,12 @@
     "difficulty": "medium",
     "tags": ["beauty", "acne", "amino_acid", "budget"],
     "ground_truth": {
+      "schema_version": "2026-05-31",
       "intent_type": "recommend",
       "constraints": {
         "category": "美妆护肤",
-        "max_price": 200,
-        "must_have_features": ["氨基酸", "洁面", "痘痘肌"]
+        "budget_max": 200,
+        "must_match_terms": ["氨基酸", "洁面", "痘痘肌"]
       },
       "relevant_product_ids": ["p_beauty_011"],
       "expected_criteria_chips": ["美妆护肤", "200元内", "氨基酸", "洁面"],

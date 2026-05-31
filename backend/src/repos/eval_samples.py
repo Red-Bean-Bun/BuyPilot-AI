@@ -10,6 +10,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.repos.database import ensure_eval_schema, get_async_engine
 from src.repos.models import EvalSample
+from src.types.sse_events import Constraints
+
+
+GROUND_TRUTH_SCHEMA_VERSION = "2026-05-31"
+_CURRENT_CONSTRAINT_KEYS = set(Constraints.model_fields) | {"category"}
+_EVAL_ONLY_CONSTRAINT_KEYS = {"must_match_terms", "forbidden_terms", "brand_prefer"}
+_ALLOWED_CONSTRAINT_KEYS = _CURRENT_CONSTRAINT_KEYS | _EVAL_ONLY_CONSTRAINT_KEYS
 
 
 async def seed_from_json(json_path: str | Path) -> int:
@@ -30,7 +37,7 @@ async def seed_from_json(json_path: str | Path) -> int:
                 context=sample_data.get("context"),
                 scenario_type=sample_data.get("scenario_type"),
                 difficulty=sample_data.get("difficulty"),
-                ground_truth=sample_data.get("ground_truth", {}),
+                ground_truth=normalize_ground_truth(sample_data.get("ground_truth", {})),
                 tags=sample_data.get("tags", []),
             )
             if existing:
@@ -55,3 +62,42 @@ async def get_by_id(sample_id: str) -> EvalSample | None:
     await ensure_eval_schema()
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         return await session.get(EvalSample, sample_id)
+
+
+def normalize_ground_truth(ground_truth: dict) -> dict:
+    """Migrate legacy eval constraint names into the current Constraints DSL."""
+
+    if not isinstance(ground_truth, dict):
+        return {"schema_version": GROUND_TRUTH_SCHEMA_VERSION, "constraints": {}}
+
+    constraints = ground_truth.get("constraints")
+    migrated_constraints = _normalize_constraints(constraints if isinstance(constraints, dict) else {})
+    unknown = sorted(set(migrated_constraints) - _ALLOWED_CONSTRAINT_KEYS)
+    if unknown:
+        raise ValueError(f"Unsupported eval ground_truth constraints: {', '.join(unknown)}")
+
+    return {
+        **ground_truth,
+        "schema_version": ground_truth.get("schema_version") or GROUND_TRUTH_SCHEMA_VERSION,
+        "constraints": migrated_constraints,
+    }
+
+
+def _normalize_constraints(constraints: dict) -> dict:
+    migrated: dict = {}
+    for key, value in constraints.items():
+        if key == "max_price":
+            migrated["budget_max"] = value
+        elif key == "min_price":
+            migrated["budget_min"] = value
+        elif key == "use_case":
+            migrated["use_scenario"] = value
+        elif key == "must_have_features":
+            migrated["must_match_terms"] = value
+        elif key == "forbidden_features":
+            migrated["forbidden_terms"] = value
+        elif key == "brands":
+            migrated["brand_prefer"] = value
+        else:
+            migrated[key] = value
+    return migrated
