@@ -3,591 +3,564 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chat Stream 可观测性</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<title>Chat Stream Observer</title>
 <style>
+/* ═══════════════════════════════════════════════
+   Grafana-style utilitarian dark theme.
+   Zero decoration, max information density,
+   color only serves state semantics.
+   ═══════════════════════════════════════════════ */
 *{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#0b0e14;--surface:#131720;--surface2:#1a1f2b;--surface3:#222836;
-  --border:#252d3d;--border2:#2f3a4d;
-  --text:#e2e6f0;--text2:#8892a8;--text3:#576178;
-  --accent:#00c2d4;--accent2:#0891a0;--accent-bg:rgba(0,194,212,.08);
-  --green:#26d97f;--green-bg:rgba(38,217,127,.1);
-  --red:#f5475b;--red-bg:rgba(245,71,91,.1);
-  --amber:#f5a623;--amber-bg:rgba(245,166,35,.1);
-  --violet:#9f7aea;--violet-bg:rgba(159,122,234,.1);
-  --blue:#4d8ef7;--blue-bg:rgba(77,142,247,.1);
-}
 html,body{height:100%;overflow:hidden}
-body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
-.mono{font-family:'IBM Plex Mono',monospace}
-.display{font-family:'Sora',sans-serif}
 
-/* ── Header ── */
-.header{display:flex;align-items:center;gap:16px;padding:0 24px;height:54px;background:var(--surface);border-bottom:1px solid var(--border);position:relative;z-index:10}
-.header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent2),transparent);opacity:.35}
-.logo{display:flex;align-items:center;gap:10px;white-space:nowrap}
-.logo-icon{width:30px;height:30px;background:linear-gradient(135deg,var(--accent),var(--violet));border-radius:8px;display:grid;place-items:center;font-size:15px;flex-shrink:0}
-.logo h1{font-family:'Sora',sans-serif;font-size:14px;font-weight:700;letter-spacing:-.02em}
-.logo h1 em{font-style:normal;color:var(--accent)}
-.search-box{display:flex;gap:8px;flex:1;max-width:540px;margin-left:auto}
-.search-box input{flex:1;padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font:inherit;font-size:13px;outline:none;transition:border-color .2s}
-.search-box input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
-.search-box input::placeholder{color:var(--text3)}
-.btn{padding:7px 16px;background:var(--accent);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;transition:all .15s}
-.btn:hover{background:var(--accent2);transform:translateY(-1px)}
-.btn:active{transform:translateY(0)}
-.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text2)}
-.btn-ghost:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
-.kbd{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 5px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text3);margin-left:6px}
+body{
+  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d8d9da;
+  background: #111217;
+  -webkit-font-smoothing: antialiased;
+}
 
-/* ── Layout ── */
-.main{display:flex;height:calc(100vh - 54px)}
+.mono{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;font-size:12px}
 
-/* ── Sidebar ── */
-.sidebar{width:340px;min-width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column}
-.sidebar-header{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
-.sidebar-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text3)}
-.sidebar-count{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text3);background:var(--surface2);padding:2px 8px;border-radius:4px}
-.sidebar-list{flex:1;overflow-y:auto}
-.req-item{padding:12px 18px;border-bottom:1px solid var(--border);border-left:3px solid transparent;cursor:pointer;transition:all .15s}
-.req-item:hover{background:var(--surface2)}
-.req-item.active{background:var(--surface2);border-left-color:var(--accent)}
-.req-item .req-path{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;color:var(--text)}
-.req-item .req-meta{font-size:11px;color:var(--text3);margin-top:5px;display:flex;gap:10px;align-items:center}
-.req-item .req-id{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3);margin-top:3px;word-break:break-all;opacity:.7}
-.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
-.status-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
-.status-dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
+/* ── Header (40px, Grafana nav height) ─────────── */
+.gf-header{
+  display:flex;align-items:center;gap:12px;
+  height:40px;padding:0 12px;
+  background:#181b1f;
+  border-bottom:1px solid #2c3235;
+}
+.gf-brand{
+  font-size:13px;font-weight:600;color:#d8d9da;
+  white-space:nowrap;display:flex;align-items:center;gap:6px;flex-shrink:0;
+}
+.gf-brand-sub{color:#5ea3f5;font-weight:400}
+.gf-search{display:flex;gap:4px;flex:1;max-width:440px;margin-left:auto;align-items:center}
+.gf-input{
+  height:28px;padding:0 8px;
+  background:#0b0c0f;border:1px solid #2c3235;
+  color:#d8d9da;font:12px ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  outline:none;flex:1;
+}
+.gf-input::placeholder{color:#4a4f53}
+.gf-input:focus{border-color:#5ea3f5}
+.gf-btn{
+  height:28px;padding:0 12px;border:none;
+  font:500 12px inherit;cursor:pointer;white-space:nowrap;
+}
+.gf-btn-primary{background:#2f6397;color:#fff}
+.gf-btn-primary:hover{background:#3a7bc8}
+.gf-btn-ghost{background:transparent;color:#8e8e8e;border:1px solid #2c3235}
+.gf-btn-ghost:hover{color:#d8d9da;border-color:#555}
 
-/* ── Content ── */
-.content{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+/* ── Layout ────────────────────────────────────── */
+.gf-main{display:flex;height:calc(100vh - 40px)}
 
-/* ── Tabs ── */
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--surface)}
-.tab{padding:12px 22px;font-size:13px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;position:relative}
-.tab:hover{color:var(--text2)}
-.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.tab .tab-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;margin-left:6px;background:var(--surface3);color:var(--text3)}
-.tab.active .tab-badge{background:var(--accent-bg);color:var(--accent)}
+/* ── Sidebar (224px, compact list) ─────────────── */
+.gf-side{
+  width:224px;min-width:224px;
+  background:#181b1f;
+  border-right:1px solid #2c3235;
+  display:flex;flex-direction:column;
+}
+.gf-side-head{
+  padding:8px 12px;font-size:11px;color:#666;
+  border-bottom:1px solid #2c3235;
+  display:flex;justify-content:space-between;
+  letter-spacing:.5px;text-transform:uppercase;
+}
+.gf-side-list{flex:1;overflow-y:auto}
 
-/* ── Tab Panel ── */
-.tab-panel{flex:1;overflow-y:auto;padding:24px;scroll-behavior:smooth}
-.empty-state{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3);font-size:14px;flex-direction:column;gap:12px}
-.empty-state .empty-icon{width:72px;height:72px;border-radius:50%;background:var(--surface2);display:grid;place-items:center;font-size:28px;opacity:.5}
-.empty-state p{max-width:280px;text-align:center;line-height:1.6}
+/* request row: flat, thin-line separated, no decoration */
+.row{
+  padding:6px 12px;
+  border-bottom:1px solid #1f2227;
+  border-left:2px solid transparent;
+  cursor:pointer;
+}
+.row:hover{background:#1f2227}
+.row.on{border-left-color:#5ea3f5;background:#1a1e24}
+.row-path{font:11px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#d8d9da;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-meta{font-size:10px;color:#555;margin-top:2px;display:flex;gap:6px;align-items:center}
+.row-id{font:10px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#444;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ── Cards ── */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px;transition:border-color .2s}
-.card:hover{border-color:var(--border2)}
-.card-header{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
-.card-body{padding:18px}
-.card-title{font-size:13px;font-weight:600;letter-spacing:-.01em}
+/* ── Content ───────────────────────────────────── */
+.gf-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 
-/* ── Badges ── */
-.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:.02em}
-.badge-success{background:var(--green-bg);color:var(--green)}
-.badge-error{background:var(--red-bg);color:var(--red)}
-.badge-warning{background:var(--amber-bg);color:var(--amber)}
-.badge-info{background:var(--accent-bg);color:var(--accent)}
-.badge-violet{background:var(--violet-bg);color:var(--violet)}
-.badge-blue{background:var(--blue-bg);color:var(--blue)}
+/* tabs: thin underline indicator, no decoration */
+.gf-tabs{
+  display:flex;height:32px;align-items:stretch;
+  background:#181b1f;border-bottom:1px solid #2c3235;padding:0 12px;
+}
+.tab{
+  padding:0 12px;font-size:12px;color:#666;
+  cursor:pointer;border-bottom:1px solid transparent;
+  display:flex;align-items:center;gap:4px;
+}
+.tab:hover{color:#d8d9da}
+.tab.on{color:#d8d9da;border-bottom-color:#5ea3f5}
+.tab-n{font:11px ui-monospace,monospace;color:#444}
+.tab.on .tab-n{color:#5ea3f5}
 
-/* ── Overview Stats ── */
-.overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;position:relative;overflow:hidden;transition:border-color .2s}
-.stat-card:hover{border-color:var(--border2)}
-.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
-.stat-card[data-accent="cyan"]::before{background:var(--accent)}
-.stat-card[data-accent="amber"]::before{background:var(--amber)}
-.stat-card[data-accent="green"]::before{background:var(--green)}
-.stat-card[data-accent="violet"]::before{background:var(--violet)}
-.stat-card[data-accent="red"]::before{background:var(--red)}
-.stat-card[data-accent="blue"]::before{background:var(--blue)}
-.stat-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:6px}
-.stat-value{font-family:'Sora',sans-serif;font-size:22px;font-weight:700;line-height:1.2}
-.stat-value.sm{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;word-break:break-all}
+.gf-panel{flex:1;overflow-y:auto;padding:12px;background:#111217}
 
-/* ── Timing Bars ── */
-.timing-section{margin-bottom:12px}
-.timing-bar{display:flex;align-items:center;gap:12px;margin-bottom:10px}
-.timing-bar .bar-label{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text2);min-width:110px;text-align:right}
-.timing-bar .bar-track{flex:1;height:26px;background:var(--bg);border-radius:6px;overflow:hidden;border:1px solid var(--border)}
-.timing-bar .bar-fill{height:100%;border-radius:5px;display:flex;align-items:center;padding:0 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:#fff;white-space:nowrap;min-width:fit-content;transition:width .6s cubic-bezier(.16,1,.3,1)}
-.bar-fill.fast{background:linear-gradient(90deg,var(--accent2),var(--accent))}
-.bar-fill.medium{background:linear-gradient(90deg,#c08a20,var(--amber))}
-.bar-fill.slow{background:linear-gradient(90deg,#c0392b,var(--red))}
+/* ── Stat metrics (horizontal strip, no card border) ── */
+.stat-row{
+  display:flex;gap:24px;padding:4px 0 12px;
+  border-bottom:1px solid #1f2227;margin-bottom:12px;
+}
+.stat{min-width:0}
+.stat-lbl{font-size:10px;color:#666;letter-spacing:.5px;text-transform:uppercase;margin-bottom:2px}
+.stat-val{font:600 18px/1.2 ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#d8d9da}
+.stat-val.warn{color:#e8a838}
+.stat-val.err{color:#d94a38}
+.stat-val.ok{color:#4caf50}
+.stat-val.muted{font-size:11px;font-weight:400;color:#8e8e8e}
 
-/* ── LLM Call Card ── */
-.llm-card{margin-bottom:16px}
-.llm-card .card-header{gap:12px;flex-wrap:wrap}
-.llm-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.llm-duration{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:var(--amber)}
-.collapsible{cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:4px 0;transition:opacity .15s}
-.collapsible:hover{opacity:.8}
-.collapsible .tri{display:inline-block;font-size:10px;color:var(--accent);transition:transform .2s;width:12px}
-.collapsible.open .tri{transform:rotate(90deg)}
-.collapsible-content{max-height:0;overflow:hidden;transition:max-height .3s ease,margin-top .2s}
-.collapsible-content.open{max-height:4000px;margin-top:10px}
-pre.json-block{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-family:'IBM Plex Mono',monospace;font-size:12px;overflow-x:auto;max-height:400px;overflow-y:auto;line-height:1.65;tab-size:2}
+/* ── Panel (Grafana panel: header bar + body) ──── */
+.pnl{border:1px solid #2c3235;background:#181b1f;margin-bottom:8px}
+.pnl-head{
+  padding:6px 12px;font-size:11px;font-weight:500;color:#8e8e8e;
+  border-bottom:1px solid #2c3235;
+  display:flex;justify-content:space-between;align-items:center;
+  letter-spacing:.3px;
+}
+.pnl-body{padding:10px 12px}
 
-/* ── SSE Timeline ── */
-.sse-timeline{position:relative;padding-left:32px}
-.sse-timeline::before{content:'';position:absolute;left:11px;top:4px;bottom:4px;width:2px;background:linear-gradient(to bottom,var(--accent),var(--border),var(--border));border-radius:1px}
-.sse-item{position:relative;margin-bottom:14px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;transition:border-color .2s,transform .15s}
-.sse-item:hover{border-color:var(--border2);transform:translateX(3px)}
-.sse-item::before{content:'';position:absolute;left:-25px;top:16px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);transition:background .2s}
-.sse-item:hover::before{background:var(--accent)}
-.sse-item .sse-head{display:flex;justify-content:space-between;align-items:center}
-.sse-item .sse-seq{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text3);margin-right:6px}
-.sse-item .sse-time{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text3)}
-.sse-item .sse-detail{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text2);margin-top:6px;line-height:1.5}
+/* ── Timing bars: number + thin flat bar, no gradient ── */
+.tmr{display:flex;align-items:center;gap:8px;margin-bottom:4px;font:12px ui-monospace,monospace}
+.tmr-lbl{width:100px;text-align:right;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tmr-track{flex:1;height:14px;background:#0b0c0f;overflow:hidden}
+.tmr-fill{height:100%;background:#2f6397;display:flex;align-items:center;padding:0 4px;font-size:10px;color:#fff;white-space:nowrap}
+.tmr-fill.slow{background:#8a3c2c}
+.tmr-fill.med{background:#6b5e22}
+.tmr-num{width:60px;color:#8e8e8e;text-align:right}
 
-/* ── Diagnostic Card ── */
-.diag-card{border-left:3px solid var(--amber);position:relative}
-.diag-card.severity-error{border-left-color:var(--red)}
-.diag-card .card-body{display:flex;flex-direction:column;gap:10px}
-.diag-code{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:var(--amber)}
-.diag-card.severity-error .diag-code{color:var(--red)}
-.diag-field{display:flex;gap:12px;font-size:13px;align-items:baseline}
-.diag-field .label{color:var(--text3);min-width:120px;font-size:12px;flex-shrink:0}
+/* ── Data table (Grafana Logs panel style) ─────── */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{
+  text-align:left;padding:4px 8px;font-weight:500;
+  color:#666;font-size:10px;letter-spacing:.3px;text-transform:uppercase;
+  border-bottom:1px solid #2c3235;background:#181b1f;position:sticky;top:0;
+}
+.tbl td{padding:4px 8px;border-bottom:1px solid #1f2227;vertical-align:top}
+.tbl tr:hover td{background:#1f2227}
 
-/* ── Audit Table ── */
-.audit-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
-.audit-table th{text-align:left;padding:10px 14px;background:var(--surface2);color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1}
-.audit-table th:first-child{border-radius:8px 0 0 0}
-.audit-table th:last-child{border-radius:0 8px 0 0}
-.audit-table td{padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}
-.audit-table tbody tr{transition:background .15s}
-.audit-table tbody tr:hover td{background:var(--surface2)}
-.audit-table tbody tr:nth-child(even) td{background:rgba(19,23,32,.5)}
-.audit-table tbody tr:nth-child(even):hover td{background:var(--surface2)}
+/* ── Collapsible (LLM call rows) ───────────────── */
+.collapse{cursor:pointer;user-select:none}
+.collapse:hover{background:#1f2227}
+.collapse-arrow{display:inline-block;width:10px;color:#555;font-size:10px}
+.collapse-body{display:none;border-top:1px solid #1f2227;background:#0f1013}
+.collapse-body.open{display:block}
 
-/* ── Scrollbar ── */
+/* ── JSON block ────────────────────────────────── */
+pre.json{
+  background:#0b0c0f;padding:8px;
+  font:11px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;
+  overflow-x:auto;max-height:300px;overflow-y:auto;line-height:1.5;color:#d8d9da;
+  white-space:pre-wrap;word-break:break-all;
+}
+
+/* ── Status text (no colored badge, just text) ── */
+.s-ok{color:#4caf50}.s-warn{color:#e8a838}.s-err{color:#d94a38}.s-info{color:#8e8e8e}
+
+/* ── Diagnostic row ────────────────────────────── */
+.diag{border-left:2px solid #e8a838;margin-bottom:6px}
+.diag.sev-error{border-left-color:#d94a38}
+.diag-body{padding:8px 12px}
+.diag-code{font:12px ui-monospace,monospace;color:#e8a838;font-weight:600}
+.diag.sev-error .diag-code{color:#d94a38}
+.diag-kv{font-size:12px;display:flex;gap:8px;margin-top:2px}
+.diag-k{color:#666;min-width:100px}
+
+/* ── Inline labels (event type, provider) ──────── */
+.lbl{color:#555;font-size:11px;font-family:ui-monospace,monospace}
+
+/* ── Empty / loading states ────────────────────── */
+.empty{color:#444;font-size:12px;padding:24px 0;text-align:center}
+.loading{color:#555;font-size:12px;padding:16px 0;text-align:center}
+.inline-btn{background:none;border:none;color:#5ea3f5;cursor:pointer;font:inherit;padding:0;text-decoration:underline}
+
+/* ── Scrollbar (thin, subtle) ──────────────────── */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+::-webkit-scrollbar-thumb{background:#2c3235}
+::-webkit-scrollbar-thumb:hover{background:#3a4145}
 
-/* ── Loading ── */
-.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text3);gap:10px;font-size:13px}
-.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.fade-up{animation:fadeUp .35s ease both}
+/* ── Error box (minimal, border-left) ──────────── */
+.err-box{padding:4px 8px;font-size:11px;color:#d94a38;border-left:2px solid #d94a38;margin-top:6px}
 
-/* ── Error box ── */
-.error-box{padding:10px 14px;background:var(--red-bg);border:1px solid rgba(245,71,91,.2);border-radius:6px;font-size:12px;color:var(--red)}
-.error-box strong{font-weight:600}
-
-/* ── Inline info ── */
-.info-line{font-size:12px;color:var(--text2)}
-.info-line .mono{color:var(--text3)}
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="logo">
-    <div class="logo-icon">⊙</div>
-    <h1 class="display"><em>Chat Stream</em> Observer</h1>
-  </div>
-  <div class="search-box">
-    <input id="searchInput" type="text" placeholder="turn_id 或 session_id 查询" />
-    <button class="btn" onclick="handleSearch()">查询</button>
-    <button class="btn btn-ghost" onclick="loadRecentRequests()">刷新</button>
+<div class="gf-header">
+  <div class="gf-brand">Chat Stream <span class="gf-brand-sub">Observer</span></div>
+  <div class="gf-search">
+    <input id="searchInput" class="gf-input" type="text" placeholder="turn_id / session_id" />
+    <button class="gf-btn gf-btn-primary" onclick="handleSearch()">查询</button>
+    <button class="gf-btn gf-btn-ghost" onclick="loadRecentRequests()">刷新</button>
   </div>
 </div>
 
-<div class="main">
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <span class="sidebar-title">最近请求</span>
-      <span class="sidebar-count" id="reqCount">—</span>
+<div class="gf-main">
+  <div class="gf-side">
+    <div class="gf-side-head">
+      <span>请求</span>
+      <span id="reqCount">-</span>
     </div>
-    <div class="sidebar-list" id="requestList">
-      <div class="empty-state" style="padding:40px 0"><div class="empty-icon">◎</div><p>加载中…</p></div>
+    <div class="gf-side-list" id="requestList">
+      <div class="loading">加载中...</div>
     </div>
   </div>
 
-  <div class="content">
-    <div class="tabs" id="tabBar">
-      <div class="tab active" data-tab="overview">概览</div>
-      <div class="tab" data-tab="llm">LLM 调用<span class="tab-badge" id="llmBadge" style="display:none"></span></div>
-      <div class="tab" data-tab="sse">SSE 事件<span class="tab-badge" id="sseBadge" style="display:none"></span></div>
-      <div class="tab" data-tab="diagnostics">诊断<span class="tab-badge" id="diagBadge" style="display:none"></span></div>
+  <div class="gf-body">
+    <div class="gf-tabs" id="tabBar">
+      <div class="tab on" data-tab="overview">概览</div>
+      <div class="tab" data-tab="llm">LLM <span class="tab-n" id="llmN"></span></div>
+      <div class="tab" data-tab="sse">SSE <span class="tab-n" id="sseN"></span></div>
+      <div class="tab" data-tab="diag">诊断 <span class="tab-n" id="diagN"></span></div>
       <div class="tab" data-tab="audit">审计</div>
     </div>
-    <div class="tab-panel" id="tabContent">
-      <div class="empty-state">
-        <div class="empty-icon">⊙</div>
-        <p>从左侧选择请求，或在搜索框输入 turn_id / session_id 查询</p>
-      </div>
+    <div class="gf-panel" id="tabContent">
+      <div class="empty">选择左侧请求或输入 ID 查询</div>
     </div>
   </div>
 </div>
 
 <script>
 const API = '/admin/observability';
-let currentBundle = null;
-let currentTab = 'overview';
+const adminToken = new URLSearchParams(window.location.search).get('token') || '';
+let bundle = null, tab = 'overview';
 
-function escapeHtml(value) {
-  if (value === null || value === undefined) return '';
-  return String(value).replace(/[&<>"']/g, ch => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+/* ── Utilities ──────────────────────────────── */
+
+function escapeHtml(value){
+  if(value===null||value===undefined)return'';
+  return String(value).replace(/[&<>"']/g,ch=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[ch]));
 }
 
-// ── JSON syntax highlighting ──
-function highlightJson(obj) {
-  if (obj === null || obj === undefined) return '<span style="color:var(--text3)">null</span>';
-  const json = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
-  return json.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"([^"]+)"(?=\s*:)/g, '<span style="color:var(--accent)">"$1"</span>')
-    .replace(/:\s*"([^"]*)"/g, ': <span style="color:var(--green)">"$1"</span>')
-    .replace(/:\s*(\d+\.?\d*)/g, ': <span style="color:var(--amber)">$1</span>')
-    .replace(/:\s*(true|false)/g, ': <span style="color:var(--violet)">$1</span>')
-    .replace(/:\s*(null)/g, ': <span style="color:var(--text3)">$1</span>');
+function hlJson(obj){
+  if(obj==null)return'<span style="color:#555">null</span>';
+  const s=(typeof obj==='string'?obj:JSON.stringify(obj,null,2));
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"([^"]+)"(?=\s*:)/g,'<span style="color:#5ea3f5">"$1"</span>')
+    .replace(/:\s*"([^"]*)"/g,': <span style="color:#4caf50">"$1"</span>')
+    .replace(/:\s*(\d+\.?\d*)/g,': <span style="color:#e8a838">$1</span>')
+    .replace(/:\s*(true|false|null)/g,': <span style="color:#8e8e8e">$1</span>');
 }
 
-function jsonBlock(obj) {
-  if (!obj) return '<span style="color:var(--text3)">null</span>';
-  return '<pre class="json-block mono">' + highlightJson(obj) + '</pre>';
+function jblock(obj){return obj?'<pre class="json">'+hlJson(obj)+'</pre>':'<span style="color:#555">null</span>'}
+
+function timeAgo(iso){
+  if(!iso)return'';
+  const d=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+  if(d<60)return d+'s ago';
+  if(d<3600)return Math.floor(d/60)+'m ago';
+  if(d<86400)return Math.floor(d/3600)+'h ago';
+  return new Date(iso).toLocaleDateString('zh-CN');
 }
 
-function timeAgo(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 60) return diff + '秒前';
-  if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
-  if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
-  return d.toLocaleDateString('zh-CN');
+function fmtMs(ms){
+  if(ms==null)return'-';
+  return ms<1000?ms.toFixed(0)+'ms':(ms/1000).toFixed(2)+'s';
 }
 
-function fmtDuration(ms) {
-  if (ms === undefined || ms === null) return '-';
-  if (ms < 1000) return ms.toFixed(0) + 'ms';
-  return (ms / 1000).toFixed(2) + 's';
+function statusCls(s){return s==='success'?'s-ok':s==='failed'?'s-err':s==='fallback'?'s-warn':'s-info'}
+
+function sevCls(s){return s==='error'?'s-err':s==='warning'?'s-warn':'s-info'}
+
+function evtColor(t){
+  return({error:'#d94a38',done:'#4caf50',text_delta:'#4caf50',thinking:'#8e8e8e',clarification:'#e8a838'})[t]||'#8e8e8e';
 }
 
-function statusBadge(status) {
-  const m = { success: 'badge-success', failed: 'badge-error', fallback: 'badge-warning' };
-  return '<span class="badge ' + (m[status] || 'badge-info') + '">' + escapeHtml(status || '-') + '</span>';
+function togglePanel(el){
+  const arrow=el.querySelector('.collapse-arrow');
+  const body=el.nextElementSibling;
+  if(!body)return;
+  const open=body.classList.toggle('open');
+  if(arrow)arrow.textContent=open?'▼':'▶';
 }
 
-function severityBadge(sev) {
-  const m = { warning: 'badge-warning', error: 'badge-error', info: 'badge-info' };
-  return '<span class="badge ' + (m[sev] || 'badge-info') + '">' + escapeHtml(sev || '-') + '</span>';
+/* ── API calls ─────────────────────────────── */
+
+async function fetchJson(url){
+  const options = adminToken ? {headers:{Authorization:'Bearer '+adminToken}} : {};
+  const r=await fetch(url, options);
+  if(!r.ok)throw new Error('HTTP '+r.status+': '+r.statusText);
+  return r.json();
 }
 
-function eventTypeBadge(t) {
-  const colors = {
-    thinking: 'badge-info', criteria_card: 'badge-violet', text_delta: 'badge-success',
-    product_card: 'badge-blue', done: 'badge-success', error: 'badge-error',
-    clarification: 'badge-warning', cart_action: 'badge-violet', final_decision: 'badge-violet'
-  };
-  return '<span class="badge ' + (colors[t] || 'badge-info') + '">' + escapeHtml(t || '-') + '</span>';
-}
-
-function barSpeedClass(ms) {
-  if (ms < 500) return 'fast';
-  if (ms < 3000) return 'medium';
-  return 'slow';
-}
-
-// ── Tab badges ──
-function updateTabBadges(b) {
-  if (!b) return;
-  const set = (id, count) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (count > 0) { el.textContent = count; el.style.display = ''; }
-    else { el.style.display = 'none'; }
-  };
-  set('llmBadge', (b.llm_calls || []).length);
-  set('sseBadge', (b.sse_events || []).length);
-  set('diagBadge', (b.context_diagnostics || []).length);
-}
-
-// ── API calls ──
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + res.statusText);
-  return res.json();
-}
-
-async function loadRecentRequests() {
-  const list = document.getElementById('requestList');
-  list.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
-  try {
-    const reqs = await fetchJson(API + '/requests?limit=20');
-    document.getElementById('reqCount').textContent = reqs.length + ' 条';
-    if (!reqs.length) {
-      list.innerHTML = '<div class="empty-state" style="padding:40px 0"><div class="empty-icon">◎</div><p>暂无请求记录</p></div>';
-      return;
-    }
-    list.replaceChildren(...reqs.map(r => {
-      const turnId = r.turn_id || '-';
-      const dur = r.duration_ms ? fmtDuration(r.duration_ms) : '';
-      const statusCode = Number(r.status_code || 0);
-      const isOk = statusCode >= 200 && statusCode < 300;
-      const item = document.createElement('div');
-      item.className = 'req-item';
-      item.dataset.turn = turnId;
-      item.addEventListener('click', () => loadTurn(turnId));
-
-      const path = document.createElement('div');
-      path.className = 'req-path mono';
-      path.textContent = (r.method || 'GET') + ' ' + (r.path || '-');
-
-      const meta = document.createElement('div');
-      meta.className = 'req-meta';
-      const dot = document.createElement('span');
-      dot.className = 'status-dot ' + (isOk ? 'ok' : 'err');
-      const statusEl = document.createElement('span');
-      statusEl.style.color = isOk ? 'var(--green)' : 'var(--red)';
-      statusEl.textContent = r.status_code || '';
-      const durationEl = document.createElement('span');
-      durationEl.textContent = dur;
-      const timeEl = document.createElement('span');
-      timeEl.textContent = timeAgo(r.created_at);
-      meta.append(dot, statusEl, durationEl, timeEl);
-
-      const id = document.createElement('div');
-      id.className = 'req-id mono';
-      id.textContent = turnId;
-
-      item.append(path, meta, id);
+async function loadRecentRequests(){
+  const list=document.getElementById('requestList');
+  list.innerHTML='<div class="loading">加载中...</div>';
+  try{
+    const reqs=await fetchJson(API+'/requests?limit=20');
+    document.getElementById('reqCount').textContent=reqs.length;
+    if(!reqs.length){list.innerHTML='<div class="empty">暂无请求</div>';return}
+    list.replaceChildren(...reqs.map(r=>{
+      const sessionId=r.session_id||'';
+      const targetKind=r.turn_id?'turn':(sessionId?'session':'');
+      const targetId=r.turn_id||sessionId||'';
+      const displayId=targetId||(r.trace_id||r.request_id||'-');
+      const sc=Number(r.status_code||0);
+      const ok=sc>=200&&sc<300;
+      const item=document.createElement('div');
+      item.className='row';item.dataset.key=targetId;
+      if(targetKind==='turn')item.addEventListener('click', () => loadTurn(targetId));
+      else if(targetKind==='session')item.addEventListener('click', () => loadSession(targetId));
+      const path=document.createElement('div');
+      path.className='row-path mono';
+      path.textContent=(r.method||'GET')+' '+(r.path||'-');
+      const meta=document.createElement('div');
+      meta.className='row-meta';
+      const statusEl=document.createElement('span');
+      statusEl.style.color=ok?'#4caf50':'#d94a38';
+      statusEl.textContent=r.status_code||'-';
+      const durEl=document.createElement('span');
+      durEl.textContent=r.duration_ms?fmtMs(r.duration_ms):'';
+      const timeEl=document.createElement('span');
+      timeEl.textContent=timeAgo(r.created_at);
+      meta.append(statusEl,durEl,timeEl);
+      const id=document.createElement('div');
+      id.className='row-id mono';
+      id.textContent = targetKind ? targetKind+': '+displayId : displayId;
+      item.append(path,meta,id);
       return item;
     }));
-  } catch (e) {
-    list.innerHTML = '<div class="empty-state" style="padding:40px 0"><div class="empty-icon" style="color:var(--red)">⚠</div><p style="color:var(--red)">' + escapeHtml(e.message) + '</p></div>';
+  }catch(e){
+    list.innerHTML='<div class="empty" style="color:#d94a38">'+escapeHtml(e.message)+'</div>';
   }
 }
 
-async function loadTurn(turnId) {
-  if (!turnId || turnId === '-') return;
-  document.querySelectorAll('.req-item').forEach(el => el.classList.toggle('active', el.dataset.turn === turnId));
-  const panel = document.getElementById('tabContent');
-  panel.innerHTML = '<div class="loading"><div class="spinner"></div>加载 turn 数据…</div>';
-  try {
-    currentBundle = await fetchJson(API + '/turns/' + encodeURIComponent(turnId));
-    updateTabBadges(currentBundle);
-    renderTab(currentTab);
-  } catch (e) {
-    panel.innerHTML = '<div class="empty-state"><div class="empty-icon" style="color:var(--red)">⚠</div><p style="color:var(--red)">加载失败: ' + escapeHtml(e.message) + '</p></div>';
-  }
+async function loadTurn(id){
+  if(!id||id==='-')return;
+  document.querySelectorAll('.row').forEach(el=>el.classList.toggle('on',el.dataset.key===id));
+  const p=document.getElementById('tabContent');
+  p.innerHTML='<div class="loading">加载 turn...</div>';
+  try{bundle=await fetchJson(API+'/turns/'+encodeURIComponent(id));updateBadge();render()}
+  catch(e){p.innerHTML='<div class="empty" style="color:#d94a38">加载失败: '+escapeHtml(e.message)+'</div>'}
 }
 
-async function loadSession(sessionId) {
-  const panel = document.getElementById('tabContent');
-  panel.innerHTML = '<div class="loading"><div class="spinner"></div>加载 session 数据…</div>';
-  try {
-    currentBundle = await fetchJson(API + '/sessions/' + encodeURIComponent(sessionId));
-    updateTabBadges(currentBundle);
-    renderTab(currentTab);
-  } catch (e) {
-    panel.innerHTML = '<div class="empty-state"><div class="empty-icon" style="color:var(--red)">⚠</div><p style="color:var(--red)">加载失败: ' + escapeHtml(e.message) + '</p></div>';
-  }
+async function loadSession(id){
+  if(!id||id==='-')return;
+  document.querySelectorAll('.row').forEach(el=>el.classList.toggle('on',el.dataset.key===id));
+  const p=document.getElementById('tabContent');
+  p.innerHTML='<div class="loading">加载 session...</div>';
+  try{bundle=await fetchJson(API+'/sessions/'+encodeURIComponent(id));updateBadge();render()}
+  catch(e){p.innerHTML='<div class="empty" style="color:#d94a38">加载失败: '+escapeHtml(e.message)+'</div>'}
 }
 
-function handleSearch() {
-  const q = document.getElementById('searchInput').value.trim();
-  if (!q) return;
-  if (q.startsWith('turn_')) loadTurn(q);
-  else if (q.startsWith('session_') || q.startsWith('test_session') || q.includes('_session_')) loadSession(q);
+function handleSearch(){
+  const q=document.getElementById('searchInput').value.trim();
+  if(!q)return;
+  if(q.startsWith('turn_'))loadTurn(q);
+  else if(q.startsWith('session_')||q.includes('_session_'))loadSession(q);
   else loadTurn(q);
 }
+document.getElementById('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')handleSearch()});
 
-document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') handleSearch(); });
-
-// ── Tab switching ──
-document.getElementById('tabBar').addEventListener('click', e => {
-  const tab = e.target.closest('.tab');
-  if (!tab) return;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
-  currentTab = tab.dataset.tab;
-  if (currentBundle) renderTab(currentTab);
+document.getElementById('tabBar').addEventListener('click',e=>{
+  const t=e.target.closest('.tab');if(!t)return;
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on');
+  tab=t.dataset.tab;
+  if(bundle)render();
 });
 
-function renderTab(tab) {
-  const panel = document.getElementById('tabContent');
-  if (!currentBundle) return;
-  const renderers = { overview: renderOverview, llm: renderLLM, sse: renderSSE, diagnostics: renderDiagnostics, audit: renderAudit };
-  panel.innerHTML = '<div class="fade-up">' + (renderers[tab] || renderOverview)(currentBundle) + '</div>';
+function updateBadge(){
+  if(!bundle)return;
+  const set=(id,n)=>{const e=document.getElementById(id);if(e)e.textContent=n||''};
+  set('llmN',(bundle.llm_calls||[]).length);
+  set('sseN',(bundle.sse_events||[]).length);
+  set('diagN',(bundle.context_diagnostics||[]).length);
 }
 
-// ── Overview ──
-function renderOverview(b) {
-  const req = (b.requests || [])[0] || {};
-  const llmCount = (b.llm_calls || []).length;
-  const sseCount = (b.sse_events || []).length;
-  const diagCount = (b.context_diagnostics || []).length;
-  const totalDuration = req.duration_ms || 0;
-  const statusCode = Number(req.status_code || 0);
-  const isOk = statusCode >= 200 && statusCode < 300;
+function render(){
+  const p=document.getElementById('tabContent');
+  if(!bundle)return;
+  p.innerHTML=(
+    {overview:renderOverview,llm:renderLLM,sse:renderSSE,diag:renderDiag,audit:renderAudit}
+    [tab]||renderOverview
+  )(bundle);
+}
 
-  // Extract stage timings
-  let timings = {};
-  for (const e of (b.audit_events || [])) {
-    if (e.action === 'chat.turn_completed' && e.metadata && e.metadata.stage_timings_ms) {
-      timings = e.metadata.stage_timings_ms;
-      break;
+/* ── Overview ─────────────────────────────── */
+
+function renderOverview(b){
+  const req=(b.requests||[])[0]||{};
+  const llmC=(b.llm_calls||[]).length;
+  const sseC=(b.sse_events||[]).length;
+  const diagC=(b.context_diagnostics||[]).length;
+  const dur=req.duration_ms||0;
+  const sc=Number(req.status_code||0);
+
+  let timings={};
+  for(const e of(b.audit_events||[])){
+    if(e.action==='chat.turn_completed'&&e.metadata?.stage_timings_ms){
+      timings=e.metadata.stage_timings_ms;break;
     }
   }
-  const timingEntries = Object.entries(timings);
-  const maxTiming = Math.max(...timingEntries.map(([, v]) => Number(v) || 0), 1);
+  const entries=Object.entries(timings);
+  const maxT=Math.max(...entries.map(([,v])=>Number(v)||0),1);
 
-  let timingBars = '';
-  for (const [stage, ms] of timingEntries) {
-    const safeMs = Number(ms) || 0;
-    const pct = (safeMs / maxTiming * 100).toFixed(0);
-    const cls = barSpeedClass(safeMs);
-    timingBars += '<div class="timing-bar">' +
-      '<span class="bar-label mono">' + escapeHtml(stage) + '</span>' +
-      '<div class="bar-track"><div class="bar-fill ' + cls + '" style="width:' + Math.max(pct, 8) + '%">' + fmtDuration(safeMs) + '</div></div>' +
+  let timingHtml='';
+  for(const[stage,ms]of entries){
+    const m=Number(ms)||0;
+    const pct=(m/maxT*100).toFixed(0);
+    const cls=m>=3000?'slow':m>=1000?'med':'';
+    timingHtml+=
+      '<div class="tmr">'+
+        '<span class="tmr-lbl">'+escapeHtml(stage)+'</span>'+
+        '<div class="tmr-track"><div class="tmr-fill '+cls+'" style="width:'+Math.max(pct,2)+'%"></div></div>'+
+        '<span class="tmr-num">'+fmtMs(m)+'</span>'+
       '</div>';
   }
 
-  return '<div class="overview-grid">' +
-    '<div class="stat-card" data-accent="cyan"><div class="stat-label">Turn ID</div><div class="stat-value sm">' + escapeHtml(b.turn_id || '-') + '</div></div>' +
-    '<div class="stat-card" data-accent="amber"><div class="stat-label">总耗时</div><div class="stat-value" style="color:var(--amber)">' + fmtDuration(totalDuration) + '</div></div>' +
-    '<div class="stat-card" data-accent="violet"><div class="stat-label">LLM 调用</div><div class="stat-value" style="color:var(--violet)">' + llmCount + '</div></div>' +
-    '<div class="stat-card" data-accent="blue"><div class="stat-label">SSE 事件</div><div class="stat-value" style="color:var(--blue)">' + sseCount + '</div></div>' +
-    '<div class="stat-card" data-accent="' + (diagCount ? 'amber' : 'green') + '"><div class="stat-label">诊断</div><div class="stat-value" style="color:var(' + (diagCount ? '--amber' : '--green') + ')">' + diagCount + '</div></div>' +
-    '<div class="stat-card" data-accent="' + (isOk ? 'green' : 'red') + '"><div class="stat-label">状态</div><div class="stat-value" style="color:var(' + (isOk ? '--green' : '--red') + ')">' + escapeHtml(req.status_code || '-') + '</div></div>' +
-    '</div>' +
-    '<div class="card"><div class="card-header"><span class="card-title">阶段耗时分布</span></div>' +
-    '<div class="card-body">' + (timingBars ? '<div class="timing-section">' + timingBars + '</div>' : '<span class="info-line">暂无阶段计时数据</span>') + '</div></div>' +
-    '<div class="card"><div class="card-header"><span class="card-title">请求详情</span></div>' +
-    '<div class="card-body">' + jsonBlock(req) + '</div></div>';
+  return(
+    '<div class="stat-row">'+
+      '<div class="stat"><div class="stat-lbl">Turn ID</div><div class="stat-val muted">'+escapeHtml(b.turn_id||'-')+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">总耗时</div><div class="stat-val warn">'+fmtMs(dur)+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">LLM</div><div class="stat-val">'+llmC+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">SSE</div><div class="stat-val">'+sseC+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">诊断</div><div class="stat-val '+(diagC?'warn':'ok')+'">'+diagC+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">状态</div><div class="stat-val '+(sc>=200&&sc<300?'ok':'err')+'">'+(req.status_code||'-')+'</div></div>'+
+    '</div>'+
+    (entries.length?(
+      '<div class="pnl"><div class="pnl-head">阶段耗时</div><div class="pnl-body">'+timingHtml+'</div></div>'
+    ):'')+
+    '<div class="pnl"><div class="pnl-head">请求详情</div><div class="pnl-body">'+jblock(req)+'</div></div>'
+  );
 }
 
-// ── LLM Calls ──
-function renderLLM(b) {
-  const calls = b.llm_calls || [];
-  if (!calls.length) return '<div class="empty-state"><div class="empty-icon">⬡</div><p>暂无 LLM 调用记录</p></div>';
+/* ── LLM Calls ────────────────────────────── */
 
-  return calls.map(function(c) {
-    const providerBadge = c.provider === 'Doubao' ? 'badge-violet' : 'badge-info';
-
-    let promptSection = '', responseSection = '', parsedSection = '';
-    if (c.prompt_preview || c.prompt_json) {
-      const text = c.prompt_json || c.prompt_preview;
-      promptSection = '<div class="collapsible" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">' +
-        '<span class="tri">▶</span><span style="color:var(--accent);font-size:12px">Prompt (' + (text || '').length + ' chars)</span></div>' +
-        '<div class="collapsible-content">' + jsonBlock(text) + '</div>';
+function renderLLM(b){
+  const calls=b.llm_calls||[];
+  if(!calls.length)return'<div class="empty">暂无 LLM 调用</div>';
+  return calls.map(c=>{
+    const task=escapeHtml(c.task||'-');
+    const st=statusCls(c.status);
+    let content='';
+    if(c.prompt_preview||c.prompt_json){
+      const t=c.prompt_json||c.prompt_preview;
+      content+='<div style="padding:4px 12px;cursor:pointer;color:#5ea3f5;font-size:11px" onclick="togglePanel(this)"><span class="collapse-arrow">▶</span> Prompt ('+(t||'').length+' chars)</div><div class="collapse-body">'+jblock(t)+'</div>';
     }
-    if (c.response_preview || c.response_json) {
-      const text = c.response_json || c.response_preview;
-      responseSection = '<div class="collapsible" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')" style="margin-top:8px">' +
-        '<span class="tri">▶</span><span style="color:var(--accent);font-size:12px">Response (' + (text || '').length + ' chars)</span></div>' +
-        '<div class="collapsible-content">' + jsonBlock(text) + '</div>';
+    if(c.response_preview||c.response_json){
+      const t=c.response_json||c.response_preview;
+      content+='<div style="padding:4px 12px;cursor:pointer;color:#5ea3f5;font-size:11px" onclick="togglePanel(this)"><span class="collapse-arrow">▶</span> Response ('+(t||'').length+' chars)</div><div class="collapse-body">'+jblock(t)+'</div>';
     }
-    if (c.parsed_json) {
-      parsedSection = '<div style="margin-top:14px"><span class="info-line">Parsed JSON:</span>' + jsonBlock(c.parsed_json) + '</div>';
+    if(c.parsed_json){
+      content+='<div style="padding:6px 12px"><div style="color:#666;font-size:10px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px">Parsed</div>'+jblock(c.parsed_json)+'</div>';
     }
-
-    let errorSection = '';
-    if (c.error_type || c.error_message) {
-      errorSection = '<div class="error-box" style="margin-top:10px"><strong>' + escapeHtml(c.error_type || 'Error') + '</strong>: ' + escapeHtml(c.error_message || '') + '</div>';
+    if(c.error_type||c.error_message){
+      content+='<div class="err-box"><strong>'+escapeHtml(c.error_type||'Error')+'</strong>: '+escapeHtml(c.error_message||'')+'</div>';
     }
-
-    return '<div class="card llm-card">' +
-      '<div class="card-header">' +
-        '<div class="llm-meta">' +
-          '<span class="card-title mono">' + escapeHtml(c.task || '-') + '</span>' +
-          '<span class="badge ' + providerBadge + '">' + escapeHtml(c.provider || '-') + '</span>' +
-          statusBadge(c.status) +
-          (c.fallback_from ? '<span class="badge badge-warning">fallback ← ' + escapeHtml(c.fallback_from) + '</span>' : '') +
-        '</div>' +
-        '<span class="llm-duration mono">' + fmtDuration(c.duration_ms) + '</span>' +
-      '</div>' +
-      '<div class="card-body">' +
-        '<div class="info-line" style="margin-bottom:10px">profile: <span class="mono">' + escapeHtml(c.profile || '-') + '</span> · model: <span class="mono">' + escapeHtml(c.model || '-') + '</span>' +
-          (c.prompt_hash ? ' · hash: <span class="mono">' + escapeHtml(c.prompt_hash.slice(0, 12)) + '…</span>' : '') +
-        '</div>' +
-        promptSection + responseSection + parsedSection + errorSection +
-        (c.validation_error ? '<div class="error-box" style="margin-top:8px">Validation: ' + escapeHtml(c.validation_error) + '</div>' : '') +
-      '</div></div>';
+    if(c.validation_error){
+      content+='<div class="err-box">Validation: '+escapeHtml(c.validation_error)+'</div>';
+    }
+    return(
+      '<div class="pnl">'+
+        '<div class="pnl-head collapse" onclick="togglePanel(this)">'+
+          '<span><span class="collapse-arrow">▶</span> <strong>'+task+'</strong> '+
+          '<span class="lbl">'+escapeHtml(c.provider||'-')+'</span> '+
+          '<span class="lbl">· '+escapeHtml(c.profile||'-')+'</span> '+
+          '<span class="lbl">· '+escapeHtml(c.model||'-')+'</span>'+
+          (c.fallback_from?' <span class="lbl">· fallback ← '+escapeHtml(c.fallback_from)+'</span>':'')+
+          '</span>'+
+          '<span class="'+st+'" style="font-weight:600">'+fmtMs(c.duration_ms)+' · '+escapeHtml(c.status||'-')+'</span>'+
+        '</div>'+
+        '<div class="collapse-body">'+content+'</div>'+
+      '</div>'
+    );
   }).join('');
 }
 
-// ── SSE Events ──
-function renderSSE(b) {
-  const events = b.sse_events || [];
-  if (!events.length) return '<div class="empty-state"><div class="empty-icon">◇</div><p>暂无 SSE 事件记录</p></div>';
+/* ── SSE Events (table, Logs panel style) ─── */
 
-  return '<div class="sse-timeline">' + events.map(function(e) {
-    const details = [];
-    if (e.stage) details.push('stage: ' + escapeHtml(e.stage));
-    if (e.deck_id) details.push('deck: ' + escapeHtml(e.deck_id));
-    if (e.criteria_id) details.push('criteria: ' + escapeHtml(e.criteria_id));
-    if (e.message_id) details.push('msg: ' + escapeHtml(e.message_id));
-    if (e.product_ids && e.product_ids.length) details.push('products: [' + e.product_ids.map(escapeHtml).join(', ') + ']');
-    if (e.finish_reason) details.push('finish: ' + escapeHtml(e.finish_reason));
-    if (e.delta_preview) {
-      const dp = e.delta_preview;
-      details.push('delta: "' + escapeHtml(dp.slice(0, 60)) + (dp.length > 60 ? '…' : '') + '"');
-    }
-
-    return '<div class="sse-item">' +
-      '<div class="sse-head">' +
-        '<div><span class="sse-seq mono">#' + escapeHtml(e.seq) + '</span> ' + eventTypeBadge(e.event_type) + '</div>' +
-        '<span class="sse-time mono">' + (e.created_at ? new Date(e.created_at).toLocaleTimeString('zh-CN') : '') + '</span>' +
-      '</div>' +
-      (details.length ? '<div class="sse-detail mono">' + details.join(' · ') + '</div>' : '') +
-    '</div>';
-  }).join('') + '</div>';
+function renderSSE(b){
+  const evts=b.sse_events||[];
+  if(!evts.length)return'<div class="empty">暂无 SSE 事件</div>';
+  const rows=evts.map(e=>{
+    const details=[];
+    if(e.stage)details.push('stage='+escapeHtml(e.stage));
+    if(e.deck_id)details.push('deck='+escapeHtml(e.deck_id));
+    if(e.criteria_id)details.push('criteria='+escapeHtml(e.criteria_id));
+    if(e.message_id)details.push('msg='+escapeHtml(e.message_id));
+    if(e.product_ids&&e.product_ids.length)details.push('products=['+e.product_ids.map(escapeHtml).join(',')+']');
+    if(e.finish_reason)details.push('finish='+escapeHtml(e.finish_reason));
+    if(e.delta_preview)details.push('delta="'+escapeHtml(e.delta_preview.slice(0,60))+(e.delta_preview.length>60?'...':'')+'"');
+    return(
+      '<tr>'+
+        '<td class="mono" style="color:#555">#'+escapeHtml(e.seq)+'</td>'+
+        '<td><span style="color:'+evtColor(e.event_type)+'">'+escapeHtml(e.event_type||'-')+'</span></td>'+
+        '<td class="mono" style="color:#555">'+(e.created_at?new Date(e.created_at).toLocaleTimeString('zh-CN'):'')+'</td>'+
+        '<td class="mono" style="color:#666">'+details.join(' · ')+'</td>'+
+      '</tr>'
+    );
+  }).join('');
+  return '<table class="tbl"><thead><tr><th>#</th><th>Type</th><th>Time</th><th>Details</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
 
-// ── Context Diagnostics ──
-function renderDiagnostics(b) {
-  const diags = b.context_diagnostics || [];
-  if (!diags.length) return '<div class="empty-state"><div class="empty-icon">✓</div><p>无上下文诊断警告 — 多轮约束传递正常</p></div>';
+/* ── Diagnostics ──────────────────────────── */
 
-  return diags.map(function(d) {
-    const meta = d.metadata || d;
-    const sev = meta.severity || 'warning';
-    const fields = Object.entries(meta).filter(function([k]) { return !['diagnostic_code', 'severity'].includes(k); });
-    return '<div class="card diag-card severity-' + sev + '">' +
-      '<div class="card-body">' +
-        '<div style="display:flex;gap:12px;align-items:center">' +
-          '<span class="diag-code mono">' + escapeHtml(meta.diagnostic_code || '-') + '</span>' +
-          severityBadge(sev) +
-        '</div>' +
-        fields.map(function([k, v]) {
-          return '<div class="diag-field"><span class="label">' + escapeHtml(k) + '</span><span class="mono">' + escapeHtml(typeof v === 'object' ? JSON.stringify(v) : v) + '</span></div>';
-        }).join('') +
-      '</div></div>';
+function renderDiag(b){
+  const d=b.context_diagnostics||[];
+  if(!d.length)return'<div class="empty" style="color:#4caf50">无诊断警告 - 多轮约束传递正常</div>';
+  return d.map(x=>{
+    const m=x.metadata||x;
+    const sev=m.severity||'warning';
+    const fields=Object.entries(m).filter(([k])=>!['diagnostic_code','severity'].includes(k));
+    return(
+      '<div class="pnl diag sev-'+sev+'"><div class="diag-body">'+
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">'+
+          '<span class="diag-code">'+escapeHtml(m.diagnostic_code||'-')+'</span>'+
+          '<span class="'+sevCls(sev)+'">['+escapeHtml(sev)+']</span>'+
+        '</div>'+
+        fields.map(([k,v])=>
+          '<div class="diag-kv"><span class="diag-k">'+escapeHtml(k)+'</span><span class="mono">'+escapeHtml(typeof v==='object'?JSON.stringify(v):v)+'</span></div>'
+        ).join('')+
+      '</div></div>'
+    );
   }).join('');
 }
 
-// ── Audit Events ──
-function renderAudit(b) {
-  const events = b.audit_events || [];
-  if (!events.length) return '<div class="empty-state"><div class="empty-icon">▤</div><p>暂无审计事件</p></div>';
+/* ── Audit (table with collapsible metadata) ── */
 
-  return '<table class="audit-table">' +
-    '<thead><tr><th>时间</th><th>Action</th><th>Resource</th><th>Metadata</th></tr></thead>' +
-    '<tbody>' + events.map(function(e) {
-      return '<tr>' +
-        '<td class="mono" style="font-size:11px;white-space:nowrap">' + (e.created_at ? new Date(e.created_at).toLocaleTimeString('zh-CN') : '-') + '</td>' +
-        '<td><span class="mono" style="font-size:12px">' + escapeHtml(e.action || '-') + '</span></td>' +
-        '<td style="font-size:12px">' + escapeHtml(e.resource_type || '-') +
-          (e.resource_id ? '<br><span class="mono" style="color:var(--text3);font-size:11px">' + escapeHtml(e.resource_id) + '</span>' : '') +
-        '</td>' +
-        '<td>' + (e.metadata ? '<pre class="json-block mono" style="font-size:11px;max-height:200px;margin:0">' + highlightJson(e.metadata) + '</pre>' : '-') + '</td>' +
-      '</tr>';
-    }).join('') + '</tbody></table>';
+function renderAudit(b){
+  const evts=b.audit_events||[];
+  if(!evts.length)return'<div class="empty">暂无审计事件</div>';
+  const rows=evts.map((e,i)=>{
+    let metaCell='-';
+    if(e.metadata){
+      const preview=JSON.stringify(e.metadata);
+      metaCell=preview.length>80?
+        '<span class="mono" style="color:#666">'+escapeHtml(preview.slice(0,80))+'...</span> <button class="inline-btn" onclick="expandAuditMeta(this,'+i+')">展开</button>':
+        '<span class="mono" style="color:#666">'+escapeHtml(preview)+'</span>';
+    }
+    return(
+      '<tr>'+
+        '<td class="mono" style="font-size:11px;white-space:nowrap">'+(e.created_at?new Date(e.created_at).toLocaleTimeString('zh-CN'):'-')+'</td>'+
+        '<td class="mono">'+escapeHtml(e.action||'-')+'</td>'+
+        '<td>'+escapeHtml(e.resource_type||'-')+(e.resource_id?'<br><span class="mono" style="color:#555;font-size:10px">'+escapeHtml(e.resource_id)+'</span>':'')+'</td>'+
+        '<td>'+metaCell+'</td>'+
+      '</tr>'
+    );
+  }).join('');
+  return '<table class="tbl"><thead><tr><th>时间</th><th>Action</th><th>Resource</th><th>Metadata</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
 
-// ── Init ──
+function expandAuditMeta(btn,idx){
+  const meta=(bundle.audit_events||[])[idx]?.metadata;
+  if(!meta)return;
+  const cell=btn.closest('td');
+  cell.innerHTML='<pre class="json">'+hlJson(meta)+'</pre>';
+}
+
+/* ── Init ─────────────────────────────────── */
 loadRecentRequests();
 </script>
 </body>

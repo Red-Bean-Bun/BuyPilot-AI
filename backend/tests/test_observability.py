@@ -1,13 +1,20 @@
 import pytest
 
 import src.config.settings as settings_module
-from src.repos.audit import list_api_request_logs, list_audit_events
+from src.repos.audit import (
+    insert_api_request_log,
+    insert_audit_event,
+    list_api_request_logs,
+    list_audit_events,
+)
+from src.services.audit import list_request_log_payloads
 from tests.conftest import collect_sse_stream
 
 
 @pytest.fixture
 async def observability_database(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'observability.db'}")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
     settings_module._settings = None
     from src.services.product_ingest import seed_products_if_needed
 
@@ -82,8 +89,14 @@ async def test_chat_turn_audit_can_be_queried_by_observability_api(test_client, 
             assert response.headers["X-Trace-ID"] == "trace_chat_obs"
             events = await collect_sse_stream(response)
 
-        turn_response = await c.get("/admin/observability/turns/turn_chat_obs")
-        session_response = await c.get("/admin/observability/sessions/sess_chat_obs")
+        turn_response = await c.get(
+            "/admin/observability/turns/turn_chat_obs",
+            headers={"Authorization": "Bearer test-key"},
+        )
+        session_response = await c.get(
+            "/admin/observability/sessions/sess_chat_obs",
+            headers={"Authorization": "Bearer test-key"},
+        )
 
     assert events[-1][0] == "done"
 
@@ -103,3 +116,38 @@ async def test_chat_turn_audit_can_be_queried_by_observability_api(test_client, 
     session_payload = session_response.json()
     assert session_payload["session_id"] == "sess_chat_obs"
     assert any(event["turn_id"] == "turn_chat_obs" for event in session_payload["audit_events"])
+
+
+@pytest.mark.asyncio
+async def test_request_log_payload_backfills_generated_turn_id_from_audit(observability_database):
+    del observability_database
+
+    await insert_api_request_log(
+        request_id="req_generated_turn",
+        trace_id="trace_generated_turn",
+        session_id="sess_generated_turn",
+        turn_id=None,
+        method="POST",
+        path="/chat/stream",
+        status_code=200,
+        duration_ms=12.3,
+    )
+    await insert_audit_event(
+        action="chat.turn_started",
+        request_id="req_generated_turn",
+        trace_id="trace_generated_turn",
+        session_id="sess_generated_turn",
+        turn_id="turn_generated_obs",
+        resource_type="chat_turn",
+        resource_id="turn_generated_obs",
+    )
+
+    payloads = await list_request_log_payloads(trace_id="trace_generated_turn")
+
+    assert len(payloads) == 1
+    assert payloads[0]["turn_id"] == "turn_generated_obs"
+
+    turn_payloads = await list_request_log_payloads(turn_id="turn_generated_obs")
+    assert len(turn_payloads) == 1
+    assert turn_payloads[0]["request_id"] == "req_generated_turn"
+    assert turn_payloads[0]["turn_id"] == "turn_generated_obs"

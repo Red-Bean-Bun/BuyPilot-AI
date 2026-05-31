@@ -9,7 +9,10 @@ from src.repos.audit import (
     insert_api_request_log,
     insert_audit_event,
     list_api_request_logs,
+    list_api_request_logs_by_request_ids,
     list_audit_events,
+    list_request_ids_by_turn_id,
+    map_turn_ids_by_request_ids,
 )
 from src.services.request_context import get_request_context
 
@@ -125,7 +128,27 @@ def audit_event_payload(row) -> dict[str, Any]:
 
 
 async def list_request_log_payloads(**filters: Any) -> list[dict[str, Any]]:
-    return [api_request_log_payload(row) for row in await list_api_request_logs(**filters)]
+    rows = await list_api_request_logs(**filters)
+    turn_id = filters.get("turn_id")
+    if turn_id:
+        existing_request_ids = {row.request_id for row in rows}
+        request_ids = await list_request_ids_by_turn_id(turn_id)
+        missing_request_ids = [request_id for request_id in request_ids if request_id not in existing_request_ids]
+        if missing_request_ids:
+            limit = int(filters.get("limit") or 50)
+            rows.extend(await list_api_request_logs_by_request_ids(missing_request_ids, limit=limit))
+            rows = sorted(rows, key=lambda row: row.created_at, reverse=True)[:limit]
+
+    payloads = [api_request_log_payload(row) for row in rows]
+    missing_turn_request_ids = [
+        payload["request_id"] for payload in payloads if payload.get("request_id") and not payload.get("turn_id")
+    ]
+    if missing_turn_request_ids:
+        turn_ids_by_request = await map_turn_ids_by_request_ids(missing_turn_request_ids)
+        for payload in payloads:
+            if not payload.get("turn_id"):
+                payload["turn_id"] = turn_ids_by_request.get(payload["request_id"])
+    return payloads
 
 
 async def list_audit_event_payloads(**filters: Any) -> list[dict[str, Any]]:

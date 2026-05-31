@@ -62,15 +62,17 @@ def _extract_sse_event_fields(event: SSEEventBase) -> dict:
 @chat_router.post("/stream")
 async def stream_chat(body: ChatStreamRequest):
     sid = body.session_id or f"sess_{uuid.uuid4().hex}"
+    turn_id = body.client_turn_id or f"turn_{uuid.uuid4().hex[:8]}"
+    stream_body = body if body.client_turn_id else body.model_copy(update={"client_turn_id": turn_id})
     stream_context = update_request_context(
         trace_id=body.client_trace_id,
         session_id=sid,
-        turn_id=body.client_turn_id,
+        turn_id=turn_id,
     )
 
     async def event_generator():
         set_request_context(stream_context)
-        async for event in chat_stream(sid, body):
+        async for event in chat_stream(sid, stream_body):
             # Record SSE event for observability (fire-and-forget)
             fields = _extract_sse_event_fields(event)
             schedule_sse_event_recording(**fields)

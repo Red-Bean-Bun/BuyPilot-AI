@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
+from src.api.admin_auth import require_admin_key
 from src.services.observability import (
     get_session_debug_bundle,
     get_turn_debug_bundle,
@@ -16,7 +17,11 @@ from src.services.observability import (
     list_requests,
 )
 
-observability_router = APIRouter(tags=["observability"], prefix="/admin/observability")
+observability_router = APIRouter(
+    tags=["observability"],
+    prefix="/admin/observability",
+    dependencies=[Depends(require_admin_key)],
+)
 
 _DASHBOARD_HTML_PATH = Path(__file__).resolve().parents[2] / "static" / "observability_dashboard.html"
 

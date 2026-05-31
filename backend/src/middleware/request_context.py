@@ -11,18 +11,31 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from src.services.audit import record_api_request
 from src.services.request_context import RequestContext, clear_request_context, get_request_context, set_request_context
 
+# Exact-match paths to exclude from request logging (noise / self-referential).
 REQUEST_LOG_EXCLUDED_PATHS = {
     "/health", "/health/",
     "/",
     "/favicon.ico",
     "/sitemap.xml",
     "/robots.txt",
-    "/admin/observability/dashboard",
 }
+
+# Prefix-match paths to exclude. Admin/observability queries are self-referential
+# and pollute the request log with zero-information entries.
+REQUEST_LOG_EXCLUDED_PREFIXES = ("/admin",)
 
 # Static file paths — skip all middleware processing (UUID, audit, context).
 # These are immutable content-addressed files; per-request overhead is wasted.
 _STATIC_PATH_PREFIXES = ("/assets/", "/uploads/")
+
+
+def _should_log_request(path: str) -> bool:
+    """Decide whether a request path should be persisted to api_request_logs."""
+    if path in REQUEST_LOG_EXCLUDED_PATHS:
+        return False
+    if path.startswith(REQUEST_LOG_EXCLUDED_PREFIXES):
+        return False
+    return True
 
 
 class RequestContextMiddleware:
@@ -73,7 +86,7 @@ class RequestContextMiddleware:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             client = scope.get("client")
             client_ip = client[0] if client else None
-            if path not in REQUEST_LOG_EXCLUDED_PATHS:
+            if _should_log_request(path):
                 await record_api_request(
                     method=scope["method"],
                     path=path,
