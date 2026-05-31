@@ -113,6 +113,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -593,7 +594,7 @@ fun BuyPilotChatScreen(
     onClearConversation: () -> Unit,
     onConvergeProductDeck: (String) -> Unit,
 ) {
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
     var sheetContent by remember { mutableStateOf<ChatSheetContent?>(null) }
     var sheetExiting by remember { mutableStateOf(false) }
@@ -3968,7 +3969,7 @@ private fun rememberRouteEnterProgress(
     key: Any?,
     durationMillis: Int,
     delayMillis: Int = 0,
-): Float {
+): State<Float> {
     val progress = remember(key) { Animatable(0f) }
     LaunchedEffect(key) {
         progress.snapTo(0f)
@@ -3981,7 +3982,7 @@ private fun rememberRouteEnterProgress(
             ),
         )
     }
-    return progress.value
+    return progress.asState()
 }
 
 @Composable
@@ -4098,7 +4099,7 @@ private fun ClarificationBlock(
         }
     }
 
-    LaunchedEffect(dismissing) {
+    LaunchedEffect(dismissing, nodeKey) {
         if (dismissing && !dismissNotified) {
             kotlinx.coroutines.delay((ClarificationSelectionHoldMs + ClarificationExitMs).toLong())
             dismissNotified = true
@@ -4252,7 +4253,7 @@ private fun ClarificationOptionScroller(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(start = 8.dp, end = 40.dp),
         ) {
-            itemsIndexed(labels, key = { _, label -> label }) { index, label ->
+            itemsIndexed(labels, key = { index, label -> "$index:$label" }) { index, label ->
                 AnimatedVisibility(
                     visible = selectedLabel == null || selectedLabel == label,
                     enter = fadeIn(
@@ -6317,6 +6318,7 @@ fun ProductSwipeModeScreen(
     state: ChatUiState,
     deckId: String,
     initialProductId: String?,
+    modifier: Modifier = Modifier,
     onBack: () -> Unit,
     onDeckCompleted: (String) -> Unit,
     onOpenDetail: (String, String) -> Unit,
@@ -6355,7 +6357,7 @@ fun ProductSwipeModeScreen(
         latestOnBack()
     }
 
-    Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
+    Surface(color = BuyPilotColors.SurfaceBg, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ProductSwipeTopBar(
                 title = if (products.size > 1) "商品详情" else "唯一候选",
@@ -6497,7 +6499,7 @@ private fun ProductSingleCandidateModeContent(
 
 @Composable
 private fun ProductSwipeCompletedState() {
-    val mascotProgress = rememberRouteEnterProgress(
+    val mascotProgress by rememberRouteEnterProgress(
         key = "product_swipe_completed_mascot",
         durationMillis = 260,
     )
@@ -6549,12 +6551,10 @@ private fun ProductSwipeModeContent(
     val latestProducts by rememberUpdatedState(orderedProducts)
     val latestOnLike by rememberUpdatedState(onLike)
     val latestOnDislike by rememberUpdatedState(onDislike)
-    val routeProgress = rememberRouteEnterProgress(
+    val routeProgressState = rememberRouteEnterProgress(
         key = "product_swipe_detail_$animationKey",
         durationMillis = ProductSwipeDetailEnterMs,
     )
-    val cardEnter = segmentProgress(routeProgress, 0f, 0.86f)
-    val controlsEnter = segmentProgress(routeProgress, 0.34f, 1f)
 
     Column(
         modifier = Modifier
@@ -6568,6 +6568,7 @@ private fun ProductSwipeModeContent(
                 .weight(1f)
                 .fillMaxWidth()
                 .graphicsLayer {
+                    val cardEnter = segmentProgress(routeProgressState.value, 0f, 0.86f)
                     alpha = cardEnter
                     translationY = (1f - cardEnter) * 22f
                     scaleX = lerp(0.982f, 1f, cardEnter)
@@ -6597,6 +6598,7 @@ private fun ProductSwipeModeContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
+                    val controlsEnter = segmentProgress(routeProgressState.value, 0.34f, 1f)
                     alpha = controlsEnter
                     translationY = (1f - controlsEnter) * 18f
                     scaleX = lerp(0.96f, 1f, controlsEnter)
@@ -6669,9 +6671,9 @@ private fun ProductCardStackView(
     products: List<ProductCardPayload>,
     backendBaseUrl: String,
     bridge: CardStackBridge,
+    modifier: Modifier = Modifier,
     onSwiped: (Direction, Int) -> Unit,
     onStackPositionChanged: (Int) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
@@ -7195,9 +7197,9 @@ private class ProductCardStackAdapter(
             positionBadge.text = positionLabel
             image.load(product.imageUrl.resolveProductImageUrl(backendBaseUrl)) {
                 crossfade(180)
-                placeholder(R.drawable.product_cleanser_sample)
-                error(R.drawable.product_cleanser_sample)
-                fallback(R.drawable.product_cleanser_sample)
+                placeholder(R.drawable.product_image_placeholder)
+                error(R.drawable.product_image_placeholder)
+                fallback(R.drawable.product_image_placeholder)
             }
             val reason = payload.reason
                 .withoutMarkdownMarkup()
@@ -7310,6 +7312,7 @@ fun ProductHeroDetailScreen(
     state: ChatUiState,
     deckId: String,
     productId: String,
+    modifier: Modifier = Modifier,
     onBack: () -> Unit,
     onOpenEvidence: (String, String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
@@ -7419,13 +7422,13 @@ fun ProductHeroDetailScreen(
             )
         }
     }
-    val routeProgress = rememberRouteEnterProgress(
+    val routeProgressState = rememberRouteEnterProgress(
         key = "detail_${deckId}_${activeProductId}",
         durationMillis = ProductDetailEnterMs,
     )
-    val backdropEnter = segmentProgress(routeProgress, 0f, 0.82f)
-    val contentEnter = segmentProgress(routeProgress, 0.18f, 1f)
-    val chromeEnter = segmentProgress(routeProgress, 0.28f, 1f)
+    val backdropEnter = segmentProgress(routeProgressState.value, 0f, 0.82f)
+    val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
+    val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
 
     LaunchedEffect(product.productId) {
         snapshotFlow { detailListState.isScrollInProgress }
@@ -7491,7 +7494,7 @@ fun ProductHeroDetailScreen(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .then(swipeGestureModifier),
     ) {
@@ -7968,6 +7971,7 @@ fun ProductEvidenceOverlayScreen(
     state: ChatUiState,
     deckId: String,
     productId: String,
+    modifier: Modifier = Modifier,
     onBack: () -> Unit,
 ) {
     val payload = state.findProduct(deckId, productId)
@@ -7992,15 +7996,15 @@ fun ProductEvidenceOverlayScreen(
         )
     }
     val highlightTags = payload.displayTags()
-    val routeProgress = rememberRouteEnterProgress(
+    val routeProgressState = rememberRouteEnterProgress(
         key = "evidence_${deckId}_${productId}",
         durationMillis = ProductEvidenceEnterMs,
     )
-    val chromeEnter = segmentProgress(routeProgress, 0.12f, 0.72f)
-    val contentEnter = segmentProgress(routeProgress, 0.18f, 1f)
+    val chromeEnter = segmentProgress(routeProgressState.value, 0.12f, 0.72f)
+    val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
@@ -9057,11 +9061,15 @@ private fun CriteriaEditSheet(
     val exclusionsPlaceholder = stringResource(R.string.criteria_exclusions_placeholder)
     val resetLabel = stringResource(R.string.criteria_reset)
     val applyLabel = stringResource(R.string.criteria_apply)
-    var productType by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.productTypeLabel()) }
-    var budgetMax by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.budgetMaxLabel()) }
-    var skinType by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.skinTypeLabel()) }
-    var useScenario by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.useScenarioLabel()) }
-    var exclusions by remember(payload.criteria.criteriaId) { mutableStateOf(criteria.exclusionLabels().joinToString("、")) }
+    val criteriaContentKey = remember(criteria) {
+        criteria.productTypeLabel() + criteria.budgetMaxLabel() + criteria.skinTypeLabel() +
+            criteria.useScenarioLabel() + criteria.exclusionLabels().joinToString()
+    }
+    var productType by remember(payload.criteria.criteriaId, criteriaContentKey) { mutableStateOf(criteria.productTypeLabel()) }
+    var budgetMax by remember(payload.criteria.criteriaId, criteriaContentKey) { mutableStateOf(criteria.budgetMaxLabel()) }
+    var skinType by remember(payload.criteria.criteriaId, criteriaContentKey) { mutableStateOf(criteria.skinTypeLabel()) }
+    var useScenario by remember(payload.criteria.criteriaId, criteriaContentKey) { mutableStateOf(criteria.useScenarioLabel()) }
+    var exclusions by remember(payload.criteria.criteriaId, criteriaContentKey) { mutableStateOf(criteria.exclusionLabels().joinToString("、")) }
 
     fun resetFields() {
         productType = criteria.productTypeLabel()
@@ -10098,8 +10106,8 @@ private fun WarningBox(text: String) {
 }
 
 @Composable
-private fun SectionTitle(title: String, leading: String? = null) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun SectionTitle(title: String, leading: String? = null, modifier: Modifier = Modifier) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         if (leading != null) {
             Text(leading, color = BuyPilotColors.Success, fontSize = BuyPilotType.Body)
             Spacer(Modifier.width(6.dp))
@@ -10160,7 +10168,7 @@ private fun ScrollableChipRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = contentPadding,
         ) {
-            itemsIndexed(labels) { index, label ->
+            itemsIndexed(labels, key = { index, label -> "$index:$label" }) { index, label ->
                 if (colorful) {
                     DecisionReasonChip(label = label, colorIndex = index) { onClick?.invoke(label) }
                 } else {
@@ -10174,6 +10182,7 @@ private fun ScrollableChipRow(
 @Composable
 private fun ScrollableQuickActionRow(
     actions: List<QuickActionPayload>,
+    modifier: Modifier = Modifier,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -10186,6 +10195,7 @@ private fun ScrollableQuickActionRow(
         derivedStateOf { listState.canScrollForward }
     }
     EdgeFadedLazyRow(
+        modifier = modifier,
         leadingAlpha = if (canScrollBackward) 1f else 0f,
         trailingAlpha = if (canScrollForward) 1f else 0f,
         height = 36.dp,
@@ -10196,7 +10206,9 @@ private fun ScrollableQuickActionRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 28.dp),
         ) {
-            items(actions) { action ->
+            itemsIndexed(actions, key = { index, action ->
+                action.actionId.ifEmpty { "$index:${action.label}" }
+            }) { _, action ->
                 SmallActionChip(action.label) { onQuickAction(action) }
             }
         }
@@ -10569,7 +10581,7 @@ private fun ProductMockImage(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Image(
-            painter = painterResource(R.drawable.product_cleanser_sample),
+            painter = painterResource(R.drawable.product_image_placeholder),
             contentDescription = "Product image",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
@@ -10607,9 +10619,9 @@ private fun ProductImage(
         contentDescription = product.displayName("商品图片"),
         modifier = modifier,
         contentScale = contentScale,
-        error = painterResource(R.drawable.product_cleanser_sample),
-        fallback = painterResource(R.drawable.product_cleanser_sample),
-        placeholder = painterResource(R.drawable.product_cleanser_sample),
+        error = painterResource(R.drawable.product_image_placeholder),
+        fallback = painterResource(R.drawable.product_image_placeholder),
+        placeholder = painterResource(R.drawable.product_image_placeholder),
     )
 }
 

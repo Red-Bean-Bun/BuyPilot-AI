@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -117,11 +118,12 @@ fun BuyPilotLayeredSplash(
     modifier: Modifier = Modifier,
 ) {
     var entered by rememberSaveable { mutableStateOf(false) }
+    val currentOnFinished by rememberUpdatedState(onFinished)
 
     LaunchedEffect(Unit) {
         entered = true
         delay(SplashHoldMillis)
-        onFinished()
+        currentOnFinished()
     }
 
     val density = LocalDensity.current
