@@ -279,6 +279,18 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun clearConversation() {
+        streamJob?.cancel()
+        pendingFeedbackJobsByDeck.clear()
+        convergenceJobsByDeck.clear()
+        fallbackThinkingStartedAt.clear()
+        nextSendFromEditResubmit = false
+        _uiState.value = ChatUiState(
+            backendBaseUrl = chatRepository.backendBaseUrl,
+            useMockChat = BuildConfig.USE_MOCK_CHAT,
+        )
+    }
+
     fun onInputChanged(text: String, hasImage: Boolean = false) {
         _uiState.update { ChatReducer.markComposing(it, text.isNotBlank(), hasImage) }
     }

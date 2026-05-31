@@ -590,6 +590,7 @@ fun BuyPilotChatScreen(
     onOpenProductDetail: (String, String) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
+    onClearConversation: () -> Unit,
     onConvergeProductDeck: (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
@@ -704,6 +705,29 @@ fun BuyPilotChatScreen(
         keyboardController?.show()
     }
 
+    fun clearConversationForDebug() {
+        input = ""
+        showAttachmentMenu = false
+        sheetContent = null
+        sheetExiting = false
+        sheetTransitionId += 1
+        dismissedClarificationKeys = emptySet()
+        dismissingClarificationKey = null
+        revealedMessageKeyList = emptyList()
+        typingMessageKeys = emptySet()
+        visualActiveTurnKeys = emptySet()
+        pendingClarificationAnswer = null
+        activeClarificationFlight = null
+        hiddenFlightMessageKeys = emptySet()
+        userBubbleSnapshots = emptyMap()
+        clarificationManualSource = null
+        keyboardFlightSnapshot = null
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onInputChanged("", false)
+        onClearConversation()
+    }
+
     fun answerClarification(
         message: String,
         selectedOption: String? = null,
@@ -810,7 +834,8 @@ fun BuyPilotChatScreen(
             TopBar(
                 centered = state.nodes.isNotEmpty(),
                 showBack = state.nodes.any { it is CriteriaNode || it is ProductDeckNode || it is FinalDecisionNode },
-                showHistory = state.nodes.any { it is ProductDeckNode },
+                showClear = state.nodes.isNotEmpty(),
+                onClearConversation = ::clearConversationForDebug,
             )
 
             Box(
@@ -1266,7 +1291,8 @@ private fun AttachmentMenuMotion(
 private fun TopBar(
     centered: Boolean,
     showBack: Boolean,
-    showHistory: Boolean,
+    showClear: Boolean,
+    onClearConversation: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1280,11 +1306,11 @@ private fun TopBar(
             navigationIcon = if (showBack) R.drawable.ic_arrow_back_24 else R.drawable.ic_menu_24,
             navigationDescription = if (showBack) "返回" else "打开菜单",
             navigationTint = if (showBack) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
-            actionIcon = R.drawable.ic_history_24.takeIf { showHistory },
-            actionDescription = "查看推荐历史",
+            actionIcon = R.drawable.ic_restart_24.takeIf { showClear },
+            actionDescription = "清空当前对话",
             actionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.72f),
             onNavigationClick = {},
-            onActionClick = {},
+            onActionClick = onClearConversation,
         )
         HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
     }
