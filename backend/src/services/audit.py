@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timezone
 from typing import Any
 
 from src.repos.audit import (
@@ -11,6 +12,18 @@ from src.repos.audit import (
     list_audit_events,
 )
 from src.services.request_context import get_request_context
+
+
+def _ensure_utc_iso(dt) -> str:
+    """Serialize datetime to ISO-8601 with explicit UTC offset.
+
+    SQLite strips tzinfo on round-trip, producing naive datetimes.
+    Without ``+00:00``, JS ``new Date()`` interprets the string as
+    local time, causing an 8-hour offset in UTC+8 browsers.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 async def record_api_request(
@@ -88,7 +101,7 @@ def api_request_log_payload(row) -> dict[str, Any]:
         "user_agent": row.user_agent,
         "error_code": row.error_code,
         "error_type": row.error_type,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _ensure_utc_iso(row.created_at),
     }
 
 
@@ -107,7 +120,7 @@ def audit_event_payload(row) -> dict[str, Any]:
         "before_json": row.before_json,
         "after_json": row.after_json,
         "metadata": row.audit_metadata,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _ensure_utc_iso(row.created_at),
     }
 
 

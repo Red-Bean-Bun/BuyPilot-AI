@@ -211,3 +211,63 @@ class SystemMetadata(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column("value", JSON))
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ObservabilityLLMCall(SQLModel, table=True):
+    """LLM 调用明细记录，用于幻觉排查。"""
+
+    __tablename__ = "observability_llm_calls"
+    __table_args__ = (
+        Index("ix_obs_llm_turn_id", "turn_id"),
+        Index("ix_obs_llm_session_id", "session_id"),
+        Index("ix_obs_llm_created_at", "created_at"),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    turn_id: str | None = Field(default=None, index=True)
+    session_id: str | None = Field(default=None, index=True)
+    task: str  # analyze_intent / generate_criteria / generate_recommendation / generate_decision / analyze_image
+    profile: str
+    model: str
+    provider: str  # Doubao / Qwen
+    status: str  # success / failed / fallback
+    duration_ms: float
+    prompt_hash: str
+    prompt_preview: str | None = None
+    prompt_json: str | None = None  # full payload 模式
+    response_preview: str | None = None
+    response_json: str | None = None  # full payload 模式
+    parsed_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    validation_error: str | None = None
+    token_usage: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    fallback_from: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+    error_raw: str | None = None  # full payload 模式
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ObservabilitySSEEvent(SQLModel, table=True):
+    """SSE 事件记录，用于前后端一致性验证。"""
+
+    __tablename__ = "observability_sse_events"
+    __table_args__ = (
+        Index("ix_obs_sse_turn_id", "turn_id"),
+        Index("ix_obs_sse_session_id", "session_id"),
+        Index("ix_obs_sse_created_at", "created_at"),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    turn_id: str | None = Field(default=None, index=True)
+    session_id: str | None = Field(default=None, index=True)
+    event_type: str  # thinking / text_delta / product_card / criteria_card / final_decision / clarification / cart_action / done / error
+    seq: int
+    node_id: str | None = None
+    deck_id: str | None = None
+    criteria_id: str | None = None
+    product_ids: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    message_id: str | None = None
+    delta_preview: str | None = None
+    delta_hash: str | None = None
+    finish_reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)

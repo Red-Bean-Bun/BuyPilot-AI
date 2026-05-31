@@ -107,6 +107,12 @@ _MOCK_KNOWN_VIOLATIONS = {
     # to simulate invalid/empty/hallucinated responses (no llm_gateway._chat_completion
     # mock needed — uses MOCK_ALLOWED_INTERNAL stage entry points instead)
     "tests/test_viewmodel_pipeline.py::test_viewmodel_decision_winner_not_in_candidates_locked_to_scoring_winner -> src.services.llm_gateway._chat_completion",
+    # Observability tests: mock AsyncSession to verify graceful degradation on DB failures
+    "tests/test_observability_llm.py::test_insert_llm_call_returns_none_on_database_error -> src.repos.observability_llm.AsyncSession",
+    "tests/test_observability_sse.py::test_insert_sse_event_returns_none_on_database_error -> src.repos.observability_llm.AsyncSession",
+    # Demo smoke: mock internal constants and helpers for timeout testing
+    "tests/test_demo_smoke.py::test_demo_smoke_run_turn_times_out -> demo_smoke.TURN_TIMEOUT_SECONDS",
+    "tests/test_demo_smoke.py::test_demo_smoke_run_turn_times_out -> demo_smoke._collect_turn_events",
 }
 
 

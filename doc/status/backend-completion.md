@@ -67,7 +67,7 @@
 | 33 | 接口契约文档 | ✅ 有 | `contracts/sse-events.schema.json` + 3 个 golden trace 示例 |
 | 34 | 评测看板（Streamlit） | ✅ 已完成 | `static/eval_dashboard.py`，4 页：总览/版本对比/样本详情/错误分析，`streamlit run` 启动 |
 | 35 | Pytest + Ruff + Mypy CI | ✅ 已完成 | `.github/workflows/backend-tests.yml`；使用 `uv sync --locked`；CI 运行 `ruff check` + `ruff format --check` + 目标 mypy + 全量 pytest；另有手动/定时 live provider + pgvector smoke job（需要 secrets） |
-| 36 | 请求可观测性 + 审计 | ✅ 已完成 | `middleware/request_context.py` `repos/audit.py` `services/observability.py` `api/observability.py`；所有 HTTP 请求写 `api_request_logs`，chat/cancel/feedback/upload/admin eval seed/cart intent 等副作用写 `audit_events`；提供 `/admin/observability/requests`、`/audit`、`/turns/{turn_id}`、`/sessions/{session_id}`、`/fallbacks` 调试入口 |
+| 36 | 请求可观测性 + 审计 | ✅ 已完成 | `middleware/request_context.py` `repos/audit.py` `services/observability.py` `api/observability.py`；所有 HTTP 请求写 `api_request_logs`，chat/cancel/feedback/upload/admin eval seed/cart intent 等副作用写 `audit_events`；提供 `/admin/observability/requests`、`/audit`、`/turns/{turn_id}`、`/sessions/{session_id}`、`/fallbacks` 调试入口；2026-06-01 新增 LLM 调用明细记录（`observability_llm_calls` 表，记录 task/profile/model/duration/prompt/response/parsed_json）+ SSE 事件记录（`observability_sse_events` 表，记录服务端实际发出的事件序列）+ 上下文诊断规则（`BUDGET_PATCH_LOST` / `EXCLUSION_LOST`）；debug bundle 扩展为 `requests + audit_events + llm_calls + sse_events + context_diagnostics`；详见 `doc/observability/observability-runbook.md` |
 
 ## 4 条 Demo 路径状态
 

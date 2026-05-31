@@ -6,6 +6,7 @@ names or call provider SDKs directly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -15,6 +16,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.config import user_messages as msg
+from src.config.settings import get_settings
+from src.repos.observability_llm import update_llm_call_parsed_json
 from src.repos.products import list_products
 from src.services.image_upload import image_url_to_provider_url
 from src.services.llm_gateway import (
@@ -34,11 +37,13 @@ from src.services.llm_task_payloads import (
     recommendation_stream_messages,
 )
 from src.services.recommendation_reasons import build_reason_atoms
+from src.services.request_context import get_request_context
 from src.types.schemas import DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 logger = logging.getLogger(__name__)
 _LOG_PAYLOAD_PREVIEW_CHARS = 2000
+_PARSED_JSON_UPDATE_RETRY_DELAYS_SECONDS = (0.02, 0.05, 0.1, 0.2, 0.4)
 _PRODUCT_ID_RE = re.compile(r"\bp_[a-z]+_\d+\b")
 _FORBIDDEN_RECOMMENDATION_TERMS = (
     "库存",
@@ -60,6 +65,42 @@ _FORBIDDEN_RECOMMENDATION_TERMS = (
     "下单",
     "立即购买",
 )
+
+
+def _schedule_parsed_json_update(
+    task: str,
+    parsed_json: dict[str, Any] | None,
+    validation_error: str | None,
+) -> asyncio.Task[None] | None:
+    """Fire-and-forget update of parsed_json for the most recent LLM call."""
+    if not get_settings().observability_local_enabled:
+        return None
+
+    context = get_request_context()
+    turn_id = context.turn_id if context else None
+    if not turn_id:
+        return None
+
+    async def _update():
+        attempts = len(_PARSED_JSON_UPDATE_RETRY_DELAYS_SECONDS) + 1
+        for attempt in range(attempts):
+            try:
+                updated = await update_llm_call_parsed_json(turn_id, task, parsed_json, validation_error)
+            except Exception as exc:
+                logger.debug("Failed to update parsed_json for %s: %s", task, exc)
+                return
+            if updated:
+                return
+            if attempt < len(_PARSED_JSON_UPDATE_RETRY_DELAYS_SECONDS):
+                await asyncio.sleep(_PARSED_JSON_UPDATE_RETRY_DELAYS_SECONDS[attempt])
+        logger.debug(
+            "No LLM observability row found for parsed_json update after %s attempts: turn_id=%s task=%s",
+            attempts,
+            turn_id,
+            task,
+        )
+
+    return asyncio.create_task(_update())
 
 __all__ = [
     "LiveLLMUnavailable",
@@ -85,8 +126,11 @@ async def analyze_intent(
     )
     parsed = _require_json_object(live, "analyze_intent")
     try:
-        return IntentResult.model_validate(_normalize_intent_payload(parsed))
+        result = IntentResult.model_validate(_normalize_intent_payload(parsed))
+        _schedule_parsed_json_update("analyze_intent", result.model_dump(), None)
+        return result
     except ValidationError as exc:
+        _schedule_parsed_json_update("analyze_intent", None, str(exc.errors()))
         logger.warning(
             "Live intent payload failed schema validation. validation_errors=%s payload_preview=%s",
             _json_preview(exc.errors()),
@@ -116,7 +160,9 @@ async def generate_criteria(
     parsed = _require_json_object(live, "generate_criteria")
     criteria = _criteria_from_live_payload(parsed, existing)
     if criteria:
+        _schedule_parsed_json_update("generate_criteria", criteria.model_dump(), None)
         return criteria
+    _schedule_parsed_json_update("generate_criteria", parsed, "criteria validation failed")
     raise RuntimeError("Live criteria payload failed schema validation.")
 
 
@@ -149,7 +195,10 @@ async def generate_recommendation(
     if isinstance(chunks, list) and all(isinstance(chunk, str) for chunk in chunks):
         validated_chunks = chunks[:4]
         _validate_recommendation_chunks(validated_chunks, products)
-        return RecommendationResult(text_chunks=validated_chunks, products=products)
+        result = RecommendationResult(text_chunks=validated_chunks, products=products)
+        _schedule_parsed_json_update("generate_recommendation", result.model_dump(), None)
+        return result
+    _schedule_parsed_json_update("generate_recommendation", parsed, "recommendation validation failed")
     raise RuntimeError("Live recommendation payload failed schema validation.")
 
 
@@ -204,6 +253,7 @@ async def analyze_image(image_url: str) -> dict[str, Any]:
     )
     parsed = _require_json_object(live, "analyze_image")
     parsed["image_url"] = image_url
+    _schedule_parsed_json_update("analyze_image", parsed, None)
     return parsed
 
 
@@ -231,6 +281,7 @@ async def generate_decision(
         json_object=True,
     )
     parsed = _require_json_object(live, "generate_decision")
+    _schedule_parsed_json_update("generate_decision", parsed, None)
     winner_id = parsed.get("winner_product_id", "")
     if authoritative_winner is not None and winner_id != authoritative_winner:
         logger.warning(

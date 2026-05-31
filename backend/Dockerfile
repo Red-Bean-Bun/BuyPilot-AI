@@ -5,6 +5,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY src/ src/
 COPY prompts/ prompts/
+COPY static/ static/
 # 使用 BuildKit 缓存挂载加速依赖安装，同时保持镜像纯净
 RUN --mount=type=cache,target=/root/.cache/uv \
     pip install --no-cache-dir uv && \

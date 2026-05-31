@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,7 @@ from src.config.tuning import DEFAULT_SERVICE_TIMEOUT_SECONDS, LLM_TEMPERATURE
 from src.services.fallbacks import record_fallback
 from src.services.http_client import get_http_client
 from src.services.llm_profiles import task_profile_names as _task_profile_names
+from src.services.observability_llm import schedule_llm_call_recording
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +34,89 @@ class LiveLLMUnavailable(RuntimeError):
 
 async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object: bool = False) -> str:
     last_error: Exception | None = None
-    for profile_name in _task_profile_names(task):
+    fallback_from: str | None = None
+    for idx, profile_name in enumerate(_task_profile_names(task)):
         try:
             profile = _resolve_chat_profile(profile_name)
-            return await _chat_completion(profile, messages, json_object=json_object)
+            started_at = time.perf_counter()
+            response = await _chat_completion(profile, messages, json_object=json_object)
+            duration_ms = (time.perf_counter() - started_at) * 1000
+
+            # Record successful LLM call
+            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            status = "success" if idx == 0 else "fallback"
+            schedule_llm_call_recording(
+                task=task,
+                profile=profile_name,
+                model=profile.model,
+                provider=provider,
+                status=status,
+                duration_ms=duration_ms,
+                messages=messages,
+                response=response,
+                parsed_json=None,
+                validation_error=None,
+                token_usage=None,
+                fallback_from=fallback_from,
+                error_type=None,
+                error_message=None,
+                error_raw=None,
+            )
+
+            return response
         except LiveLLMUnavailable as exc:
+            if 'started_at' in locals():
+                duration_ms = (time.perf_counter() - started_at) * 1000
+            else:
+                duration_ms = 0.0
+            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            schedule_llm_call_recording(
+                task=task,
+                profile=profile_name,
+                model=profile.model if 'profile' in locals() else "unknown",
+                provider=provider,
+                status="failed",
+                duration_ms=duration_ms,
+                messages=messages,
+                response=None,
+                parsed_json=None,
+                validation_error=None,
+                token_usage=None,
+                fallback_from=fallback_from,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                error_raw=None,
+            )
             last_error = exc
+            fallback_from = profile_name
             record_fallback(f"llm.{task}", "profile_unavailable", profile=profile_name, detail=str(exc))
             logger.info("LLM profile unavailable for task %s profile %s: %s", task, profile_name, exc)
             continue
         except Exception as exc:
+            if 'started_at' in locals():
+                duration_ms = (time.perf_counter() - started_at) * 1000
+            else:
+                duration_ms = 0.0
+            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            schedule_llm_call_recording(
+                task=task,
+                profile=profile_name,
+                model=profile.model if 'profile' in locals() else "unknown",
+                provider=provider,
+                status="failed",
+                duration_ms=duration_ms,
+                messages=messages,
+                response=None,
+                parsed_json=None,
+                validation_error=None,
+                token_usage=None,
+                fallback_from=fallback_from,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                error_raw=str(exc),
+            )
             last_error = exc
+            fallback_from = profile_name
             record_fallback(
                 f"llm.{task}",
                 "provider_error",
@@ -62,22 +136,97 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
 async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncGenerator[str, None]:
     last_error: Exception | None = None
     yielded = False
-    for profile_name in _task_profile_names(task):
+    fallback_from: str | None = None
+    for idx, profile_name in enumerate(_task_profile_names(task)):
         try:
             profile = _resolve_chat_profile(profile_name)
+            started_at = time.perf_counter()
+            accumulated_text = ""
+            first_delta_emitted = False
             async for delta in _chat_completion_stream(profile, messages):
+                if not first_delta_emitted:
+                    first_delta_emitted = True
                 yielded = True
+                accumulated_text += delta
                 yield delta
+
+            # Stream completed successfully
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            status = "success" if idx == 0 else "fallback"
+            schedule_llm_call_recording(
+                task=task,
+                profile=profile_name,
+                model=profile.model,
+                provider=provider,
+                status=status,
+                duration_ms=duration_ms,
+                messages=messages,
+                response=accumulated_text,
+                parsed_json=None,
+                validation_error=None,
+                token_usage=None,
+                fallback_from=fallback_from,
+                error_type=None,
+                error_message=None,
+                error_raw=None,
+            )
             return
         except LiveLLMUnavailable as exc:
+            if 'started_at' in locals():
+                duration_ms = (time.perf_counter() - started_at) * 1000
+            else:
+                duration_ms = 0.0
+            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            schedule_llm_call_recording(
+                task=task,
+                profile=profile_name,
+                model=profile.model if 'profile' in locals() else "unknown",
+                provider=provider,
+                status="failed",
+                duration_ms=duration_ms,
+                messages=messages,
+                response=accumulated_text if 'accumulated_text' in locals() else None,
+                parsed_json=None,
+                validation_error=None,
+                token_usage=None,
+                fallback_from=fallback_from,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                error_raw=None,
+            )
             last_error = exc
+            fallback_from = profile_name
             record_fallback(f"llm.{task}", "profile_unavailable", profile=profile_name, detail=str(exc))
             logger.info("LLM stream profile unavailable for task %s profile %s: %s", task, profile_name, exc)
             continue
         except Exception as exc:
+            if 'started_at' in locals():
+                duration_ms = (time.perf_counter() - started_at) * 1000
+            else:
+                duration_ms = 0.0
+            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            schedule_llm_call_recording(
+                task=task,
+                profile=profile_name,
+                model=profile.model if 'profile' in locals() else "unknown",
+                provider=provider,
+                status="failed",
+                duration_ms=duration_ms,
+                messages=messages,
+                response=accumulated_text if 'accumulated_text' in locals() else None,
+                parsed_json=None,
+                validation_error=None,
+                token_usage=None,
+                fallback_from=fallback_from,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                error_raw=str(exc),
+            )
             if yielded:
                 raise
             last_error = exc
+            fallback_from = profile_name
             record_fallback(
                 f"llm.{task}",
                 "provider_stream_error",

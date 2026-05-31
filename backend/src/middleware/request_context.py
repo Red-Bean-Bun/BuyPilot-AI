@@ -11,7 +11,14 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from src.services.audit import record_api_request
 from src.services.request_context import RequestContext, clear_request_context, get_request_context, set_request_context
 
-REQUEST_LOG_EXCLUDED_PATHS = {"/health", "/health/"}
+REQUEST_LOG_EXCLUDED_PATHS = {
+    "/health", "/health/",
+    "/",
+    "/favicon.ico",
+    "/sitemap.xml",
+    "/robots.txt",
+    "/admin/observability/dashboard",
+}
 
 # Static file paths — skip all middleware processing (UUID, audit, context).
 # These are immutable content-addressed files; per-request overhead is wasted.

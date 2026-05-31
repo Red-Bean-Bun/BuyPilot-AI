@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.repos.observability_llm import list_llm_calls_by_turn, list_sse_events_by_turn
 from src.repos.traces import list_recent_retrieval_traces
 from src.services.audit import list_audit_event_payloads, list_request_log_payloads
 
@@ -34,18 +35,28 @@ async def list_audit(
 
 
 async def get_turn_debug_bundle(turn_id: str, limit: int = 100) -> dict[str, Any]:
+    audit_events = await list_audit(turn_id=turn_id, limit=limit)
+    context_diagnostics = [e for e in audit_events if e.get("action") == "chat.context_diagnostic"]
     return {
         "turn_id": turn_id,
         "requests": await list_requests(turn_id=turn_id, limit=limit),
-        "audit_events": await list_audit(turn_id=turn_id, limit=limit),
+        "audit_events": audit_events,
+        "llm_calls": await list_llm_calls_by_turn(turn_id),
+        "sse_events": await list_sse_events_by_turn(turn_id),
+        "context_diagnostics": context_diagnostics,
     }
 
 
 async def get_session_debug_bundle(session_id: str, limit: int = 100) -> dict[str, Any]:
+    audit_events = await list_audit(session_id=session_id, limit=limit)
+    context_diagnostics = [e for e in audit_events if e.get("action") == "chat.context_diagnostic"]
     return {
         "session_id": session_id,
         "requests": await list_requests(session_id=session_id, limit=limit),
-        "audit_events": await list_audit(session_id=session_id, limit=limit),
+        "audit_events": audit_events,
+        "llm_calls": [],  # Session-level LLM calls not aggregated
+        "sse_events": [],  # Session-level SSE events not aggregated
+        "context_diagnostics": context_diagnostics,
     }
 
 
