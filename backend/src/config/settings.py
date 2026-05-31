@@ -37,17 +37,6 @@ def _load_env_file(path: Path) -> None:
 _load_env_file(PROJECT_DIR / ".env")
 
 
-TASK_MODEL_MAP: dict[str, dict[str, str | None]] = {
-    "analyze_intent": {"primary": "qwen_turbo", "fallback": "doubao_intent"},
-    "generate_criteria": {"primary": "qwen_turbo", "fallback": "doubao_generation"},
-    "generate_recommendation": {"primary": "qwen_turbo", "fallback": "doubao_generation"},
-    "generate_decision": {"primary": "qwen_turbo", "fallback": "doubao_generation"},
-    "analyze_image": {"primary": "qwen_vl_plus", "fallback": None},
-    "embedding": {"primary": "qwen_embedding", "fallback": None},
-    "rerank": {"primary": "gte_rerank", "fallback": None},
-}
-
-
 class Settings:
     def __init__(self) -> None:
         self.app_name = os.getenv("APP_NAME", "buypilot-api")
@@ -63,7 +52,8 @@ class Settings:
         )
         self.upload_dir = _resolve_path(os.getenv("UPLOAD_DIR"), BACKEND_DIR / "uploads", BACKEND_DIR)
         self.llm_profiles_path = BACKEND_DIR / "src" / "config" / "llm_profiles.yaml"
-        self.task_model_map = TASK_MODEL_MAP
+        profiles_data = load_llm_profiles(self.llm_profiles_path)
+        self.task_model_map = profiles_data.get("task_model_map", {})
 
     @property
     def llm_profiles(self) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 
 from src.services.audit import record_audit_event
 from src.services.image_upload import (
@@ -30,14 +30,14 @@ async def handle_upload_image(request: Request) -> ImageUploadResponse:
     content_length = request.headers.get("content-length")
     if content_length is not None and int(content_length) > MAX_IMAGE_BYTES:
         raise HTTPException(
-            status_code=413,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail={"code": "IMAGE_TOO_LARGE", "message": f"Request exceeds {MAX_IMAGE_BYTES} bytes"},
         )
 
     content_type = request.headers.get("content-type", "")
     if not content_type.startswith("multipart/form-data"):
         raise HTTPException(
-            status_code=415,
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={
                 "code": "UNSUPPORTED_MEDIA_TYPE",
                 "message": "Only multipart/form-data image uploads are supported.",

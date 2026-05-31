@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.config import user_messages as msg
 from src.config.domain_terms import KNOWN_CATEGORIES, normalize_product_type
 from src.types.schemas import IntentResult
 
@@ -47,25 +48,9 @@ def _needs_budget(category: str, product_type: object, constraints: dict) -> boo
 
 def build_clarification_question(missing_slots: list[str]) -> tuple[str, list[str]]:
     if "category" in missing_slots:
-        return "你想买哪一类商品？", ["美妆护肤", "数码电子", "服饰运动", "食品生活"]
+        return msg.CLARIFY_CATEGORY_QUESTION, list(msg.CATEGORY_DISPLAY_ORDER)
     if "budget" in missing_slots:
-        return "这类商品价格跨度比较大，你的预算或价位范围大概是多少？", [
-            "1000-2000元",
-            "2000-4000元",
-            "4000元以上",
-        ]
+        return msg.CLARIFY_BUDGET_QUESTION, list(msg.CLARIFY_BUDGET_OPTIONS)
     if "product_type" in missing_slots:
-        return "你想买具体哪一类商品？", [
-            "洁面",
-            "防晒",
-            "面霜",
-            "精华",
-            "手机",
-            "耳机",
-            "跑鞋",
-            "T恤",
-            "咖啡",
-            "茶饮",
-            "零食",
-        ]
-    return "请补充一下你的购买需求。", []
+        return msg.CLARIFY_PRODUCT_TYPE_QUESTION, list(msg.CLARIFY_PRODUCT_TYPE_OPTIONS)
+    return msg.CLARIFY_FALLBACK_QUESTION, []

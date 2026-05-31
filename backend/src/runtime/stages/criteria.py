@@ -6,7 +6,8 @@ import asyncio
 import uuid
 from typing import Any
 
-from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX
+from src.config import user_messages as msg
+from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, DEFAULT_CRITERIA_ID
 from src.services.conversation_state import get_conversation_summary, get_previous_criteria
 from src.services.feedback import get_feedback_context
 from src.services.llm_client import generate_criteria
@@ -24,7 +25,7 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
     if body.criteria_patch:
         feedback_task.cancel()
         summary_task.cancel()
-        return apply_criteria_patch(existing or CriteriaPayload(criteria_id="c_auto_001"), body.criteria_patch)
+        return apply_criteria_patch(existing or CriteriaPayload(criteria_id=DEFAULT_CRITERIA_ID), body.criteria_patch)
 
     feedback = await feedback_task
     ctx_summary = await summary_task
@@ -199,13 +200,13 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
     """
     budget_action = QuickActionPayload(
         action_id="budget_low",
-        label="预算压低",
+        label=msg.QA_BUDGET_LOW,
         action="criteria_patch",
         criteria_patch={"constraints": {"budget_max": CHEAPER_BUDGET_DEFAULT_MAX}},
     )
     replace_action = QuickActionPayload(
         action_id="replace_deck",
-        label="换一组",
+        label=msg.QA_REPLACE_DECK,
         action="criteria_patch",
         criteria_patch={"replace_deck": True, "constraints": {}},
     )
@@ -216,13 +217,13 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
             budget_action,
             QuickActionPayload(
                 action_id="sensitive_skin",
-                label="敏感肌适用",
+                label=msg.QA_SENSITIVE_SKIN,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"skin_type": "敏感"}},
             ),
             QuickActionPayload(
                 action_id="no_alcohol",
-                label="不要含酒精",
+                label=msg.QA_NO_ALCOHOL,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
             ),
@@ -234,13 +235,13 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
             budget_action,
             QuickActionPayload(
                 action_id="sensitive_skin",
-                label="敏感肌适用",
+                label=msg.QA_SENSITIVE_SKIN,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"skin_type": "敏感"}},
             ),
             QuickActionPayload(
                 action_id="no_alcohol",
-                label="不要含酒精",
+                label=msg.QA_NO_ALCOHOL,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"ingredient_avoid": ["酒精"]}},
             ),
@@ -249,13 +250,13 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
             budget_action,
             QuickActionPayload(
                 action_id="storage_256",
-                label="256G以上",
+                label=msg.QA_STORAGE_256,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"storage": "256GB"}},
             ),
             QuickActionPayload(
                 action_id="large_screen",
-                label="大屏幕",
+                label=msg.QA_LARGE_SCREEN,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"screen_size": "6.5英寸以上"}},
             ),
@@ -264,13 +265,13 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
             budget_action,
             QuickActionPayload(
                 action_id="sport_running",
-                label="跑步",
+                label=msg.QA_RUNNING,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"sport_type": "跑步"}},
             ),
             QuickActionPayload(
                 action_id="season_spring",
-                label="春夏款",
+                label=msg.QA_SPRING_SUMMER,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"season": "春夏"}},
             ),
@@ -279,16 +280,16 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
             budget_action,
             QuickActionPayload(
                 action_id="dietary_sugar_free",
-                label="无糖",
+                label=msg.QA_SUGAR_FREE,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"dietary": ["无糖"]}},
             ),
             QuickActionPayload(
                 action_id="dietary_low_fat",
-                label="低脂",
+                label=msg.QA_LOW_FAT,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"dietary": ["低脂"]}},
             ),
         ],
     }
-    return _ACTIONS.get(category, _ACTIONS["美妆护肤"]) + [replace_action]
+    return _ACTIONS.get(category, _ACTIONS[msg.DEFAULT_CATEGORY]) + [replace_action]

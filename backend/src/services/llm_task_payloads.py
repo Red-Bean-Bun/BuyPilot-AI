@@ -9,40 +9,33 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.config.domain_terms import infer_category_from_product_type, normalize_category, normalize_product_type
+from src.config.tuning import DEFAULT_CRITERIA_ID
 from src.services.prompts import get_prompt_store
 from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload, ReasonAtomPayload
 
-INTENT_SYSTEM_SCHEMA = (
-    "你是电商导购意图识别器。只输出 JSON，字段为 intent、confidence、category、"
-    "extracted_constraints、soft_preferences、target_product_id。intent 只能是 "
-    "recommend/clarify/continue/feedback/add_to_cart/remove_from_cart/update_cart_quantity/view_cart/chitchat。"
-)
+# ── Schema overrides loaded from prompts/schema_overrides.md ────────────
+# Each task maps to a ``## section`` heading in that file.
 
-CRITERIA_SYSTEM_SCHEMA = (
-    "你是电商导购购买标准生成器。只输出 JSON，字段为 criteria_id、category、summary、"
-    "chips、constraints。constraints 必须只使用允许字段：budget_min,budget_max,"
-    "use_scenario,brand_avoid,origin_avoid,product_type,skin_type,ingredient_avoid,"
-    "ingredient_prefer,storage,screen_size,sport_type,season,dietary。不要输出商品。"
-)
+_SCHEMA_TASK_NAMES = {
+    "analyze_intent": "analyze_intent",
+    "generate_criteria": "generate_criteria",
+    "generate_recommendation": "generate_recommendation",
+    "generate_recommendation_stream": "generate_recommendation_stream",
+    "generate_decision": "generate_decision",
+    "analyze_image": "analyze_image",
+}
 
-RECOMMENDATION_SYSTEM_SCHEMA = (
-    "你是电商导购推荐解释生成器。只输出 JSON，字段为 text_chunks。只能解释传入商品，不得编造商品、价格、优惠或库存。"
-)
+_SCHEMA_FILE = "schema_overrides"
 
-RECOMMENDATION_STREAM_SYSTEM_SCHEMA = (
-    "你是电商导购推荐解释生成器。直接输出自然语言正文，不要输出 JSON、Markdown 表格或代码块。"
-    "只能解释传入商品和已校验事实原子，不得编造商品、价格、优惠或库存。"
-)
 
-DECISION_SYSTEM_SCHEMA = (
-    "你是电商导购决策器。只输出 JSON，字段为 winner_product_id、summary、why、not_for。"
-    "winner_product_id 必须是传入商品之一，不得编造。"
-    "如果输入包含非空 locked_winner_product_id，winner_product_id 必须等于该值，summary/why 只能解释这个锁定商品。"
-    "why 是选择该商品的理由列表（每条一句话）。"
-    "not_for 是不适合人群或场景列表。"
-)
-
-IMAGE_SYSTEM_SCHEMA = "你是商品图片理解器。只输出 JSON，字段为 category_hint、description、visible_traits。"
+def _schema_override(task: str) -> str:
+    """Load the runtime schema override for *task* from schema_overrides.md."""
+    section = _SCHEMA_TASK_NAMES.get(task, task)
+    loaded = get_prompt_store().load_section(_SCHEMA_FILE, section)
+    if loaded:
+        return loaded
+    # Fallback: should not happen in production, but keeps tests green
+    return f"(schema override for {task} not found)"
 
 CONFIDENCE_LABELS = {
     "high": 0.9,
@@ -70,7 +63,7 @@ def intent_messages(
                     "history": history or [],
                     "conversation_context": conversation_context,
                 },
-                INTENT_SYSTEM_SCHEMA,
+                _schema_override("analyze_intent"),
             ),
         },
         {"role": "user", "content": _history_prompt(message, history, image_url)},
@@ -103,7 +96,7 @@ def criteria_messages(
                     "existing": existing_dump,
                     "conversation_context": conversation_context,
                 },
-                CRITERIA_SYSTEM_SCHEMA,
+                _schema_override("generate_criteria"),
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -138,7 +131,7 @@ def recommendation_messages(
                         for product_id, atoms in (reason_atoms_by_product or {}).items()
                     },
                 },
-                RECOMMENDATION_SYSTEM_SCHEMA,
+                _schema_override("generate_recommendation"),
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -173,7 +166,7 @@ def recommendation_stream_messages(
                         for product_id, atoms in (reason_atoms_by_product or {}).items()
                     },
                 },
-                RECOMMENDATION_STREAM_SYSTEM_SCHEMA,
+                _schema_override("generate_recommendation_stream"),
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -187,7 +180,7 @@ def image_messages(image_url: str, provider_image_url: str) -> list[dict[str, An
             "content": _prompt_content(
                 "image_analysis",
                 {"image_url": image_url},
-                IMAGE_SYSTEM_SCHEMA,
+                _schema_override("analyze_image"),
             ),
         },
         {
@@ -230,7 +223,7 @@ def decision_messages(
             "content": _prompt_content(
                 "decision",
                 prompt_vars,
-                DECISION_SYSTEM_SCHEMA,
+                _schema_override("generate_decision"),
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -449,7 +442,7 @@ def criteria_from_live_payload(
         )
         criteria = CriteriaPayload.model_validate(
             {
-                "criteria_id": payload.get("criteria_id") or base.criteria_id or "c_auto_001",
+                "criteria_id": payload.get("criteria_id") or base.criteria_id or DEFAULT_CRITERIA_ID,
                 "category": category,
                 "summary": payload.get("summary") or base.summary,
                 "chips": payload.get("chips") if isinstance(payload.get("chips"), list) else [],

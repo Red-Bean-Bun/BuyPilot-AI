@@ -11,11 +11,13 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
+from src.config import user_messages as msg
 from src.config.tuning import (
     CHEAPER_BUDGET_DEFAULT_MAX,
     CHEAPER_BUDGET_MIN_MAX,
     CHEAPER_BUDGET_RATIO,
     INTER_CARD_DELAY_MS,
+    SSE_DELTA_POLL_TIMEOUT_SECONDS,
 )
 from src.runtime.cart_rules import message_refers_to_previous_product, quantity_from_intent, referenced_product_id
 from src.runtime.message_rules import is_replace_deck_phrase
@@ -65,21 +67,16 @@ from src.types.sse_events import (
 
 IntentHandler = Callable[[StreamContext, ChatStreamRequest, IntentResult], AsyncGenerator[SSEEventBase, None]]
 T = TypeVar("T")
-CLARIFICATION_ANALYSIS_TEXT = (
-    "我先看了一下你的需求，已经能判断大方向，但还缺一个会影响推荐标准的关键信息。补齐后再生成购买标准会更稳。"
-)
-RECOMMENDATION_STREAM_FALLBACK_TEXT = "我先把匹配商品列出来，方便你快速比较。"
+CLARIFICATION_ANALYSIS_TEXT = msg.CLARIFICATION_ANALYSIS
+RECOMMENDATION_STREAM_FALLBACK_TEXT = msg.RECOMMENDATION_STREAM_FALLBACK
 RECOMMENDATION_STREAM_MIN_CHARS = 1
 RECOMMENDATION_STREAM_MAX_CHARS = 8
 RECOMMENDATION_STREAM_BOUNDARIES = set("，。！？；、,.!?;:\n")
-INTRO_TEXT_NO_CONSTRAINTS = "正在分析你的需求，马上为你查找匹配商品..."
-FOLLOWUP_TEXT_DEFAULT = (
-    "你先看看这几款候选。如果想调整筛选范围，可以直接说「再温和一点」「不要酒精」「预算再低一点」，也可以点筛选卡修改。"
-)
-FOLLOWUP_TEXT_NO_MATCH = "当前条件下暂时没有匹配的商品。你可以放宽预算、换一个品类，或者去掉一些排除条件试试。"
-FOLLOWUP_TEXT_BUDGET_RELAXED = (
-    "原预算内没有匹配商品，以下为放宽预算后的备选。如果你想回到原预算，可以直接说或点筛选卡修改。"
-)
+INTRO_TEXT_NO_CONSTRAINTS = msg.INTRO_NO_CONSTRAINTS
+FOLLOWUP_TEXT_DEFAULT = msg.FOLLOWUP_DEFAULT
+FOLLOWUP_TEXT_SUBSEQUENT = msg.FOLLOWUP_SUBSEQUENT
+FOLLOWUP_TEXT_NO_MATCH = msg.FOLLOWUP_NO_MATCH
+FOLLOWUP_TEXT_BUDGET_RELAXED = msg.FOLLOWUP_BUDGET_RELAXED
 
 STREAM_TEXT_DEFAULT_DELAY_MS = 25
 TYPEWRITER_MIN_CHARS = 2
@@ -103,7 +100,7 @@ async def handle_view_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body, intent
-    yield ctx.thinking("generating", "正在查看购物车...")
+    yield ctx.thinking("generating", msg.THINKING_VIEWING_CART)
     yield await _cart_action_event(ctx, "view", "", 0, "success")
     yield ctx.done()
 
@@ -113,7 +110,7 @@ async def handle_add_to_cart(
 ) -> AsyncGenerator[SSEEventBase, None]:
     product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
-        async for event in _clarify_cart_target(ctx, "你想把哪个商品加入购物车？"):
+        async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_ADD):
             yield event
         yield ctx.done()
         return
@@ -142,7 +139,7 @@ async def handle_remove_from_cart(
 ) -> AsyncGenerator[SSEEventBase, None]:
     product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
-        async for event in _clarify_cart_target(ctx, "你想从购物车移出哪个商品？"):
+        async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_REMOVE):
             yield event
         yield ctx.done()
         return
@@ -171,7 +168,7 @@ async def handle_update_cart_quantity(
 ) -> AsyncGenerator[SSEEventBase, None]:
     product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
-        async for event in _clarify_cart_target(ctx, "你想修改哪个商品的数量？"):
+        async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_UPDATE):
             yield event
         yield ctx.done()
         return
@@ -200,7 +197,7 @@ async def handle_chitchat(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body, intent
-    yield ctx.thinking("understanding", "正在处理...")
+    yield ctx.thinking("understanding", msg.THINKING_PROCESSING)
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -209,7 +206,7 @@ async def handle_chitchat(
         node_id=f"ai_text_{ctx.turn_id}",
         created_at_ms=now_ms(),
         message_id=f"msg_{ctx.turn_id}",
-        delta="我是电商导购助手，可以帮你推荐商品、添加购物车。请问你想买什么？",
+        delta=msg.GREETING,
         done=True,
     )
     yield ctx.done()
@@ -217,7 +214,7 @@ async def handle_chitchat(
 
 async def handle_clarification(ctx: StreamContext, missing_slots: list[str]) -> AsyncGenerator[SSEEventBase, None]:
     question, options = build_clarification_question(missing_slots)
-    yield ctx.thinking("clarifying", "需要补充一个关键信息。")
+    yield ctx.thinking("clarifying", msg.THINKING_NEEDS_INFO)
     async for event in stream_text(
         ctx,
         CLARIFICATION_ANALYSIS_TEXT,
@@ -252,9 +249,22 @@ def _speculative_summary(intent: IntentResult) -> str:
     parts: list[str] = []
     if intent.category:
         parts.append(f"{intent.category}类产品")
-    skin_type = constraints.get("skin_type")
-    if skin_type:
+
+    # Category-specific attributes
+    if skin_type := constraints.get("skin_type"):
         parts.append(f"{skin_type}肌肤适用")
+    if storage := constraints.get("storage"):
+        parts.append(f"{storage}存储")
+    if screen_size := constraints.get("screen_size"):
+        parts.append(f"{screen_size}屏幕")
+    if sport_type := constraints.get("sport_type"):
+        parts.append(f"{sport_type}运动")
+    if dietary := constraints.get("dietary"):
+        if isinstance(dietary, list):
+            parts.append("、".join(dietary))
+        else:
+            parts.append(str(dietary))
+
     budget = constraints.get("budget_max")
     if budget is not None:
         parts.append(f"预算{budget:g}元以内")
@@ -335,7 +345,7 @@ async def handle_recommendation(
     )
 
     # ── Criteria generation (in parallel with speculative retrieval) ──
-    yield ctx.thinking("criteria", "正在生成购买标准...")
+    yield ctx.thinking("criteria", msg.THINKING_GENERATING_CRITERIA)
     criteria_capture: CapturedStage[CriteriaPayload] = CapturedStage()
     ctx.ensure_active()
     async for event in _capture_stage_result(
@@ -344,7 +354,7 @@ async def handle_recommendation(
             ctx,
             ctx.stages.run_criteria(ctx.session_id, body, intent),
             "criteria",
-            "正在生成购买标准...",
+            msg.THINKING_GENERATING_CRITERIA,
             timing_key="criteria",
         ),
     ):
@@ -353,7 +363,7 @@ async def handle_recommendation(
 
     # ── Await speculative retrieval + post-filter, then delegate ──
     if not retrieval_task.task.done():
-        yield ctx.thinking("searching", "正在检索匹配商品...")
+        yield ctx.thinking("searching", msg.THINKING_SEARCHING)
     try:
         precomputed = await retrieval_task.task
     except Exception:
@@ -420,7 +430,7 @@ async def continue_recommendation_from_criteria(
     if precomputed_retrieval is not None:
         retrieval = precomputed_retrieval
     else:
-        yield ctx.thinking("searching", "正在检索匹配商品...")
+        yield ctx.thinking("searching", msg.THINKING_SEARCHING)
         retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
         ctx.ensure_active()
         async for event in _capture_stage_result(
@@ -429,7 +439,7 @@ async def continue_recommendation_from_criteria(
                 ctx,
                 ctx.stages.run_retrieval(criteria, feedback=feedback),
                 "searching",
-                "正在检索匹配商品...",
+                msg.THINKING_SEARCHING,
                 timing_key="retrieve",
             ),
         ):
@@ -439,7 +449,7 @@ async def continue_recommendation_from_criteria(
     products = retrieval.products
     evidences_by_product = dict(retrieval.evidence_by_product)
     budget_relaxed = _budget_was_relaxed(retrieval.trace_details)
-    risk_notes_extra = ["原预算内无匹配，此为超预算备选"] if budget_relaxed else []
+    risk_notes_extra = [msg.RISK_OVER_BUDGET] if budget_relaxed else []
 
     # Branch 0: no matching products
     if not products:
@@ -471,7 +481,7 @@ async def continue_recommendation_from_criteria(
         status, confidence = decision_confidence(scored, user_signal_count=0)
 
         yield _criteria_card_event(ctx, criteria)
-        yield ctx.thinking("decision", "正在生成适配建议...")
+        yield ctx.thinking("decision", msg.THINKING_DECISION)
         winner = scored[0]
         decision = await _run_decision_with_context(
             ctx,
@@ -517,7 +527,12 @@ async def continue_recommendation_from_criteria(
     yield _criteria_card_event(ctx, criteria)
 
     # Step 3: followup guidance text ("你可以自然语言调整...")
-    followup_text = FOLLOWUP_TEXT_BUDGET_RELAXED if budget_relaxed else FOLLOWUP_TEXT_DEFAULT
+    if budget_relaxed:
+        followup_text = FOLLOWUP_TEXT_BUDGET_RELAXED
+    elif feedback:
+        followup_text = FOLLOWUP_TEXT_SUBSEQUENT
+    else:
+        followup_text = FOLLOWUP_TEXT_DEFAULT
     async for event in stream_text(
         ctx,
         followup_text,
@@ -556,7 +571,7 @@ async def continue_decision_from_current_deck(
             products,
             DecisionResult(
                 winner_product_id="",
-                summary="当前候选都不太符合你的偏好。你可以换一组商品，或者调整筛选条件后重新推荐。",
+                summary=msg.NO_SUITABLE_WINNER,
                 why=[],
                 not_for=[p.product_id for p in products],
                 decision_status="no_suitable_winner",
@@ -600,7 +615,7 @@ async def continue_decision_from_current_deck(
     elif status == "needs_more_signal":
         next_step = "continue_current_deck"
 
-    yield ctx.thinking("decision", "正在结合你的反馈生成最终建议...")
+    yield ctx.thinking("decision", msg.THINKING_DECISION_WITH_FEEDBACK)
     decision_capture: CapturedStage[DecisionResult] = CapturedStage()
     async for event in _capture_stage_result(
         decision_capture,
@@ -615,7 +630,7 @@ async def continue_decision_from_current_deck(
                 score_breakdown=winner.score_breakdown,
             ),
             "decision",
-            "正在结合你的反馈生成最终建议...",
+            msg.THINKING_DECISION_WITH_FEEDBACK,
             timing_key="decision",
         ),
     ):
@@ -763,11 +778,11 @@ async def _product_card_events(
             risk_notes=list(risk_notes_extra or []),
             evidence=evidence,
             actions=[
-                QuickActionPayload(action_id="show_evidence", label="看证据", action="open_evidence"),
-                QuickActionPayload(action_id="add_to_cart", label="加入购物车", action="add_to_cart"),
+                QuickActionPayload(action_id="show_evidence", label=msg.QA_SHOW_EVIDENCE, action="open_evidence"),
+                QuickActionPayload(action_id="add_to_cart", label=msg.QA_ADD_TO_CART, action="add_to_cart"),
                 QuickActionPayload(
                     action_id="dislike_product",
-                    label="不喜欢这个",
+                    label=msg.QA_DISLIKE,
                     action="feedback",
                     feedback_type="not_interested",
                 ),
@@ -802,7 +817,7 @@ async def _stream_recommendation_text_events(
         while True:
             ctx.ensure_active()
             try:
-                kind, value = await asyncio.wait_for(queue.get(), timeout=0.05)
+                kind, value = await asyncio.wait_for(queue.get(), timeout=SSE_DELTA_POLL_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
                 # Fast 50ms timeout for low-latency delta passthrough
                 if buffer:
@@ -946,7 +961,7 @@ def _build_intro_text(intent: IntentResult, _message: str) -> str:
     budget = constraints.get("budget_max")
     if budget is not None:
         try:
-            parts.append(f"{float(budget):g}元以内")
+            parts.append(f"{float(budget):g}{msg.INTRO_BUDGET_SUFFIX}")
         except (ValueError, TypeError):
             pass
     product_type = constraints.get("product_type")
@@ -955,14 +970,22 @@ def _build_intro_text(intent: IntentResult, _message: str) -> str:
     scenario = constraints.get("use_scenario")
     if scenario:
         parts.append(str(scenario))
-    skin = constraints.get("skin_type")
-    if skin:
-        parts.append(f"{skin}肌肤")
+
+    # Category-specific attributes
+    if skin := constraints.get("skin_type"):
+        parts.append(f"{skin}{msg.INTRO_SKIN_SUFFIX}")
+    if storage := constraints.get("storage"):
+        parts.append(f"{storage}{msg.INTRO_STORAGE_SUFFIX}")
+    if screen := constraints.get("screen_size"):
+        parts.append(f"{screen}{msg.INTRO_SCREEN_SUFFIX}")
+    if sport := constraints.get("sport_type"):
+        parts.append(f"{sport}{msg.INTRO_SPORT_SUFFIX}")
+
     if parts:
-        intro = f"我先按{'、'.join(parts)}这几个条件找一组候选。"
+        intro = f"{msg.INTRO_CONDITIONS_PREFIX}{'、'.join(parts)}{msg.INTRO_CONDITIONS_INFIX}"
         # When only category is present, add a guidance hint
         if len(parts) == 1 and intent.category:
-            intro += "看到商品后也可以继续调整筛选范围。"
+            intro += msg.INTRO_SINGLE_CATEGORY_SUFFIX
         return intro
     return INTRO_TEXT_NO_CONSTRAINTS
 
@@ -995,11 +1018,11 @@ def _final_decision_event(
         next_actions=[
             QuickActionPayload(
                 action_id="cheaper",
-                label="再便宜一点",
+                label=msg.QA_CHEAPER,
                 action="criteria_patch",
                 criteria_patch={"constraints": {"budget_max": _cheaper_budget_max(criteria)}},
             ),
-            QuickActionPayload(action_id="compare", label="加入对比", action="compare"),
+            QuickActionPayload(action_id="compare", label=msg.QA_COMPARE, action="compare"),
         ],
         decision_status=decision.decision_status,
         confidence=decision.confidence,
@@ -1071,7 +1094,7 @@ INTENT_HANDLERS: dict[str, IntentHandler] = {
 
 
 async def _clarify_cart_target(ctx: StreamContext, question: str) -> AsyncGenerator[SSEEventBase, None]:
-    yield ctx.thinking("clarifying", "需要确认购物车商品。")
+    yield ctx.thinking("clarifying", msg.THINKING_CONFIRM_CART)
     yield ClarificationEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,

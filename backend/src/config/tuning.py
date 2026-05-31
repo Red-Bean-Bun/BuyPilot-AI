@@ -25,6 +25,15 @@ INTER_CARD_DELAY_MS = 150
 DECISION_LOW_CONFIDENCE_RATIO = 0.15
 DECISION_MIN_USER_SIGNALS_FOR_HIGH_CONFIDENCE = 2
 
+# Default timeout for LLM/embedding/rerank service calls (seconds)
+DEFAULT_SERVICE_TIMEOUT_SECONDS = 30.0
+
+# SSE delta passthrough poll interval (seconds)
+SSE_DELTA_POLL_TIMEOUT_SECONDS = 0.05
+
+# Default criteria ID when none is assigned
+DEFAULT_CRITERIA_ID = "c_auto_001"
+
 LEGACY_MAIN_CHUNK_MAX_CHARS = 400
 LEGACY_SUB_CHUNK_MAX_CHARS = 200
 LEGACY_HEADER_MAX_CHARS = 50

@@ -25,6 +25,7 @@ from src.runtime.stages.intent import run_intent
 from src.runtime.stages.multimodal import run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
+from src.config import user_messages as msg
 from src.config.domain_terms import KNOWN_CATEGORIES, is_supported_product_type
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
@@ -46,7 +47,7 @@ from src.types.sse_events import (
 )
 
 HEARTBEAT_INTERVAL_SECONDS = 0.8
-PUBLIC_PIPELINE_ERROR_MESSAGE = "本轮导购处理失败，请稍后重试。"
+PUBLIC_PIPELINE_ERROR_MESSAGE = msg.PIPELINE_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -213,14 +214,14 @@ async def _prepare_pipeline_body(
     ctx: StreamContext, body: ChatStreamRequest
 ) -> AsyncGenerator[SSEEventBase | StageResult[ChatStreamRequest], None]:
     if body.image_url:
-        yield ctx.thinking("analyzing_image", "正在分析图片...")
+        yield ctx.thinking("analyzing_image", msg.THINKING_ANALYZING_IMAGE)
         image_analysis: dict[str, Any] | None = None
         ctx.ensure_active()
         async for image_item in run_with_heartbeat(
             ctx,
             ctx.stages.run_multimodal(body.image_url),
             "analyzing_image",
-            "正在分析图片...",
+            msg.THINKING_ANALYZING_IMAGE,
             timing_key="image_analysis",
         ):
             if isinstance(image_item, StageResult):
@@ -255,14 +256,14 @@ async def _resolve_intent(
     if synthetic_intent is not None:
         intent = synthetic_intent
     else:
-        yield ctx.thinking("understanding", "正在理解您的需求...")
+        yield ctx.thinking("understanding", msg.THINKING_UNDERSTANDING)
         intent = None
         ctx.ensure_active()
         async for intent_item in run_with_heartbeat(
             ctx,
             ctx.stages.run_intent(ctx.session_id, pipeline_body),
             "understanding",
-            "正在理解您的需求...",
+            msg.THINKING_UNDERSTANDING,
             timing_key="intent",
         ):
             if isinstance(intent_item, StageResult):
@@ -371,7 +372,7 @@ def _partial_criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) 
 async def _emit_unsupported_product_type(
     ctx: StreamContext, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    product_type = (intent.extracted_constraints or {}).get("product_type") or intent.category or "这类商品"
+    product_type = (intent.extracted_constraints or {}).get("product_type") or intent.category or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -380,7 +381,7 @@ async def _emit_unsupported_product_type(
         node_id=f"unsupported_{ctx.turn_id}",
         created_at_ms=now_ms(),
         message_id=f"unsupported_{ctx.turn_id}",
-        delta=f"当前商品库暂不覆盖{product_type}，我不能基于现有数据给出可靠推荐。",
+        delta=msg.UNSUPPORTED_PRODUCT_TYPE_TEMPLATE.format(product_type=product_type),
         done=True,
     )
     yield ctx.done()
@@ -408,7 +409,7 @@ def _current_stages() -> PipelineStages:
 
 
 async def _emit_commercial_claim_reply(ctx: StreamContext) -> AsyncGenerator[SSEEventBase, None]:
-    yield ctx.thinking("understanding", "正在处理...")
+    yield ctx.thinking("understanding", msg.THINKING_PROCESSING)
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,

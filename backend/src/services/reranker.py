@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.config.settings import get_settings
+from src.config.tuning import DEFAULT_SERVICE_TIMEOUT_SECONDS
 from src.services.http_client import get_http_client
 from src.services.llm_profiles import task_profile_names
 from src.services.retrieval_features import (
@@ -105,7 +106,7 @@ def _resolve_rerank_profile(profile_name: str) -> RerankProfile:
         base_url=base_url,
         endpoint_path=str(raw.get("endpoint_path") or "/reranks"),
         api_key=api_key,
-        timeout_seconds=float(raw.get("timeout_seconds", 30)),
+        timeout_seconds=float(raw.get("timeout_seconds", DEFAULT_SERVICE_TIMEOUT_SECONDS)),
     )
 
 

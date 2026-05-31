@@ -1,3 +1,26 @@
+task_model_map:
+  analyze_intent:
+    primary: qwen_turbo
+    fallback: doubao_intent
+  generate_criteria:
+    primary: qwen_turbo
+    fallback: doubao_generation
+  generate_recommendation:
+    primary: qwen_turbo
+    fallback: doubao_generation
+  generate_decision:
+    primary: qwen_turbo
+    fallback: doubao_generation
+  analyze_image:
+    primary: qwen_vl_plus
+    fallback: null
+  embedding:
+    primary: qwen_embedding
+    fallback: null
+  rerank:
+    primary: gte_rerank
+    fallback: null
+
 profiles:
   doubao_intent:
     provider: doubao
@@ -51,7 +74,7 @@ profiles:
   gte_rerank:
     provider: bailian
     model: qwen3-rerank
-    base_url: https://dashscope.aliyuncs.com/compatible-api/v1
+    base_url_env: BAILIAN_BASE_URL
     endpoint_path: /reranks
     api_key_env: BAILIAN_API_KEY
     timeout_seconds: 20

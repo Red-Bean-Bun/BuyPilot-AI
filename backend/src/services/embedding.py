@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.config.settings import get_settings
+from src.config.tuning import DEFAULT_SERVICE_TIMEOUT_SECONDS
 from src.services.http_client import get_http_client
 from src.services.llm_profiles import task_profile_names
 
@@ -80,7 +81,7 @@ def _resolve_embedding_profile(profile_name: str) -> EmbeddingProfile:
         model=model,
         base_url=base_url,
         api_key=api_key,
-        timeout_seconds=float(raw.get("timeout_seconds", 30)),
+        timeout_seconds=float(raw.get("timeout_seconds", DEFAULT_SERVICE_TIMEOUT_SECONDS)),
         dimensions=raw.get("dimensions"),
     )
 

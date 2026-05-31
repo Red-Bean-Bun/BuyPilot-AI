@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from src.config import user_messages as msg
 from src.repos.products import list_products
 from src.services.image_upload import image_url_to_provider_url
 from src.services.llm_gateway import (
@@ -125,7 +126,7 @@ async def generate_recommendation(
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
 ) -> RecommendationResult:
     if not products:
-        return RecommendationResult(text_chunks=["暂时没有找到合适商品。"], products=[])
+        return RecommendationResult(text_chunks=[msg.NO_MATCH], products=[])
     live = await _call_chat_task(
         "generate_recommendation",
         recommendation_messages(
@@ -158,7 +159,7 @@ async def stream_recommendation(
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
 ) -> AsyncGenerator[str, None]:
     if not products:
-        yield "暂时没有找到合适商品。"
+        yield msg.NO_MATCH
         return
     reason_atoms_by_product = {
         product.product_id: build_reason_atoms(
@@ -215,7 +216,7 @@ async def generate_decision(
     score_breakdown: dict[str, Any] | None = None,
 ) -> DecisionResult:
     if not products:
-        return DecisionResult(winner_product_id="", summary="暂时没有找到合适商品。")
+        return DecisionResult(winner_product_id="", summary=msg.NO_MATCH)
     valid_ids = [p.product_id for p in products]
     authoritative_winner = locked_winner_product_id if locked_winner_product_id in valid_ids else None
     live = await _call_chat_task(
@@ -247,8 +248,8 @@ async def generate_decision(
         winner_id = valid_ids[0]
     decision = DecisionResult(
         winner_product_id=winner_id,
-        summary=parsed.get("summary", f"优先选{winner_id}。"),
-        why=parsed.get("why", ["综合匹配度最高"]) if isinstance(parsed.get("why"), list) else ["综合匹配度最高"],
+        summary=parsed.get("summary", msg.DECISION_SUMMARY_FALLBACK_TEMPLATE.format(winner_id=winner_id)),
+        why=parsed.get("why", [msg.DECISION_WHY_DEFAULT]) if isinstance(parsed.get("why"), list) else [msg.DECISION_WHY_DEFAULT],
         not_for=parsed.get("not_for", []) if isinstance(parsed.get("not_for"), list) else [],
     )
     return _sanitize_decision(decision, valid_ids, products)
@@ -263,12 +264,12 @@ def _deterministic_locked_decision(
     score = (score_breakdown or {}).get("final_score")
     score_text = f"，综合评分 {score}" if isinstance(score, int | float) else ""
     reasons = [
-        f"{winner.name} 是当前候选中综合匹配度最高的商品{score_text}。",
-        "这个结论来自检索相关性、标准匹配、用户反馈和证据质量的综合评分。",
+        msg.DECISION_LOCKED_REASON_TEMPLATE.format(name=winner.name, score_text=score_text),
+        msg.DECISION_LOCKED_REASON_SOURCE,
     ]
     return DecisionResult(
         winner_product_id=winner.product_id,
-        summary=f"优先推荐{winner.name}，它是当前候选里综合评分最高的一款。",
+        summary=msg.DECISION_LOCKED_SUMMARY_TEMPLATE.format(name=winner.name),
         why=reasons,
         not_for=[],
     )
@@ -326,7 +327,7 @@ _DECISION_FORBIDDEN_TERMS = (
     "几天到",
     "送到",
 )
-_DECISION_SAFE_REPLACEMENT = "在当前候选范围内"
+_DECISION_SAFE_REPLACEMENT = msg.DECISION_SAFE_REPLACEMENT
 
 
 def _sanitize_decision(

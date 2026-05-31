@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.config.settings import get_settings
-from src.config.tuning import LLM_TEMPERATURE
+from src.config.tuning import DEFAULT_SERVICE_TIMEOUT_SECONDS, LLM_TEMPERATURE
 from src.services.fallbacks import record_fallback
 from src.services.http_client import get_http_client
 from src.services.llm_profiles import task_profile_names as _task_profile_names
@@ -109,7 +109,7 @@ def _resolve_chat_profile(profile_name: str) -> ChatProfile:
         model=model,
         base_url=base_url,
         api_key=api_key,
-        timeout_seconds=float(raw.get("timeout_seconds", 30)),
+        timeout_seconds=float(raw.get("timeout_seconds", DEFAULT_SERVICE_TIMEOUT_SECONDS)),
     )
 
 

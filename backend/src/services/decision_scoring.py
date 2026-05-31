@@ -33,6 +33,32 @@ SIGNAL_OPEN_EVIDENCE = 0.25
 SIGNAL_NOT_INTERESTED = -1.2
 SIGNAL_EXPLICIT_DISLIKE = -1.5
 
+# ── Criteria match scoring ─────────────────────────────────────────────
+BASE_CRITERIA_SCORE = 1.0
+BUDGET_UNDER_MAX_BONUS = 0.1
+OVER_BUDGET_PENALTY = 0.3
+SKIN_TYPE_MATCH_BONUS = 0.15
+SCENARIO_MATCH_BONUS = 0.1
+INGREDIENT_AVOID_PENALTY_PER_HIT = 0.2
+MAX_CRITERIA_SCORE = 2.0
+
+# ── Default retrieval score decay ──────────────────────────────────────
+RETRIEVAL_DECAY_FACTOR = 0.8
+DEFAULT_RETRIEVAL_TOTAL = 5
+
+# ── Evidence scoring ───────────────────────────────────────────────────
+EVIDENCE_PER_PIECE_WEIGHT = 0.15
+EVIDENCE_PER_CHAR_WEIGHT = 0.001
+MAX_EVIDENCE_SCORE = 1.0
+
+# ── Risk penalty ───────────────────────────────────────────────────────
+RISK_AVOID_PRODUCT_PENALTY = 1.0
+RISK_DISLIKED_PRODUCT_PENALTY = 1.5
+RISK_BUDGET_MIN_VIOLATION = 0.5
+
+# ── Confidence epsilon ─────────────────────────────────────────────────
+CONFIDENCE_EPSILON = 0.001
+
 
 @dataclass
 class ScoredCandidate:
@@ -124,7 +150,7 @@ def decision_confidence(
         return "selected", "medium"
 
     gap = scored[0].final_score - scored[1].final_score if len(scored) > 1 else scored[0].final_score
-    max_score = max(abs(scored[0].final_score), 0.001)
+    max_score = max(abs(scored[0].final_score), CONFIDENCE_EPSILON)
     ratio = gap / max_score
 
     if ratio >= DECISION_LOW_CONFIDENCE_RATIO:
@@ -159,32 +185,32 @@ def _compute_user_signal_scores(feedback: dict[str, Any]) -> dict[str, float]:
     return scores
 
 
-def _default_retrieval_score(rank: int, total: int = 5) -> float:
+def _default_retrieval_score(rank: int, total: int = DEFAULT_RETRIEVAL_TOTAL) -> float:
     """Fallback retrieval score when no explicit score is available."""
-    return max(0.0, 1.0 - (rank / max(total, 1)) * 0.8)
+    return max(0.0, 1.0 - (rank / max(total, 1)) * RETRIEVAL_DECAY_FACTOR)
 
 
 def _compute_criteria_match(product: ProductPayload, criteria: CriteriaPayload) -> float:
     """Compute how well a product matches the active criteria."""
-    score = 1.0
+    score = BASE_CRITERIA_SCORE
     constraints = criteria.constraints
     if constraints.budget_max is not None and product.price is not None:
         if product.price <= constraints.budget_max:
-            score += 0.1
+            score += BUDGET_UNDER_MAX_BONUS
         else:
-            score -= 0.3
+            score -= OVER_BUDGET_PENALTY
     if constraints.skin_type and product.skin_type_match:
         if constraints.skin_type in product.skin_type_match:
-            score += 0.15
+            score += SKIN_TYPE_MATCH_BONUS
     if constraints.use_scenario and product.use_scenario:
         if constraints.use_scenario in product.use_scenario:
-            score += 0.1
+            score += SCENARIO_MATCH_BONUS
     # Penalise if product contains avoided ingredients
     avoided = set(constraints.ingredient_avoid or [])
     product_ingredients = set(product.ingredient_avoid or [])
     if avoided & product_ingredients:
-        score -= 0.2 * len(avoided & product_ingredients)
-    return max(0.0, min(score, 2.0))
+        score -= INGREDIENT_AVOID_PENALTY_PER_HIT * len(avoided & product_ingredients)
+    return max(0.0, min(score, MAX_CRITERIA_SCORE))
 
 
 def _compute_evidence_score(evidence: list[EvidencePayload]) -> float:
@@ -192,7 +218,7 @@ def _compute_evidence_score(evidence: list[EvidencePayload]) -> float:
     if not evidence:
         return 0.0
     total_chars = sum(len(e.snippet) for e in evidence if e.snippet)
-    return min(1.0, len(evidence) * 0.15 + total_chars * 0.001)
+    return min(MAX_EVIDENCE_SCORE, len(evidence) * EVIDENCE_PER_PIECE_WEIGHT + total_chars * EVIDENCE_PER_CHAR_WEIGHT)
 
 
 def _compute_risk_penalty(
@@ -204,11 +230,11 @@ def _compute_risk_penalty(
     penalty = 0.0
     pid = product.product_id
     if pid in set(feedback.get("avoid_products", [])):
-        penalty += 1.0
+        penalty += RISK_AVOID_PRODUCT_PENALTY
     if pid in set(feedback.get("disliked_products", [])):
-        penalty += 1.5
+        penalty += RISK_DISLIKED_PRODUCT_PENALTY
     # Budget hard violation
     if criteria.constraints.budget_min is not None and product.price is not None:
         if product.price < criteria.constraints.budget_min:
-            penalty += 0.5
+            penalty += RISK_BUDGET_MIN_VIOLATION
     return penalty

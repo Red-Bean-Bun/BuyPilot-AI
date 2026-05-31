@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.config import user_messages as msg
 from src.config.domain_terms import (
     PRODUCT_TYPE_ALIASES,
     category_from_text,
@@ -16,7 +17,7 @@ from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, CHEAPER_BUDGET_MIN_MAX
 from src.services.conversation_state import get_previous_criteria
 from src.types.schemas import ChatStreamRequest, IntentResult
 
-COMMERCIAL_CLAIM_REPLY = "当前商品库无该字段，不能确认。"
+COMMERCIAL_CLAIM_REPLY = msg.COMMERCIAL_CLAIM_REPLY
 
 _COMMERCIAL_CLAIM_MARKERS = (
     "优惠券",
