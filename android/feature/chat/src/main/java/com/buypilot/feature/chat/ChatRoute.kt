@@ -24,6 +24,7 @@ fun ChatRoute(
         onOpenProductDetail = onOpenProductDetail,
         onRetryLastMessage = viewModel::retryLastMessage,
         onEditLastMessage = viewModel::editLastMessage,
+        onClearConversation = viewModel::clearConversation,
         onConvergeProductDeck = { deckId ->
             viewModel.convergeProductDeck(deckId)
         },
