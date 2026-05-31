@@ -8,8 +8,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.config.domain_terms import infer_category_from_product_type, normalize_category, normalize_product_type
+from src.config.domain_terms import (
+    infer_category_from_product_type,
+    normalize_category,
+    normalize_product_type,
+)
 from src.config.tuning import DEFAULT_CRITERIA_ID
+from src.services.criteria_sanitizer import sanitize_criteria_product_type, sanitize_product_type_constraint
 from src.services.prompts import get_prompt_store
 from src.types.sse_events import Constraints, CriteriaPayload, EvidencePayload, ProductPayload, ReasonAtomPayload
 
@@ -36,6 +41,7 @@ def _schema_override(task: str) -> str:
         return loaded
     # Fallback: should not happen in production, but keeps tests green
     return f"(schema override for {task} not found)"
+
 
 CONFIDENCE_LABELS = {
     "high": 0.9,
@@ -260,7 +266,13 @@ def normalize_intent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized["extracted_constraints"] = _normalize_intent_constraints(
         constraints if isinstance(constraints, dict) else {}
     )
-    if not normalized["category"]:
+    if normalized["category"]:
+        sanitize_product_type_constraint(
+            normalized["extracted_constraints"],
+            normalized["category"],
+            allow_unknown=True,
+        )
+    else:
         normalized["category"] = infer_category_from_product_type(
             normalized["extracted_constraints"].get("product_type")
         )
@@ -433,24 +445,32 @@ def criteria_from_live_payload(
     )
     if not category:
         return None
+    sanitize_product_type_constraint(raw_constraints, category)
+    # Category switch: old constraints are semantically irrelevant to the new
+    # category (e.g. dietary=["坚果","零食"] has no meaning for 数码电子).
+    # Start from clean constraints to prevent cross-category field leakage.
+    category_switched = existing is not None and category != existing.category
+    base_constraints: dict[str, Any] = {} if category_switched else base.constraints.model_dump()
     try:
         constraints = Constraints.model_validate(
             {
-                **base.constraints.model_dump(),
+                **base_constraints,
                 **raw_constraints,
             }
         )
         criteria = CriteriaPayload.model_validate(
             {
-                "criteria_id": payload.get("criteria_id") or base.criteria_id or DEFAULT_CRITERIA_ID,
+                "criteria_id": payload.get("criteria_id")
+                or (base.criteria_id if not category_switched else DEFAULT_CRITERIA_ID),
                 "category": category,
-                "summary": payload.get("summary") or base.summary,
+                "summary": payload.get("summary") or ("" if category_switched else base.summary),
                 "chips": payload.get("chips") if isinstance(payload.get("chips"), list) else [],
                 "constraints": constraints.model_dump(),
             }
         )
     except ValidationError:
         return None
+    criteria = sanitize_criteria_product_type(criteria, chips_for_constraints=_chips_for_constraints)
     if not criteria.chips:
         criteria.chips = _chips_for_constraints(criteria.category, criteria.constraints)
     if not criteria.summary:

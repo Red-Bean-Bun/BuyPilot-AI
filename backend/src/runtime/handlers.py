@@ -76,7 +76,6 @@ RECOMMENDATION_STREAM_BOUNDARIES = set("，。！？；、,.!?;:\n")
 INTRO_TEXT_NO_CONSTRAINTS = msg.INTRO_NO_CONSTRAINTS
 FOLLOWUP_TEXT_DEFAULT = msg.FOLLOWUP_DEFAULT
 FOLLOWUP_TEXT_SUBSEQUENT = msg.FOLLOWUP_SUBSEQUENT
-FOLLOWUP_TEXT_NO_MATCH = msg.FOLLOWUP_NO_MATCH
 FOLLOWUP_TEXT_BUDGET_RELAXED = msg.FOLLOWUP_BUDGET_RELAXED
 
 STREAM_TEXT_DEFAULT_DELAY_MS = 25
@@ -288,17 +287,11 @@ def _post_filter_retrieval(
 
     Does NOT re-run embedding or Rerank — just applies the hard-filter checks (O(n)).
     """
-    kept = filter_products(
-        result.products, criteria, feedback, max_products=max_products
-    )
+    kept = filter_products(result.products, criteria, feedback, max_products=max_products)
     kept_ids = {p.product_id for p in kept}
     return RetrievalResult(
         products=kept,
-        evidence_by_product={
-            pid: ev
-            for pid, ev in result.evidence_by_product.items()
-            if pid in kept_ids
-        },
+        evidence_by_product={pid: ev for pid, ev in result.evidence_by_product.items() if pid in kept_ids},
         trace_details={**result.trace_details, "speculative_post_filtered": True},
     )
 
@@ -385,7 +378,11 @@ async def handle_recommendation(
             precomputed = None  # trigger serial fallback in continue_recommendation_from_criteria
 
     async for event in continue_recommendation_from_criteria(
-        ctx, body, criteria, precomputed_retrieval=precomputed, precomputed_feedback=feedback,
+        ctx,
+        body,
+        criteria,
+        precomputed_retrieval=precomputed,
+        precomputed_feedback=feedback,
     ):
         yield event
 
@@ -457,7 +454,7 @@ async def continue_recommendation_from_criteria(
         yield _criteria_card_event(ctx, criteria)
         async for event in stream_text(
             ctx,
-            FOLLOWUP_TEXT_NO_MATCH,
+            _no_match_followup_text(criteria),
             message_id=f"no_match_{ctx.turn_id}",
             node_id=f"no_match_{ctx.turn_id}",
         ):
@@ -467,7 +464,9 @@ async def continue_recommendation_from_criteria(
         return
 
     # Emit product cards with pacing delay (built into _product_card_events)
-    async for event in _product_card_events(ctx, criteria, products, evidences_by_product, risk_notes_extra=risk_notes_extra):
+    async for event in _product_card_events(
+        ctx, criteria, products, evidences_by_product, risk_notes_extra=risk_notes_extra
+    ):
         yield event
 
     # Branch 1: single product — score, then LLM explanation, then final_decision
@@ -1079,6 +1078,31 @@ def _budget_was_relaxed(trace_details: dict) -> bool:
         if "budget_max" in (step.get("relaxed_fields") or []):
             return True
     return False
+
+
+def _no_match_followup_text(criteria: CriteriaPayload) -> str:
+    constraints = criteria.constraints
+    has_budget = constraints.budget_min is not None or constraints.budget_max is not None
+    has_exclusions = bool(
+        constraints.brand_avoid or constraints.origin_avoid or constraints.ingredient_avoid or constraints.dietary
+    )
+    has_product_type = bool(constraints.product_type)
+    if criteria.category and not has_budget and not has_exclusions and not has_product_type:
+        examples = msg.PRODUCT_TYPE_HINTS_BY_CATEGORY.get(criteria.category, "具体商品类型")
+        return msg.FOLLOWUP_NO_MATCH_NEED_PRODUCT_TYPE_TEMPLATE.format(category=criteria.category, examples=examples)
+
+    suggestions: list[str] = []
+    if has_budget:
+        suggestions.append("放宽预算")
+    if has_product_type:
+        suggestions.append("换一个具体商品类型")
+    else:
+        suggestions.append("补充具体商品类型")
+    if has_exclusions:
+        suggestions.append("去掉部分排除条件")
+    if criteria.category:
+        suggestions.append("换一个品类")
+    return msg.FOLLOWUP_NO_MATCH_ADJUST_TEMPLATE.format(suggestions="、".join(dict.fromkeys(suggestions)))
 
 
 INTENT_HANDLERS: dict[str, IntentHandler] = {

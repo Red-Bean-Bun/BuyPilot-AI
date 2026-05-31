@@ -41,6 +41,16 @@ async def test_retrieve_normalizes_product_type_aliases():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_category_only_returns_digital_candidates():
+    criteria = CriteriaPayload(category="数码电子", summary="数码电子", constraints=Constraints())
+
+    products = await retrieve(criteria, top_n=3)
+
+    assert products
+    assert all(product.category == "数码电子" for product in products)
+
+
+@pytest.mark.asyncio
 async def test_retrieve_filters_feedback_avoid_products():
     criteria = CriteriaPayload(
         category="美妆护肤",

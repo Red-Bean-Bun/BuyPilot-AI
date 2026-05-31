@@ -39,12 +39,11 @@ async def test_rerank_strict_mode_raises_when_config_missing(monkeypatch):
     _reset_settings()
 
 
-def test_qwen3_rerank_uses_compatible_api_endpoint(monkeypatch):
-    monkeypatch.setenv("BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+def test_qwen3_rerank_uses_dashscope_native_endpoint(monkeypatch):
     monkeypatch.setenv("BAILIAN_API_KEY", "test-key")
     _reset_settings()
 
     profile = reranker._resolve_rerank_profile("gte_rerank")
 
-    assert reranker._rerank_endpoint(profile) == "https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+    assert reranker._rerank_endpoint(profile) == "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
     _reset_settings()

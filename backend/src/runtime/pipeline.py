@@ -26,7 +26,7 @@ from src.runtime.stages.multimodal import run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.config import user_messages as msg
-from src.config.domain_terms import KNOWN_CATEGORIES, is_supported_product_type
+from src.config.domain_terms import KNOWN_CATEGORIES, is_supported_product_type, normalize_category
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
@@ -349,6 +349,8 @@ def _unsupported_product_type(intent: IntentResult) -> bool:
     if intent.category and intent.category not in KNOWN_CATEGORIES:
         return True
     product_type = (intent.extracted_constraints or {}).get("product_type")
+    if normalize_category(product_type) in KNOWN_CATEGORIES:
+        return False
     return bool(product_type and not is_supported_product_type(str(product_type)))
 
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from src.config import user_messages as msg
 from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, DEFAULT_CRITERIA_ID
+from src.services.criteria_sanitizer import sanitize_criteria_product_type, sanitize_product_type_constraint
 from src.services.conversation_state import get_conversation_summary, get_previous_criteria
 from src.services.feedback import get_feedback_context
 from src.services.llm_client import generate_criteria
@@ -48,6 +49,7 @@ def criteria_from_intent(
     """
     _LIST_FIELDS = {"brand_avoid", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
     allowed = set(Constraints.model_fields)
+    category = intent.category or ""
     constraint_kwargs: dict[str, Any] = {}
     for key, value in (intent.extracted_constraints or {}).items():
         if key not in allowed or value is None:
@@ -56,8 +58,8 @@ def criteria_from_intent(
             constraint_kwargs[key] = [value]
         else:
             constraint_kwargs[key] = value
+    sanitize_product_type_constraint(constraint_kwargs, category)
     constraints = Constraints(**constraint_kwargs)
-    category = intent.category or ""
     chips = [category] if category else []
     chips.extend(_constraint_chips(constraints))
 
@@ -81,6 +83,8 @@ def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> Cr
     raw_constraints = patch.get("constraints", patch)
     allowed = set(Constraints.model_fields)
     updates = {key: value for key, value in raw_constraints.items() if key in allowed}
+    if "product_type" in updates:
+        sanitize_product_type_constraint(updates, criteria.category, clear_invalid=True)
     for key in _MERGE_LIST_FIELDS & updates.keys():
         updates[key] = list(dict.fromkeys([*(getattr(criteria.constraints, key) or []), *(updates[key] or [])]))
     constraints = criteria.constraints.model_copy(update=updates)
@@ -104,8 +108,12 @@ def annotate_criteria_sources(
     intent: IntentResult,
     existing: CriteriaPayload | None,
 ) -> CriteriaPayload:
+    criteria = sanitize_criteria_product_type(criteria, chips_for_constraints=_criteria_chips)
     explicit_fields = _explicit_source_fields(intent)
     history_fields = _history_source_fields(criteria, existing)
+    # Category switch: only keep constraints the user explicitly stated this
+    # turn. All other fields are semantically irrelevant to the new category.
+    category_switched = existing is not None and criteria.category and criteria.category != existing.category
     field_sources: dict[str, str] = {}
     if criteria.category:
         field_sources["category"] = (
@@ -120,6 +128,10 @@ def annotate_criteria_sources(
             continue
         if field in explicit_fields:
             field_sources[field] = "user"
+            continue
+        if category_switched:
+            # Non-explicit field on category switch: discard it
+            constraints_update[key] = [] if isinstance(value, list) else None
             continue
         if field in history_fields:
             field_sources[field] = "history"
@@ -137,7 +149,14 @@ def annotate_criteria_sources(
     return criteria.model_copy(update={"field_sources": field_sources, "chips": chips, "summary": "，".join(chips)})
 
 
-_HARD_CONSTRAINT_FIELDS = {"budget_min", "budget_max", "brand_avoid", "origin_avoid", "ingredient_avoid"}
+_HARD_CONSTRAINT_FIELDS = {
+    "budget_min",
+    "budget_max",
+    "brand_avoid",
+    "origin_avoid",
+    "ingredient_avoid",
+    "product_type",
+}
 
 
 def _explicit_source_fields(intent: IntentResult) -> set[str]:
@@ -146,8 +165,16 @@ def _explicit_source_fields(intent: IntentResult) -> set[str]:
         fields.add("category")
     for key, value in (intent.extracted_constraints or {}).items():
         if key in Constraints.model_fields and _has_value(value):
+            if key == "product_type" and not _valid_product_type_source(value, intent.category):
+                continue
             fields.add(f"constraints.{key}")
     return fields
+
+
+def _valid_product_type_source(value: Any, category: str | None) -> bool:
+    probe: dict[str, Any] = {"product_type": value}
+    sanitize_product_type_constraint(probe, category)
+    return bool(probe.get("product_type"))
 
 
 def _history_source_fields(criteria: CriteriaPayload, existing: CriteriaPayload | None) -> set[str]:
@@ -188,6 +215,12 @@ def _constraint_chips(constraints: Constraints) -> list[str]:
         chips.append(f"不要{item}")
     if constraints.product_type:
         chips.append(constraints.product_type)
+    return chips
+
+
+def _criteria_chips(category: str, constraints: Constraints) -> list[str]:
+    chips = [category] if category else []
+    chips.extend(_constraint_chips(constraints))
     return chips
 
 

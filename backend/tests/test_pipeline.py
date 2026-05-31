@@ -6,6 +6,7 @@ from src.runtime import handlers as handlers_module
 from src.runtime import pipeline as pipeline_module
 from src.runtime import streaming as streaming_module
 from src.runtime.cancel_registry import active_turn_count, cancel_turn
+from src.runtime.handlers import _no_match_followup_text
 from src.runtime.pipeline import chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
 from src.services.fallbacks import get_fallback_events
@@ -146,6 +147,24 @@ async def test_pipeline_product_first_default_flow():
     assert events[-1].event == "done"
     assert events[-1].finish_reason in ("awaiting_product_feedback", "completed")
     assert [event.seq for event in events] == sorted(event.seq for event in events)
+
+
+def test_no_match_text_for_category_only_asks_for_product_type():
+    criteria = CriteriaPayload(category="数码电子", constraints=Constraints())
+
+    text = _no_match_followup_text(criteria)
+
+    assert "手机、耳机、平板、笔记本电脑" in text
+    assert "放宽预算" not in text
+    assert "排除条件" not in text
+
+
+def test_no_match_text_with_budget_mentions_budget():
+    criteria = CriteriaPayload(category="数码电子", constraints=Constraints(budget_max=500))
+
+    text = _no_match_followup_text(criteria)
+
+    assert "放宽预算" in text
 
 
 @pytest.mark.asyncio

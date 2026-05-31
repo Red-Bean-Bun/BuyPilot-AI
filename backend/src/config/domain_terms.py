@@ -303,11 +303,19 @@ def normalize_category(value: object) -> str | None:
     return key
 
 
-def normalize_product_type(value: str | None) -> str | None:
+def normalize_product_type(value: object) -> str | None:
     if value is None:
+        return None
+    if isinstance(value, int | float):
+        value = str(value)
+    if not isinstance(value, str):
         return None
     key = value.strip()
     if not key:
+        return None
+    if key.casefold() in {"null", "none", "nil", "n/a", "na", "unknown", "undefined"}:
+        return None
+    if key in {"无", "未知", "未识别"}:
         return None
     direct = _PRODUCT_TYPE_INDEX.get(key.casefold())
     if direct:
@@ -328,6 +336,35 @@ def product_type_aliases(value: str | None) -> tuple[str, ...]:
 def infer_category_from_product_type(value: str | None) -> str | None:
     canonical = normalize_product_type(value)
     return PRODUCT_TYPE_TO_CATEGORY.get(canonical or "")
+
+
+def normalize_product_type_for_category(
+    value: object,
+    category: object,
+    *,
+    allow_unknown: bool = False,
+) -> str | None:
+    canonical = normalize_product_type(value)
+    if not canonical:
+        return None
+    normalized_category = normalize_category(category)
+    inferred_category = infer_category_from_product_type(canonical)
+    if not inferred_category and _is_exact_category_label(canonical):
+        return None
+    if not inferred_category:
+        return canonical if allow_unknown else None
+    if normalized_category and inferred_category and normalized_category != inferred_category:
+        return None
+    return canonical
+
+
+def _is_exact_category_label(value: str) -> bool:
+    key = value.strip().casefold()
+    if not key:
+        return False
+    if any(key == category.casefold() for category in KNOWN_CATEGORIES):
+        return True
+    return any(key == alias.casefold() for aliases in CATEGORY_ALIASES.values() for alias in aliases)
 
 
 def is_supported_product_type(value: str | None) -> bool:
