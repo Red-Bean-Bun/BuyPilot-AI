@@ -42,6 +42,7 @@ def test_criteria_strips_inferred_budget_in_new_session():
 
 
 def test_criteria_strips_inferred_product_type_in_new_session():
+    """product_type is no longer in HARD_CONSTRAINT_FIELDS — kept as 'inferred'."""
     generated = CriteriaPayload(
         criteria_id="c_new",
         category="数码电子",
@@ -51,9 +52,9 @@ def test_criteria_strips_inferred_product_type_in_new_session():
 
     criteria = annotate_criteria_sources(generated, intent, None)
 
-    assert criteria.constraints.product_type is None
-    assert "constraints.product_type" not in criteria.field_sources
-    assert criteria.chips == ["数码电子", "日常使用"]
+    assert criteria.constraints.product_type == "智能手机"
+    assert criteria.field_sources["constraints.product_type"] == "inferred"
+    assert "智能手机" in criteria.chips
 
 
 def test_criteria_keeps_user_explicit_product_type():
@@ -90,6 +91,7 @@ def test_criteria_keeps_history_product_type():
 
 
 def test_category_name_product_type_is_not_explicit_source():
+    """Intent product_type equal to category name is not explicit, but criteria's correct value is kept."""
     generated = CriteriaPayload(
         criteria_id="c_new",
         category="数码电子",
@@ -99,8 +101,8 @@ def test_category_name_product_type_is_not_explicit_source():
 
     criteria = annotate_criteria_sources(generated, intent, None)
 
-    assert criteria.constraints.product_type is None
-    assert "constraints.product_type" not in criteria.field_sources
+    assert criteria.constraints.product_type == "智能手机"
+    assert criteria.field_sources["constraints.product_type"] == "inferred"
 
 
 def test_food_category_normalizes_to_business_taxonomy():
@@ -287,3 +289,40 @@ def test_category_name_product_type_is_not_treated_as_unsupported():
     intent = IntentResult(intent="recommend", category="数码电子", extracted_constraints={"product_type": "数码电子"})
 
     assert _unsupported_product_type(intent) is False
+
+
+# ── product_type retention after removal from _HARD_CONSTRAINT_FIELDS ──────
+
+
+def test_product_type_retained_as_inferred_when_not_explicit():
+    """LLM-inferred product_type should survive annotation, marked as 'inferred'."""
+    generated = CriteriaPayload(
+        criteria_id="c_test",
+        category="食品生活",
+        summary="食品生活，坚果",
+        chips=["食品生活", "坚果"],
+        constraints=Constraints(product_type="坚果/零食"),
+    )
+    intent = IntentResult(intent="recommend", category="食品生活", extracted_constraints={})
+
+    result = annotate_criteria_sources(generated, intent, existing=None)
+
+    assert result.constraints.product_type == "坚果/零食"
+    assert result.field_sources.get("constraints.product_type") == "inferred"
+
+
+def test_product_type_still_cleared_on_category_switch():
+    """Category switch clears product_type even without HARD_CONSTRAINT (category_switched check)."""
+    existing = CriteriaPayload(category="食品生活", constraints=Constraints(product_type="坚果"))
+    generated = CriteriaPayload(
+        criteria_id="c_test",
+        category="数码电子",
+        chips=["数码电子", "智能手机"],
+        constraints=Constraints(product_type="智能手机"),
+    )
+    intent = IntentResult(intent="recommend", category="数码电子", extracted_constraints={})
+
+    result = annotate_criteria_sources(generated, intent, existing=existing)
+
+    assert result.constraints.product_type is None
+    assert "constraints.product_type" not in result.field_sources

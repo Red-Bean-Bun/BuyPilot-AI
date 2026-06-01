@@ -160,7 +160,6 @@ _HARD_CONSTRAINT_FIELDS = {
     "brand_avoid",
     "origin_avoid",
     "ingredient_avoid",
-    "product_type",
 }
 
 
