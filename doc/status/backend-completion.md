@@ -1,8 +1,8 @@
 # BuyPilot-AI 后端完成状态
 
-> 最后核实：2026-05-28（全面整改）
+> 最后核实：2026-06-02（图片 embedding 索引 + Makefile 运维 + bug 修复）
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 本次改动摘要：product-first 流式体验重构 + 决策收敛算法 + SSE 类型扩展。
+> 本次改动摘要：图片 VL embedding 索引（qwen3-vl-embedding 1024 维）+ 运维 Makefile + 上传目录 bind mount + 4 个检索/索引 bug 修复
 > 历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过
 
 ---
@@ -34,8 +34,9 @@
 | 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids/deck_id 已持久化到 Conversations 表；澄清/继续轮会合并上一轮 criteria，避免短回答或“继续”丢槽位；完整消息历史尚未用于 LLM |
 | 17 | 反馈闭环 | ✅ 已完成 | 7 | `services/feedback.py` `repos/feedbacks.py` `services/retriever.py` | Feedbacks 表已持久化，avoid_products/avoid_traits 已进入 retrieval 硬过滤；2026-05-28 增加 `deck_id` 绑定，候选后最终决策会读取当前 deck 反馈并排除不喜欢商品 |
 | 18 | 反选排除（⭐⭐） | ✅ 已完成 | — | `stages/criteria.py` | criteria_patch + ingredient_avoid + DB 会话恢复已覆盖 Demo 3 |
-| 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；JSON legacy mock 已移除，非 multipart 请求返回 415 |
+| 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`（bind mount 到宿主机 `backend/uploads/`）、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；JSON legacy mock 已移除，非 multipart 请求返回 415 |
 | 20 | 对话式加购（⭐入门） | ✅ 已完成 | — | `services/cart.py` `repos/cart_items.py` `api/cart.py` `runtime/handlers.py` | add/view/remove/update 已持久化到 cart_items 表并覆盖 Demo 4；内存兜底为显式 dev adapter（默认关闭）；无可指代商品时发 ClarificationEvent 而非静默兜底；quantity=0 在 intent 解析层视为无效输入（返回 default），不走 repo 层隐式删除；product_id 不存在时返回 status=failed |
+| 20.1 | 图片 VL embedding 索引 | ✅ 已完成 | — | `scripts/reindex_image_embeddings.py` `services/embedding.py` `repos/models.py` | qwen3-vl-embedding 1024 维；`make seed-image` 手动触发（hash 幂等）；payload 格式 `input.contents[{image:...}]`；与 text seed 分离，不拖慢启动 |
 
 ## P2：打磨与稳定性
 
@@ -62,7 +63,7 @@
 | 28 | 架构分层（AGENTS.md） | ✅ 基本符合 | API/Runtime 已通过 Service 访问业务能力；`repos.ingest` 反向依赖已移到 `services/product_ingest.py`；eval runner 已移出 service 反向依赖；新增测试防止 API/Runtime 直接 import Repo、Repo 反向 import Service |
 | 29 | 配置集中管理 | ✅ 符合 | `settings.py` + `llm_profiles.yaml` + `config/tuning.py` + `config/domain_terms.py`，运行时调参常量、领域词典、反馈规避词和品牌别名已集中，禁止散落 `os.getenv()` |
 | 30 | 错误处理 | ✅ 有 | pipeline try/except 兜底，ErrorEvent 对外只返回稳定文案 + trace_id，内部异常进日志；LLM/embedding/rerank/cart/trace 等可降级路径已加日志；推荐链路 trace 记录 `_fallbacks`；`STRICT_RUNTIME=1` 下关键降级会显性失败 |
-| 31 | Docker Compose | ✅ 基本可用 | `deploy/docker-compose.yml` 已配置 `pgvector/pgvector:pg16`；API 容器不再使用 `--reload` 和源码热挂载，运行时上传目录改为 named volume；Postgres 启动时自动 `CREATE EXTENSION vector`，`product_chunks.embedding` 在 Postgres 下为 `VECTOR(1024)`；旧 JSON chunk 表需通过 `reindex_embeddings --drop-derived-tables` 显式清理；SQLite 测试环境仍为 JSON |
+| 31 | Docker Compose + Makefile | ✅ 基本可用 | `deploy/docker-compose.yml` + 根目录 `Makefile`；`pgvector/pgvector:pg16`；API 容器不使用 `--reload`，上传目录为 bind mount（`../backend/uploads:/app/uploads`）；运维命令统一通过 `make rebuild`/`make seed-image`/`make db-stats` 等执行；Postgres 启动时自动 `CREATE EXTENSION vector`；旧 JSON chunk 表需通过 `reindex_embeddings --drop-derived-tables` 显式清理 |
 | 32 | Prompt 文件 | ✅ 已完成 | `analyze_intent`/`generate_criteria`/`generate_recommendation`/`generate_decision`/`analyze_image` 已通过 `PromptStore` 运行时加载 `backend/prompts/*.md`；三个核心 prompt 已重写严格对齐 Pydantic 模型（CriteriaPayload/RecommendationResult/DecisionResult），移除 weights/quick_actions/verdict/why_chips/confidence/decision_basis 等运行时不存在字段 |
 | 33 | 接口契约文档 | ✅ 有 | `contracts/sse-events.schema.json` + 3 个 golden trace 示例 |
 | 34 | 评测看板（Streamlit） | ✅ 已完成 | `static/eval_dashboard.py`，4 页：总览/版本对比/样本详情/错误分析，`streamlit run` 启动 |

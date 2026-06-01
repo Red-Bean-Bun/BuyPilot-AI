@@ -9,18 +9,19 @@
 |--------|------|
 | 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
-| LLM | **双轨并行**：火山引擎 Doubao（意图识别主力）+ 百炼 Qwen（生成主力） |
+| LLM | **百炼主力 + Doubao 兜底**：qwen-turbo 做意图/标准/推荐/决策主力，Doubao 做 fallback；Qwen-VL-Plus 做图片理解 |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
 | 模型切换 | task-oriented interface（analyze_intent / generate_criteria / generate_recommendation / analyze_image），内部按 TASK_MODEL_MAP 选 primary/fallback |
 
-### 模型-任务映射（双轨策略）
+### 模型-任务映射（百炼主力策略）
 
 | 任务 | Primary | Fallback | 选型原因 |
 |------|---------|----------|---------|
-| 意图识别/路由 | Doubao-Seed-2.0-lite | Qwen-Turbo | 意图识别不需要很强，Doubao 免费额度高 |
-| 购买标准生成 | Qwen-Plus | Doubao | 核心亮点，JSON schema 强约束输出，Qwen-Plus 更稳定 |
-| 推荐解释生成 | Qwen-Plus | Doubao | 解释需要高质量文本生成 |
+| 意图识别/路由 | Qwen-Turbo | Doubao-Seed-2.0-lite | qwen-turbo 延迟低、成本低，实测效果与 Doubao 无显著差异 |
+| 购买标准生成 | Qwen-Turbo | Doubao-Seed-1.6 | 结构化 prompt + JSON schema 约束下，qwen-turbo 输出稳定 |
+| 推荐解释生成 | Qwen-Turbo | Doubao-Seed-1.6 | 推荐文案质量在 prompt 工程下与 qwen-plus 差异不大，成本优势明显 |
+| 最终决策生成 | Qwen-Turbo | Doubao-Seed-1.6 | 决策基于候选 + 反馈的结构化输入，模型能力要求不高 |
 | 多模态图片理解 | Qwen-VL-Plus | 无 | Doubao VL 生态不确定，Qwen-VL-Plus 成熟 |
 | Embedding | text-embedding-v3 (1024维) | 确定性 fallback (16维) | 百炼有 Key + 维度确定；fallback 仅供开发态 |
 | Rerank | qwen3-rerank (百炼) | 无 | Doubao 无对应服务 |
@@ -330,15 +331,15 @@ docker-compose up
 ```
 用户输入 (Android)
   ↓
-意图识别 (Doubao primary / Qwen-Turbo fallback) + 槽位检查
+意图识别 (Qwen-Turbo primary / Doubao fallback) + 槽位检查
   ↓ add_to_cart意图 → cart_action事件 → 加购操作
   ↓ 需要澄清时 → clarification 事件（多问题模式，每题带 suggested_options）
   ↓ 并行
-购买标准生成 (Qwen-Plus primary / Doubao fallback) → 约束列表 → 展平为 CriteriaPayload（封闭 DSL，constraints 为显式枚举字段）  |  投机检索 (embedding + 硬过滤)
+购买标准生成 (Qwen-Turbo primary / Doubao fallback) → 约束列表 → 展平为 CriteriaPayload（封闭 DSL，constraints 为显式枚举字段）  |  投机检索 (embedding + 硬过滤)
   ↓
 混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(gte)
   ↓
-推荐解释生成 (Qwen-Plus) + 证据绑定
+推荐解释生成 (Qwen-Turbo) + 证据绑定
   ↓
 SSE 事件流（每事件必带 seq + session_id）：
   thinking → clarification → criteria_card → text_delta → product_card → cart_action → final_decision → done

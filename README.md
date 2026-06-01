@@ -10,7 +10,7 @@
 |--------|------|
 | 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
-| LLM | **双轨并行**：火山引擎 Doubao（意图识别主力）+ 百炼 Qwen（生成/多模态/Embedding/Rerank 主力） |
+| LLM | **百炼主力 + Doubao 兜底**：qwen-turbo 做意图/标准/推荐/决策主力，Doubao 做 fallback；Qwen-VL-Plus 做图片理解 |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel（SQLite 仅 pytest 隔离测试） |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
 | 商品数据 | 导师官方脱敏电商数据（100条，4品类×25） |
@@ -112,7 +112,10 @@ doc/
 │   └── examples/                    ← Golden trace 示例（3 个 .sse）
 │
 ├── deploy/                      ← 部署
-│   └── docker-compose.yml           ← PG + pgvector + FastAPI
+│   ├── docker-compose.yml           ← PG + pgvector + FastAPI
+│   └── docker-compose.cloudflare.yml ← Cloudflare Tunnel
+│
+├── Makefile                     ← 运维命令入口（make help 查看全部）
 │
 └── .github/workflows/           ← CI
     └── backend-tests.yml             ← pytest + ruff
@@ -126,30 +129,37 @@ doc/
 # 1) 准备真实模型配置：复制模板到项目根目录 .env，并填写 BAILIAN_API_KEY。
 cp .env.example .env
 
-# 2) 启动 Postgres/pgvector + FastAPI；首次启动会自动建表、入库并生成 1024 维 embedding。
-cd deploy
-docker-compose up --build
+# 2) 启动 Postgres/pgvector + FastAPI；首次启动会自动建表、入库并生成 text embedding。
+make rebuild
 
-# 3) 另开终端执行 live RAG 门禁；输出每个阶段的 JSON 状态，任一阶段失败会非 0 退出。
-cd ../backend
-uv run -m src.scripts.smoke_live_rag
+# 3) 构建图片 embedding 索引（拍照找货需要，text seed 不包含）
+make seed-image
 
-# 4) 执行完整 Demo smoke。
-uv run -m src.scripts.demo_smoke
+# 4) 验证
+make db-stats     # 确认 products:100, chunks:1292, image_embeddings:100
+make smoke        # live RAG 门禁
 ```
 
 说明：PostgreSQL + pgvector 是后端运行时必需依赖；SQLite 仅作为 pytest 隔离测试路径，不支持日常开发或答辩运行。
 
+### 运维命令（Makefile）
+
+所有命令从**项目根目录**执行，已统一 compose 文件和 env-file 配置：
+
+```bash
+make help          # 显示所有命令
+make rebuild       # 重建镜像并启动（自动 seed text embedding）
+make seed-image    # 构建图片 embedding 索引（需要百炼 VL API Key）
+make db-stats      # 查看数据库表行数
+make logs          # 查看 api 日志
+make reset         # 删库 + 重建（全量重置）
+make smoke         # live RAG smoke test
+make shell         # 进入容器 shell
+```
+
 ### Cloudflare 部署
 
 后端推荐通过 Cloudflare Tunnel 暴露现有 Docker Compose 服务，避免把 FastAPI + pgvector + SSE 强行迁到 Worker 运行时。配置见 [`deploy/cloudflare.md`](deploy/cloudflare.md)。
-
-```bash
-docker compose --env-file .env \
-  -f deploy/docker-compose.yml \
-  -f deploy/docker-compose.cloudflare.yml \
-  up --build -d
-```
 
 ### 开发路径
 
@@ -166,9 +176,6 @@ uv run -m src.scripts.smoke_live_rag
 
 # Demo smoke（6 条 Demo 路径端到端，需 Postgres/pgvector + 真实 API Key）
 uv run -m src.scripts.demo_smoke
-
-# Docker Compose 演示环境
-cd deploy && docker-compose up
 ```
 
 ## 文档角色定位
@@ -201,15 +208,15 @@ cd deploy && docker-compose up
 ```
 用户输入 (Android)
   ↓
-意图识别 (Doubao primary / Qwen-Turbo fallback) + 槽位检查
+意图识别 (Qwen-Turbo primary / Doubao fallback) + 槽位检查
   ↓ add_to_cart意图 → cart_action事件 → 购物车状态更新
   ↓ 需要澄清时 → clarification 事件
   ↓ 并行
-购买标准生成 (Qwen-Plus primary / Doubao fallback)  |  投机检索 (embedding + 硬过滤)
+购买标准生成 (Qwen-Turbo primary / Doubao fallback)  |  投机检索 (embedding + 硬过滤)
   ↓
 混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(qwen3-rerank)
   ↓
-推荐解释生成 (Qwen-Plus) + 证据绑定
+推荐解释生成 (Qwen-Turbo) + 证据绑定
   ↓
 SSE 事件流：thinking → clarification → criteria_card → text_delta → product_card → cart_action → final_decision → done
   ↓
