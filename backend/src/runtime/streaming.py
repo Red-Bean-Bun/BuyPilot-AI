@@ -32,12 +32,16 @@ class RunRetrieval(Protocol):
         criteria: CriteriaPayload,
         top_n: int = 5,
         feedback: Mapping[str, list[str]] | None = None,
+        image_embedding: list[float] | None = None,
     ) -> Awaitable[RetrievalResult]: ...
 
 
 class StageBundle(Protocol):
     @property
     def run_multimodal(self) -> Callable[[str | None], Awaitable[dict[str, Any] | None]]: ...
+
+    @property
+    def run_image_embedding(self) -> Callable[[str | None], Awaitable[list[float] | None]]: ...
 
     @property
     def run_intent(self) -> Callable[[ChatStreamRequest], Awaitable[IntentResult]]: ...

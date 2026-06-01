@@ -22,7 +22,7 @@ from src.runtime.message_rules import (
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions, run_criteria
 from src.runtime.stages.decision import run_decision
 from src.runtime.stages.intent import run_intent
-from src.runtime.stages.multimodal import run_multimodal
+from src.runtime.stages.multimodal import run_image_embedding, run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.config import user_messages as msg
@@ -67,6 +67,7 @@ class _TurnGuard:
 @dataclass(frozen=True)
 class PipelineStages:
     run_multimodal: Callable[[str | None], Awaitable[dict[str, Any] | None]]
+    run_image_embedding: Callable[[str | None], Awaitable[list[float] | None]]
     run_intent: Callable[[str, ChatStreamRequest], Awaitable[IntentResult]]
     run_criteria: Callable[[str, ChatStreamRequest, IntentResult], Awaitable[CriteriaPayload]]
     run_retrieval: RunRetrieval
@@ -407,6 +408,7 @@ def _current_stages() -> PipelineStages:
     """Resolve stage implementations via module attributes so tests can monkeypatch them."""
     return PipelineStages(
         run_multimodal=run_multimodal,
+        run_image_embedding=run_image_embedding,
         run_intent=run_intent,
         run_criteria=run_criteria,
         run_retrieval=run_retrieval,

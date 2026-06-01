@@ -23,8 +23,9 @@ async def run_retrieval(
     criteria: CriteriaPayload,
     top_n: int = 5,
     feedback: Mapping[str, list[str]] | None = None,
+    image_embedding: list[float] | None = None,
 ) -> RetrievalResult:
-    retrieval = await retrieve_with_evidence(criteria, top_n=top_n, feedback=feedback)
+    retrieval = await retrieve_with_evidence(criteria, top_n=top_n, feedback=feedback, image_embedding=image_embedding)
     return RetrievalResult(
         products=retrieval.products,
         evidence_by_product=retrieval.evidence_by_product,

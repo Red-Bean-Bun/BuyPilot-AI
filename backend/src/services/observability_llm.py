@@ -17,6 +17,7 @@ from src.repos.observability_llm import insert_llm_call, insert_sse_event
 from src.services.request_context import get_request_context
 
 logger = logging.getLogger(__name__)
+_OBSERVABILITY_TASKS: set[asyncio.Task[None]] = set()
 
 
 async def safe_observability_task(
@@ -125,7 +126,7 @@ def schedule_llm_call_recording(
     This is what llm_gateway.py should call. The task is created but
     NOT awaited, so observability writes never block the chat flow.
     """
-    asyncio.create_task(
+    _schedule_observability_task(
         record_llm_call(
             task=task,
             profile=profile,
@@ -199,7 +200,7 @@ def schedule_sse_event_recording(
     finish_reason: str | None = None,
 ) -> None:
     """Fire-and-forget wrapper for SSE event recording."""
-    asyncio.create_task(
+    _schedule_observability_task(
         record_sse_event(
             event_type=event_type,
             seq=seq,
@@ -213,3 +214,21 @@ def schedule_sse_event_recording(
             finish_reason=finish_reason,
         )
     )
+
+
+def _schedule_observability_task(coro: Coroutine[Any, Any, None]) -> None:
+    task = asyncio.create_task(coro)
+    _OBSERVABILITY_TASKS.add(task)
+    task.add_done_callback(_OBSERVABILITY_TASKS.discard)
+
+
+async def drain_observability_tasks(timeout_seconds: float = 1.0) -> None:
+    pending = [task for task in _OBSERVABILITY_TASKS if not task.done()]
+    if not pending:
+        return
+
+    _, still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+    for task in still_pending:
+        task.cancel()
+    if still_pending:
+        await asyncio.gather(*still_pending, return_exceptions=True)

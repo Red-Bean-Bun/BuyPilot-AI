@@ -311,6 +311,12 @@ async def handle_recommendation(
     else:
         product_ids_task = None
 
+    # ── Fire image embedding in parallel (for visual similarity retrieval) ──
+    image_embedding_task: asyncio.Task | None = None
+    if body.image_url:
+        image_embedding_task = asyncio.create_task(ctx.stages.run_image_embedding(body.image_url))
+        ctx.background_tasks.append(TimedTask(task=image_embedding_task, started_at=time.perf_counter()))
+
     # ── Build speculative criteria (instant, no I/O) ──
     spec_criteria = criteria_from_intent(intent, summary=_speculative_summary(intent))
 
@@ -331,9 +337,10 @@ async def handle_recommendation(
         feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
 
     # ── Speculative retrieval: launch in background while criteria runs ──
+    image_embedding = await image_embedding_task if image_embedding_task else None
     retrieval_task = start_stage_task(
         ctx,
-        ctx.stages.run_retrieval(spec_criteria, top_n=8, feedback=feedback),
+        ctx.stages.run_retrieval(spec_criteria, top_n=8, feedback=feedback, image_embedding=image_embedding),
         timing_key="retrieve",
         background=True,
     )
@@ -383,6 +390,7 @@ async def handle_recommendation(
         criteria,
         precomputed_retrieval=precomputed,
         precomputed_feedback=feedback,
+        image_embedding=image_embedding,
     ):
         yield event
 
@@ -414,6 +422,7 @@ async def continue_recommendation_from_criteria(
     *,
     precomputed_retrieval: RetrievalResult | None = None,
     precomputed_feedback: dict | None = None,
+    image_embedding: list[float] | None = None,
 ) -> AsyncGenerator[SSEEventBase, None]:
     ctx.ensure_active()
 
@@ -435,7 +444,7 @@ async def continue_recommendation_from_criteria(
             retrieval_capture,
             run_with_heartbeat(
                 ctx,
-                ctx.stages.run_retrieval(criteria, feedback=feedback),
+                ctx.stages.run_retrieval(criteria, feedback=feedback, image_embedding=image_embedding),
                 "searching",
                 msg.THINKING_SEARCHING,
                 timing_key="retrieve",

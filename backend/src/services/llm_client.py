@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 _LOG_PAYLOAD_PREVIEW_CHARS = 2000
 _PARSED_JSON_UPDATE_RETRY_DELAYS_SECONDS = (0.02, 0.05, 0.1, 0.2, 0.4)
 _PRODUCT_ID_RE = re.compile(r"\bp_[a-z]+_\d+\b")
-_FORBIDDEN_RECOMMENDATION_TERMS = (
+_FORBIDDEN_COMMERCIAL_TERMS = (
     "库存",
     "现货",
     "有货",
@@ -64,7 +64,15 @@ _FORBIDDEN_RECOMMENDATION_TERMS = (
     "购买链接",
     "下单",
     "立即购买",
+    "物流",
+    "快递",
+    "发货",
+    "几天到",
+    "送到",
 )
+
+# Backward-compatible alias for recommendation validation.
+_FORBIDDEN_RECOMMENDATION_TERMS = _FORBIDDEN_COMMERCIAL_TERMS
 
 
 def _schedule_parsed_json_update(
@@ -361,26 +369,7 @@ def _validate_recommendation_chunks(chunks: list[str], products: list[ProductPay
 
 # ── Decision text sanitisation (总评 #7) ────────────────────────────────────
 
-_DECISION_FORBIDDEN_TERMS = (
-    "库存",
-    "现货",
-    "有货",
-    "缺货",
-    "优惠券",
-    "满减",
-    "折扣",
-    "打折",
-    "包邮",
-    "免邮",
-    "运费",
-    "下单",
-    "购买链接",
-    "物流",
-    "快递",
-    "发货",
-    "几天到",
-    "送到",
-)
+_DECISION_FORBIDDEN_TERMS = _FORBIDDEN_COMMERCIAL_TERMS
 _DECISION_SAFE_REPLACEMENT = msg.DECISION_SAFE_REPLACEMENT
 
 
