@@ -6,190 +6,282 @@
 <title>Chat Stream Observer</title>
 <style>
 /* ═══════════════════════════════════════════════
-   Grafana-style utilitarian dark theme.
-   Zero decoration, max information density,
-   color only serves state semantics.
+   Glassmorphism dashboard — frosted glass cards
+   with soft glowing background orbs.
    ═══════════════════════════════════════════════ */
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden}
 
 body{
   font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #d8d9da;
-  background: #111217;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1e293b;
+  background: linear-gradient(135deg, #f5f3ff 0%, #eef2ff 30%, #f0f9ff 60%, #fdf2f8 100%);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+}
+/* ── Background decorative orbs ───────────────── */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse 600px 400px at 15% 20%, rgba(139,92,246,0.10) 0%, transparent 70%),
+    radial-gradient(ellipse 500px 350px at 85% 75%, rgba(59,130,246,0.10) 0%, transparent 70%),
+    radial-gradient(ellipse 400px 300px at 50% 50%, rgba(236,72,153,0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 350px 300px at 75% 10%, rgba(34,197,94,0.07) 0%, transparent 70%);
 }
 
 .mono{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;font-size:12px}
 
-/* ── Header (40px, Grafana nav height) ─────────── */
+/* ── Header (glass bar) ───────────────────────── */
 .gf-header{
-  display:flex;align-items:center;gap:12px;
-  height:40px;padding:0 12px;
-  background:#181b1f;
-  border-bottom:1px solid #2c3235;
+  display:flex;align-items:center;gap:16px;
+  height:52px;padding:0 24px;
+  background:rgba(255,255,255,0.65);
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  border-bottom:1px solid rgba(0,0,0,0.06);
+  position:relative;z-index:20;
 }
 .gf-brand{
-  font-size:13px;font-weight:600;color:#d8d9da;
-  white-space:nowrap;display:flex;align-items:center;gap:6px;flex-shrink:0;
+  font-size:15px;font-weight:700;color:#1e293b;
+  white-space:nowrap;display:flex;align-items:center;gap:6px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  flex-shrink:0;
 }
-.gf-brand-sub{color:#5ea3f5;font-weight:400}
-.gf-search{display:flex;gap:4px;flex:1;max-width:440px;margin-left:auto;align-items:center}
+.gf-brand-sub{
+  color:#8b5cf6;font-weight:500;
+  -webkit-text-fill-color:#8b5cf6;
+}
+.gf-search{display:flex;gap:8px;flex:1;max-width:480px;margin-left:auto;align-items:center}
 .gf-input{
-  height:28px;padding:0 8px;
-  background:#0b0c0f;border:1px solid #2c3235;
-  color:#d8d9da;font:12px ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  height:36px;padding:0 14px;
+  background:rgba(255,255,255,0.6);border:1px solid rgba(0,0,0,0.08);
+  border-radius:18px;
+  color:#1e293b;font:13px ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
   outline:none;flex:1;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  transition:all .2s;
 }
-.gf-input::placeholder{color:#4a4f53}
-.gf-input:focus{border-color:#5ea3f5}
+.gf-input::placeholder{color:#94a3b8}
+.gf-input:focus{
+  border-color:rgba(99,102,241,0.4);
+  box-shadow:0 0 0 4px rgba(99,102,241,0.1);
+  background:rgba(255,255,255,0.85);
+}
 .gf-btn{
-  height:28px;padding:0 12px;border:none;
-  font:500 12px inherit;cursor:pointer;white-space:nowrap;
+  height:36px;padding:0 16px;border:none;
+  border-radius:18px;
+  font:500 13px inherit;cursor:pointer;white-space:nowrap;
+  transition:all .2s;
 }
-.gf-btn-primary{background:#2f6397;color:#fff}
-.gf-btn-primary:hover{background:#3a7bc8}
-.gf-btn-ghost{background:transparent;color:#8e8e8e;border:1px solid #2c3235}
-.gf-btn-ghost:hover{color:#d8d9da;border-color:#555}
+.gf-btn-primary{
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  color:#fff;box-shadow:0 2px 8px rgba(99,102,241,0.25);
+}
+.gf-btn-primary:hover{box-shadow:0 4px 16px rgba(99,102,241,0.35);transform:translateY(-1px)}
+.gf-btn-ghost{
+  background:rgba(255,255,255,0.5);color:#64748b;
+  border:1px solid rgba(0,0,0,0.08);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+.gf-btn-ghost:hover{background:rgba(255,255,255,0.8);color:#1e293b;border-color:rgba(0,0,0,0.12)}
+.gf-filter{
+  display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;
+  font-size:12px;color:#64748b;white-space:nowrap;
+  padding:0 4px;
+}
+.gf-filter input[type=checkbox]{accent-color:#6366f1;width:14px;height:14px;cursor:pointer}
+.gf-filter:hover{color:#1e293b}
 
 /* ── Layout ────────────────────────────────────── */
-.gf-main{display:flex;height:calc(100vh - 40px)}
+.gf-main{display:flex;height:calc(100vh - 52px);position:relative;z-index:1}
 
-/* ── Sidebar (224px, compact list) ─────────────── */
+/* ── Sidebar (glass panel) ─────────────────────── */
 .gf-side{
-  width:224px;min-width:224px;
-  background:#181b1f;
-  border-right:1px solid #2c3235;
+  width:244px;min-width:244px;
+  background:rgba(255,255,255,0.45);
+  backdrop-filter:blur(16px) saturate(180%);
+  -webkit-backdrop-filter:blur(16px) saturate(180%);
+  border-right:1px solid rgba(0,0,0,0.05);
   display:flex;flex-direction:column;
 }
 .gf-side-head{
-  padding:8px 12px;font-size:11px;color:#666;
-  border-bottom:1px solid #2c3235;
+  padding:12px 18px;font-size:11px;color:#94a3b8;
+  border-bottom:1px solid rgba(0,0,0,0.05);
   display:flex;justify-content:space-between;
-  letter-spacing:.5px;text-transform:uppercase;
+  letter-spacing:.6px;text-transform:uppercase;font-weight:600;
 }
 .gf-side-list{flex:1;overflow-y:auto}
 
-/* request row: flat, thin-line separated, no decoration */
+/* request row */
 .row{
-  padding:6px 12px;
-  border-bottom:1px solid #1f2227;
-  border-left:2px solid transparent;
-  cursor:pointer;
+  padding:10px 16px;
+  border-bottom:1px solid rgba(0,0,0,0.03);
+  border-left:3px solid transparent;
+  cursor:pointer;transition:all .15s;
 }
-.row:hover{background:#1f2227}
-.row.on{border-left-color:#5ea3f5;background:#1a1e24}
-.row-path{font:11px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#d8d9da;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row-meta{font-size:10px;color:#555;margin-top:2px;display:flex;gap:6px;align-items:center}
-.row-id{font:10px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#444;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row:hover{background:rgba(99,102,241,0.06)}
+.row.on{
+  border-left-color:#8b5cf6;
+  background:linear-gradient(90deg,rgba(99,102,241,0.1) 0%,rgba(139,92,246,0.04) 100%);
+}
+.row-path{font:12px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.row-meta{font-size:11px;color:#94a3b8;margin-top:3px;display:flex;gap:8px;align-items:center}
+.row-id{font:10px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#c0c8d4;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Content ───────────────────────────────────── */
 .gf-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 
-/* tabs: thin underline indicator, no decoration */
+/* tabs: glass bar */
 .gf-tabs{
-  display:flex;height:32px;align-items:stretch;
-  background:#181b1f;border-bottom:1px solid #2c3235;padding:0 12px;
+  display:flex;height:44px;align-items:stretch;gap:4px;
+  background:rgba(255,255,255,0.5);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(0,0,0,0.05);padding:0 24px;
 }
 .tab{
-  padding:0 12px;font-size:12px;color:#666;
-  cursor:pointer;border-bottom:1px solid transparent;
-  display:flex;align-items:center;gap:4px;
+  padding:0 18px;font-size:13px;color:#64748b;
+  cursor:pointer;border-bottom:2px solid transparent;
+  display:flex;align-items:center;gap:6px;transition:all .15s;font-weight:500;
 }
-.tab:hover{color:#d8d9da}
-.tab.on{color:#d8d9da;border-bottom-color:#5ea3f5}
-.tab-n{font:11px ui-monospace,monospace;color:#444}
-.tab.on .tab-n{color:#5ea3f5}
+.tab:hover{color:#334155}
+.tab.on{color:#6366f1;border-bottom-color:#8b5cf6}
+.tab-n{
+  font:11px ui-monospace,monospace;color:#94a3b8;
+  background:rgba(0,0,0,0.04);border-radius:10px;padding:1px 7px;line-height:18px;
+}
+.tab.on .tab-n{color:#fff;background:linear-gradient(135deg,#6366f1,#8b5cf6)}
 
-.gf-panel{flex:1;overflow-y:auto;padding:12px;background:#111217}
+.gf-panel{flex:1;overflow-y:auto;padding:24px;position:relative}
 
-/* ── Stat metrics (horizontal strip, no card border) ── */
+/* ── Stat cards (glass) ────────────────────────── */
 .stat-row{
-  display:flex;gap:24px;padding:4px 0 12px;
-  border-bottom:1px solid #1f2227;margin-bottom:12px;
+  display:flex;gap:16px;padding:0 0 24px;margin-bottom:24px;
+  border-bottom:1px solid rgba(0,0,0,0.05);
 }
-.stat{min-width:0}
-.stat-lbl{font-size:10px;color:#666;letter-spacing:.5px;text-transform:uppercase;margin-bottom:2px}
-.stat-val{font:600 18px/1.2 ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#d8d9da}
-.stat-val.warn{color:#e8a838}
-.stat-val.err{color:#d94a38}
-.stat-val.ok{color:#4caf50}
-.stat-val.muted{font-size:11px;font-weight:400;color:#8e8e8e}
+.stat{
+  flex:1;min-width:0;
+  background:rgba(255,255,255,0.6);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,0.8);
+  border-radius:16px;padding:18px 22px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.04),0 1px 3px rgba(0,0,0,0.03);
+  position:relative;overflow:hidden;
+}
+/* subtle top accent bar */
+.stat::before{
+  content:'';position:absolute;top:0;left:16px;right:16px;height:3px;
+  border-radius:0 0 3px 3px;
+  background:linear-gradient(90deg,#6366f1,#8b5cf6);
+  opacity:0.4;
+}
+.stat:nth-child(2)::before{background:linear-gradient(90deg,#3b82f6,#06b6d4)}
+.stat:nth-child(3)::before{background:linear-gradient(90deg,#22c55e,#10b981)}
+.stat:nth-child(4)::before{background:linear-gradient(90deg,#f59e0b,#f97316)}
+.stat:nth-child(5)::before{background:linear-gradient(90deg,#ec4899,#f43f5e)}
+.stat:nth-child(6)::before{background:linear-gradient(90deg,#6366f1,#a855f7)}
+.stat-lbl{font-size:11px;color:#94a3b8;letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px;font-weight:600}
+.stat-val{font:700 28px/1.2 ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;color:#1e293b}
+.stat-val.warn{color:#f59e0b}
+.stat-val.err{color:#ef4444}
+.stat-val.ok{color:#22c55e}
+.stat-val.muted{font-size:12px;font-weight:500;color:#94a3b8}
 
-/* ── Panel (Grafana panel: header bar + body) ──── */
-.pnl{border:1px solid #2c3235;background:#181b1f;margin-bottom:8px}
+/* ── Panel card (glass) ────────────────────────── */
+.pnl{
+  border:1px solid rgba(255,255,255,0.7);
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-radius:14px;margin-bottom:14px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.03),0 1px 3px rgba(0,0,0,0.02);
+  overflow:hidden;
+}
 .pnl-head{
-  padding:6px 12px;font-size:11px;font-weight:500;color:#8e8e8e;
-  border-bottom:1px solid #2c3235;
+  padding:12px 18px;font-size:12px;font-weight:600;color:#475569;
+  border-bottom:1px solid rgba(0,0,0,0.05);
   display:flex;justify-content:space-between;align-items:center;
-  letter-spacing:.3px;
+  letter-spacing:.2px;
+  background:rgba(255,255,255,0.3);
 }
-.pnl-body{padding:10px 12px}
+.pnl-body{padding:16px 18px}
 
-/* ── Timing bars: number + thin flat bar, no gradient ── */
-.tmr{display:flex;align-items:center;gap:8px;margin-bottom:4px;font:12px ui-monospace,monospace}
-.tmr-lbl{width:100px;text-align:right;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tmr-track{flex:1;height:14px;background:#0b0c0f;overflow:hidden}
-.tmr-fill{height:100%;background:#2f6397;display:flex;align-items:center;padding:0 4px;font-size:10px;color:#fff;white-space:nowrap}
-.tmr-fill.slow{background:#8a3c2c}
-.tmr-fill.med{background:#6b5e22}
-.tmr-num{width:60px;color:#8e8e8e;text-align:right}
+/* ── Timing bars ───────────────────────────────── */
+.tmr{display:flex;align-items:center;gap:12px;margin-bottom:8px;font:12px ui-monospace,monospace}
+.tmr-lbl{width:120px;text-align:right;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.tmr-track{flex:1;height:20px;background:rgba(0,0,0,0.04);border-radius:10px;overflow:hidden}
+.tmr-fill{height:100%;border-radius:10px;display:flex;align-items:center;padding:0 8px;font-size:10px;color:#fff;white-space:nowrap;
+  background:linear-gradient(90deg,#6366f1,#8b5cf6);
+}
+.tmr-fill.slow{background:linear-gradient(90deg,#fca5a5,#f87171)}
+.tmr-fill.med{background:linear-gradient(90deg,#fcd34d,#fbbf24)}
+.tmr-num{width:68px;color:#64748b;text-align:right;font-weight:500}
 
-/* ── Data table (Grafana Logs panel style) ─────── */
-.tbl{width:100%;border-collapse:collapse;font-size:12px}
+/* ── Data table ────────────────────────────────── */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tbl th{
-  text-align:left;padding:4px 8px;font-weight:500;
-  color:#666;font-size:10px;letter-spacing:.3px;text-transform:uppercase;
-  border-bottom:1px solid #2c3235;background:#181b1f;position:sticky;top:0;
+  text-align:left;padding:10px 14px;font-weight:600;
+  color:#64748b;font-size:11px;letter-spacing:.4px;text-transform:uppercase;
+  border-bottom:2px solid rgba(0,0,0,0.06);background:rgba(255,255,255,0.4);
+  position:sticky;top:0;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
 }
-.tbl td{padding:4px 8px;border-bottom:1px solid #1f2227;vertical-align:top}
-.tbl tr:hover td{background:#1f2227}
+.tbl td{padding:10px 14px;border-bottom:1px solid rgba(0,0,0,0.04);vertical-align:top}
+.tbl tr:hover td{background:rgba(99,102,241,0.04)}
 
-/* ── Collapsible (LLM call rows) ───────────────── */
-.collapse{cursor:pointer;user-select:none}
-.collapse:hover{background:#1f2227}
-.collapse-arrow{display:inline-block;width:10px;color:#555;font-size:10px}
-.collapse-body{display:none;border-top:1px solid #1f2227;background:#0f1013}
+/* ── Collapsible ───────────────────────────────── */
+.collapse{cursor:pointer;user-select:none;transition:background .1s}
+.collapse:hover{background:rgba(99,102,241,0.04)}
+.collapse-arrow{display:inline-block;width:14px;color:#94a3b8;font-size:11px}
+.collapse-body{display:none;border-top:1px solid rgba(0,0,0,0.04);background:rgba(0,0,0,0.01)}
 .collapse-body.open{display:block}
 
 /* ── JSON block ────────────────────────────────── */
 pre.json{
-  background:#0b0c0f;padding:8px;
+  background:rgba(15,23,42,0.03);padding:12px;border-radius:8px;
   font:11px ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;
-  overflow-x:auto;max-height:300px;overflow-y:auto;line-height:1.5;color:#d8d9da;
-  white-space:pre-wrap;word-break:break-all;
+  overflow-x:auto;max-height:300px;overflow-y:auto;line-height:1.7;color:#334155;
+  white-space:pre-wrap;word-break:break-all;border:1px solid rgba(0,0,0,0.06);
 }
 
-/* ── Status text (no colored badge, just text) ── */
-.s-ok{color:#4caf50}.s-warn{color:#e8a838}.s-err{color:#d94a38}.s-info{color:#8e8e8e}
+/* ── Status text ───────────────────────────────── */
+.s-ok{color:#22c55e}.s-warn{color:#f59e0b}.s-err{color:#ef4444}.s-info{color:#94a3b8}
 
 /* ── Diagnostic row ────────────────────────────── */
-.diag{border-left:2px solid #e8a838;margin-bottom:6px}
-.diag.sev-error{border-left-color:#d94a38}
-.diag-body{padding:8px 12px}
-.diag-code{font:12px ui-monospace,monospace;color:#e8a838;font-weight:600}
-.diag.sev-error .diag-code{color:#d94a38}
-.diag-kv{font-size:12px;display:flex;gap:8px;margin-top:2px}
-.diag-k{color:#666;min-width:100px}
+.diag{
+  border-left:3px solid #f59e0b;margin-bottom:10px;
+  background:rgba(251,191,36,0.06);border-radius:0 10px 10px 0;
+}
+.diag.sev-error{border-left-color:#ef4444;background:rgba(239,68,68,0.05)}
+.diag-body{padding:12px 18px}
+.diag-code{font:12px ui-monospace,monospace;color:#f59e0b;font-weight:700}
+.diag.sev-error .diag-code{color:#ef4444}
+.diag-kv{font-size:12px;display:flex;gap:10px;margin-top:4px}
+.diag-k{color:#94a3b8;min-width:120px;font-weight:500}
 
-/* ── Inline labels (event type, provider) ──────── */
-.lbl{color:#555;font-size:11px;font-family:ui-monospace,monospace}
+/* ── Inline labels ─────────────────────────────── */
+.lbl{color:#94a3b8;font-size:11px;font-family:ui-monospace,monospace}
 
 /* ── Empty / loading states ────────────────────── */
-.empty{color:#444;font-size:12px;padding:24px 0;text-align:center}
-.loading{color:#555;font-size:12px;padding:16px 0;text-align:center}
-.inline-btn{background:none;border:none;color:#5ea3f5;cursor:pointer;font:inherit;padding:0;text-decoration:underline}
+.empty{color:#c0c8d4;font-size:14px;padding:48px 0;text-align:center}
+.loading{color:#94a3b8;font-size:14px;padding:32px 0;text-align:center}
+.inline-btn{background:none;border:none;color:#6366f1;cursor:pointer;font:inherit;padding:0;text-decoration:none;font-weight:600}
+.inline-btn:hover{color:#4f46e5;text-decoration:underline}
 
-/* ── Scrollbar (thin, subtle) ──────────────────── */
-::-webkit-scrollbar{width:6px;height:6px}
+/* ── Scrollbar (thin, translucent) ─────────────── */
+::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#2c3235}
-::-webkit-scrollbar-thumb:hover{background:#3a4145}
+::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.1);border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,0.2)}
 
-/* ── Error box (minimal, border-left) ──────────── */
-.err-box{padding:4px 8px;font-size:11px;color:#d94a38;border-left:2px solid #d94a38;margin-top:6px}
+/* ── Error box ─────────────────────────────────── */
+.err-box{
+  padding:8px 14px;font-size:12px;color:#ef4444;
+  border-left:3px solid #ef4444;margin-top:10px;
+  background:rgba(239,68,68,0.05);border-radius:0 8px 8px 0;
+}
 
 </style>
 </head>
@@ -198,6 +290,10 @@ pre.json{
 <div class="gf-header">
   <div class="gf-brand">Chat Stream <span class="gf-brand-sub">Observer</span></div>
   <div class="gf-search">
+    <label id="filterToggle" class="gf-filter" title="只显示 Chat 请求">
+      <input type="checkbox" id="filterChatOnly" onchange="loadRecentRequests()" />
+      <span>仅 Chat</span>
+    </label>
     <input id="searchInput" class="gf-input" type="text" placeholder="turn_id / session_id" />
     <button class="gf-btn gf-btn-primary" onclick="handleSearch()">查询</button>
     <button class="gf-btn gf-btn-ghost" onclick="loadRecentRequests()">刷新</button>
@@ -298,7 +394,11 @@ async function loadRecentRequests(){
   const list=document.getElementById('requestList');
   list.innerHTML='<div class="loading">加载中...</div>';
   try{
-    const reqs=await fetchJson(API+'/requests?limit=20');
+    let reqs=await fetchJson(API+'/requests?limit=50');
+    const chatOnly=document.getElementById('filterChatOnly').checked;
+    if(chatOnly){
+      reqs=reqs.filter(r=>r.turn_id||r.session_id);
+    }
     document.getElementById('reqCount').textContent=reqs.length;
     if(!reqs.length){list.innerHTML='<div class="empty">暂无请求</div>';return}
     list.replaceChildren(...reqs.map(r=>{
