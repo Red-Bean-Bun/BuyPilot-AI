@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
@@ -23,8 +24,11 @@ from src.config.tuning import (
 )
 from src.repos.documents import (
     ChunkDocument,
+    ImageSimilarityHit,
     VectorSearchFilters,
     evidence_for_chunk,
+    evidence_for_product,
+    list_products_by_image_similarity,
     list_vector_chunks_by_similarity,
 )
 from src.repos.products import get_product
@@ -69,17 +73,28 @@ async def retrieve(
     criteria: CriteriaPayload,
     top_n: int = 5,
     feedback: Mapping[str, list[str]] | None = None,
+    image_embedding: list[float] | None = None,
 ) -> list[ProductPayload]:
-    return (await retrieve_with_evidence(criteria, top_n=top_n, feedback=feedback)).products
+    return (await retrieve_with_evidence(criteria, top_n=top_n, feedback=feedback, image_embedding=image_embedding)).products
 
 
 async def retrieve_with_evidence(
     criteria: CriteriaPayload,
     top_n: int = 5,
     feedback: Mapping[str, list[str]] | None = None,
+    image_embedding: list[float] | None = None,
 ) -> RetrievalOutput:
     filters = _retrieval_filters(feedback)
     query_embedding = await embed_text(criteria_query_text(criteria))
+
+    # Launch visual recall in parallel if image_embedding provided
+    visual_task = None
+    if image_embedding:
+        sql_filters = _sql_filters_for_recall(criteria, filters)
+        visual_task = asyncio.create_task(
+            list_products_by_image_similarity(image_embedding, limit=10, filters=sql_filters)
+        )
+
     recall_result = await _vector_recall_from_db(criteria, query_embedding, filters)
     chunk_hits = recall_result.hits
     recall_criteria = criteria
@@ -111,24 +126,47 @@ async def retrieve_with_evidence(
                 recall_filters = relaxed_filters
                 recall_stats = relaxed_result
                 break
-    if not chunk_hits:
-        return RetrievalOutput(products=[], evidence_by_product={})
 
-    candidate_hits = _rank_hits(criteria, chunk_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
+    # Merge visual recall results
+    visual_hits: list[ProductHit] = []
+    visual_recall_stats: dict[str, object] = {}
+    if visual_task is not None:
+        try:
+            image_hits = await visual_task
+            visual_hits, visual_recall_stats = _build_visual_hits(image_hits, criteria, filters)
+        except Exception:
+            # Visual recall failure is non-fatal — degrade to text-only
+            visual_recall_stats = {"error": "visual recall failed, degraded to text-only"}
+
+    # Merge text and visual hits
+    merged_hits = _merge_text_and_visual(chunk_hits, visual_hits)
+
+    if not merged_hits:
+        return RetrievalOutput(products=[], evidence_by_product={}, trace_details=_visual_trace(visual_recall_stats))
+
+    candidate_hits = _rank_hits(criteria, merged_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
     ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
+
+    # Supplement evidence for visual-only hits (no chunk)
+    evidence_map = _evidence_by_product(ranked_hits, all_reranked_hits)
+    await _supplement_visual_evidence(ranked_hits, evidence_map)
+
+    trace = _trace_details_for_chunk_retrieval(
+        criteria=criteria,
+        recall_criteria=recall_criteria,
+        filters=recall_filters,
+        chunk_hits=chunk_hits,
+        candidate_hits=candidate_hits,
+        ranked_hits=ranked_hits,
+        relaxation_steps=relaxation_steps,
+        recall_stats=recall_stats,
+    )
+    if visual_recall_stats:
+        trace["visual_recall"] = visual_recall_stats
     return RetrievalOutput(
         products=[hit.product for hit in ranked_hits],
-        evidence_by_product=_evidence_by_product(ranked_hits, all_reranked_hits),
-        trace_details=_trace_details_for_chunk_retrieval(
-            criteria=criteria,
-            recall_criteria=recall_criteria,
-            filters=recall_filters,
-            chunk_hits=chunk_hits,
-            candidate_hits=candidate_hits,
-            ranked_hits=ranked_hits,
-            relaxation_steps=relaxation_steps,
-            recall_stats=recall_stats,
-        ),
+        evidence_by_product=evidence_map,
+        trace_details=trace,
     )
 
 
@@ -509,3 +547,78 @@ def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
 
 def _distance_to_score(distance: float) -> float:
     return 1.0 / (1.0 + max(distance, 0.0))
+
+
+# ---------------------------------------------------------------------------
+# Visual similarity recall (dual-channel)
+# ---------------------------------------------------------------------------
+
+
+def _build_visual_hits(
+    image_hits: list[ImageSimilarityHit],
+    criteria: CriteriaPayload,
+    filters: RetrievalFilters,
+) -> tuple[list[ProductHit], dict[str, object]]:
+    """Convert ImageSimilarityHit to ProductHit, applying hard filters."""
+    hits: list[ProductHit] = []
+    for hit in image_hits:
+        product = get_product(hit.product_id)
+        if product is None or not _passes_hard_filters(criteria, product, filters):
+            continue
+        hits.append(
+            ProductHit(
+                product=product,
+                vector_score=_distance_to_score(hit.distance),
+                filter_score=_filter_score(criteria, product),
+                chunk=None,  # visual hits have no chunk
+            )
+        )
+    stats: dict[str, object] = {
+        "pre_filter_count": len(image_hits),
+        "post_filter_count": len(hits),
+    }
+    return hits, stats
+
+
+def _merge_text_and_visual(text_hits: list[ProductHit], visual_hits: list[ProductHit]) -> list[ProductHit]:
+    """Merge text and visual hits, dedup by product_id, keep higher vector_score."""
+    seen: dict[str, ProductHit] = {}
+    for hit in text_hits:
+        pid = hit.product.product_id
+        if pid not in seen:
+            seen[pid] = hit
+    for hit in visual_hits:
+        pid = hit.product.product_id
+        existing = seen.get(pid)
+        if existing is None:
+            seen[pid] = hit
+        elif hit.vector_score > existing.vector_score:
+            # Keep text hit's chunk if it has one
+            seen[pid] = ProductHit(
+                product=hit.product,
+                vector_score=hit.vector_score,
+                filter_score=max(hit.filter_score, existing.filter_score),
+                chunk=existing.chunk,
+            )
+    return list(seen.values())
+
+
+async def _supplement_visual_evidence(
+    ranked_hits: list[ProductHit],
+    evidence_by_product: dict[str, list[EvidencePayload]],
+) -> None:
+    """For visual-only hits (no chunk), load evidence from product chunks."""
+    for hit in ranked_hits:
+        pid = hit.product.product_id
+        if hit.chunk is None and not evidence_by_product.get(pid):
+            evidence = await evidence_for_product(hit.product)
+            if evidence:
+                evidence_by_product[pid] = evidence
+
+
+def _visual_trace(visual_recall_stats: dict[str, object]) -> dict[str, object]:
+    """Minimal trace for empty-result case when visual recall was attempted."""
+    trace: dict[str, object] = {"selected_ids": [], "hit_count": 0, "vector_count": 0}
+    if visual_recall_stats:
+        trace["visual_recall"] = visual_recall_stats
+    return trace
