@@ -1214,7 +1214,7 @@ class ChatViewModel @Inject constructor(
             )
         }
         startRealStream(
-            message = "继续",
+            message = userMessage.ifBlank { "帮我选" },
             showUserMessage = showUserMessage,
             convergenceDeckId = deckId,
             forcedClientTurnId = convergenceTurnId,
