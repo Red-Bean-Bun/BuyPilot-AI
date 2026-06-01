@@ -44,6 +44,12 @@ class VectorSearchFilters:
     avoid_product_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ImageSimilarityHit:
+    product_id: str
+    distance: float
+
+
 async def list_embedded_chunks() -> list[ChunkDocument]:
     await create_db_and_tables()
     try:
@@ -129,6 +135,80 @@ async def list_vector_chunks_by_similarity(
             )
         )
     return hits
+
+
+async def list_products_by_image_similarity(
+    query_embedding: list[float],
+    limit: int,
+    filters: VectorSearchFilters | None = None,
+) -> list[ImageSimilarityHit]:
+    """pgvector cosine similarity on product_image_embeddings with SQL hard filters."""
+    await create_db_and_tables()
+    engine = get_async_engine()
+    if not is_postgres_engine(engine) or not query_embedding:
+        return []
+
+    filters = filters or VectorSearchFilters()
+    sql_filter, params = _image_sql_filters(filters)
+    params.update({"query_embedding": vector_to_pg_literal(query_embedding), "limit": limit})
+    try:
+        async with engine.connect() as conn:
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            f"""
+                    SELECT
+                        pie.product_id,
+                        pie.embedding <=> CAST(:query_embedding AS vector) AS distance
+                    FROM product_image_embeddings pie
+                    JOIN products p ON p.id = pie.product_id
+                    WHERE pie.embedding IS NOT NULL
+                      {sql_filter}
+                    ORDER BY pie.embedding <=> CAST(:query_embedding AS vector)
+                    LIMIT :limit
+                    """
+                        ),
+                        params,
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError:
+        logger.exception("image similarity search failed")
+        raise
+
+    return [
+        ImageSimilarityHit(
+            product_id=str(row["product_id"]),
+            distance=float(row["distance"]),
+        )
+        for row in rows
+    ]
+
+
+def _image_sql_filters(filters: VectorSearchFilters) -> tuple[str, dict[str, Any]]:
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if filters.category:
+        clauses.append("AND p.category = :img_category")
+        params["img_category"] = filters.category
+    if filters.budget_max is not None:
+        clauses.append("AND (p.price IS NULL OR p.price <= :img_budget_max)")
+        params["img_budget_max"] = filters.budget_max
+    if filters.product_type_aliases:
+        placeholders = _named_placeholders("img_product_type", filters.product_type_aliases, params, lowercase=True)
+        clauses.append(f"AND lower(COALESCE(p.sub_category, '')) IN ({placeholders})")
+    if filters.brand_avoid:
+        placeholders = _named_placeholders("img_brand_avoid", filters.brand_avoid, params, lowercase=True)
+        clauses.append(f"AND lower(COALESCE(p.brand, '')) NOT IN ({placeholders})")
+    if filters.avoid_product_ids:
+        placeholders = _named_placeholders("img_avoid_product", filters.avoid_product_ids, params)
+        clauses.append(f"AND pie.product_id NOT IN ({placeholders})")
+
+    return ("\n                      " + "\n                      ".join(clauses)) if clauses else "", params
 
 
 def _pgvector_sql_filters(filters: VectorSearchFilters) -> tuple[str, dict[str, Any]]:

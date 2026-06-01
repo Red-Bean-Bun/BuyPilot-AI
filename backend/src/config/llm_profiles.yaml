@@ -20,6 +20,9 @@ task_model_map:
   rerank:
     primary: gte_rerank
     fallback: null
+  vl_embedding:
+    primary: qwen3_vl_embedding
+    fallback: null
 
 profiles:
   doubao_intent:
@@ -78,3 +81,11 @@ profiles:
     endpoint_path: /rerank/text-rerank/text-rerank
     api_key_env: BAILIAN_API_KEY
     timeout_seconds: 20
+  qwen3_vl_embedding:
+    provider: bailian
+    model: qwen3-vl-embedding
+    dimensions: 1024
+    base_url: https://dashscope.aliyuncs.com/api/v1/services
+    endpoint_path: /embeddings/multimodal-embedding/multimodal-embedding
+    api_key_env: BAILIAN_API_KEY
+    timeout_seconds: 30

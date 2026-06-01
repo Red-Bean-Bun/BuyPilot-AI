@@ -113,3 +113,98 @@ async def _embedding_request(profile: EmbeddingProfile, texts: list[str]) -> lis
             return []
         vectors.append([float(value) for value in embedding])
     return vectors
+
+
+# ---------------------------------------------------------------------------
+# VL (Vision-Language) Embedding — DashScope native API
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VLEmbeddingProfile:
+    name: str
+    model: str
+    base_url: str
+    endpoint_path: str
+    api_key: str
+    timeout_seconds: float
+    dimensions: int | None = None
+
+
+async def embed_image(image_source: str) -> list[float]:
+    """Embed a single image via qwen3-vl-embedding.
+
+    Args:
+        image_source: Image URL or base64 data URI.
+
+    Returns:
+        Embedding vector (1024-dim by default).
+
+    Raises:
+        EmbeddingUnavailable: If profile is missing/incomplete or API call fails.
+    """
+    if not image_source:
+        raise EmbeddingUnavailable("embed_image requires a non-empty image source.")
+    profile_name = _primary_profile_name("vl_embedding")
+    try:
+        profile = _resolve_vl_embedding_profile(profile_name)
+        vector = await _vl_embedding_request(profile, image_source)
+    except EmbeddingUnavailable:
+        logger.info("VL embedding profile unavailable for %s", profile_name, exc_info=True)
+        raise
+    except Exception as exc:
+        logger.warning("VL embedding provider failed for profile %s", profile_name, exc_info=True)
+        raise EmbeddingUnavailable("Live VL embedding provider failed.") from exc
+    return vector
+
+
+def _resolve_vl_embedding_profile(profile_name: str) -> VLEmbeddingProfile:
+    settings = get_settings()
+    raw = settings.llm_profiles.get("profiles", {}).get(profile_name)
+    if not raw:
+        raise EmbeddingUnavailable(f"Unknown VL embedding profile: {profile_name}")
+    base_url = raw.get("base_url") or settings.env_value(raw.get("base_url_env"))
+    api_key = settings.env_value(raw.get("api_key_env"))
+    model = raw.get("model")
+    if not base_url or not api_key or not model:
+        raise EmbeddingUnavailable(f"Incomplete VL embedding profile: {profile_name}")
+    return VLEmbeddingProfile(
+        name=profile_name,
+        model=model,
+        base_url=base_url,
+        endpoint_path=str(raw.get("endpoint_path") or "/embeddings/multimodal-embedding/multimodal-embedding"),
+        api_key=api_key,
+        timeout_seconds=float(raw.get("timeout_seconds", DEFAULT_SERVICE_TIMEOUT_SECONDS)),
+        dimensions=raw.get("dimensions"),
+    )
+
+
+async def _vl_embedding_request(profile: VLEmbeddingProfile, image_source: str) -> list[float]:
+    payload: dict[str, Any] = {
+        "model": profile.model,
+        "input": {
+            "contents": [
+                {"image": image_source}
+            ]
+        },
+    }
+    if profile.dimensions:
+        payload["parameters"] = {"dimension": profile.dimensions}
+
+    endpoint = f"{profile.base_url.rstrip('/')}/{profile.endpoint_path.strip('/')}"
+    headers = {
+        "Authorization": f"Bearer {profile.api_key}",
+        "Content-Type": "application/json",
+    }
+    client = get_http_client()
+    response = await client.post(endpoint, headers=headers, json=payload, timeout=profile.timeout_seconds)
+    response.raise_for_status()
+    data = response.json()
+    embeddings = data.get("output", {}).get("embeddings") if isinstance(data, dict) else None
+    if not isinstance(embeddings, list) or not embeddings:
+        raise EmbeddingUnavailable("VL embedding provider returned no embeddings.")
+    first = embeddings[0]
+    vector = first.get("embedding") if isinstance(first, dict) else None
+    if not isinstance(vector, list):
+        raise EmbeddingUnavailable("VL embedding provider returned malformed embedding.")
+    return [float(v) for v in vector]

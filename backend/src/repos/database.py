@@ -126,6 +126,12 @@ async def ensure_pgvector_indexes(engine: AsyncEngine) -> None:
                 "ON product_chunks USING hnsw (embedding vector_cosine_ops)"
             )
         )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_product_image_embeddings_hnsw "
+                "ON product_image_embeddings USING hnsw (embedding vector_cosine_ops)"
+            )
+        )
 
 
 async def ensure_runtime_indexes(conn) -> None:

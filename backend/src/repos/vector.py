@@ -10,6 +10,7 @@ from sqlalchemy.types import TypeDecorator, UserDefinedType
 
 
 EMBEDDING_DIMENSIONS = 1024
+VL_EMBEDDING_DIMENSIONS = 1024  # qwen3-vl-embedding supports 256-2560; 1024 matches text embedding
 
 
 class PgVector(UserDefinedType):

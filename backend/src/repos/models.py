@@ -9,7 +9,7 @@ from uuid import uuid4
 from sqlalchemy import Column, Index, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from src.repos.vector import EMBEDDING_DIMENSIONS, EmbeddingType
+from src.repos.vector import EMBEDDING_DIMENSIONS, VL_EMBEDDING_DIMENSIONS, EmbeddingType
 
 
 def utc_now() -> datetime:
@@ -44,6 +44,24 @@ class ProductChunk(SQLModel, table=True):
     chunk_index: int
     embedding: list[float] = Field(default_factory=list, sa_column=Column(EmbeddingType(EMBEDDING_DIMENSIONS)))
     chunk_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column("metadata", JSON))
+
+
+class ProductImageEmbedding(SQLModel, table=True):
+    """Image embeddings for visual similarity search (qwen3-vl-embedding)."""
+
+    __tablename__ = "product_image_embeddings"
+    __table_args__ = (
+        UniqueConstraint("product_id", "image_path", "embedding_model", "embedding_dimensions"),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    product_id: str = Field(foreign_key="products.id", index=True)
+    image_path: str
+    embedding: list[float] = Field(default_factory=list, sa_column=Column(EmbeddingType(VL_EMBEDDING_DIMENSIONS)))
+    embedding_model: str
+    embedding_dimensions: int
+    image_hash: str
+    indexed_at: str
 
 
 class Conversation(SQLModel, table=True):
