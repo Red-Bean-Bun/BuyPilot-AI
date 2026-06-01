@@ -471,6 +471,7 @@ private data class TimelineRenderContext(
     val backendBaseUrl: String,
     val isStreaming: Boolean,
     val currentTurnId: String?,
+    val cartState: ChatCartUiState,
     val productsById: Map<String, ProductCardPayload>,
     val productDeckIdByProductId: Map<String, String>,
     val latestProductDeckKey: String?,
@@ -603,6 +604,7 @@ fun BuyPilotChatScreen(
     onCancel: () -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
     onCartOpen: () -> Unit,
+    onCartSheetRequestHandled: (Long) -> Unit,
     onCartQuantityChange: (String, Int) -> Unit,
     onOpenProductDeck: (String, String?) -> Unit,
     onOpenProductDetail: (String, String) -> Unit,
@@ -728,6 +730,14 @@ fun BuyPilotChatScreen(
                 sheetContent = null
                 sheetExiting = false
             }
+        }
+    }
+
+    LaunchedEffect(state.cartSheetRequestId) {
+        val requestId = state.cartSheetRequestId
+        if (requestId > 0L) {
+            openSheet(ChatSheetContent.Cart)
+            onCartSheetRequestHandled(requestId)
         }
     }
 
@@ -1164,14 +1174,15 @@ fun BuyPilotChatScreen(
                         payload = targetContent.payload,
                         productsById = sheetProductsById,
                         productDeckIdByProductId = sheetProductDeckIdByProductId,
+                        cartState = state.cartState,
                         onProductDetailOpen = { deckId, productId ->
                             dismissSheet { onOpenProductDetail(deckId, productId) }
                         },
+                        onQuickAction = ::dispatchQuickAction,
                     )
                     ChatSheetContent.Cart -> CartSheet(
                         state = state.cartState,
                         backendBaseUrl = state.backendBaseUrl,
-                        onRefresh = onCartOpen,
                         onQuantityChange = onCartQuantityChange,
                         onProductDetailOpen = { productId ->
                             val deckId = sheetProductDeckIdByProductId[productId]
@@ -1891,6 +1902,7 @@ private fun ChatTimeline(
             backendBaseUrl = state.backendBaseUrl,
             isStreaming = state.isStreaming,
             currentTurnId = state.currentTurnId,
+            cartState = state.cartState,
             productsById = productsById,
             productDeckIdByProductId = productDeckIdByProductId,
             latestProductDeckKey = productDeckNodes.lastOrNull()?.key,
@@ -3254,6 +3266,7 @@ private fun TimelineNodeContent(
             payload = node.payload,
             productsById = renderContext.productsById,
             productDeckIdByProductId = renderContext.productDeckIdByProductId,
+            cartState = renderContext.cartState,
             backendBaseUrl = renderContext.backendBaseUrl,
             motionEnabled = structuredMotionEnabled,
             alreadyEntered = structuredAlreadyEntered,
@@ -3262,7 +3275,20 @@ private fun TimelineNodeContent(
             onProductDetailOpen = onProductDetailOpen,
             onQuickAction = onQuickAction,
         )
-        is CartActionNode -> CartActionCard(node.payload)
+        is CartActionNode -> CartActionCard(
+            payload = node.payload,
+            productsById = renderContext.productsById,
+            onRetryAddToCart = { productId ->
+                onQuickAction(
+                    QuickActionPayload(
+                        actionId = "retry_add_to_cart_$productId",
+                        label = "重试",
+                        action = "add_to_cart",
+                        productId = productId,
+                    ),
+                )
+            },
+        )
         is ErrorNode -> ErrorCard(
             node = node,
             latestUserMessage = renderContext.lastUserMessage,
@@ -6613,6 +6639,7 @@ private fun DecisionSummaryCard(
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
+    cartState: ChatCartUiState,
     backendBaseUrl: String,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
@@ -6631,7 +6658,14 @@ private fun DecisionSummaryCard(
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
     val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
     val statusBadge = payload.decisionStatusBadge()
-    val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
+    val canAddWinnerToCart = winner != null && !winnerProductId.isNullOrBlank()
+    val nextActions = payload.nextActions.filter { action ->
+        action.label.isNotBlank() &&
+            action.action != "view_cart" &&
+            !(canAddWinnerToCart && action.action == "add_to_cart")
+    }
+    val winnerAlreadyInCart = winnerProductId?.let { id -> cartState.items.any { it.productId == id } } == true
+    val winnerAddPending = winnerProductId?.let { it in cartState.pendingAddProductIds } == true
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         DecisionSummaryIntro(
@@ -6767,6 +6801,24 @@ private fun DecisionSummaryCard(
                                     Text("查看决策依据 ›", color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
                                 }
                             }
+                            if (canAddWinnerToCart) {
+                                HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.62f))
+                                DecisionCartActionBar(
+                                    productId = winnerProductId.orEmpty(),
+                                    pending = winnerAddPending,
+                                    inCart = winnerAlreadyInCart,
+                                    onAddToCart = {
+                                        onQuickAction(
+                                            QuickActionPayload(
+                                                actionId = "add_to_cart_${winnerProductId.orEmpty()}",
+                                                label = "加入购物车",
+                                                action = "add_to_cart",
+                                                productId = winnerProductId,
+                                            ),
+                                        )
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -6776,6 +6828,94 @@ private fun DecisionSummaryCard(
             ScrollableQuickActionRow(
                 actions = nextActions,
                 onQuickAction = onQuickAction,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DecisionCartActionBar(
+    productId: String,
+    pending: Boolean,
+    inCart: Boolean,
+    onAddToCart: () -> Unit,
+) {
+    if (productId.isBlank()) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        QuietCartActionButton(
+            label = when {
+                pending -> "加入中..."
+                inCart -> "已加入"
+                else -> "加入购物车"
+            },
+            iconRes = R.drawable.ic_shopping_bag_24,
+            enabled = !pending && !inCart,
+            emphasized = !inCart,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onAddToCart,
+        )
+    }
+}
+
+@Composable
+private fun QuietCartActionButton(
+    label: String,
+    iconRes: Int,
+    enabled: Boolean,
+    emphasized: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val background = when {
+        !enabled -> BuyPilotColors.SurfaceMuted.copy(alpha = 0.62f)
+        emphasized -> BuyPilotColors.PrimarySoft.copy(alpha = 0.42f)
+        else -> BuyPilotColors.SurfaceMuted.copy(alpha = 0.7f)
+    }
+    val contentColor = when {
+        !enabled -> BuyPilotColors.TextMuted
+        emphasized -> BuyPilotColors.PrimaryDark
+        else -> BuyPilotColors.TextSecondary
+    }
+    Surface(
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        color = background,
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (emphasized) {
+                BuyPilotColors.Primary.copy(alpha = 0.16f)
+            } else {
+                BuyPilotColors.Border.copy(alpha = 0.68f)
+            },
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = label,
+                color = contentColor,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -7884,6 +8024,7 @@ fun ProductHeroDetailScreen(
     onOpenEvidence: (String, String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
     onDeckCompleted: (String) -> Unit,
+    onAddToCart: (String) -> Unit = {},
 ) {
     var activeProductId by rememberSaveable(deckId, productId) { mutableStateOf(productId) }
     val payload = state.findProduct(deckId, activeProductId)
@@ -7935,6 +8076,8 @@ fun ProductHeroDetailScreen(
     }
 
     val product = payload.product
+    val productAlreadyInCart = state.cartState.items.any { it.productId == activeProductId }
+    val productAddPending = activeProductId in state.cartState.pendingAddProductIds
     val detailListState = rememberLazyListState()
     val density = LocalDensity.current
     val revealDistancePx = with(density) { ProductDetailRevealDistance.toPx() }
@@ -7945,13 +8088,19 @@ fun ProductHeroDetailScreen(
         }
     }
     val choiceActionsActive = choiceActionsAvailable && submittedFeedback == null
+    val showInlineCartAction = activeProductId.isNotBlank() &&
+        !choiceActionsAvailable &&
+        readOnlyByState
     val actionAlpha by animateFloatAsState(
         targetValue = if (choiceActionsActive && scrollProgress < 0.38f) 1f else 0f,
         animationSpec = tween(durationMillis = 260, easing = PremiumRevealEase),
         label = "product_detail_action_alpha",
     )
     val actionBottomPadding by animateDpAsState(
-        targetValue = if (choiceActionsActive) 118.dp else 36.dp,
+        targetValue = when {
+            choiceActionsActive -> 126.dp
+            else -> 48.dp
+        },
         animationSpec = tween(durationMillis = 260, easing = PremiumRevealEase),
         label = "product_detail_action_bottom_padding",
     )
@@ -8130,11 +8279,22 @@ fun ProductHeroDetailScreen(
                 CinematicProductDetailPanel(
                     payload = payload,
                     progress = scrollProgress,
+                    cartAction = if (showInlineCartAction) {
+                        {
+                            ProductDetailInlineCartAction(
+                                pending = productAddPending,
+                                inCart = productAlreadyInCart,
+                                onAddToCart = { onAddToCart(activeProductId) },
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
         if (choiceActionsAvailable && (submittedFeedback == null || actionAlpha > 0.01f)) {
-            Row(
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
@@ -8155,28 +8315,35 @@ fun ProductHeroDetailScreen(
                         ),
                     )
                     .navigationBarsPadding()
-                    .padding(horizontal = 52.dp, vertical = 22.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .padding(horizontal = 34.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                SwipeRoundButton(
-                    iconRes = R.drawable.ic_close_24,
-                    contentDescription = "不感兴趣",
-                    active = false,
-                    enabled = actionsEnabled,
-                    onClick = {
-                        submitChoice("not_interested")
-                    },
-                )
-                SwipeRoundButton(
-                    iconRes = R.drawable.ic_favorite_24,
-                    contentDescription = "感兴趣",
-                    active = true,
-                    enabled = actionsEnabled,
-                    onClick = {
-                        submitChoice("like")
-                    },
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SwipeRoundButton(
+                        iconRes = R.drawable.ic_close_24,
+                        contentDescription = "不感兴趣",
+                        active = false,
+                        enabled = actionsEnabled,
+                        onClick = {
+                            submitChoice("not_interested")
+                        },
+                    )
+                    Spacer(Modifier.width(58.dp))
+                    SwipeRoundButton(
+                        iconRes = R.drawable.ic_favorite_24,
+                        contentDescription = "感兴趣",
+                        active = true,
+                        enabled = actionsEnabled,
+                        onClick = {
+                            submitChoice("like")
+                        },
+                    )
+                }
             }
         }
     }
@@ -8311,6 +8478,7 @@ private fun ImmersiveCircleButton(
 private fun CinematicProductDetailPanel(
     payload: ProductCardPayload,
     progress: Float,
+    cartAction: (@Composable () -> Unit)? = null,
 ) {
     val product = payload.product
     val tags = payload.displayTags().take(4)
@@ -8414,8 +8582,9 @@ private fun CinematicProductDetailPanel(
                         lineHeight = 23.sp,
                     ),
                 )
-            }
+        }
         Spacer(Modifier.height(20.dp))
+        cartAction?.invoke()
         CinematicDetailDivider(progress)
         ImmersiveSectionTitle("详细信息")
         if (payload.riskNotes.isNotEmpty()) {
@@ -8423,6 +8592,114 @@ private fun CinematicProductDetailPanel(
         }
         ProductAttributeRowsDark(product = product)
         Spacer(Modifier.height(14.dp))
+    }
+}
+
+@Composable
+private fun ProductDetailInlineCartAction(
+    pending: Boolean,
+    inCart: Boolean,
+    onAddToCart: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val enabled = !pending && !inCart
+    val label = when {
+        pending -> "加入中..."
+        inCart -> "已加入"
+        else -> "加入购物车"
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.985f else 1f,
+        animationSpec = tween(durationMillis = 150, easing = PremiumRevealEase),
+        label = "product_detail_cart_press",
+    )
+    val enterProgress by rememberRouteEnterProgress(
+        key = "product_detail_inline_cart_${label}_${pending}_${inCart}",
+        durationMillis = 360,
+        delayMillis = 70,
+    )
+    val contentColor = when {
+        pending -> BuyPilotColors.TextMuted
+        inCart -> BuyPilotColors.Success
+        else -> BuyPilotColors.PrimaryDark
+    }
+    val background = when {
+        pending -> BuyPilotColors.SurfaceMuted.copy(alpha = 0.58f)
+        inCart -> Color(0xFFF0FBF4)
+        else -> BuyPilotColors.PrimarySoft.copy(alpha = 0.34f)
+    }
+    val borderColor = when {
+        pending -> BuyPilotColors.Border.copy(alpha = 0.72f)
+        inCart -> BuyPilotColors.Success.copy(alpha = 0.22f)
+        else -> BuyPilotColors.Primary.copy(alpha = 0.18f)
+    }
+    val shape = RoundedCornerShape(18.dp)
+
+    Surface(
+        onClick = onAddToCart,
+        enabled = enabled,
+        interactionSource = interactionSource,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .graphicsLayer {
+                alpha = enterProgress
+                translationY = (1f - enterProgress) * 8.dp.toPx()
+                scaleX = pressScale * lerp(0.992f, 1f, enterProgress)
+                scaleY = pressScale * lerp(0.992f, 1f, enterProgress)
+            },
+        color = background,
+        shape = shape,
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        shadowElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.72f), CircleShape)
+                    .border(1.dp, borderColor.copy(alpha = 0.82f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_shopping_bag_24),
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+            Spacer(Modifier.width(11.dp))
+            Text(
+                text = label,
+                color = contentColor,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                modifier = Modifier
+                    .width(30.dp)
+                    .height(20.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                if (!inCart && !pending) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_chevron_right_20),
+                        contentDescription = null,
+                        tint = BuyPilotColors.Primary.copy(alpha = 0.58f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -9040,49 +9317,132 @@ private fun ProductAttributeRows(product: ProductPayload) {
 }
 
 @Composable
-private fun CartActionCard(payload: CartActionPayload) {
-    payload.cart?.let { cart ->
-        val actionLabel = if (payload.status == "failed") {
-            when (payload.action) {
-                "add" -> "加购失败"
-                "remove" -> "移出失败"
-                "update_quantity" -> "更新失败"
-                else -> "购物车操作失败"
+private fun CartActionCard(
+    payload: CartActionPayload,
+    productsById: Map<String, ProductCardPayload>,
+    onRetryAddToCart: (String) -> Unit,
+) {
+    val cart = payload.cart
+    val productId = payload.productId.takeIf { it.isNotBlank() }
+    val failed = payload.status == "failed"
+    val cartItem = productId
+        ?.let { id -> cart?.items?.firstOrNull { it.productId == id } }
+        ?: if (failed) null else cart?.items?.firstOrNull()
+    val product = cartItem?.product ?: productId?.let { productsById[it]?.product }
+    val productName = cartItem?.name
+        ?.withoutInternalDebugTokens()
+        ?.takeIf { it.isNotBlank() }
+        ?: product?.displayName("商品")
+        ?: if (failed) "这件商品" else "商品"
+    val title = when {
+        failed -> "没有加成功"
+        payload.action == "add" -> "已加入购物车"
+        payload.action == "remove" -> "已移出购物车"
+        payload.action == "update_quantity" -> "已更新数量"
+        payload.action == "view" -> "购物车已同步"
+        else -> "购物车已更新"
+    }
+    val itemLine = when {
+        failed -> "${productName}还没有加入购物车"
+        cartItem != null -> "$productName x${cartItem.quantity}"
+        cart?.items.isNullOrEmpty() -> "购物车为空"
+        else -> productName
+    }
+    val totalLine = cart
+        ?.takeIf { it.totalItems > 0 }
+        ?.let { "共${it.totalItems}件 · ¥${it.totalPrice.clean()}" }
+    val retryableAdd = failed && payload.action == "add" && !productId.isNullOrBlank()
+    val subtitle = listOfNotNull(itemLine, totalLine)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+    val progress by rememberRouteEnterProgress(
+        key = "cart_receipt_${payload.action}_${payload.status}_${payload.productId}",
+        durationMillis = 260,
+    )
+    val iconProgress by rememberRouteEnterProgress(
+        key = "cart_receipt_icon_${payload.action}_${payload.status}_${payload.productId}",
+        durationMillis = 180,
+        delayMillis = 70,
+    )
+    val accent = if (failed) BuyPilotColors.Warning else BuyPilotColors.Success
+    val tintSurface = if (failed) Color(0xFFFFF7E8) else Color(0xFFF0FBF4)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = progress
+                translationY = (1f - progress) * 8.dp.toPx()
+                scaleX = lerp(0.985f, 1f, progress)
+                scaleY = lerp(0.985f, 1f, progress)
+            },
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.68f)),
+        shadowElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .graphicsLayer {
+                        scaleX = lerp(0.94f, 1f, iconProgress)
+                        scaleY = lerp(0.94f, 1f, iconProgress)
+                        alpha = iconProgress
+                    }
+                    .background(tintSurface, CircleShape)
+                    .border(1.dp, accent.copy(alpha = 0.22f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_shopping_bag_24),
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(18.dp),
+                )
             }
-        } else {
-            when (payload.action) {
-                "add" -> "已加入购物车"
-                "remove" -> "已移出购物车"
-                "update_quantity" -> "已更新数量"
-                "view" -> "购物车"
-                else -> "购物车已更新"
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = title,
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 17.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (retryableAdd) {
+                TextButton(
+                    onClick = { onRetryAddToCart(productId.orEmpty()) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "重试",
+                        color = BuyPilotColors.PrimaryDark,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
-        val itemSummary = if (cart.items.isEmpty()) {
-            "购物车为空"
-        } else {
-            cart.items.take(2).joinToString(" · ") { item ->
-                val itemName = item.name
-                    .withoutInternalDebugTokens()
-                    .takeIf { it.isNotBlank() }
-                    ?: "商品"
-                "$itemName x${item.quantity}"
-            }
-        }
-        val moreSummary = if (cart.items.size > 2) "等${cart.items.size}种商品" else null
-        val totalSummary = if (cart.totalItems > 0) "共${cart.totalItems}件 · ¥${cart.totalPrice.clean()}" else null
-        InlineSystemNotice(
-            listOfNotNull(actionLabel, itemSummary, moreSummary, totalSummary)
-                .filter { it.isNotBlank() }
-                .joinToString(" · "),
-        )
-        return
     }
-    val fallback = when (payload.status) {
-        "failed" -> "购物车操作失败"
-        else -> "购物车状态已更新"
-    }
-    InlineSystemNotice(fallback)
 }
 
 private data class ErrorPresentation(
@@ -9797,7 +10157,6 @@ private fun CriteriaEditSheet(
 private fun CartSheet(
     state: ChatCartUiState,
     backendBaseUrl: String,
-    onRefresh: () -> Unit,
     onQuantityChange: (String, Int) -> Unit,
     onProductDetailOpen: (String) -> Unit,
 ) {
@@ -9814,20 +10173,10 @@ private fun CartSheet(
                 lineHeight = 23.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            TextButton(onClick = onRefresh, enabled = !state.isLoading) {
-                Text("刷新", color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
-            }
         }
         when {
             state.isLoading && state.items.isEmpty() -> CartLoadingState()
-            state.error != null && state.items.isEmpty() -> CartEmptyState(
-                title = "暂时没有拿到购物车",
-                helper = "可以稍后刷新，或先回到对话继续加购。",
-            )
-            state.items.isEmpty() -> CartEmptyState(
-                title = "购物车还是空的",
-                helper = "从结论或商品卡加购后，这里会汇总数量和金额。",
-            )
+            state.items.isEmpty() -> CartEmptyState()
             else -> {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     state.items.forEach { item ->
@@ -9865,33 +10214,28 @@ private fun CartLoadingState() {
 }
 
 @Composable
-private fun CartEmptyState(title: String, helper: String) {
+private fun CartEmptyState() {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
+            .padding(top = 24.dp, bottom = 30.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(
+        Image(
+            painter = painterResource(R.drawable.redbean_bun_character_03),
+            contentDescription = null,
             modifier = Modifier
-                .size(54.dp)
-                .background(BuyPilotColors.SurfaceMuted, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_shopping_bag_24),
-                contentDescription = null,
-                tint = BuyPilotColors.TextMuted,
-                modifier = Modifier.size(24.dp),
-            )
-        }
-        Text(title, color = BuyPilotColors.TextPrimary, fontSize = BuyPilotType.Body, fontWeight = FontWeight.SemiBold)
+                .size(132.dp)
+                .clip(RoundedCornerShape(32.dp)),
+            contentScale = ContentScale.Fit,
+        )
         Text(
-            helper,
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 18.sp,
+            "购物车还是空的",
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 20.sp,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
         )
     }
@@ -10087,14 +10431,25 @@ private fun DecisionEvidenceSheet(
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
+    cartState: ChatCartUiState,
     onProductDetailOpen: (String, String) -> Unit,
+    onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
     val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
     val alternatives = payload.alternatives.filter {
         it.name.withoutInternalDebugTokens().isNotBlank()
     }
-    val nextActions = payload.nextActions.filter { it.label.isNotBlank() }
+    val winnerProductId = payload.winnerProductId?.takeIf { it.isNotBlank() }
+    val nextActions = payload.nextActions
+        .filter { it.label.isNotBlank() && it.action != "view_cart" }
+        .map { action ->
+            if (action.action == "add_to_cart" && action.productId.isNullOrBlank() && !winnerProductId.isNullOrBlank()) {
+                action.copy(productId = winnerProductId)
+            } else {
+                action
+            }
+        }
 
     SheetContentColumn(expandToMaxHeight = false) {
         SheetTitle("决策依据")
@@ -10138,7 +10493,11 @@ private fun DecisionEvidenceSheet(
         }
 
         if (nextActions.isNotEmpty()) {
-            DecisionNextActionsSection(nextActions)
+            DecisionNextActionsSection(
+                actions = nextActions,
+                cartState = cartState,
+                onQuickAction = onQuickAction,
+            )
         }
     }
 }
@@ -10400,12 +10759,152 @@ private fun DecisionAlternativeRow(
 }
 
 @Composable
-private fun DecisionNextActionsSection(actions: List<QuickActionPayload>) {
-    val labels = actions.mapNotNull { it.label.takeIf { label -> label.isNotBlank() } }
-    if (labels.isEmpty()) return
+private fun DecisionNextActionsSection(
+    actions: List<QuickActionPayload>,
+    cartState: ChatCartUiState,
+    onQuickAction: (QuickActionPayload) -> Unit,
+) {
+    val visibleActions = actions.mapNotNull { action ->
+        val label = action.label.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val productId = action.productId?.takeIf { it.isNotBlank() }
+        val isAddToCart = action.action == "add_to_cart"
+        val isPending = isAddToCart && productId in cartState.pendingAddProductIds
+        val isInCart = isAddToCart && cartState.items.any { it.productId == productId }
+        val enabled = when {
+            isAddToCart -> productId != null && !isPending && !isInCart
+            else -> true
+        }
+        DecisionNextActionUi(
+            action = action.copy(
+                label = when {
+                    isPending -> "加入中..."
+                    isInCart -> "已加入"
+                    else -> label
+                },
+            ),
+            helper = when {
+                isPending -> "等待真实购物车回执"
+                isInCart -> "这件商品已在购物车中"
+                isAddToCart && productId == null -> "缺少商品信息，暂不可操作"
+                isAddToCart -> "绑定当前结论商品"
+                action.action == "open_evidence" || action.action == "compare" -> "查看更多判断依据"
+                else -> "继续调整推荐"
+            },
+            iconRes = when (action.action) {
+                "add_to_cart" -> R.drawable.ic_shopping_bag_24
+                "open_evidence", "compare" -> R.drawable.ic_article_24
+                else -> R.drawable.ic_arrow_upward_24
+            },
+            enabled = enabled,
+        )
+    }
+    if (visibleActions.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        DecisionEvidenceSectionHeader("下一步动作", actions.size)
-        ChipRows(labels = labels)
+        DecisionEvidenceSectionHeader("下一步动作", visibleActions.size)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(18.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                visibleActions.forEachIndexed { index, action ->
+                    DecisionNextActionRow(
+                        item = action,
+                        onClick = { onQuickAction(action.action) },
+                    )
+                    if (index != visibleActions.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 44.dp),
+                            color = BuyPilotColors.Border.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class DecisionNextActionUi(
+    val action: QuickActionPayload,
+    val helper: String,
+    val iconRes: Int,
+    val enabled: Boolean,
+)
+
+@Composable
+private fun DecisionNextActionRow(
+    item: DecisionNextActionUi,
+    onClick: () -> Unit,
+) {
+    val contentAlpha = if (item.enabled) 1f else 0.56f
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = item.enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp)
+            .graphicsLayer { alpha = contentAlpha },
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(
+                    if (item.action.action == "add_to_cart") {
+                        BuyPilotColors.PrimarySoft.copy(alpha = 0.45f)
+                    } else {
+                        BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f)
+                    },
+                    CircleShape,
+                )
+                .border(
+                    1.dp,
+                    if (item.action.action == "add_to_cart") {
+                        BuyPilotColors.Primary.copy(alpha = 0.12f)
+                    } else {
+                        BuyPilotColors.Border.copy(alpha = 0.58f)
+                    },
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(item.iconRes),
+                contentDescription = null,
+                tint = if (item.action.action == "add_to_cart") BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = item.action.label,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.helper,
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Tiny,
+                lineHeight = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (item.enabled) {
+            ProductDetailChevron(modifier = Modifier.size(26.dp))
+        }
     }
 }
 

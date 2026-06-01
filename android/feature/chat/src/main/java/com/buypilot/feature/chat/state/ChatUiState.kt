@@ -39,6 +39,7 @@ data class ChatCartUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val updatingProductIds: Set<String> = emptySet(),
+    val pendingAddProductIds: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean
         get() = !isLoading && items.isEmpty()
@@ -66,6 +67,7 @@ data class ChatUiState(
     val pendingDecisions: Map<String, PendingDecision> = emptyMap(),
     val imageAttachment: ChatImageAttachmentState = ChatImageAttachmentState(),
     val cartState: ChatCartUiState = ChatCartUiState(),
+    val cartSheetRequestId: Long = 0L,
     val backendBaseUrl: String = "",
     val useMockChat: Boolean = false,
 )

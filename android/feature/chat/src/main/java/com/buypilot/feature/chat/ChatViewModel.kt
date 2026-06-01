@@ -64,6 +64,19 @@ private const val CONVERGENCE_TIMEOUT_MS = 60_000L
 private const val MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024
 private const val CHAT_IMAGE_MAX_EDGE_PX = 1600
 private const val CONVERGENCE_LOG_TAG = "BuyPilotConverge"
+private val CART_STOP_WORDS = setOf(
+    "加入",
+    "购物",
+    "物车",
+    "购物车",
+    "商品",
+    "产品",
+    "手机",
+    "这个",
+    "这件",
+    "这款",
+    "数量",
+)
 private data class PendingConvergenceRequest(
     val userMessage: String,
     val showUserMessage: Boolean,
@@ -85,7 +98,187 @@ private data class ProductActionTarget(
     val deckId: String,
     val productId: String,
     val rank: Int?,
+    val productName: String?,
 )
+
+internal data class ProductCartCandidate(
+    val deckId: String,
+    val productId: String,
+    val rank: Int?,
+    val productName: String?,
+    val brand: String?,
+    val subCategory: String?,
+    val category: String?,
+    val recency: Int = 0,
+)
+
+private data class PreparedUserStream(
+    val networkMessage: String,
+    val displayMessage: String,
+    val pendingCartProductId: String? = null,
+    val clientErrorMessage: String? = null,
+)
+
+private enum class CartReferenceStyle {
+    Explicit,
+    Deictic,
+}
+
+internal fun buildAddToCartCommand(productId: String, rank: Int?, productName: String?): String {
+    return "把商品ID $productId 加入购物车，数量1件"
+}
+
+private fun ProductActionTarget.addToCartCommand(): String =
+    buildAddToCartCommand(productId = productId, rank = rank, productName = productName)
+
+private fun ProductCartCandidate.addToCartCommand(): String =
+    buildAddToCartCommand(productId = productId, rank = rank, productName = productName)
+
+internal fun resolveAddToCartTarget(
+    message: String,
+    candidates: List<ProductCartCandidate>,
+    fallbackCandidate: ProductCartCandidate? = null,
+): ProductCartCandidate? {
+    if (!message.looksLikeAddToCartIntent()) return null
+    val safeFallback = fallbackCandidate.takeIf { message.cartReferenceStyle() == CartReferenceStyle.Deictic }
+    val uniqueCandidates = candidates.distinctBy { it.productId }.filter { it.productId.isNotBlank() }
+    if (uniqueCandidates.isEmpty()) return safeFallback
+
+    val ordinal = message.extractRequestedOrdinal()
+    if (ordinal != null) {
+        uniqueCandidates
+            .filter { it.rank == ordinal }
+            .maxWithOrNull(compareBy<ProductCartCandidate> { it.recency })
+            ?.let { return it }
+    }
+
+    val query = message.extractCartTargetQuery()
+    if (query.isBlank()) return safeFallback
+    val ranked = uniqueCandidates
+        .mapNotNull { candidate ->
+            val score = candidate.matchScore(query)
+            if (score <= 0) null else candidate to score
+        }
+        .sortedWith(
+            compareByDescending<Pair<ProductCartCandidate, Int>> { it.second }
+                .thenByDescending { it.first.recency },
+        )
+    val best = ranked.firstOrNull() ?: return null
+    val second = ranked.getOrNull(1)
+    if (second != null && second.second == best.second) return null
+    return best.first
+}
+
+private fun String.looksLikeAddToCartIntent(): Boolean {
+    val text = lowercase(Locale.ROOT).replace(" ", "")
+    val hasCart = listOf("购物车", "cart", "加购").any { it in text }
+    val hasAddVerb = listOf("加入", "加到", "添加", "放入", "放到", "加入购物车", "加购", "add").any { it in text }
+    return hasCart && hasAddVerb
+}
+
+private fun String.cartReferenceStyle(): CartReferenceStyle {
+    val query = extractCartTargetQuery()
+    val hasDeicticWord = listOf("这个", "这件", "这款", "当前", "选中", "它").any { it in this }
+    if (query.isBlank()) {
+        return if (hasDeicticWord) CartReferenceStyle.Deictic else CartReferenceStyle.Explicit
+    }
+    val tokens = query.cartMatchTokens().filterNot { it in CART_STOP_WORDS }
+    return if (tokens.isEmpty() && hasDeicticWord) {
+        CartReferenceStyle.Deictic
+    } else {
+        CartReferenceStyle.Explicit
+    }
+}
+
+private fun String.extractRequestedOrdinal(): Int? {
+    val normalized = lowercase(Locale.ROOT)
+    val digit = Regex("""第\s*(\d+)\s*(个|件|款|台)?""").find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+    if (digit != null) return digit
+    return when {
+        listOf("第一个", "第一款", "第一件", "第一台", "1号", "top1").any { it in normalized } -> 1
+        listOf("第二个", "第二款", "第二件", "第二台", "2号", "top2").any { it in normalized } -> 2
+        listOf("第三个", "第三款", "第三件", "第三台", "3号", "top3").any { it in normalized } -> 3
+        listOf("第四个", "第四款", "第四件", "第四台", "4号", "top4").any { it in normalized } -> 4
+        listOf("第五个", "第五款", "第五件", "第五台", "5号", "top5").any { it in normalized } -> 5
+        else -> null
+    }
+}
+
+private fun String.extractCartTargetQuery(): String =
+    replace("加入购物车", " ")
+        .replace("加到购物车", " ")
+        .replace("添加到购物车", " ")
+        .replace("放入购物车", " ")
+        .replace("放到购物车", " ")
+        .replace("购物车", " ")
+        .replace("加购", " ")
+        .replace("加入", " ")
+        .replace("添加", " ")
+        .replace("这个", " ")
+        .replace("这件", " ")
+        .replace("这款", " ")
+        .replace("商品", " ")
+        .replace("产品", " ")
+        .replace("手机", " ")
+        .replace(Regex("""数量\s*\d+\s*件?"""), " ")
+        .cartMatchTokens()
+        .joinToString(" ")
+
+private fun ProductCartCandidate.matchScore(query: String): Int {
+    val queryTokens = query.cartMatchTokens().filterNot { it in CART_STOP_WORDS }
+    if (queryTokens.isEmpty()) return 0
+    val productTokens = listOfNotNull(productName, brand, subCategory, category, productId)
+        .flatMap { it.cartMatchTokens() }
+        .filterNot { it in CART_STOP_WORDS }
+        .toSet()
+    if (productTokens.isEmpty()) return 0
+    val normalizedName = productName.orEmpty().normalizeCartText()
+    val normalizedBrand = brand.orEmpty().normalizeCartText()
+    val normalizedId = productId.normalizeCartText()
+    return queryTokens.sumOf { token ->
+        when {
+            token == normalizedId -> 120
+            token.length >= 3 && token in normalizedName -> 80 + token.length
+            token.length >= 2 && token in normalizedBrand -> 60 + token.length
+            token in productTokens -> 45 + token.length
+            token.length >= 4 && productTokens.any { it.contains(token) || token.contains(it) } -> 24 + token.length
+            else -> 0
+        }
+    }
+}
+
+private fun String.cartMatchTokens(): List<String> {
+    val normalized = normalizeCartText()
+    val alnum = Regex("""[a-z0-9]+""").findAll(normalized).map { it.value }.toList()
+    val chinese = Regex("""[\u4e00-\u9fa5]+""").findAll(normalized).flatMap { match ->
+        match.value.windowed(size = 2, step = 1, partialWindows = false) + match.value
+    }.toList()
+    return (alnum + chinese)
+        .map { it.trim() }
+        .filter { it.length >= 2 }
+        .distinct()
+}
+
+private fun String.normalizeCartText(): String =
+    lowercase(Locale.ROOT)
+        .replace("（", " ")
+        .replace("）", " ")
+        .replace("(", " ")
+        .replace(")", " ")
+        .replace("，", " ")
+        .replace("。", " ")
+        .replace("、", " ")
+        .replace("：", " ")
+        .replace(":", " ")
+        .replace("；", " ")
+        .replace(";", " ")
+        .replace("-", " ")
+        .replace("_", " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -129,7 +322,27 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        startRealStream(message = message, imageUrl = imageUrl, fromEditResubmit = fromEditResubmit)
+        val preparedStream = state.prepareUserStream(message, imageUrl)
+        if (preparedStream.clientErrorMessage != null) {
+            showLocalClientError(
+                message = preparedStream.displayMessage,
+                imageUrl = imageUrl,
+                fromEditResubmit = fromEditResubmit,
+                errorMessage = preparedStream.clientErrorMessage,
+            )
+            if (imageUrl != null) {
+                clearImageAttachment()
+            }
+            return
+        }
+        preparedStream.pendingCartProductId?.let { markAddToCartPending(it) }
+        startRealStream(
+            message = preparedStream.networkMessage,
+            displayMessage = preparedStream.displayMessage,
+            imageUrl = imageUrl,
+            fromEditResubmit = fromEditResubmit,
+            pendingCartProductId = preparedStream.pendingCartProductId,
+        )
         if (imageUrl != null) {
             clearImageAttachment()
         }
@@ -280,6 +493,41 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private fun showLocalClientError(
+        message: String,
+        imageUrl: String?,
+        fromEditResubmit: Boolean,
+        errorMessage: String,
+    ) {
+        val nowMs = System.currentTimeMillis()
+        val sessionId = _uiState.value.sessionId ?: "local_session_001"
+        val turnId = Ids.clientTurnId()
+        _uiState.update {
+            ChatReducer.reduce(
+                ChatReducer.addUserMessage(
+                    state = it.copy(sessionId = sessionId, currentTurnId = turnId),
+                    key = Ids.userMessageId(nowMs),
+                    content = message,
+                    imageUrl = imageUrl,
+                    fromEditResubmit = fromEditResubmit,
+                ),
+                AgentUiEnvelope(
+                    event = AgentEventType.Error,
+                    sessionId = sessionId,
+                    turnId = turnId,
+                    seq = 1,
+                    eventId = "$turnId:client-add-cart-target",
+                    nodeId = "error_add_cart_target_$turnId",
+                    payload = ErrorPayload(
+                        code = "ADD_TO_CART_TARGET_REQUIRED",
+                        message = errorMessage,
+                        retryable = false,
+                    ),
+                ),
+            )
+        }
+    }
+
     fun retryLastMessage() {
         val request = _uiState.value.lastRetryableRequest ?: return
         val message = request.message.trim()
@@ -329,6 +577,7 @@ class ChatViewModel @Inject constructor(
 
     private fun startRealStream(
         message: String,
+        displayMessage: String = message,
         imageUrl: String? = null,
         criteriaPatch: JsonObject? = null,
         skipStages: List<String> = emptyList(),
@@ -336,6 +585,7 @@ class ChatViewModel @Inject constructor(
         showUserMessage: Boolean = true,
         convergenceDeckId: String? = null,
         forcedClientTurnId: String? = null,
+        pendingCartProductId: String? = null,
     ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = forcedClientTurnId ?: Ids.clientTurnId()
@@ -346,7 +596,7 @@ class ChatViewModel @Inject constructor(
                 val withUserMessage = ChatReducer.addUserMessage(
                     state = it,
                     key = Ids.userMessageId(nowMs),
-                    content = message,
+                    content = displayMessage,
                     imageUrl = imageUrl,
                     fromEditResubmit = fromEditResubmit,
                 )
@@ -375,7 +625,7 @@ class ChatViewModel @Inject constructor(
             if (showUserMessage && currentSessionId != null) {
                 chatRepository.recordUserMessage(
                     sessionId = currentSessionId,
-                    content = message,
+                    content = displayMessage,
                     nowMs = nowMs,
                 )
             }
@@ -406,6 +656,10 @@ class ChatViewModel @Inject constructor(
             suspend fun collectStream() {
                 chatRepository.streamChat(request)
                     .catch { throwable ->
+                        clearPendingAddToCart(
+                            productId = pendingCartProductId,
+                            errorMessage = throwable.message ?: "没有加成功",
+                        )
                         if (isConvergenceStream && !convergenceProducedDecision) {
                             convergenceFailed = true
                             logConvergence {
@@ -473,7 +727,7 @@ class ChatViewModel @Inject constructor(
                             userMessageRecorded = true
                             chatRepository.recordUserMessage(
                                 sessionId = sessionId,
-                                content = message,
+                                content = displayMessage,
                                 nowMs = nowMs,
                             )
                         }
@@ -510,6 +764,7 @@ class ChatViewModel @Inject constructor(
                     turnId = clientTurnId,
                 )
             }
+            clearPendingAddToCart(pendingCartProductId)
         }
     }
 
@@ -572,6 +827,22 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun requestCartSheet() {
+        _uiState.update { it.copy(cartSheetRequestId = it.cartSheetRequestId + 1L) }
+        refreshCart()
+    }
+
+    fun consumeCartSheetRequest(requestId: Long) {
+        if (requestId <= 0L) return
+        _uiState.update {
+            if (it.cartSheetRequestId == requestId) {
+                it.copy(cartSheetRequestId = 0L)
+            } else {
+                it
+            }
+        }
+    }
+
     fun updateCartQuantity(productId: String, quantity: Int) {
         val sessionId = _uiState.value.sessionId ?: return
         if (productId.isBlank()) return
@@ -630,13 +901,23 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun addProductToCart(productId: String) {
+        addCurrentRecommendationToCart(productId)
+    }
+
     private fun addCurrentRecommendationToCart(preferredProductId: String?) {
         val state = _uiState.value
-        val target = state.productActionTarget(preferredProductId) ?: return
-        val ordinal = target.rank?.let { "第${it}个" } ?: "这个"
+        val target = state.productActionTarget(
+            preferredProductId = preferredProductId,
+            allowDeckFallback = false,
+        ) ?: return
+        if (target.productId in state.cartState.pendingAddProductIds) return
+        if (state.cartState.items.any { it.productId == target.productId }) return
+        markAddToCartPending(target.productId)
         startRealStream(
-            message = "把${ordinal}商品加入购物车",
+            message = target.addToCartCommand(),
             showUserMessage = false,
+            pendingCartProductId = target.productId,
         )
         submitProductInteraction(
             sessionId = state.sessionId,
@@ -647,6 +928,30 @@ class ChatViewModel @Inject constructor(
             reason = "用户点击快捷动作加入购物车",
             silentFailure = true,
         )
+    }
+
+    private fun markAddToCartPending(productId: String) {
+        if (productId.isBlank()) return
+        _uiState.update {
+            it.copy(
+                cartState = it.cartState.copy(
+                    error = null,
+                    pendingAddProductIds = it.cartState.pendingAddProductIds + productId,
+                ),
+            )
+        }
+    }
+
+    private fun clearPendingAddToCart(productId: String?, errorMessage: String? = null) {
+        val cleanProductId = productId?.takeIf { it.isNotBlank() } ?: return
+        _uiState.update {
+            it.copy(
+                cartState = it.cartState.copy(
+                    error = errorMessage ?: it.cartState.error,
+                    pendingAddProductIds = it.cartState.pendingAddProductIds - cleanProductId,
+                ),
+            )
+        }
     }
 
     private fun handleFeedbackQuickAction(action: QuickActionPayload) {
@@ -927,7 +1232,10 @@ class ChatViewModel @Inject constructor(
             }
     }
 
-    private fun ChatUiState.productActionTarget(preferredProductId: String?): ProductActionTarget? {
+    private fun ChatUiState.productActionTarget(
+        preferredProductId: String?,
+        allowDeckFallback: Boolean = true,
+    ): ProductActionTarget? {
         val cleanPreferred = preferredProductId?.takeIf { it.isNotBlank() }
         val decisionWinner = nodes
             .filterIsInstance<FinalDecisionNode>()
@@ -936,6 +1244,7 @@ class ChatViewModel @Inject constructor(
             ?.winnerProductId
             ?.takeIf { it.isNotBlank() }
         val targetProductId = cleanPreferred ?: decisionWinner
+        if (targetProductId == null && !allowDeckFallback) return null
         val decks = nodes.filterIsInstance<ProductDeckNode>()
         val targetDeck = if (targetProductId != null) {
             decks.lastOrNull { deck ->
@@ -952,7 +1261,92 @@ class ChatViewModel @Inject constructor(
         val rank = targetDeck.products.indexOfFirst { it.product.productId == productId }
             .takeIf { it >= 0 }
             ?.plus(1)
-        return ProductActionTarget(targetDeck.deckId, productId, rank)
+        return ProductActionTarget(
+            deckId = targetDeck.deckId,
+            productId = productId,
+            rank = rank,
+            productName = product.product.name.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun ChatUiState.prepareUserStream(message: String, imageUrl: String?): PreparedUserStream {
+        if (imageUrl != null) {
+            return PreparedUserStream(networkMessage = message, displayMessage = message)
+        }
+        if (!message.looksLikeAddToCartIntent()) {
+            return PreparedUserStream(networkMessage = message, displayMessage = message)
+        }
+        val target = resolveAddToCartTarget(
+            message = message,
+            candidates = productCartCandidates(),
+            fallbackCandidate = addToCartFallbackCandidate(message),
+        )
+            ?: return PreparedUserStream(
+                networkMessage = message,
+                displayMessage = message,
+                clientErrorMessage = "没找到要加入的具体商品。请先点开商品，或说清商品名再加入购物车。",
+            )
+        return PreparedUserStream(
+            networkMessage = target.addToCartCommand(),
+            displayMessage = message,
+            pendingCartProductId = target.productId,
+        )
+    }
+
+    private fun ChatUiState.productCartCandidates(): List<ProductCartCandidate> {
+        val decks = nodes.filterIsInstance<ProductDeckNode>()
+        return decks.flatMapIndexed { deckIndex, deck ->
+            deck.products.map { product ->
+                ProductCartCandidate(
+                    deckId = deck.deckId,
+                    productId = product.product.productId,
+                    rank = product.rank.takeIf { it > 0 },
+                    productName = product.product.name.takeIf { it.isNotBlank() },
+                    brand = product.product.brand?.takeIf { it.isNotBlank() },
+                    subCategory = product.product.subCategory?.takeIf { it.isNotBlank() },
+                    category = product.product.category.takeIf { it.isNotBlank() },
+                    recency = deckIndex,
+                )
+            }
+        }
+    }
+
+    private fun ChatUiState.addToCartFallbackCandidate(message: String): ProductCartCandidate? {
+        if (message.cartReferenceStyle() != CartReferenceStyle.Deictic) return null
+        val preferredProductId = nodes
+            .filterIsInstance<FinalDecisionNode>()
+            .lastOrNull()
+            ?.payload
+            ?.winnerProductId
+            ?.takeIf { it.isNotBlank() }
+            ?: nodes
+                .filterIsInstance<ProductDeckNode>()
+                .lastOrNull()
+                ?.let { deck ->
+                    val swipeState = productSwipeStates[deck.deckId]
+                    swipeState?.currentProductId?.takeIf { currentId ->
+                        deck.products.any { it.product.productId == currentId }
+                    } ?: deck.products.singleOrNull()?.product?.productId
+                }
+        return preferredProductId?.let { productCartCandidate(it) }
+    }
+
+    private fun ChatUiState.productCartCandidate(productId: String): ProductCartCandidate? {
+        if (productId.isBlank()) return null
+        nodes.filterIsInstance<ProductDeckNode>().forEachIndexed { deckIndex, deck ->
+            val payload = deck.products.firstOrNull { it.product.productId == productId } ?: return@forEachIndexed
+            return ProductCartCandidate(
+                deckId = deck.deckId,
+                productId = payload.product.productId,
+                rank = payload.rank.takeIf { it > 0 },
+                productName = payload.product.name.takeIf { it.isNotBlank() },
+                brand = payload.product.brand?.takeIf { it.isNotBlank() },
+                subCategory = payload.product.subCategory?.takeIf { it.isNotBlank() },
+                category = payload.product.category.takeIf { it.isNotBlank() },
+                recency = deckIndex,
+            )
+        }
+        return null
     }
 
     private fun readImageUploadInput(uri: Uri): ImageUploadInput {

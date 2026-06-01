@@ -106,11 +106,24 @@ object ChatReducer {
             AgentEventType.CartAction -> {
                 val payload = envelope.payload as CartActionPayload
                 val nextCart = payload.cart
+                val pendingAddProductIds = payload.productId
+                    .takeIf { it.isNotBlank() }
+                    ?.let { contentBase.cartState.pendingAddProductIds - it }
+                    ?: contentBase.cartState.pendingAddProductIds
                 contentBase.upsertNode(
                     CartActionNode(envelope.nodeId, payload),
                 ).let { nextState ->
                     if (nextCart == null) {
-                        nextState
+                        nextState.copy(
+                            cartState = nextState.cartState.copy(
+                                error = if (payload.status == "failed") {
+                                    "没有加成功"
+                                } else {
+                                    nextState.cartState.error
+                                },
+                                pendingAddProductIds = pendingAddProductIds,
+                            ),
+                        )
                     } else {
                         nextState.copy(
                             cartState = nextState.cartState.copy(
@@ -120,6 +133,7 @@ object ChatReducer {
                                 isLoading = false,
                                 error = null,
                                 updatingProductIds = emptySet(),
+                                pendingAddProductIds = pendingAddProductIds,
                             ),
                         )
                     }
@@ -191,7 +205,11 @@ object ChatReducer {
 
     fun cancel(state: ChatUiState): ChatUiState {
         val base = state.currentTurnId?.let { state.withoutThinking(it) } ?: state
-        return base.copy(inputState = ChatInputState.Canceled, isStreaming = false)
+        return base.copy(
+            inputState = ChatInputState.Canceled,
+            isStreaming = false,
+            cartState = base.cartState.copy(pendingAddProductIds = emptySet()),
+        )
     }
 
     fun markComposing(state: ChatUiState, hasText: Boolean, hasImage: Boolean): ChatUiState =

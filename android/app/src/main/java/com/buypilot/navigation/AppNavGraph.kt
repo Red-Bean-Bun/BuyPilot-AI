@@ -175,6 +175,7 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                             allowFullyHandled = true,
                         )
                     },
+                    onAddToCart = viewModel::addProductToCart,
                 )
             }
 

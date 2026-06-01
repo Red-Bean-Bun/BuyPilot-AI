@@ -25,6 +25,7 @@ fun ChatRoute(
         onCancel = viewModel::cancel,
         onQuickAction = viewModel::handleQuickAction,
         onCartOpen = viewModel::refreshCart,
+        onCartSheetRequestHandled = viewModel::consumeCartSheetRequest,
         onCartQuantityChange = viewModel::updateCartQuantity,
         onOpenProductDeck = onOpenProductDeck,
         onOpenProductDetail = onOpenProductDetail,

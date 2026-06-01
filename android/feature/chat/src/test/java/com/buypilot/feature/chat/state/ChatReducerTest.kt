@@ -3,6 +3,9 @@ package com.buypilot.feature.chat.state
 import com.buypilot.core.model.AgentEventType
 import com.buypilot.core.model.AgentPayload
 import com.buypilot.core.model.AgentUiEnvelope
+import com.buypilot.core.model.CartActionPayload
+import com.buypilot.core.model.CartItemPayload
+import com.buypilot.core.model.CartSummaryPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.CriteriaPayload
@@ -13,6 +16,7 @@ import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.TextDeltaPayload
 import com.buypilot.core.model.ThinkingPayload
+import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.ClarificationNode
 import com.buypilot.feature.chat.model.CriteriaNode
@@ -1346,6 +1350,68 @@ class ChatReducerTest {
         assertEquals(listOf("p1"), swipeState?.swipedProductIds)
         assertEquals(1, swipeState?.undoStack?.size)
         assertEquals("not_interested", swipeState?.undoStack?.single()?.feedbackType)
+    }
+
+    @Test
+    fun cartActionSuccessUpdatesCartAndClearsPendingAddProduct() {
+        val state = ChatUiState(
+            cartState = ChatCartUiState(
+                pendingAddProductIds = setOf("p1", "p2"),
+            ),
+        )
+
+        val next = ChatReducer.reduce(
+            state,
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "cart_turn_1",
+                payload = CartActionPayload(
+                    action = "add",
+                    productId = "p1",
+                    status = "success",
+                    cart = CartSummaryPayload(
+                        items = listOf(CartItemPayload(productId = "p1", name = "Phone", quantity = 1, price = 9999.0)),
+                        totalItems = 1,
+                        totalPrice = 9999.0,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(setOf("p2"), next.cartState.pendingAddProductIds)
+        assertEquals(1, next.cartState.totalItems)
+        assertEquals(9999.0, next.cartState.totalPrice, 0.0)
+        assertEquals("p1", next.cartState.items.single().productId)
+        assertTrue(next.nodes.single() is CartActionNode)
+    }
+
+    @Test
+    fun failedCartActionClearsPendingAddAndKeepsRetryablePayload() {
+        val state = ChatUiState(
+            cartState = ChatCartUiState(
+                pendingAddProductIds = setOf("p1"),
+            ),
+        )
+
+        val next = ChatReducer.reduce(
+            state,
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "cart_turn_1",
+                payload = CartActionPayload(
+                    action = "add",
+                    productId = "p1",
+                    status = "failed",
+                    cart = null,
+                ),
+            ),
+        )
+
+        val node = next.nodes.single() as CartActionNode
+        assertTrue(next.cartState.pendingAddProductIds.isEmpty())
+        assertEquals("没有加成功", next.cartState.error)
+        assertEquals("failed", node.payload.status)
+        assertEquals("p1", node.payload.productId)
     }
 
     private fun product(
