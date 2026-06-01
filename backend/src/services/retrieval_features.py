@@ -41,6 +41,15 @@ def product_document_text(product: ProductPayload, extra_text: str = "") -> str:
     return " | ".join(part for part in parts if part)
 
 
+def _brand_in_summary(brand: str | None, summary: str) -> bool:
+    """Check if a product brand name is mentioned in the criteria summary."""
+    if not brand or not summary:
+        return False
+    if len(brand) < 2:
+        return False
+    return brand in summary
+
+
 def product_match_score(
     criteria: CriteriaPayload,
     product: ProductPayload,
@@ -49,6 +58,7 @@ def product_match_score(
     skin_type_weight: float,
     budget_weight: float,
     scenario_weight: float = 0.0,
+    brand_weight: float = 0.0,
 ) -> float:
     score = 0.0
     if normalize_category(product.category) == normalize_category(criteria.category):
@@ -68,6 +78,8 @@ def product_match_score(
         and criteria.constraints.use_scenario in product.use_scenario
     ):
         score += scenario_weight
+    if brand_weight and _brand_in_summary(product.brand, criteria.summary):
+        score += brand_weight
     return score
 
 

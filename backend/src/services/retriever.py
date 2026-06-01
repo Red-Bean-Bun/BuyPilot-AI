@@ -15,6 +15,7 @@ from src.config.domain_terms import (
     product_type_aliases,
 )
 from src.config.tuning import (
+    FILTER_SCORE_BRAND,
     FILTER_SCORE_BUDGET,
     FILTER_SCORE_CATEGORY,
     FILTER_SCORE_SCENARIO,
@@ -542,6 +543,7 @@ def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
         skin_type_weight=FILTER_SCORE_SKIN_TYPE,
         budget_weight=FILTER_SCORE_BUDGET,
         scenario_weight=FILTER_SCORE_SCENARIO,
+        brand_weight=FILTER_SCORE_BRAND,
     )
 
 
