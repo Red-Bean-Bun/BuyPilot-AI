@@ -42,6 +42,7 @@ data class QuickActionPayload(
     @SerialName("action_id") val actionId: String = "",
     val label: String = "",
     val action: String = "",
+    @SerialName("product_id") val productId: String? = null,
     @SerialName("feedback_type") val feedbackType: String? = null,
     @SerialName("criteria_patch") val criteriaPatch: JsonObject? = null,
 )

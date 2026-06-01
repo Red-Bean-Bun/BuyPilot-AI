@@ -49,7 +49,7 @@ class ChatReducerTest {
             envelope(
                 event = AgentEventType.Thinking,
                 nodeId = "thinking_turn_1",
-                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+                payload = ThinkingPayload(stage = "searching", message = "正在检索匹配商品"),
             ),
         )
 
@@ -289,7 +289,7 @@ class ChatReducerTest {
             envelope(
                 event = AgentEventType.Thinking,
                 nodeId = "thinking_turn_1",
-                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+                payload = ThinkingPayload(stage = "searching", message = "正在检索匹配商品"),
             ),
         )
 
@@ -519,7 +519,7 @@ class ChatReducerTest {
             envelope(
                 event = AgentEventType.Thinking,
                 nodeId = "thinking_turn_1",
-                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求"),
+                payload = ThinkingPayload(stage = "criteria", message = "正在生成购买标准"),
             ),
         )
         val payload = CriteriaCardPayload(
@@ -543,6 +543,22 @@ class ChatReducerTest {
         assertTrue(state.nodes.first() is ThinkingNode)
         val node = state.nodes.single { it is CriteriaNode } as CriteriaNode
         assertEquals(payload, node.payload)
+    }
+
+    @Test
+    fun genericUnderstandingThinkingHeartbeatKeepsMascotNodeWithoutUiCopy() {
+        val state = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解您的需求..."),
+            ),
+        )
+
+        assertEquals("sess_1", state.sessionId)
+        assertTrue(state.isStreaming)
+        assertTrue(state.nodes.single() is ThinkingNode)
     }
 
     @Test
@@ -1075,6 +1091,47 @@ class ChatReducerTest {
         assertFalse("deck_1" in converged.awaitingConvergenceDeckIds)
         assertTrue(converged.nodes.any { it is FinalDecisionNode })
         assertEquals("deck_1", (converged.nodes.last { it is FinalDecisionNode } as FinalDecisionNode).deckId)
+    }
+
+    @Test
+    fun cachedPendingDecisionCanBePresentedAsNewAssistantTurn() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val awaitableDeckState = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+        val earlyDecision = ChatReducer.reduce(
+            awaitableDeckState,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "当前先把 p1 作为首选候选；继续反馈后我会再收敛。",
+                    decisionStatus = "needs_more_signal",
+                    confidence = "low",
+                    nextStep = "continue_current_deck",
+                ),
+            ),
+        )
+
+        val converged = ChatReducer.convergeDeck(
+            state = earlyDecision.copy(currentTurnId = "converge_turn_1"),
+            deckId = "deck_1",
+            presentationTurnId = "converge_turn_1",
+        )
+
+        val decision = converged.nodes.last { it is FinalDecisionNode } as FinalDecisionNode
+        assertEquals("converge_turn_1", decision.turnId)
+        assertEquals("converge_turn_1", converged.currentTurnId)
     }
 
     @Test

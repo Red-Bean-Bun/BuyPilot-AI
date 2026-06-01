@@ -74,7 +74,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun textAfterThinkingStartsWithHandoffWhilePreviousThinkingExits() {
+    fun textAfterThinkingKeepsThinkingVisibleUntilTextStarts() {
         val thinking = thinking("thinking_search")
         val text = text("intro_text")
         val state = listOf(thinking, text).visibleTurnNodeKeys(
@@ -83,9 +83,44 @@ class TimelineRevealStoreTest {
             enteredStructuredKeys = emptySet(),
         )
 
-        assertFalse(thinking.key in state.visibleNodeKeys)
+        assertTrue(thinking.key in state.visibleNodeKeys)
         assertTrue(text.key in state.visibleNodeKeys)
         assertTrue(text.key in state.textHandoffKeys)
+    }
+
+    @Test
+    fun textAfterThinkingHidesThinkingAfterTextStarts() {
+        val thinking = thinking("thinking_search")
+        val text = text("intro_text")
+        val state = listOf(thinking, text).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = mapOf(text.key to TextRevealProgress(visibleLength = 1, totalLength = 20)),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertFalse(thinking.key in state.visibleNodeKeys)
+        assertTrue(text.key in state.visibleNodeKeys)
+        assertFalse(text.key in state.textHandoffKeys)
+    }
+
+    @Test
+    fun genericThinkingDoesNotShowAsOrphanBeforeBackendContentArrives() {
+        val thinking = thinking("thinking_understanding", stage = "understanding", message = "正在理解您的需求...")
+        val waitingState = listOf(thinking).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+        val text = text("intro_text")
+        val handoffState = listOf(thinking, text).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertFalse(thinking.key in waitingState.visibleNodeKeys)
+        assertTrue(thinking.key in handoffState.visibleNodeKeys)
+        assertTrue(text.key in handoffState.visibleNodeKeys)
     }
 
     @Test
@@ -110,7 +145,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun followingTextHidesIntermediateThinkingAndStartsWithHandoff() {
+    fun followingTextKeepsIntermediateThinkingUntilHandoffStarts() {
         val intro = text("intro_text")
         val thinking = thinking("thinking_decision")
         val nextText = text("decision_text")
@@ -122,7 +157,7 @@ class TimelineRevealStoreTest {
             enteredStructuredKeys = emptySet(),
         )
 
-        assertFalse(thinking.key in state.visibleNodeKeys)
+        assertTrue(thinking.key in state.visibleNodeKeys)
         assertTrue(nextText.key in state.visibleNodeKeys)
         assertTrue(nextText.key in state.textHandoffKeys)
     }
@@ -515,13 +550,18 @@ class TimelineRevealStoreTest {
         assertEquals(fallback, "Failed to connect to /chat/stream".userFacingErrorReason(fallback))
         assertEquals(fallback, "HTTP 500 NETWORK_ERROR".userFacingErrorReason(fallback))
         assertEquals(fallback, """{"detail":"timeout"}""".userFacingErrorReason(fallback))
+        assertEquals(
+            fallback,
+            "本轮导购处理失败，请稍后重试。 trace_id=android-turn-1da6b6ab-926e-46e8-862d-1db09c1f09f0"
+                .userFacingErrorReason(fallback),
+        )
         assertEquals("图片主体不够清晰。", "图片主体不够清晰。".userFacingErrorReason(fallback))
     }
 
     @Test
     fun thinkingStatusUsesBackendTextWithoutFrontendFallbackCopy() {
         assertEquals(
-            "正在理解您的需求...",
+            "",
             ThinkingPayload(stage = "understanding", message = "正在理解您的需求...").userFacingThinkingMessage(),
         )
         assertEquals(
@@ -590,9 +630,13 @@ class TimelineRevealStoreTest {
         assertEquals("直接输入预算范围", budget)
     }
 
-    private fun thinking(key: String) = ThinkingNode(
+    private fun thinking(
+        key: String,
+        stage: String = key,
+        message: String = "正在检索匹配商品...",
+    ) = ThinkingNode(
         key = key,
-        payload = ThinkingPayload(stage = key, message = "thinking"),
+        payload = ThinkingPayload(stage = stage, message = message),
         turnId = "turn_1",
     )
 

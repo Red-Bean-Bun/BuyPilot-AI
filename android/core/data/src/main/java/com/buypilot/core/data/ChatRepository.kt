@@ -10,10 +10,15 @@ import com.buypilot.core.model.AgentUiEnvelope
 import com.buypilot.core.model.requests.ChatCancelRequest
 import com.buypilot.core.model.requests.ChatStreamRequest
 import com.buypilot.core.model.requests.FeedbackRequest
+import com.buypilot.core.model.responses.CartResponse
+import com.buypilot.core.model.responses.ChatCancelResponse
+import com.buypilot.core.model.responses.ImageUploadResponse
 import com.buypilot.core.network.BaseUrlProvider
+import com.buypilot.core.network.CartApi
 import com.buypilot.core.network.ChatApi
 import com.buypilot.core.network.ChatCancelApi
 import com.buypilot.core.network.FeedbackApi
+import com.buypilot.core.network.ImageUploadApi
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 
@@ -21,6 +26,8 @@ class ChatRepository @Inject constructor(
     private val chatApi: ChatApi,
     private val chatCancelApi: ChatCancelApi,
     private val feedbackApi: FeedbackApi,
+    private val imageUploadApi: ImageUploadApi,
+    private val cartApi: CartApi,
     private val baseUrlProvider: BaseUrlProvider,
     private val sessionDao: SessionDao,
     private val messageDao: MessageDao,
@@ -31,8 +38,33 @@ class ChatRepository @Inject constructor(
     fun streamChat(request: ChatStreamRequest): Flow<AgentUiEnvelope<AgentPayload>> =
         chatApi.stream(request)
 
-    suspend fun cancel(sessionId: String, turnId: String) {
+    suspend fun cancel(sessionId: String, turnId: String): ChatCancelResponse =
         chatCancelApi.cancel(ChatCancelRequest(sessionId = sessionId, turnId = turnId))
+
+    suspend fun uploadImage(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+        sessionId: String? = null,
+    ): ImageUploadResponse =
+        imageUploadApi.uploadImage(
+            bytes = bytes,
+            fileName = fileName,
+            mimeType = mimeType,
+            sessionId = sessionId,
+        )
+
+    suspend fun getCart(sessionId: String): CartResponse =
+        cartApi.getCart(sessionId)
+
+    suspend fun updateCartQuantity(sessionId: String, productId: String, quantity: Int): CartResponse {
+        cartApi.updateQuantity(sessionId, productId, quantity)
+        return cartApi.getCart(sessionId)
+    }
+
+    suspend fun removeCartItem(sessionId: String, productId: String): CartResponse {
+        cartApi.removeItem(sessionId, productId)
+        return cartApi.getCart(sessionId)
     }
 
     suspend fun submitProductFeedback(

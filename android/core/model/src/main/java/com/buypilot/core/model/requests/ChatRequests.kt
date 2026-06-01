@@ -37,3 +37,8 @@ data class FeedbackRequest(
     val action: String? = null,
     val reason: String? = null,
 )
+
+@Serializable
+data class CartMutationRequest(
+    val quantity: Int = 1,
+)

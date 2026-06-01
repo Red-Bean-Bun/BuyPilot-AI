@@ -75,18 +75,25 @@ object ChatReducer {
         }
 
         return when (envelope.event) {
-            AgentEventType.Thinking -> base.upsertThinkingAtTail(
-                (envelope.payload as ThinkingPayload).let { payload ->
+            AgentEventType.Thinking -> {
+                val payload = envelope.payload as ThinkingPayload
+                if (payload.fallback || payload.isFallback) {
+                    return base.copy(
+                        inputState = ChatInputState.Streaming,
+                        isStreaming = true,
+                    )
+                }
+                base.upsertThinkingAtTail(
                     ThinkingNode(
                         key = payload.thinkingNodeKey(envelope),
                         payload = payload,
                         turnId = envelope.turnId,
-                    )
-                },
-            ).copy(
-                inputState = ChatInputState.Streaming,
-                isStreaming = true,
-            )
+                    ),
+                ).copy(
+                    inputState = ChatInputState.Streaming,
+                    isStreaming = true,
+                )
+            }
 
             AgentEventType.Clarification -> reduceClarification(contentBase, envelope)
 
@@ -96,9 +103,28 @@ object ChatReducer {
 
             AgentEventType.ProductCard -> reduceProductCard(contentBase, envelope)
 
-            AgentEventType.CartAction -> contentBase.upsertNode(
-                CartActionNode(envelope.nodeId, envelope.payload as CartActionPayload),
-            )
+            AgentEventType.CartAction -> {
+                val payload = envelope.payload as CartActionPayload
+                val nextCart = payload.cart
+                contentBase.upsertNode(
+                    CartActionNode(envelope.nodeId, payload),
+                ).let { nextState ->
+                    if (nextCart == null) {
+                        nextState
+                    } else {
+                        nextState.copy(
+                            cartState = nextState.cartState.copy(
+                                items = nextCart.items,
+                                totalItems = nextCart.totalItems,
+                                totalPrice = nextCart.totalPrice,
+                                isLoading = false,
+                                error = null,
+                                updatingProductIds = emptySet(),
+                            ),
+                        )
+                    }
+                }
+            }
 
             AgentEventType.FinalDecision -> reduceFinalDecision(contentBase, envelope)
 
@@ -260,6 +286,7 @@ object ChatReducer {
         deckId: String,
         usePendingDecision: Boolean = true,
         allowFullyHandled: Boolean = false,
+        presentationTurnId: String? = null,
     ): ChatUiState {
         if (state.isDeckFullyHandled(deckId) && !allowFullyHandled) {
             return state.clearDeckConvergence(deckId)
@@ -275,11 +302,12 @@ object ChatReducer {
         return if (pending == null) {
             withoutWaiting
         } else {
+            val decisionTurnId = presentationTurnId?.takeIf { it.isNotBlank() } ?: pending.turnId
             withoutWaiting.upsertNode(
                 FinalDecisionNode(
                     key = pending.key,
                     payload = pending.payload,
-                    turnId = pending.turnId,
+                    turnId = decisionTurnId,
                     deckId = deckId,
                 ),
             )

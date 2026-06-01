@@ -1,6 +1,8 @@
 package com.buypilot.feature.chat.ui
 
 import androidx.annotation.DrawableRes
+import android.graphics.Bitmap
+import android.net.Uri
 import android.content.Context
 import android.text.Spanned
 import android.text.method.LinkMovementMethod
@@ -12,6 +14,9 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -227,6 +232,8 @@ import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
 import com.buypilot.feature.chat.model.PendingDecision
 import com.buypilot.feature.chat.state.ChatInputState
+import com.buypilot.feature.chat.state.ChatCartUiState
+import com.buypilot.feature.chat.state.ChatImageAttachmentState
 import com.buypilot.feature.chat.state.ChatUiState
 import com.yuyakaido.android.cardstackview.CardStackLayoutManager
 import com.yuyakaido.android.cardstackview.CardStackListener
@@ -589,8 +596,14 @@ fun BuyPilotChatScreen(
     state: ChatUiState,
     onInputChanged: (String, Boolean) -> Unit,
     onSendMessage: (String, String?) -> Unit,
+    onImageSelected: (Uri) -> Unit,
+    onImageCaptured: (Bitmap) -> Unit,
+    onClearImageAttachment: () -> Unit,
     onCriteriaPatch: (JsonObject) -> Unit,
     onCancel: () -> Unit,
+    onQuickAction: (QuickActionPayload) -> Unit,
+    onCartOpen: () -> Unit,
+    onCartQuantityChange: (String, Int) -> Unit,
     onOpenProductDeck: (String, String?) -> Unit,
     onOpenProductDetail: (String, String) -> Unit,
     onRetryLastMessage: () -> Unit,
@@ -630,6 +643,20 @@ fun BuyPilotChatScreen(
     val composerFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            onImageSelected(uri)
+        }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview(),
+    ) { bitmap ->
+        if (bitmap != null) {
+            onImageCaptured(bitmap)
+        }
+    }
     val defaultSkinTypeOptions = stringArrayResource(R.array.default_skin_type_options).toSet()
     val showWelcome = state.nodes.isEmpty() && input.isBlank()
     val shouldDismissWelcomeContent = showWelcome &&
@@ -714,6 +741,27 @@ fun BuyPilotChatScreen(
         showAttachmentMenu = false
         focusManager.clearFocus()
         keyboardController?.hide()
+    }
+
+    fun dispatchQuickAction(action: QuickActionPayload) {
+        action.criteriaPatch?.let {
+            onCriteriaPatch(it)
+            return
+        }
+        val latestDecision = state.nodes
+            .filterIsInstance<FinalDecisionNode>()
+            .lastOrNull()
+            ?.payload
+        when (action.action) {
+            "compare", "open_evidence" -> {
+                if (latestDecision != null) {
+                    openSheet(ChatSheetContent.DecisionEvidence(latestDecision))
+                } else {
+                    onQuickAction(action)
+                }
+            }
+            else -> onQuickAction(action)
+        }
     }
 
     fun editAndFocus(message: String) {
@@ -867,6 +915,11 @@ fun BuyPilotChatScreen(
                 centered = state.nodes.isNotEmpty(),
                 showBack = state.nodes.any { it is CriteriaNode || it is ProductDeckNode || it is FinalDecisionNode },
                 showClear = state.nodes.isNotEmpty(),
+                cartCount = state.cartState.totalItems,
+                onCartOpen = {
+                    onCartOpen()
+                    openSheet(ChatSheetContent.Cart)
+                },
                 onClearConversation = ::clearConversationForDebug,
             )
 
@@ -901,14 +954,7 @@ fun BuyPilotChatScreen(
                     onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
                     onRetryLastMessage = onRetryLastMessage,
                     onEditLastMessage = { editAndFocus(it) },
-                    onQuickAction = { action ->
-                        val patch = action.criteriaPatch
-                        if (patch != null) {
-                            onCriteriaPatch(patch)
-                        } else {
-                            sendAndClear(action.label)
-                        }
-                    },
+                    onQuickAction = ::dispatchQuickAction,
                     onClarificationManualInput = { focusComposer() },
                     onClarificationManualSource = { nodeKey, snapshot ->
                         clarificationManualSource = ClarificationManualSource(nodeKey, snapshot)
@@ -964,7 +1010,20 @@ fun BuyPilotChatScreen(
                                 imeBottomPx = imeBottomPx,
                             ),
                         ),
-                )
+                ) {
+                    AttachmentMenu(
+                        onImageInput = {
+                            showAttachmentMenu = false
+                            imagePicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onCameraInput = {
+                            showAttachmentMenu = false
+                            cameraLauncher.launch(null)
+                        },
+                    )
+                }
             }
         }
 
@@ -975,6 +1034,7 @@ fun BuyPilotChatScreen(
             isTextRevealing = assistantVisualActive,
             awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
+            imageAttachment = state.imageAttachment,
             focusRequester = composerFocusRequester,
             modifier = Modifier
                 .align(Alignment.BottomCenter),
@@ -984,7 +1044,7 @@ fun BuyPilotChatScreen(
             },
             onTextChange = {
                 input = it
-                onInputChanged(it, false)
+                onInputChanged(it, state.imageAttachment.hasImage)
             },
             onTextFocus = {
                 showAttachmentMenu = false
@@ -994,13 +1054,17 @@ fun BuyPilotChatScreen(
             onKeyboardFlightSourceChanged = {
                 keyboardFlightSnapshot = it
             },
+            onRemoveImage = onClearImageAttachment,
             onSubmit = {
                 if (state.isStreaming) {
                     onCancel()
                     return@BottomComposer
                 }
                 val next = input.trim()
-                if (next.isNotEmpty()) {
+                val imageUrl = state.imageAttachment.imageUrl?.takeIf {
+                    state.imageAttachment.canSend
+                }
+                if (next.isNotEmpty() || imageUrl != null) {
                     if (activeClarificationKey != null) {
                         val keyboardSnapshot = if (
                             imeBottomPx > 0 &&
@@ -1021,7 +1085,7 @@ fun BuyPilotChatScreen(
                             ?: keyboardFlightSnapshot
                         answerClarification(next, manualSnapshot = manualSnapshot)
                     } else {
-                        sendAndClear(next)
+                        sendAndClear(next, imageUrl)
                     }
                 }
             },
@@ -1089,12 +1153,7 @@ fun BuyPilotChatScreen(
                         payload = targetContent.payload,
                         onQuickAction = { action ->
                             dismissSheet {
-                                val patch = action.criteriaPatch
-                                if (patch != null) {
-                                    onCriteriaPatch(patch)
-                                } else {
-                                    sendAndClear(action.label)
-                                }
+                                dispatchQuickAction(action)
                             }
                         },
                         onSave = { patch ->
@@ -1107,6 +1166,18 @@ fun BuyPilotChatScreen(
                         productDeckIdByProductId = sheetProductDeckIdByProductId,
                         onProductDetailOpen = { deckId, productId ->
                             dismissSheet { onOpenProductDetail(deckId, productId) }
+                        },
+                    )
+                    ChatSheetContent.Cart -> CartSheet(
+                        state = state.cartState,
+                        backendBaseUrl = state.backendBaseUrl,
+                        onRefresh = onCartOpen,
+                        onQuantityChange = onCartQuantityChange,
+                        onProductDetailOpen = { productId ->
+                            val deckId = sheetProductDeckIdByProductId[productId]
+                            if (deckId != null) {
+                                dismissSheet { onOpenProductDetail(deckId, productId) }
+                            }
                         },
                     )
                 }
@@ -1295,6 +1366,7 @@ private fun ConversationStage(
 private fun AttachmentMenuMotion(
     visible: Boolean,
     modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -1320,7 +1392,7 @@ private fun AttachmentMenuMotion(
         ),
         modifier = modifier,
     ) {
-        AttachmentMenu()
+        content()
     }
 }
 
@@ -1330,6 +1402,8 @@ private fun TopBar(
     centered: Boolean,
     showBack: Boolean,
     showClear: Boolean,
+    cartCount: Int,
+    onCartOpen: () -> Unit,
     onClearConversation: () -> Unit,
 ) {
     Column(
@@ -1347,7 +1421,12 @@ private fun TopBar(
             actionIcon = R.drawable.ic_restart_24.takeIf { showClear },
             actionDescription = "清空当前对话",
             actionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.72f),
+            secondaryActionIcon = R.drawable.ic_shopping_bag_24.takeIf { showClear },
+            secondaryActionDescription = "查看购物车",
+            secondaryActionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
+            secondaryBadge = cartCount.takeIf { it > 0 }?.coerceAtMost(99)?.toString(),
             onNavigationClick = {},
+            onSecondaryActionClick = onCartOpen,
             onActionClick = onClearConversation,
         )
         HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
@@ -1366,11 +1445,18 @@ private fun M3TopAppBarRow(
     actionDescription: String? = null,
     actionTint: Color = BuyPilotColors.TextSecondary,
     actionEnabled: Boolean = true,
+    secondaryActionIcon: Int? = null,
+    secondaryActionDescription: String? = null,
+    secondaryActionTint: Color = BuyPilotColors.TextSecondary,
+    secondaryActionEnabled: Boolean = true,
+    secondaryBadge: String? = null,
     containerColor: Color = Color.Transparent,
     contentColor: Color = BuyPilotColors.TextPrimary,
     onNavigationClick: () -> Unit = {},
+    onSecondaryActionClick: () -> Unit = {},
     onActionClick: () -> Unit = {},
 ) {
+    val actionPadding = if (secondaryActionIcon != null && actionIcon != null) 120.dp else 72.dp
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -1398,9 +1484,9 @@ private fun M3TopAppBarRow(
                 .align(if (titleCentered) Alignment.Center else Alignment.CenterStart)
                 .then(
                     if (titleCentered) {
-                        Modifier.padding(horizontal = 72.dp)
+                        Modifier.padding(start = actionPadding, end = actionPadding)
                     } else {
-                        Modifier.padding(start = 64.dp, end = 72.dp)
+                        Modifier.padding(start = 64.dp, end = actionPadding)
                     },
                 ),
             contentAlignment = if (titleCentered) Alignment.Center else Alignment.CenterStart,
@@ -1416,12 +1502,22 @@ private fun M3TopAppBarRow(
                 textAlign = if (titleCentered) TextAlign.Center else TextAlign.Start,
             )
         }
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .size(56.dp),
-            contentAlignment = Alignment.Center,
+                .padding(end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (secondaryActionIcon != null) {
+                BadgedTopBarIconButton(
+                    iconRes = secondaryActionIcon,
+                    contentDescription = secondaryActionDescription.orEmpty(),
+                    tint = secondaryActionTint,
+                    badge = secondaryBadge,
+                    enabled = secondaryActionEnabled,
+                    onClick = onSecondaryActionClick,
+                )
+            }
             if (actionIcon != null) {
                 M3IconButton(
                     iconRes = actionIcon,
@@ -1429,6 +1525,45 @@ private fun M3TopAppBarRow(
                     tint = actionTint,
                     onClick = onActionClick,
                     enabled = actionEnabled,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BadgedTopBarIconButton(
+    @DrawableRes iconRes: Int,
+    contentDescription: String,
+    tint: Color,
+    badge: String?,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(contentAlignment = Alignment.Center) {
+        M3IconButton(
+            iconRes = iconRes,
+            contentDescription = contentDescription,
+            tint = tint,
+            onClick = onClick,
+            enabled = enabled,
+        )
+        if (!badge.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 10.dp, end = 8.dp)
+                    .heightIn(min = 16.dp)
+                    .background(BuyPilotColors.Primary, CircleShape)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = badge,
+                    color = BuyPilotColors.OnPrimary,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         }
@@ -1670,6 +1805,7 @@ private fun ChatTimeline(
     var lastAnchoredAssistantTurnId by remember { mutableStateOf<String?>(null) }
     var retainedAnchorUserMessageKey by remember { mutableStateOf<String?>(null) }
     var retainedAnchorAssistantTurnId by remember { mutableStateOf<String?>(null) }
+    var forceAssistantReadableTurnId by remember { mutableStateOf<String?>(null) }
     var revealScrollTick by remember { mutableIntStateOf(0) }
     var lastRevealScrollAtMs by remember { mutableStateOf(0L) }
     var suppressReturnAutoFocus by rememberSaveable { mutableStateOf(false) }
@@ -1690,6 +1826,12 @@ private fun ChatTimeline(
     val timelineItems = remember(state.nodes) { state.nodes.toTimelineRenderItems() }
     val latestFinalDecisionKey = remember(state.nodes) {
         state.nodes.filterIsInstance<FinalDecisionNode>().lastOrNull()?.key
+    }
+    val latestFinalDecisionTurnId = remember(state.nodes) {
+        state.nodes.filterIsInstance<FinalDecisionNode>().lastOrNull()?.turnId
+    }
+    val latestFinalDecisionDeckId = remember(state.nodes) {
+        state.nodes.filterIsInstance<FinalDecisionNode>().lastOrNull()?.deckId
     }
     val finalDecisionKeys = remember(state.nodes) {
         state.nodes.filterIsInstance<FinalDecisionNode>().mapTo(mutableSetOf()) { it.key }
@@ -1834,6 +1976,28 @@ private fun ChatTimeline(
         )
         return true
     }
+    suspend fun animateAssistantTurnToReadableArea(turnId: String?, settleFrames: Int = 2): Boolean {
+        val targetTurnId = turnId?.takeIf { it.isNotBlank() } ?: return false
+        val index = timelineItems.indexOfFirst {
+            it is AssistantTurnTimelineItem && it.turnId == targetTurnId
+        }
+        if (index < 0) return false
+        animateTimelineItemToAnchor(
+            listState = listState,
+            itemIndex = index,
+            anchorTopPx = anchorTopOffsetPx,
+            tolerancePx = followCorrectionTolerancePx,
+        )
+        repeat((settleFrames - 1).coerceAtLeast(0)) {
+            scrollTimelineItemToAnchorIfNeeded(
+                listState = listState,
+                itemIndex = index,
+                anchorTopPx = anchorTopOffsetPx,
+                tolerancePx = followCorrectionTolerancePx,
+            )
+        }
+        return true
+    }
     val isNearTimelineEnd by remember(
         timelineItems.size,
         state.lastError,
@@ -1889,6 +2053,7 @@ private fun ChatTimeline(
         followStreamingText = false
         retainedAnchorUserMessageKey = null
         retainedAnchorAssistantTurnId = null
+        forceAssistantReadableTurnId = null
         if (routeReturnRestorePending) return@LaunchedEffect
         kotlinx.coroutines.delay(420L)
         suppressReturnAutoFocus = false
@@ -1901,6 +2066,7 @@ private fun ChatTimeline(
         followStreamingText = false
         retainedAnchorUserMessageKey = null
         retainedAnchorAssistantTurnId = null
+        forceAssistantReadableTurnId = null
         kotlinx.coroutines.delay(48L)
         val newFinalDecisionKey = latestFinalDecisionKey
             ?.takeIf { it != routeReturnFinalDecisionKey }
@@ -1981,6 +2147,7 @@ private fun ChatTimeline(
             activeTurnAnchored = true
             retainedAnchorUserMessageKey = key
             retainedAnchorAssistantTurnId = null
+            forceAssistantReadableTurnId = null
             followStreamingText = false
             keepLatestUserMessageAnchored()
         }
@@ -2009,6 +2176,8 @@ private fun ChatTimeline(
         timelineItems.size,
         activeTurnAnchored,
         activeFlightMessageKey,
+        suppressTimelineAutoFocus,
+        isUserDragging,
     ) {
         if (suppressTimelineAutoFocus) return@LaunchedEffect
         val turnId = state.currentTurnId ?: return@LaunchedEffect
@@ -2036,13 +2205,9 @@ private fun ChatTimeline(
         followStreamingText = false
         retainedAnchorUserMessageKey = null
         retainedAnchorAssistantTurnId = turnId
+        forceAssistantReadableTurnId = turnId
         kotlinx.coroutines.delay(TimelineViewportSettleMs)
-        animateTimelineItemToAnchor(
-            listState = listState,
-            itemIndex = assistantTurnIndex,
-            anchorTopPx = anchorTopOffsetPx,
-            tolerancePx = followCorrectionTolerancePx,
-        )
+        animateAssistantTurnToReadableArea(turnId)
     }
 
     LaunchedEffect(isComposerFocused, imeBottomPx, composerHeightPx, timelineItems.size) {
@@ -2066,6 +2231,7 @@ private fun ChatTimeline(
             activeTurnAnchored = false
             retainedAnchorUserMessageKey = null
             retainedAnchorAssistantTurnId = null
+            forceAssistantReadableTurnId = null
             lastAutoSettledUserMessageKey = state.lastUserMessageKey
         }
     }
@@ -2074,6 +2240,7 @@ private fun ChatTimeline(
         if (isUserDragging) {
             retainedAnchorUserMessageKey = null
             retainedAnchorAssistantTurnId = null
+            forceAssistantReadableTurnId = null
             onTimelineDrag()
         }
     }
@@ -2089,7 +2256,38 @@ private fun ChatTimeline(
         }
     }
 
-    LaunchedEffect(latestFinalDecisionKey, timelineItems.size, composerHeightPx, imeBottomPx) {
+    LaunchedEffect(
+        state.activeConvergenceDeckId,
+        state.currentTurnId,
+        timelineItems.size,
+        suppressTimelineAutoFocus,
+        isUserDragging,
+    ) {
+        if (suppressTimelineAutoFocus || isUserDragging) return@LaunchedEffect
+        val turnId = state.currentTurnId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (state.activeConvergenceDeckId.isNullOrBlank()) return@LaunchedEffect
+        if (forceAssistantReadableTurnId == turnId) return@LaunchedEffect
+        val hasAssistantTurn = timelineItems.any {
+            it is AssistantTurnTimelineItem && it.turnId == turnId
+        }
+        if (!hasAssistantTurn) return@LaunchedEffect
+        activeTurnAnchored = false
+        followStreamingText = true
+        retainedAnchorUserMessageKey = null
+        retainedAnchorAssistantTurnId = turnId
+        forceAssistantReadableTurnId = turnId
+        kotlinx.coroutines.delay(TimelineViewportSettleMs)
+        animateAssistantTurnToReadableArea(turnId)
+    }
+
+    LaunchedEffect(
+        latestFinalDecisionKey,
+        timelineItems.size,
+        composerHeightPx,
+        imeBottomPx,
+        suppressTimelineAutoFocus,
+        isUserDragging,
+    ) {
         if (suppressTimelineAutoFocus) return@LaunchedEffect
         val decisionKey = latestFinalDecisionKey ?: return@LaunchedEffect
         if (decisionKey == lastFocusedFinalDecisionKey || isUserDragging) return@LaunchedEffect
@@ -2099,14 +2297,46 @@ private fun ChatTimeline(
         activeTurnAnchored = false
         followStreamingText = false
         retainedAnchorUserMessageKey = null
-        retainedAnchorAssistantTurnId = null
-        kotlinx.coroutines.delay(220L)
-        animateTimelineItemToAnchor(
-            listState = listState,
-            itemIndex = decisionItemIndex,
-            anchorTopPx = anchorTopOffsetPx,
-            tolerancePx = followCorrectionTolerancePx,
-        )
+        retainedAnchorAssistantTurnId = latestFinalDecisionTurnId
+        forceAssistantReadableTurnId = latestFinalDecisionTurnId
+        kotlinx.coroutines.delay(TimelineViewportSettleMs)
+        if (!animateAssistantTurnToReadableArea(latestFinalDecisionTurnId, settleFrames = 4)) {
+            animateTimelineItemToAnchor(
+                listState = listState,
+                itemIndex = decisionItemIndex,
+                anchorTopPx = anchorTopOffsetPx,
+                tolerancePx = followCorrectionTolerancePx,
+            )
+        }
+    }
+
+    LaunchedEffect(
+        latestFinalDecisionKey,
+        latestFinalDecisionDeckId,
+        timelineItems.size,
+        isAssistantVisualActive,
+        forceAssistantReadableTurnId,
+        composerHeightPx,
+        imeBottomPx,
+    ) {
+        if (suppressTimelineAutoFocus || isUserDragging) return@LaunchedEffect
+        val decisionKey = latestFinalDecisionKey ?: return@LaunchedEffect
+        if (latestFinalDecisionDeckId.isNullOrBlank()) return@LaunchedEffect
+        if (latestFinalDecisionTurnId.isNullOrBlank()) return@LaunchedEffect
+        if (forceAssistantReadableTurnId != latestFinalDecisionTurnId) return@LaunchedEffect
+        kotlinx.coroutines.delay(120L)
+        if (!animateAssistantTurnToReadableArea(latestFinalDecisionTurnId, settleFrames = 2)) {
+            val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(decisionKey) }
+            if (decisionItemIndex >= 0) {
+                scrollTimelineItemToAnchorIfNeeded(
+                    listState = listState,
+                    itemIndex = decisionItemIndex,
+                    anchorTopPx = anchorTopOffsetPx,
+                    tolerancePx = followCorrectionTolerancePx,
+                    settleFrames = 2,
+                )
+            }
+        }
     }
 
     LaunchedEffect(
@@ -2118,9 +2348,12 @@ private fun ChatTimeline(
         activeTurnAnchored,
         retainedAnchorUserMessageKey,
         retainedAnchorAssistantTurnId,
+        forceAssistantReadableTurnId,
     ) {
         if (suppressTimelineAutoFocus) return@LaunchedEffect
-        if ((activeTurnAnchored || retainedAnchorUserMessageKey != null) && timelineItems.isNotEmpty()) {
+        if (forceAssistantReadableTurnId != null && timelineItems.isNotEmpty()) {
+            animateAssistantTurnToReadableArea(forceAssistantReadableTurnId, settleFrames = 1)
+        } else if ((activeTurnAnchored || retainedAnchorUserMessageKey != null) && timelineItems.isNotEmpty()) {
             keepLatestUserMessageAnchored()
         } else if (retainedAnchorAssistantTurnId != null && timelineItems.isNotEmpty()) {
             keepAssistantTurnAnchored(retainedAnchorAssistantTurnId)
@@ -2705,13 +2938,26 @@ internal fun List<ChatUiNode>.canRevealThinkingNode(
     val nextNode = (index + 1 until size)
         .map { this[it] }
         .firstOrNull { it !is ThinkingNode }
-    when (nextNode) {
-        null -> return true
-        is AiStreamNode,
-        is ClarificationNode -> return false
-        else -> return false
+    val visualOnlyThinking = (this[index] as ThinkingNode)
+        .payload
+        .userFacingThinkingMessage()
+        .isBlank()
+    return when (nextNode) {
+        null -> !visualOnlyThinking
+        is AiStreamNode -> {
+            val nextTextKey = nextNode.revealTextKey()
+            nextTextKey != null &&
+                nextTextKey !in completedTextKeys &&
+                textRevealProgress[nextTextKey]?.hasStarted != true
+        }
+        is ClarificationNode -> {
+            val questionKey = nextNode.revealTextKey()
+            questionKey != null &&
+                questionKey !in completedTextKeys &&
+                textRevealProgress[questionKey]?.hasStarted != true
+        }
+        else -> false
     }
-    return true
 }
 
 internal fun List<ChatUiNode>.canRevealTurnNode(
@@ -2911,6 +3157,7 @@ private fun TimelineNodeContent(
     when (node) {
         is UserMessageNode -> UserBubble(
             node = node,
+            backendBaseUrl = renderContext.backendBaseUrl,
             hidden = hiddenUserMessage,
             onPositioned = if (node.key == activeFlightMessageKey) {
                 { onUserBubblePositioned(node.key, it) }
@@ -3100,6 +3347,7 @@ private fun TimelineItemMotion(
 @Composable
 private fun UserBubble(
     node: UserMessageNode,
+    backendBaseUrl: String,
     hidden: Boolean = false,
     onPositioned: ((ClarificationChipSnapshot) -> Unit)? = null,
 ) {
@@ -3119,19 +3367,41 @@ private fun UserBubble(
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 304.dp)
-                .background(BuyPilotColors.Primary, bubbleShape)
-                .then(positionModifier)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-            Text(
-                text = node.content.ifBlank { "已发送图片" },
-                color = Color.White,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 21.sp,
-            )
+        val resolvedImageUrl = node.imageUrl.resolveProductImageUrl(backendBaseUrl)
+        if (resolvedImageUrl != null) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 228.dp)
+                    .aspectRatio(4f / 3f)
+                    .then(if (node.content.isBlank()) positionModifier else Modifier)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(BuyPilotColors.SurfaceMuted)
+                    .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f), RoundedCornerShape(18.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = resolvedImageUrl,
+                    contentDescription = "发送的图片",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        if (node.content.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 304.dp)
+                    .background(BuyPilotColors.Primary, bubbleShape)
+                    .then(if (resolvedImageUrl == null) positionModifier else Modifier)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = node.content,
+                    color = Color.White,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 21.sp,
+                )
+            }
         }
     }
 }
@@ -3293,10 +3563,10 @@ private fun String.withoutTrailingDots(): String =
 private val PlainMarkdownParser: Parser = Parser.builder().build()
 private val MarkdownBlockQuoteMarkerRegex = Regex("""^\s{0,3}>\s?""")
 private val InternalDebugLabelValueRegex = Regex(
-    """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id)\s*[:：=]\s*[\w.-]+""",
+    """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id|trace_id|client_trace_id|session_id|turn_id)\s*[:：=]\s*[\w.-]+""",
 )
 private val InternalDebugLabelRegex = Regex(
-    """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id)\b""",
+    """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id|trace_id|client_trace_id|session_id|turn_id)\b""",
 )
 private val InternalDebugValueRegex = Regex(
     """(?i)\b(?:not_interested|view_detail|open_evidence|criteria_patch|add_to_cart|show_evidence)\b""",
@@ -8856,6 +9126,7 @@ private val TechnicalErrorMarkerRegex = Regex(
     """(?i)\b(?:exception|traceback|timeout|failed|failure|network|http|ssl|socket|connect|connection|json|cancelled|canceled|unable|unknown host|econnreset)\b""",
 )
 private val TechnicalErrorCodeRegex = Regex("""\b[A-Z][A-Z0-9_]{2,}\b""")
+private val GenericBackendFailureRegex = Regex("""(?:本轮)?(?:导购)?处理失败|请稍后重试|服务异常|系统异常""")
 
 internal fun String.userFacingErrorReason(fallback: String): String {
     val clean = withoutInternalDebugTokens().trim()
@@ -8868,6 +9139,7 @@ private fun String.looksLikeTechnicalErrorText(): Boolean {
     if (text.isBlank()) return true
     if (TechnicalErrorMarkerRegex.containsMatchIn(text)) return true
     if (TechnicalErrorCodeRegex.containsMatchIn(text)) return true
+    if (GenericBackendFailureRegex.containsMatchIn(text)) return true
     if ('{' in text || '}' in text || '[' in text || ']' in text) return true
     if ("://" in text || "/" in text && Regex("""\b(?:api|v\d+|chat|stream)\b""").containsMatchIn(text)) return true
     val hasCjk = text.any { it.isCjk() }
@@ -8881,9 +9153,18 @@ private fun Char.isCjk(): Boolean =
         this in '\uF900'..'\uFAFF'
 
 internal fun ThinkingPayload.userFacingThinkingMessage(): String {
+    if (fallback || isFallback) return ""
     val clean = message.withoutInternalDebugTokens().trim()
+    if (clean.isGenericUnderstandingThinking(stage)) return ""
     if (clean.isNotBlank() && !clean.looksLikeTechnicalStatusText()) return clean
     return ""
+}
+
+private fun String.isGenericUnderstandingThinking(stage: String): Boolean {
+    val normalizedStage = stage.trim().lowercase()
+    val normalizedMessage = trim().trimEnd('.', '。', '…')
+    return normalizedStage in setOf("understanding", "intent_analysis", "intent") &&
+        normalizedMessage in setOf("正在理解您的需求", "正在理解你的需求")
 }
 
 private fun String.looksLikeTechnicalStatusText(): Boolean {
@@ -8968,6 +9249,98 @@ private fun InlineSystemNotice(message: String) {
 }
 
 @Composable
+private fun ImageAttachmentPreview(
+    attachment: ChatImageAttachmentState,
+    onRemove: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = attachment.hasImage,
+        enter = fadeIn(animationSpec = tween(180, easing = MenuEaseOut)) +
+            expandVertically(animationSpec = tween(220, easing = MenuEaseOut)),
+        exit = fadeOut(animationSpec = tween(120, easing = MenuEaseIn)) +
+            shrinkVertically(animationSpec = tween(160, easing = MenuEaseIn)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f))
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.58f), RoundedCornerShape(18.dp))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AsyncImage(
+                model = attachment.localUri.takeIf { it.isNotBlank() } ?: attachment.imageUrl,
+                contentDescription = "已选择的图片",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF3F5F8)),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = attachment.fileName.ifBlank { "图片输入" },
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = when {
+                        attachment.isUploading -> "正在上传，稍等一下"
+                        attachment.error != null -> attachment.error
+                        else -> "已准备好，可随消息发送"
+                    },
+                    color = if (attachment.error != null) BuyPilotColors.Danger else BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (attachment.isUploading) {
+                UploadingDot()
+                Spacer(Modifier.width(8.dp))
+            }
+            M3IconButton(
+                iconRes = R.drawable.ic_close_24,
+                contentDescription = "移除图片",
+                tint = BuyPilotColors.TextMuted,
+                modifier = Modifier.size(36.dp),
+                onClick = onRemove,
+            )
+        }
+    }
+}
+
+@Composable
+private fun UploadingDot() {
+    val transition = rememberInfiniteTransition(label = "image_uploading_dot")
+    val alpha by transition.animateFloat(
+        initialValue = 0.34f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(640, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "image_uploading_dot_alpha",
+    )
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .background(BuyPilotColors.Primary.copy(alpha = alpha), CircleShape),
+    )
+}
+
+@Composable
 private fun BottomComposer(
     text: String,
     inputState: ChatInputState,
@@ -8975,6 +9348,7 @@ private fun BottomComposer(
     isTextRevealing: Boolean,
     awaitingCriteriaAdjustment: Boolean,
     isAttachmentMenuOpen: Boolean,
+    imageAttachment: ChatImageAttachmentState,
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     onAttachmentClick: () -> Unit,
@@ -8983,6 +9357,7 @@ private fun BottomComposer(
     onFocusChanged: (Boolean) -> Unit,
     onHeightChanged: (Int) -> Unit,
     onKeyboardFlightSourceChanged: (ClarificationChipSnapshot) -> Unit,
+    onRemoveImage: () -> Unit,
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -8990,11 +9365,14 @@ private fun BottomComposer(
         inputState == ChatInputState.Clarifying -> "请回答上面的问题"
         inputState == ChatInputState.Streaming -> "正在生成，可随时停止"
         inputState == ChatInputState.Error -> "输入后重试"
+        imageAttachment.isUploading -> "图片上传中..."
+        imageAttachment.error != null -> "移除图片后重试，或重新选择"
         isTextRevealing -> "正在显示回复，可继续查看"
         awaitingCriteriaAdjustment -> "放宽预算、换品类或继续描述需求..."
         else -> "继续追问或描述需求..."
     }
-    val canSubmit = isStreaming || text.isNotBlank()
+    val attachmentBlocksSubmit = imageAttachment.hasImage && !imageAttachment.canSend
+    val canSubmit = isStreaming || (!attachmentBlocksSubmit && (text.isNotBlank() || imageAttachment.canSend))
     val hasError = inputState == ChatInputState.Error
     val containerColor by animateColorAsState(
         targetValue = when {
@@ -9042,6 +9420,10 @@ private fun BottomComposer(
                 .navigationBarsPadding()
                 .padding(start = 12.dp, top = 13.dp, end = 12.dp, bottom = 28.dp),
         ) {
+            ImageAttachmentPreview(
+                attachment = imageAttachment,
+                onRemove = onRemoveImage,
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -9225,10 +9607,14 @@ private fun ComposerActionButton(
 }
 
 @Composable
-private fun AttachmentMenu(modifier: Modifier = Modifier) {
+private fun AttachmentMenu(
+    modifier: Modifier = Modifier,
+    onImageInput: () -> Unit,
+    onCameraInput: () -> Unit,
+) {
     Column(
         modifier = modifier
-            .width(148.dp)
+            .width(164.dp)
             .shadow(
                 4.dp,
                 RoundedCornerShape(16.dp),
@@ -9240,9 +9626,9 @@ private fun AttachmentMenu(modifier: Modifier = Modifier) {
             .padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        AttachmentAction(R.drawable.ic_image_24, "图片输入", enabled = true)
-        AttachmentAction(R.drawable.ic_mic_24, "语音输入", enabled = false)
-        AttachmentAction(R.drawable.ic_videocam_24, "实时视频", enabled = false)
+        AttachmentAction(R.drawable.ic_image_24, "相册图片", enabled = true, onClick = onImageInput)
+        AttachmentAction(R.drawable.ic_add_photo_24, "拍照识别", enabled = true, onClick = onCameraInput)
+        AttachmentAction(R.drawable.ic_mic_24, "语音输入", enabled = false, onClick = {})
     }
 }
 
@@ -9251,10 +9637,13 @@ private fun AttachmentAction(
     iconRes: Int,
     label: String,
     enabled: Boolean,
+    onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -9400,6 +9789,295 @@ private fun CriteriaEditSheet(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CartSheet(
+    state: ChatCartUiState,
+    backendBaseUrl: String,
+    onRefresh: () -> Unit,
+    onQuantityChange: (String, Int) -> Unit,
+    onProductDetailOpen: (String) -> Unit,
+) {
+    SheetContentColumn(expandToMaxHeight = false) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "购物车",
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Title,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            TextButton(onClick = onRefresh, enabled = !state.isLoading) {
+                Text("刷新", color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
+            }
+        }
+        when {
+            state.isLoading && state.items.isEmpty() -> CartLoadingState()
+            state.error != null && state.items.isEmpty() -> CartEmptyState(
+                title = "暂时没有拿到购物车",
+                helper = "可以稍后刷新，或先回到对话继续加购。",
+            )
+            state.items.isEmpty() -> CartEmptyState(
+                title = "购物车还是空的",
+                helper = "从结论或商品卡加购后，这里会汇总数量和金额。",
+            )
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    state.items.forEach { item ->
+                        CartItemRow(
+                            item = item,
+                            backendBaseUrl = backendBaseUrl,
+                            updating = item.productId in state.updatingProductIds,
+                            onQuantityChange = onQuantityChange,
+                            onProductDetailOpen = onProductDetailOpen,
+                        )
+                    }
+                }
+                CartSummaryFooter(
+                    totalItems = state.totalItems,
+                    totalPrice = state.totalPrice,
+                    error = state.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CartLoadingState() {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        UploadingDot()
+        Text("正在同步购物车", color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Label)
+    }
+}
+
+@Composable
+private fun CartEmptyState(title: String, helper: String) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .background(BuyPilotColors.SurfaceMuted, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_shopping_bag_24),
+                contentDescription = null,
+                tint = BuyPilotColors.TextMuted,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Text(title, color = BuyPilotColors.TextPrimary, fontSize = BuyPilotType.Body, fontWeight = FontWeight.SemiBold)
+        Text(
+            helper,
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 18.sp,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun CartItemRow(
+    item: com.buypilot.core.model.CartItemPayload,
+    backendBaseUrl: String,
+    updating: Boolean,
+    onQuantityChange: (String, Int) -> Unit,
+    onProductDetailOpen: (String) -> Unit,
+) {
+    val product = item.product
+    val title = product?.displayName() ?: item.name.ifBlank { item.productId }
+    val price = item.price?.let { "¥${it.clean()}" } ?: product?.priceLabel().orEmpty()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.52f))
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.56f), RoundedCornerShape(18.dp))
+            .clickable(enabled = product != null) { onProductDetailOpen(item.productId) }
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(Color(0xFFF6F8FA))
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.4f), RoundedCornerShape(15.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (product != null) {
+                ProductImage(
+                    product = product,
+                    backendBaseUrl = backendBaseUrl,
+                    decodeSizePx = 144,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(5.dp),
+                )
+            } else {
+                Icon(
+                    painter = painterResource(R.drawable.product_image_placeholder),
+                    contentDescription = null,
+                    tint = BuyPilotColors.TextMuted,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                title,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                price.ifBlank { "价格待确认" },
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                maxLines = 1,
+            )
+        }
+        CartQuantityStepper(
+            quantity = item.quantity,
+            updating = updating,
+            onMinus = {
+                if (item.quantity <= 1) {
+                    onQuantityChange(item.productId, 0)
+                } else {
+                    onQuantityChange(item.productId, item.quantity - 1)
+                }
+            },
+            onPlus = { onQuantityChange(item.productId, item.quantity + 1) },
+            onRemove = { onQuantityChange(item.productId, 0) },
+        )
+    }
+}
+
+@Composable
+private fun CartQuantityStepper(
+    quantity: Int,
+    updating: Boolean,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .height(34.dp)
+                .clip(CircleShape)
+                .background(BuyPilotColors.SurfaceCard)
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.7f), CircleShape),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CartMiniIconButton(R.drawable.ic_remove_24, "减少数量", enabled = !updating, onClick = onMinus)
+            Text(
+                quantity.toString(),
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Label,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(min = 24.dp),
+            )
+            CartMiniIconButton(R.drawable.ic_add_24, "增加数量", enabled = !updating, onClick = onPlus)
+        }
+        TextButton(
+            onClick = onRemove,
+            enabled = !updating,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            modifier = Modifier.height(28.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_delete_24),
+                contentDescription = null,
+                tint = BuyPilotColors.TextMuted,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text("移除", color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Tiny)
+        }
+    }
+}
+
+@Composable
+private fun CartMiniIconButton(
+    @DrawableRes iconRes: Int,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(32.dp),
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = contentDescription,
+            tint = if (enabled) BuyPilotColors.TextSecondary else BuyPilotColors.TextMuted.copy(alpha = 0.45f),
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+@Composable
+private fun CartSummaryFooter(totalItems: Int, totalPrice: Double, error: String?) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (error != null) {
+            InlineSystemNotice(error.userFacingErrorReason("购物车刚才没有同步成功，请稍后再试。"))
+        }
+        HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.5f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "共 $totalItems 件",
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 17.sp,
+            )
+            Text(
+                "¥${totalPrice.clean()}",
+                color = BuyPilotColors.Primary,
+                fontSize = 20.sp,
+                lineHeight = 25.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
@@ -11348,4 +12026,5 @@ private fun Double.clean(): String =
 private sealed interface ChatSheetContent {
     data class Criteria(val payload: CriteriaCardPayload) : ChatSheetContent
     data class DecisionEvidence(val payload: FinalDecisionPayload) : ChatSheetContent
+    data object Cart : ChatSheetContent
 }

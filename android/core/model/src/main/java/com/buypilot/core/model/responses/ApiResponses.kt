@@ -1,6 +1,6 @@
 package com.buypilot.core.model.responses
 
-import com.buypilot.core.model.ProductPayload
+import com.buypilot.core.model.CartItemPayload
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -8,6 +8,15 @@ import kotlinx.serialization.Serializable
 data class ApiStatusResponse(
     val ok: Boolean = true,
     val status: String? = null,
+)
+
+@Serializable
+data class ChatCancelResponse(
+    val ok: Boolean = true,
+    val status: String? = null,
+    val canceled: Boolean = false,
+    @SerialName("session_id") val sessionId: String? = null,
+    @SerialName("turn_id") val turnId: String? = null,
 )
 
 @Serializable
@@ -29,17 +38,7 @@ data class FeedbackResponse(
 
 @Serializable
 data class CartResponse(
-    val items: List<CartItemResponse> = emptyList(),
+    val items: List<CartItemPayload> = emptyList(),
     @SerialName("total_items") val totalItems: Int = 0,
     @SerialName("total_price") val totalPrice: Double = 0.0,
-)
-
-@Serializable
-data class CartItemResponse(
-    @SerialName("product_id") val productId: String,
-    val name: String = "",
-    val price: Double? = null,
-    val quantity: Int = 1,
-    @SerialName("added_at") val addedAt: String? = null,
-    val product: ProductPayload? = null,
 )

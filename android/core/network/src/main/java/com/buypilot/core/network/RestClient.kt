@@ -31,6 +31,20 @@ class RestClient @Inject constructor(
             responseDeserializer,
         )
 
+    suspend fun <R : Any> patchJson(
+        path: String,
+        bodyJson: String,
+        responseDeserializer: DeserializationStrategy<R>,
+    ): R =
+        executeJson(
+            Request.Builder()
+                .url(url(path))
+                .patch(bodyJson.toRequestBody(JSON_MEDIA_TYPE))
+                .header("Content-Type", "application/json")
+                .build(),
+            responseDeserializer,
+        )
+
     suspend fun <R : Any> postMultipart(
         path: String,
         body: MultipartBody,
@@ -53,6 +67,15 @@ class RestClient @Inject constructor(
             responseDeserializer,
         )
 
+    suspend fun delete(path: String) {
+        executeStatus(
+            Request.Builder()
+                .url(url(path))
+                .delete()
+                .build(),
+        )
+    }
+
     suspend fun <R : Any> executeJson(
         request: Request,
         responseDeserializer: DeserializationStrategy<R>,
@@ -66,6 +89,16 @@ class RestClient @Inject constructor(
                 json.decodeFromString(responseDeserializer, responseBody)
             }
         }
+
+    private suspend fun executeStatus(request: Request) {
+        withContext(dispatchers.io) {
+            okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("HTTP ${response.code}: ${response.body?.string().orEmpty()}")
+                }
+            }
+        }
+    }
 
     fun url(path: String): String = baseUrlProvider.baseUrl.trimEnd('/') + path
 

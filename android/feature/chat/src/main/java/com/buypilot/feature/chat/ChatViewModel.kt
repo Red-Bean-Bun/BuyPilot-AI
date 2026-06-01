@@ -3,7 +3,12 @@ package com.buypilot.feature.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.util.Log
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.buypilot.core.common.id.Ids
+import com.buypilot.core.common.coroutine.DispatcherProvider
 import com.buypilot.core.data.ChatRepository
 import com.buypilot.core.model.AgentEventType
 import com.buypilot.core.model.AgentPayload
@@ -27,6 +32,8 @@ import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.state.ChatReducer
+import com.buypilot.feature.chat.state.ChatCartUiState
+import com.buypilot.feature.chat.state.ChatImageAttachmentState
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,12 +49,20 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import coil.ImageLoader
 import coil.request.ImageRequest
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Locale
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 private const val CONVERGENCE_TIMEOUT_MS = 60_000L
+private const val MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024
+private const val CHAT_IMAGE_MAX_EDGE_PX = 1600
 private const val CONVERGENCE_LOG_TAG = "BuyPilotConverge"
 private data class PendingConvergenceRequest(
     val userMessage: String,
@@ -55,9 +70,27 @@ private data class PendingConvergenceRequest(
     val allowFullyHandled: Boolean,
 )
 
+private data class ImageUploadInput(
+    val bytes: ByteArray,
+    val fileName: String,
+    val mimeType: String,
+)
+
+private data class PreparedCameraImage(
+    val input: ImageUploadInput,
+    val localUri: String,
+)
+
+private data class ProductActionTarget(
+    val deckId: String,
+    val productId: String,
+    val rank: Int?,
+)
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
+    private val dispatchers: DispatcherProvider,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
@@ -97,18 +130,166 @@ class ChatViewModel @Inject constructor(
         }
 
         startRealStream(message = message, imageUrl = imageUrl, fromEditResubmit = fromEditResubmit)
+        if (imageUrl != null) {
+            clearImageAttachment()
+        }
+    }
+
+    fun selectImage(uri: Uri) {
+        val localUri = uri.toString()
+        _uiState.update {
+            it.copy(
+                imageAttachment = ChatImageAttachmentState(
+                    localUri = localUri,
+                    fileName = uri.lastPathSegment.orEmpty().ifBlank { "购物图片" },
+                    mimeType = appContext.contentResolver.getType(uri).orEmpty(),
+                    isUploading = true,
+                ),
+                inputState = ChatInputState.ImageAttached,
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                val input = withContext(dispatchers.io) { readImageUploadInput(uri) }
+                chatRepository.uploadImage(
+                    bytes = input.bytes,
+                    fileName = input.fileName,
+                    mimeType = input.mimeType,
+                    sessionId = _uiState.value.sessionId,
+                ) to input
+            }.onSuccess { (response, input) ->
+                _uiState.update {
+                    if (it.imageAttachment.localUri != localUri) return@update it
+                    it.copy(
+                        imageAttachment = ChatImageAttachmentState(
+                            localUri = localUri,
+                            imageUrl = response.imageUrl,
+                            fileName = input.fileName,
+                            mimeType = response.mimeType ?: input.mimeType,
+                            width = response.width,
+                            height = response.height,
+                            isUploading = false,
+                            error = null,
+                        ),
+                        inputState = if (it.inputState == ChatInputState.Streaming) {
+                            it.inputState
+                        } else {
+                            ChatInputState.ImageAttached
+                        },
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update {
+                    if (it.imageAttachment.localUri != localUri) return@update it
+                    it.copy(
+                        imageAttachment = it.imageAttachment.copy(
+                            localUri = localUri,
+                            isUploading = false,
+                            error = throwable.userFacingImageUploadError(),
+                        ),
+                        inputState = if (it.lastUserMessage.isNullOrBlank()) {
+                            ChatInputState.Error
+                        } else {
+                            it.inputState
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    fun captureImage(bitmap: Bitmap) {
+        viewModelScope.launch {
+            runCatching {
+                withContext(dispatchers.io) { prepareCameraImage(bitmap) }
+            }.onSuccess { prepared ->
+                _uiState.update {
+                    it.copy(
+                        imageAttachment = ChatImageAttachmentState(
+                            localUri = prepared.localUri,
+                            fileName = prepared.input.fileName,
+                            mimeType = prepared.input.mimeType,
+                            isUploading = true,
+                        ),
+                        inputState = ChatInputState.ImageAttached,
+                    )
+                }
+                runCatching {
+                    chatRepository.uploadImage(
+                        bytes = prepared.input.bytes,
+                        fileName = prepared.input.fileName,
+                        mimeType = prepared.input.mimeType,
+                        sessionId = _uiState.value.sessionId,
+                    )
+                }.onSuccess { response ->
+                    _uiState.update {
+                        if (it.imageAttachment.localUri != prepared.localUri) return@update it
+                        it.copy(
+                            imageAttachment = it.imageAttachment.copy(
+                                imageUrl = response.imageUrl,
+                                mimeType = response.mimeType ?: prepared.input.mimeType,
+                                width = response.width,
+                                height = response.height,
+                                isUploading = false,
+                                error = null,
+                            ),
+                            inputState = if (it.inputState == ChatInputState.Streaming) {
+                                it.inputState
+                            } else {
+                                ChatInputState.ImageAttached
+                            },
+                        )
+                    }
+                }.onFailure { throwable ->
+                    _uiState.update {
+                        if (it.imageAttachment.localUri != prepared.localUri) return@update it
+                        it.copy(
+                            imageAttachment = it.imageAttachment.copy(
+                                isUploading = false,
+                                error = throwable.userFacingImageUploadError(),
+                            ),
+                        )
+                    }
+                }
+            }.onFailure { throwable ->
+                _uiState.update {
+                    it.copy(
+                        imageAttachment = ChatImageAttachmentState(
+                            fileName = "现场照片",
+                            mimeType = "image/jpeg",
+                            isUploading = false,
+                            error = throwable.userFacingImageUploadError("照片处理失败，请重新拍一张"),
+                        ),
+                        inputState = ChatInputState.Error,
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearImageAttachment() {
+        _uiState.update {
+            it.copy(
+                imageAttachment = ChatImageAttachmentState(),
+                inputState = when {
+                    it.isStreaming -> ChatInputState.Streaming
+                    it.inputState == ChatInputState.ImageAttached -> ChatInputState.Idle
+                    else -> it.inputState
+                },
+            )
+        }
     }
 
     fun retryLastMessage() {
         val request = _uiState.value.lastRetryableRequest ?: return
         val message = request.message.trim()
-        if (message.isEmpty()) return
+        if (message.isEmpty() && request.imageUrl == null) return
 
         streamJob?.cancel()
         if (BuildConfig.USE_MOCK_CHAT) {
-            sendMockMessage(message, imageUrl = null, retryingLast = true)
+            sendMockMessage(message, imageUrl = request.imageUrl, retryingLast = true)
         } else {
-            startRealStream(message = message, imageUrl = null)
+            startRealStream(message = message, imageUrl = request.imageUrl)
         }
     }
 
@@ -344,8 +525,141 @@ class ChatViewModel @Inject constructor(
         if (sessionId != null && turnId != null) {
             viewModelScope.launch {
                 runCatching { chatRepository.cancel(sessionId, turnId) }
+                    .onSuccess { response ->
+                        if (!response.canceled) {
+                            Log.d("BuyPilotChat", "cancel acknowledged without active turn session=$sessionId turn=$turnId")
+                        }
+                    }
             }
         }
+    }
+
+    fun refreshCart() {
+        val sessionId = _uiState.value.sessionId
+        if (sessionId.isNullOrBlank()) {
+            _uiState.update { it.copy(cartState = ChatCartUiState()) }
+            return
+        }
+        _uiState.update {
+            it.copy(cartState = it.cartState.copy(isLoading = true, error = null))
+        }
+        viewModelScope.launch {
+            runCatching { chatRepository.getCart(sessionId) }
+                .onSuccess { response ->
+                    _uiState.update {
+                        it.copy(
+                            cartState = it.cartState.copy(
+                                items = response.items,
+                                totalItems = response.totalItems,
+                                totalPrice = response.totalPrice,
+                                isLoading = false,
+                                error = null,
+                                updatingProductIds = emptySet(),
+                            ),
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            cartState = it.cartState.copy(
+                                isLoading = false,
+                                error = throwable.message ?: "购物车加载失败",
+                            ),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun updateCartQuantity(productId: String, quantity: Int) {
+        val sessionId = _uiState.value.sessionId ?: return
+        if (productId.isBlank()) return
+        _uiState.update {
+            it.copy(
+                cartState = it.cartState.copy(
+                    updatingProductIds = it.cartState.updatingProductIds + productId,
+                    error = null,
+                ),
+            )
+        }
+        viewModelScope.launch {
+            val result = if (quantity <= 0) {
+                runCatching { chatRepository.removeCartItem(sessionId, productId) }
+            } else {
+                runCatching { chatRepository.updateCartQuantity(sessionId, productId, quantity) }
+            }
+            result
+                .onSuccess { response ->
+                    _uiState.update {
+                        it.copy(
+                            cartState = it.cartState.copy(
+                                items = response.items,
+                                totalItems = response.totalItems,
+                                totalPrice = response.totalPrice,
+                                isLoading = false,
+                                error = null,
+                                updatingProductIds = it.cartState.updatingProductIds - productId,
+                            ),
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            cartState = it.cartState.copy(
+                                error = throwable.message ?: "购物车更新失败",
+                                updatingProductIds = it.cartState.updatingProductIds - productId,
+                            ),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun handleQuickAction(action: QuickActionPayload) {
+        action.criteriaPatch?.let {
+            sendCriteriaPatch(it)
+            return
+        }
+        when (action.action) {
+            "add_to_cart" -> addCurrentRecommendationToCart(action.productId)
+            "feedback" -> handleFeedbackQuickAction(action)
+            "view_cart" -> refreshCart()
+            else -> Unit
+        }
+    }
+
+    private fun addCurrentRecommendationToCart(preferredProductId: String?) {
+        val state = _uiState.value
+        val target = state.productActionTarget(preferredProductId) ?: return
+        val ordinal = target.rank?.let { "第${it}个" } ?: "这个"
+        startRealStream(
+            message = "把${ordinal}商品加入购物车",
+            showUserMessage = false,
+        )
+        submitProductInteraction(
+            sessionId = state.sessionId,
+            deckId = target.deckId,
+            productId = target.productId,
+            feedbackType = "add_to_cart",
+            action = "add_to_cart",
+            reason = "用户点击快捷动作加入购物车",
+            silentFailure = true,
+        )
+    }
+
+    private fun handleFeedbackQuickAction(action: QuickActionPayload) {
+        val target = _uiState.value.productActionTarget(action.productId) ?: return
+        val feedback = action.feedbackType ?: action.action
+        if (feedback.isBlank()) return
+        swipeProduct(
+            deckId = target.deckId,
+            productId = target.productId,
+            feedbackType = feedback,
+            action = action.action.ifBlank { feedback },
+            reason = "用户点击快捷反馈：${action.label}",
+        )
     }
 
     fun clearConversation() {
@@ -559,12 +873,28 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        if (deckId in state.pendingDecisions && !state.hasProductFeedbackSignals(deckId)) {
-            if (showUserMessage) {
-                addConvergenceUserMessage(deckId, userMessage)
+        val cachedPendingDecision = state.pendingDecisions[deckId]
+        if (cachedPendingDecision != null && !state.hasProductFeedbackSignals(deckId)) {
+            val presentationTurnId = if (showUserMessage) {
+                addConvergenceUserMessage(deckId, userMessage).second
+            } else {
+                beginSilentConvergenceTurn(deckId).second
             }
             logConvergence { "using cached pending decision deck=$deckId" }
-            _uiState.update { ChatReducer.convergeDeck(it, deckId) }
+            _uiState.update { latestState ->
+                val stateWithCachedDecision = if (deckId in latestState.pendingDecisions) {
+                    latestState
+                } else {
+                    latestState.copy(
+                        pendingDecisions = latestState.pendingDecisions + (deckId to cachedPendingDecision),
+                    )
+                }
+                ChatReducer.convergeDeck(
+                    state = stateWithCachedDecision.copy(currentTurnId = presentationTurnId),
+                    deckId = deckId,
+                    presentationTurnId = presentationTurnId,
+                )
+            }
             return
         }
 
@@ -595,6 +925,136 @@ class ChatViewModel @Inject constructor(
                     action.action == "like" ||
                     action.action == "not_interested"
             }
+    }
+
+    private fun ChatUiState.productActionTarget(preferredProductId: String?): ProductActionTarget? {
+        val cleanPreferred = preferredProductId?.takeIf { it.isNotBlank() }
+        val decisionWinner = nodes
+            .filterIsInstance<FinalDecisionNode>()
+            .lastOrNull()
+            ?.payload
+            ?.winnerProductId
+            ?.takeIf { it.isNotBlank() }
+        val targetProductId = cleanPreferred ?: decisionWinner
+        val decks = nodes.filterIsInstance<ProductDeckNode>()
+        val targetDeck = if (targetProductId != null) {
+            decks.lastOrNull { deck ->
+                deck.products.any { it.product.productId == targetProductId }
+            }
+        } else {
+            decks.lastOrNull()
+        } ?: return null
+        val product = targetProductId
+            ?.let { id -> targetDeck.products.firstOrNull { it.product.productId == id } }
+            ?: targetDeck.products.firstOrNull()
+            ?: return null
+        val productId = product.product.productId.takeIf { it.isNotBlank() } ?: return null
+        val rank = targetDeck.products.indexOfFirst { it.product.productId == productId }
+            .takeIf { it >= 0 }
+            ?.plus(1)
+        return ProductActionTarget(targetDeck.deckId, productId, rank)
+    }
+
+    private fun readImageUploadInput(uri: Uri): ImageUploadInput {
+        val resolver = appContext.contentResolver
+        val mimeType = resolver.getType(uri)?.takeIf { it.isNotBlank() } ?: "image/jpeg"
+        val fileName = resolver.displayName(uri)
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ?: "buypilot-image.jpg"
+        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: error("无法读取这张图片")
+        if (mimeType.isChatUploadSupported() && bytes.size <= MAX_CHAT_IMAGE_BYTES) {
+            return ImageUploadInput(bytes = bytes, fileName = fileName, mimeType = mimeType)
+        }
+        return compressImageForChat(bytes, fileName)
+            ?: error("图片超过 5MB，请换一张更轻或更清晰的图片")
+    }
+
+    private fun prepareCameraImage(bitmap: Bitmap): PreparedCameraImage {
+        val fileName = "buypilot-camera-${System.currentTimeMillis()}.jpg"
+        val output = ByteArrayOutputStream()
+        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) { "照片压缩失败" }
+        val bytes = output.toByteArray()
+        if (bytes.size > MAX_CHAT_IMAGE_BYTES) {
+            error("图片超过 5MB，请换一张更轻的图片")
+        }
+        val file = File(appContext.cacheDir, fileName)
+        file.writeBytes(bytes)
+        return PreparedCameraImage(
+            input = ImageUploadInput(bytes = bytes, fileName = fileName, mimeType = "image/jpeg"),
+            localUri = file.toURI().toString(),
+        )
+    }
+
+    private fun android.content.ContentResolver.displayName(uri: Uri): String? {
+        val cursor = query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null) ?: return null
+        return cursor.use {
+            if (!it.moveToFirst()) return@use null
+            val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index < 0) null else it.getString(index)?.takeIf(String::isNotBlank)
+        }
+    }
+
+    private fun compressImageForChat(bytes: ByteArray, originalFileName: String): ImageUploadInput? {
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val source = decoded.scaleDownForChat()
+        val fileName = originalFileName.withJpegSuffix()
+        val qualities = intArrayOf(88, 80, 72, 64, 56)
+        try {
+            qualities.forEach { quality ->
+                val output = ByteArrayOutputStream()
+                if (source.compress(Bitmap.CompressFormat.JPEG, quality, output)) {
+                    val compressed = output.toByteArray()
+                    if (compressed.size <= MAX_CHAT_IMAGE_BYTES) {
+                        return ImageUploadInput(
+                            bytes = compressed,
+                            fileName = fileName,
+                            mimeType = "image/jpeg",
+                        )
+                    }
+                }
+            }
+        } finally {
+            if (source !== decoded) source.recycle()
+            decoded.recycle()
+        }
+        return null
+    }
+
+    private fun Bitmap.scaleDownForChat(): Bitmap {
+        val maxEdge = max(width, height)
+        if (maxEdge <= CHAT_IMAGE_MAX_EDGE_PX) return this
+        val scale = CHAT_IMAGE_MAX_EDGE_PX.toFloat() / maxEdge.toFloat()
+        val targetWidth = (width * scale).roundToInt().coerceAtLeast(1)
+        val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
+    }
+
+    private fun String.isChatUploadSupported(): Boolean =
+        trim().lowercase(Locale.US).substringBefore(';') in setOf(
+            "image/jpeg",
+            "image/jpg",
+            "image/png",
+            "image/webp",
+        )
+
+    private fun String.withJpegSuffix(): String {
+        val clean = substringAfterLast('/').substringBeforeLast('.').takeIf { it.isNotBlank() }
+            ?: "buypilot-image"
+        return "$clean.jpg"
+    }
+
+    private fun Throwable.userFacingImageUploadError(
+        fallback: String = "图片没有上传成功，请重新选择一张清晰的图片",
+    ): String {
+        val text = message.orEmpty()
+        return when {
+            "5MB" in text || "413" in text || "IMAGE_TOO_LARGE" in text -> "图片超过 5MB，请换一张更轻的图片"
+            "IMAGE_FORMAT_INVALID" in text || "UNSUPPORTED_MEDIA_TYPE" in text -> "当前只支持 JPEG、PNG 或 WebP 图片"
+            "无法读取" in text -> "无法读取这张图片，请重新选择"
+            text.isBlank() || text.contains("HTTP", ignoreCase = true) || text.contains("{") -> fallback
+            else -> text
+        }
     }
 
     private fun ChatUiState.isDeckReadyForBackendConvergence(deckId: String): Boolean =
