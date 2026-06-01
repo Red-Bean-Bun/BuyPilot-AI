@@ -36,6 +36,8 @@ import com.buypilot.feature.chat.state.ChatCartUiState
 import com.buypilot.feature.chat.state.ChatImageAttachmentState
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
+import com.buypilot.feature.chat.presentation.TimelinePresentationState
+import com.buypilot.feature.chat.presentation.toTimelinePresentationState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
@@ -43,9 +45,13 @@ import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -293,6 +299,15 @@ class ChatViewModel @Inject constructor(
         ),
     )
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+    internal val timelinePresentationState: StateFlow<TimelinePresentationState> =
+        _uiState
+            .map { state -> state.toTimelinePresentationState() }
+            .flowOn(dispatchers.default)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = _uiState.value.toTimelinePresentationState(),
+            )
 
     private var streamJob: Job? = null
     private val pendingFeedbackJobsByDeck = mutableMapOf<String, MutableList<Job>>()

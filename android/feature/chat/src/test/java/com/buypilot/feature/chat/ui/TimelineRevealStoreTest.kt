@@ -13,6 +13,9 @@ import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import com.buypilot.feature.chat.presentation.AssistantTurnTimelineItem
+import com.buypilot.feature.chat.presentation.toTimelinePresentationState
+import com.buypilot.feature.chat.presentation.toTimelineRenderItems
 import com.buypilot.feature.chat.state.ChatUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -104,7 +107,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun genericThinkingDoesNotShowAsOrphanBeforeBackendContentArrives() {
+    fun genericThinkingUsesBackendTextBeforeBackendContentArrives() {
         val thinking = thinking("thinking_understanding", stage = "understanding", message = "正在理解您的需求...")
         val waitingState = listOf(thinking).visibleTurnNodeKeys(
             completedTextKeys = emptySet(),
@@ -118,7 +121,7 @@ class TimelineRevealStoreTest {
             enteredStructuredKeys = emptySet(),
         )
 
-        assertFalse(thinking.key in waitingState.visibleNodeKeys)
+        assertTrue(thinking.key in waitingState.visibleNodeKeys)
         assertTrue(thinking.key in handoffState.visibleNodeKeys)
         assertTrue(text.key in handoffState.visibleNodeKeys)
     }
@@ -400,6 +403,43 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun timelinePresentationCarriesRenderContextOffComposition() {
+        val clarification = clarification("clarify_budget")
+        val deck = deck("deck_1")
+        val final = finalDecision("final_decision", deckId = "deck_1")
+        val swipeState = ProductSwipeState(currentProductId = "p1")
+        val state = ChatUiState(
+            nodes = listOf(clarification, deck, final),
+            backendBaseUrl = "http://localhost:8000",
+            isStreaming = true,
+            currentTurnId = "turn_1",
+            productSwipeStates = mapOf("deck_1" to swipeState),
+            awaitingConvergenceDeckIds = setOf("deck_1"),
+            latestConvergeableDeckId = "deck_1",
+            lastUserMessage = "帮我选",
+        )
+
+        val presentation = state.toTimelinePresentationState()
+
+        assertTrue(presentation.hasNodes)
+        assertTrue(presentation.hasStructuredContent)
+        assertEquals(final.payload, presentation.latestFinalDecisionPayload)
+        assertEquals("deck_1", presentation.latestFinalDecisionDeckId)
+        assertEquals(listOf("clarify_budget"), presentation.clarificationKeys)
+        assertEquals("deck_1", presentation.productDeckIdByProductId["p1"])
+        assertEquals(setOf("deck_1"), presentation.convergedDeckIds)
+        assertSame(presentation.productsById, presentation.renderContext.productsById)
+        assertSame(presentation.productDeckIdByProductId, presentation.renderContext.productDeckIdByProductId)
+        assertEquals("http://localhost:8000", presentation.renderContext.backendBaseUrl)
+        assertEquals(true, presentation.renderContext.isStreaming)
+        assertEquals("turn_1", presentation.renderContext.currentTurnId)
+        assertEquals(swipeState, presentation.renderContext.productSwipeStates["deck_1"])
+        assertEquals(setOf("deck_1"), presentation.renderContext.awaitingConvergenceDeckIds)
+        assertEquals("deck_1", presentation.renderContext.latestConvergeableDeckId)
+        assertEquals("帮我选", presentation.renderContext.lastUserMessage)
+    }
+
+    @Test
     fun revealedTextKeysCountAsCompletedAfterTimelineRecreation() {
         val intro = text("intro_text")
         val deck = deck("deck_1")
@@ -561,7 +601,7 @@ class TimelineRevealStoreTest {
     @Test
     fun thinkingStatusUsesBackendTextWithoutFrontendFallbackCopy() {
         assertEquals(
-            "",
+            "正在理解您的需求...",
             ThinkingPayload(stage = "understanding", message = "正在理解您的需求...").userFacingThinkingMessage(),
         )
         assertEquals(

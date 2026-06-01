@@ -12,15 +12,22 @@ internal object BuyPilotColors {
     val SurfaceBg = Color(0xFFF7F8FA)
     val SurfaceCard = Color(0xFFFFFEFC)
     val SurfaceMuted = Color(0xFFF1F3FC)
+    val SurfaceImage = Color(0xFFF6F8FA)
+    val SurfaceImageAlt = Color(0xFFF6F8FB)
+    val SurfaceSubtle = Color(0xFFF3F5F8)
     val Border = Color(0xFFE2E7EE)
     val TextPrimary = Color(0xFF181C22)
     val TextSecondary = Color(0xFF646A73)
     val TextMuted = Color(0xFF8A919F)
     val Info = Color(0xFF3B82F6)
+    val InfoSoft = Color(0xFFEDF5FF)
     val Success = Color(0xFF22C55E)
+    val SuccessSoft = Color(0xFFF0FBF4)
     val Warning = Color(0xFFF5A524)
+    val WarningSoft = Color(0xFFFFF7E8)
     val Attention = Color(0xFFFFF0F2)
     val Danger = Color(0xFFBA1A1A)
+    val ShadowNeutral = Color(0xFF8E97A4)
 }
 
 internal object BuyPilotDimens {
