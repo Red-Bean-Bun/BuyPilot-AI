@@ -53,12 +53,11 @@ internal fun StructuredCardMotion(
     initialOffsetY: Dp,
     initialScale: Float,
     onEntered: () -> Unit,
-    content: @Composable (() -> Float) -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val progress = remember(key) { Animatable(if (!motionEnabled || alreadyEntered) 1f else 0f) }
     val density = LocalDensity.current
     val latestOnEntered by rememberUpdatedState(onEntered)
-    val progressProvider = remember { { progress.value } }
 
     LaunchedEffect(key, motionEnabled, alreadyEntered) {
         if (!motionEnabled || alreadyEntered) {
@@ -83,7 +82,47 @@ internal fun StructuredCardMotion(
             scaleY = initialScale + (1f - initialScale) * t
         },
     ) {
-        content(progressProvider)
+        content()
+    }
+}
+
+@Composable
+internal fun StaggeredRevealMotion(
+    key: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    delayMillis: Int,
+    durationMillis: Int,
+    initialOffsetY: Dp,
+    content: @Composable () -> Unit,
+) {
+    val progress = remember(key) { Animatable(if (!motionEnabled || alreadyEntered) 1f else 0f) }
+    val density = LocalDensity.current
+
+    LaunchedEffect(key, motionEnabled, alreadyEntered) {
+        if (!motionEnabled || alreadyEntered) {
+            progress.snapTo(1f)
+            return@LaunchedEffect
+        }
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                delayMillis = delayMillis,
+                easing = PremiumRevealEase,
+            ),
+        )
+    }
+
+    Box(
+        modifier = Modifier.graphicsLayer {
+            val t = progress.value
+            alpha = t
+            translationY = with(density) { initialOffsetY.toPx() } * (1f - t)
+        },
+    ) {
+        content()
     }
 }
 
@@ -118,7 +157,7 @@ internal fun rememberProductDeckArrivalProgressProvider(
 @Composable
 internal fun ProductDeckArrivalMotion(
     arrivalProgress: () -> Float,
-    content: @Composable (() -> Float) -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
 
@@ -168,7 +207,7 @@ internal fun ProductDeckArrivalMotion(
                         translationY = (1f - contentT) * 16f
                     },
             ) {
-                content(arrivalProgress)
+                content()
             }
         }
         ProductArrivalSeedBubble(

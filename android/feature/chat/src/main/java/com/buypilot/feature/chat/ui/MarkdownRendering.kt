@@ -62,8 +62,8 @@ import org.commonmark.node.ThematicBreak
 import org.commonmark.parser.Parser
 
 private const val MarkdownRenderCacheMaxEntries = 36
-private val MarkdownSoftBlockColor = Color(0xFFEFF2F5).toArgb()
-private val MarkdownComposeCodeBackground = Color(0xFFEFF2F5)
+private val MarkdownSoftBlockColor = BuyPilotColors.MarkdownSoftBlock.toArgb()
+private val MarkdownComposeCodeBackground = BuyPilotColors.MarkdownSoftBlock
 private val PlainMarkdownParser: Parser = Parser.builder().build()
 private val MarkdownBlockQuoteMarkerRegex = Regex("""^\s{0,3}>\s?""")
 private val InternalDebugLabelValueRegex = Regex(

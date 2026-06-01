@@ -55,7 +55,7 @@ fun ProductEvidenceOverlayScreen(
     val payload = state.findProduct(deckId, productId)
 
     if (payload == null) {
-        Surface(color = Color(0xFF1A1D23), modifier = Modifier.fillMaxSize()) {
+        Surface(color = BuyPilotColors.EvidenceBackdropTop, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 ProductPageTopBar(title = "推荐证据", onBack = onBack)
                 ExpiredRecommendationState(onBack = onBack)
@@ -71,18 +71,15 @@ fun ProductEvidenceOverlayScreen(
         key = "evidence_${deckId}_${productId}",
         durationMillis = ProductEvidenceEnterMs,
     )
-    val chromeEnter = segmentProgress(routeProgressState.value, 0.12f, 0.72f)
-    val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
-
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF1A1D23),
-                        Color(0xFF13151A),
-                        Color(0xFF0F1115),
+                        BuyPilotColors.EvidenceBackdropTop,
+                        BuyPilotColors.EvidenceBackdropMiddle,
+                        BuyPilotColors.EvidenceBackdropBottom,
                     ),
                 ),
             ),
@@ -91,6 +88,7 @@ fun ProductEvidenceOverlayScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
                     alpha = contentEnter
                     translationY = (1f - contentEnter) * 36f
                 }
@@ -149,6 +147,7 @@ fun ProductEvidenceOverlayScreen(
                 .statusBarsPadding()
                 .padding(start = 12.dp, top = 8.dp)
                 .graphicsLayer {
+                    val chromeEnter = segmentProgress(routeProgressState.value, 0.12f, 0.72f)
                     alpha = chromeEnter
                     translationY = (1f - chromeEnter) * -12f
                 }
@@ -222,14 +221,14 @@ private fun MagazineRiskCard(notes: List<String>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF2A1A1A), RoundedCornerShape(16.dp))
-            .border(1.dp, Color(0xFFFF6B6B).copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+            .background(BuyPilotColors.EvidenceRiskBackground, RoundedCornerShape(16.dp))
+            .border(1.dp, BuyPilotColors.EvidenceRiskAccent.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             text = "注意事项",
-            color = Color(0xFFFF6B6B),
+            color = BuyPilotColors.EvidenceRiskAccent,
             fontSize = 13.sp,
             lineHeight = 16.sp,
             fontWeight = FontWeight.SemiBold,

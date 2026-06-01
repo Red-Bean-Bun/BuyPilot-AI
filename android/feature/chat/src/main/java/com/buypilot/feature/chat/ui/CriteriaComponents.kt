@@ -25,7 +25,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -102,7 +101,7 @@ internal fun CriteriaSummaryCard(
         initialOffsetY = 8.dp,
         initialScale = 1f,
         onEntered = onEntered,
-    ) { progress ->
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -115,8 +114,8 @@ internal fun CriteriaSummaryCard(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFFFFFEFD),
-                            Color(0xFFF9FAFB),
+                            BuyPilotColors.CriteriaCardTop,
+                            BuyPilotColors.CriteriaCardBottom,
                         ),
                     ),
                     RoundedCornerShape(16.dp),
@@ -125,8 +124,8 @@ internal fun CriteriaSummaryCard(
                     1.dp,
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFFE8ECF0),
-                            Color(0xFFDFE3E8),
+                            BuyPilotColors.CriteriaCardBorderTop,
+                            BuyPilotColors.CriteriaCardBorderBottom,
                         ),
                     ),
                     RoundedCornerShape(16.dp),
@@ -136,68 +135,77 @@ internal fun CriteriaSummaryCard(
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer {
-                            val headerProgress = segmentProgress(progress(), 0f, 0.52f)
-                            alpha = headerProgress
-                            translationY = (1f - headerProgress) * 6f
-                        },
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                StaggeredRevealMotion(
+                    key = "${motionKey}_criteria_header",
+                    motionEnabled = motionEnabled,
+                    alreadyEntered = alreadyEntered,
+                    delayMillis = 0,
+                    durationMillis = 240,
+                    initialOffsetY = 6.dp,
                 ) {
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(BuyPilotColors.Primary, CircleShape),
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(BuyPilotColors.Primary, CircleShape),
+                            )
+                            Text(
+                                text = "筛选条件",
+                                color = BuyPilotColors.TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 0.5.sp,
+                            )
+                        }
                         Text(
-                            text = "筛选条件",
-                            color = BuyPilotColors.TextSecondary,
+                            text = editLabel,
+                            color = BuyPilotColors.Primary.copy(alpha = 0.85f),
                             fontSize = 12.sp,
                             lineHeight = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button, onClick = onEdit)
+                                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
                         )
                     }
-                    Text(
-                        text = editLabel,
-                        color = BuyPilotColors.Primary.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(role = Role.Button, onClick = onEdit)
-                            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
                 }
                 if (headline.isNotBlank()) {
-                    Text(
-                        text = headline,
-                        color = BuyPilotColors.TextPrimary,
-                        fontSize = 17.sp,
-                        lineHeight = 24.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.graphicsLayer {
-                            val headlineProgress = segmentProgress(progress(), 0.12f, 0.68f)
-                            alpha = headlineProgress
-                            translationY = (1f - headlineProgress) * 5f
-                        },
-                    )
+                    StaggeredRevealMotion(
+                        key = "${motionKey}_criteria_headline",
+                        motionEnabled = motionEnabled,
+                        alreadyEntered = alreadyEntered,
+                        delayMillis = 70,
+                        durationMillis = 260,
+                        initialOffsetY = 5.dp,
+                    ) {
+                        Text(
+                            text = headline,
+                            color = BuyPilotColors.TextPrimary,
+                            fontSize = 17.sp,
+                            lineHeight = 24.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 if (properties.isNotEmpty()) {
                     CriteriaReceiptTags(
                         properties = properties,
-                        parentProgress = progress,
+                        motionKey = motionKey,
+                        motionEnabled = motionEnabled,
+                        alreadyEntered = alreadyEntered,
                     )
                 }
             }
@@ -208,7 +216,9 @@ internal fun CriteriaSummaryCard(
 @Composable
 private fun CriteriaReceiptTags(
     properties: List<CriteriaReceiptProperty>,
-    parentProgress: () -> Float,
+    motionKey: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
 ) {
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
@@ -219,16 +229,16 @@ private fun CriteriaReceiptTags(
             items = properties,
             key = { _, property -> "${property.label}:${property.value}" },
         ) { index, property ->
-            CriteriaReceiptTag(
-                property = property,
-                revealProgress = {
-                    segmentProgress(
-                        value = parentProgress(),
-                        start = 0.24f + index.coerceAtMost(3) * 0.06f,
-                        end = 0.74f + index.coerceAtMost(3) * 0.06f,
-                    )
-                },
-            )
+            StaggeredRevealMotion(
+                key = "${motionKey}_criteria_tag_${property.label}_${property.value}",
+                motionEnabled = motionEnabled,
+                alreadyEntered = alreadyEntered,
+                delayMillis = 120 + index.coerceAtMost(3) * 34,
+                durationMillis = 240,
+                initialOffsetY = 4.dp,
+            ) {
+                CriteriaReceiptTag(property = property)
+            }
         }
     }
 }
@@ -236,18 +246,12 @@ private fun CriteriaReceiptTags(
 @Composable
 private fun CriteriaReceiptTag(
     property: CriteriaReceiptProperty,
-    revealProgress: () -> Float = { 1f },
 ) {
     Text(
         text = property.value,
         modifier = Modifier
-            .graphicsLayer {
-                val progress = revealProgress()
-                alpha = progress
-                translationY = (1f - progress) * 4f
-            }
-            .background(Color(0xFFF0F2F5), RoundedCornerShape(10.dp))
-            .border(1.dp, Color(0xFFE4E8ED).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+            .background(BuyPilotColors.CriteriaTagBackground, RoundedCornerShape(10.dp))
+            .border(1.dp, BuyPilotColors.CriteriaTagBorder.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         color = BuyPilotColors.TextPrimary.copy(alpha = 0.78f),
         fontSize = 13.sp,
@@ -257,7 +261,6 @@ private fun CriteriaReceiptTag(
         overflow = TextOverflow.Ellipsis,
     )
 }
-
 internal fun CriteriaPayload.budgetLabel(): String {
     val max = budgetMax ?: constraints?.budgetMax
     val min = budgetMin ?: constraints?.budgetMin

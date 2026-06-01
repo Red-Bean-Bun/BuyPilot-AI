@@ -1744,8 +1744,8 @@ internal fun ClarificationOptionChip(
     val backgroundColor by animateColorAsState(
         targetValue = when {
             selected -> BuyPilotColors.PrimarySoft.copy(alpha = 0.95f)
-            pressed -> Color(0xFFEDE3DF)
-            else -> Color(0xFFFFF8F6)
+            pressed -> BuyPilotColors.ClarificationChipPressed
+            else -> BuyPilotColors.ClarificationChipBackground
         },
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "clarification_chip_background",
@@ -1753,8 +1753,8 @@ internal fun ClarificationOptionChip(
     val borderColor by animateColorAsState(
         targetValue = when {
             selected -> BuyPilotColors.Primary.copy(alpha = 0.32f)
-            pressed -> Color(0xFFE0C9C2)
-            else -> Color(0xFFEDE0DC)
+            pressed -> BuyPilotColors.ClarificationChipPressedBorder
+            else -> BuyPilotColors.ClarificationChipBorder
         },
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "clarification_chip_border",
@@ -1815,8 +1815,8 @@ internal fun ClarificationManualInputRow(
             .fillMaxWidth()
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFFF5F7FA), RoundedCornerShape(10.dp))
-            .border(1.dp, Color(0xFFE8ECF2), RoundedCornerShape(10.dp))
+            .background(BuyPilotColors.ClarificationManualBackground, RoundedCornerShape(10.dp))
+            .border(1.dp, BuyPilotColors.ClarificationManualBorder, RoundedCornerShape(10.dp))
             .then(positionModifier)
             .clickable(
                 enabled = enabled,
@@ -1978,12 +1978,12 @@ internal fun ProductRecommendationStrip(
                 if (page == 0) {
                     ProductDeckArrivalMotion(
                         arrivalProgress = arrivalProgress,
-                    ) { cardProgressProvider ->
+                    ) {
                         ProductRecommendationThumb(
                             payload = payload,
                             backendBaseUrl = backendBaseUrl,
                             selected = page == activeIndex,
-                            arrivalProgress = cardProgressProvider,
+                            arrivalProgress = arrivalProgress,
                             onClick = openProduct,
                             modifier = thumbModifier,
                         )
@@ -2668,7 +2668,7 @@ internal fun DecisionSummaryCard(
                 initialOffsetY = 16.dp,
                 initialScale = 0.925f,
                 onEntered = onEntered,
-            ) { cardProgress ->
+            ) {
                 Surface(
                     modifier = Modifier.shadow(
                         elevation = 8.dp,
@@ -2767,7 +2767,12 @@ internal fun DecisionSummaryCard(
                             }
                             if (whyItems.isNotEmpty()) {
                                 SectionTitle("推荐理由", leading = "✓")
-                                DecisionReasonList(items = whyItems, parentProgress = cardProgress)
+                                DecisionReasonList(
+                                    items = whyItems,
+                                    motionKey = motionKey,
+                                    motionEnabled = motionEnabled,
+                                    alreadyEntered = alreadyEntered,
+                                )
                             }
                             if (notForItems.isNotEmpty()) {
                                 WarningBox(notForItems.joinToString("；"))
@@ -3124,9 +3129,6 @@ fun ProductHeroDetailScreen(
         key = "detail_${deckId}_${activeProductId}",
         durationMillis = ProductDetailEnterMs,
     )
-    val backdropEnter = segmentProgress(routeProgressState.value, 0f, 0.82f)
-    val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
-    val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
 
     LaunchedEffect(product.productId) {
         snapshotFlow { detailListState.isScrollInProgress }
@@ -3200,7 +3202,7 @@ fun ProductHeroDetailScreen(
             product = product,
             backendBaseUrl = state.backendBaseUrl,
             progress = scrollProgress,
-            enterProgress = backdropEnter,
+            enterProgress = { segmentProgress(routeProgressState.value, 0f, 0.82f) },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -3217,6 +3219,7 @@ fun ProductHeroDetailScreen(
                 .statusBarsPadding()
                 .padding(start = 16.dp, top = 8.dp)
                 .graphicsLayer {
+                    val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
                     alpha = chromeEnter
                     translationY = (1f - chromeEnter) * -18f
                     scaleX = lerp(0.92f, 1f, chromeEnter)
@@ -3233,6 +3236,7 @@ fun ProductHeroDetailScreen(
                 .statusBarsPadding()
                 .padding(end = 16.dp, top = 8.dp)
                 .graphicsLayer {
+                    val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
                     alpha = chromeEnter
                     translationY = (1f - chromeEnter) * -18f
                     scaleX = lerp(0.92f, 1f, chromeEnter)
@@ -3245,6 +3249,7 @@ fun ProductHeroDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
                     alpha = contentEnter * (1f - gestureProgress * 0.42f)
                     translationX = animatedGestureOffsetPx
                     translationY = (1f - contentEnter) * 42f
@@ -3285,6 +3290,7 @@ fun ProductHeroDetailScreen(
                     .fillMaxWidth()
                     .alpha(actionAlpha)
                     .graphicsLayer {
+                        val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
                         val actionProgress = minOf(chromeEnter, actionAlpha)
                         translationY = (1f - actionProgress) * 26f
                         scaleX = lerp(0.96f, 1f, actionProgress)
@@ -3339,11 +3345,9 @@ private fun ProductCinematicBackdrop(
     product: ProductPayload,
     backendBaseUrl: String,
     progress: Float,
-    enterProgress: Float,
+    enterProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
-    val scale = lerp(0.92f, lerp(1.02f, 1.08f, progress), enterProgress)
-    val offsetY = lerp(42f, lerp(0f, -54f, progress), enterProgress)
     val imageAlpha = lerp(0.94f, 0.56f, progress)
     Box(modifier = modifier.background(BuyPilotColors.SurfaceBg)) {
         ProductImage(
@@ -3355,10 +3359,13 @@ private fun ProductCinematicBackdrop(
                 .align(Alignment.TopCenter)
                 .padding(top = 86.dp, start = 20.dp, end = 20.dp)
                 .graphicsLayer {
+                    val enter = enterProgress()
+                    val scale = lerp(0.92f, lerp(1.02f, 1.08f, progress), enter)
+                    val offsetY = lerp(42f, lerp(0f, -54f, progress), enter)
                     scaleX = scale
                     scaleY = scale
                     translationY = offsetY
-                    alpha = imageAlpha * lerp(0.42f, 1f, enterProgress)
+                    alpha = imageAlpha * lerp(0.42f, 1f, enter)
                 }
         )
         Box(
@@ -3600,7 +3607,7 @@ private fun ProductDetailInlineCartAction(
         animationSpec = tween(durationMillis = 150, easing = PremiumRevealEase),
         label = "product_detail_cart_press",
     )
-    val enterProgress by rememberRouteEnterProgress(
+    val enterProgressState = rememberRouteEnterProgress(
         key = "product_detail_inline_cart_${label}_${pending}_${inCart}",
         durationMillis = 360,
         delayMillis = 70,
@@ -3630,6 +3637,7 @@ private fun ProductDetailInlineCartAction(
             .fillMaxWidth()
             .height(54.dp)
             .graphicsLayer {
+                val enterProgress = enterProgressState.value
                 alpha = enterProgress
                 translationY = (1f - enterProgress) * 8.dp.toPx()
                 scaleX = pressScale * lerp(0.992f, 1f, enterProgress)
@@ -3896,11 +3904,11 @@ internal fun CartActionCard(
     val subtitle = listOfNotNull(itemLine, totalLine)
         .filter { it.isNotBlank() }
         .joinToString(" · ")
-    val progress by rememberRouteEnterProgress(
+    val progressState = rememberRouteEnterProgress(
         key = "cart_receipt_${payload.action}_${payload.status}_${payload.productId}",
         durationMillis = 260,
     )
-    val iconProgress by rememberRouteEnterProgress(
+    val iconProgressState = rememberRouteEnterProgress(
         key = "cart_receipt_icon_${payload.action}_${payload.status}_${payload.productId}",
         durationMillis = 180,
         delayMillis = 70,
@@ -3912,6 +3920,7 @@ internal fun CartActionCard(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
+                val progress = progressState.value
                 alpha = progress
                 translationY = (1f - progress) * 8.dp.toPx()
                 scaleX = lerp(0.985f, 1f, progress)
@@ -3931,6 +3940,7 @@ internal fun CartActionCard(
                 modifier = Modifier
                     .size(36.dp)
                     .graphicsLayer {
+                        val iconProgress = iconProgressState.value
                         scaleX = lerp(0.94f, 1f, iconProgress)
                         scaleY = lerp(0.94f, 1f, iconProgress)
                         alpha = iconProgress
@@ -6246,49 +6256,53 @@ private data class ChipColorSet(
 
 private val DecisionReasonChipColors = listOf(
     ChipColorSet(
-        background = Color(0xFFFFF2EA),
-        border = Color(0xFFFFCFBA),
-        content = Color(0xFFB24617),
+        background = BuyPilotColors.DecisionReasonWarmBackground,
+        border = BuyPilotColors.DecisionReasonWarmBorder,
+        content = BuyPilotColors.DecisionReasonWarmText,
     ),
     ChipColorSet(
         background = BuyPilotColors.InfoSoft,
-        border = Color(0xFFCFE3FF),
-        content = Color(0xFF245CBA),
+        border = BuyPilotColors.DecisionReasonBlueBorder,
+        content = BuyPilotColors.DecisionReasonBlueText,
     ),
     ChipColorSet(
-        background = Color(0xFFEFFBF8),
-        border = Color(0xFFCBEFE7),
-        content = Color(0xFF16745F),
+        background = BuyPilotColors.DecisionReasonGreenBackground,
+        border = BuyPilotColors.DecisionReasonGreenBorder,
+        content = BuyPilotColors.DecisionReasonGreenText,
     ),
     ChipColorSet(
-        background = Color(0xFFFFF1F6),
-        border = Color(0xFFFAD4E1),
-        content = Color(0xFF9C315F),
+        background = BuyPilotColors.DecisionReasonPinkBackground,
+        border = BuyPilotColors.DecisionReasonPinkBorder,
+        content = BuyPilotColors.DecisionReasonPinkText,
     ),
 )
 
 @Composable
 private fun DecisionReasonList(
     items: List<String>,
+    motionKey: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
     modifier: Modifier = Modifier,
-    parentProgress: () -> Float = { 1f },
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items.take(4).forEachIndexed { index, item ->
-            DecisionReasonItem(
-                text = item,
-                colorIndex = index,
-                revealProgress = {
-                    segmentProgress(
-                        value = parentProgress(),
-                        start = (DecisionReasonBaseDelayMs + index * DecisionReasonStaggerMs).toFloat() / DecisionCardEnterMs,
-                        end = (DecisionReasonBaseDelayMs + index * DecisionReasonStaggerMs + 280).toFloat() / DecisionCardEnterMs,
-                    )
-                },
-            )
+            StaggeredRevealMotion(
+                key = "${motionKey}_decision_reason_$index",
+                motionEnabled = motionEnabled,
+                alreadyEntered = alreadyEntered,
+                delayMillis = DecisionReasonBaseDelayMs + index * DecisionReasonStaggerMs,
+                durationMillis = 280,
+                initialOffsetY = 16.dp,
+            ) {
+                DecisionReasonItem(
+                    text = item,
+                    colorIndex = index,
+                )
+            }
         }
     }
 }
@@ -6297,17 +6311,11 @@ private fun DecisionReasonList(
 private fun DecisionReasonItem(
     text: String,
     colorIndex: Int,
-    revealProgress: () -> Float = { 1f },
 ) {
     val colors = DecisionReasonChipColors[colorIndex % DecisionReasonChipColors.size]
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                val progress = revealProgress()
-                alpha = progress
-                translationY = (1f - progress) * 16f
-            }
             .background(colors.background.copy(alpha = 0.62f), RoundedCornerShape(13.dp))
             .border(1.dp, colors.border.copy(alpha = 0.72f), RoundedCornerShape(13.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -6406,13 +6414,13 @@ private fun ProductMiniTag(
                 if (active) {
                     BuyPilotColors.PrimarySoft.copy(alpha = 0.7f)
                 } else {
-                    Color(0xFFF2F7FA)
+                    BuyPilotColors.ProductMiniTagBackground
                 },
                 tagShape,
             )
             .border(
                 1.dp,
-                if (active) BuyPilotColors.PrimarySoft.copy(alpha = 0.82f) else Color(0xFFDCE8F0),
+                if (active) BuyPilotColors.PrimarySoft.copy(alpha = 0.82f) else BuyPilotColors.ProductMiniTagBorder,
                 tagShape,
             )
             .padding(horizontal = if (compact) 6.dp else 8.dp, vertical = if (compact) 3.dp else 4.dp),

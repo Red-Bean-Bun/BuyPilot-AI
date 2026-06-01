@@ -2101,7 +2101,7 @@ private fun ThinkingShimmerText(
     val shimmerColor = if (isDarkTheme) {
         BuyPilotColors.SurfaceCard
     } else {
-        Color(0xFFA4AAB3)
+        BuyPilotColors.ThinkingShimmer
     }
     if (!motionEnabled) {
         Text(
@@ -2476,7 +2476,7 @@ private fun ClarificationCardContent(
                 .fillMaxHeight()
                 .background(
                     if (hasSelection) BuyPilotColors.Primary.copy(alpha = 0.6f)
-                    else Color(0xFFFFC4B0),
+                    else BuyPilotColors.ProductSelectionLine,
                     RoundedCornerShape(2.dp),
                 ),
         )

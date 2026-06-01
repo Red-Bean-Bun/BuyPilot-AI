@@ -259,7 +259,7 @@ private fun ProductSingleCandidateModeContent(
 
 @Composable
 private fun ProductSwipeCompletedState() {
-    val mascotProgress by rememberRouteEnterProgress(
+    val mascotProgressState = rememberRouteEnterProgress(
         key = "product_swipe_completed_mascot",
         durationMillis = 260,
     )
@@ -278,6 +278,7 @@ private fun ProductSwipeCompletedState() {
                 .widthIn(max = 330.dp)
                 .aspectRatio(1f)
                 .graphicsLayer {
+                    val mascotProgress = mascotProgressState.value
                     alpha = mascotProgress
                     translationY = (1f - mascotProgress) * 18f
                     scaleX = lerp(0.96f, 1f, mascotProgress)
