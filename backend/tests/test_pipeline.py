@@ -7,7 +7,7 @@ from src.runtime import pipeline as pipeline_module
 from src.runtime import streaming as streaming_module
 from src.runtime.cancel_registry import active_turn_count, cancel_turn
 from src.runtime.handlers import _no_match_followup_text
-from src.runtime.pipeline import chat_stream
+from src.runtime.pipeline import _should_merge_previous_context, chat_stream
 from src.runtime.stages.recommendation import RetrievalResult
 from src.services.fallbacks import get_fallback_events
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
@@ -403,3 +403,70 @@ async def test_pipeline_error_message_is_sanitized(monkeypatch):
     assert "trace_id=turn_" in errors[0].message
     assert events[-1].event == "done"
     assert events[-1].finish_reason == "error"
+
+
+# ── _should_merge_previous_context unit tests ──────────────────────────
+
+
+def test_should_merge_when_intent_is_clarify():
+    """clarify intent always merges previous context."""
+    assert _should_merge_previous_context(IntentResult(intent="clarify")) is True
+
+
+def test_should_merge_when_intent_is_continue():
+    """continue intent always merges previous context."""
+    assert _should_merge_previous_context(IntentResult(intent="continue")) is True
+
+
+def test_should_not_merge_when_recommend_has_category():
+    """recommend with a category means the LLM already understood context — no merge needed."""
+    assert _should_merge_previous_context(
+        IntentResult(intent="recommend", category="食品生活")
+    ) is False
+
+
+def test_should_merge_when_recommend_no_category_no_constraints():
+    """recommend without category and without constraints — should merge (the fix for context-loss)."""
+    assert _should_merge_previous_context(
+        IntentResult(intent="recommend", category=None, extracted_constraints={})
+    ) is True
+
+
+def test_should_merge_when_recommend_no_category_with_constraints():
+    """recommend without category but with constraints — should merge (original behaviour, regression)."""
+    assert _should_merge_previous_context(
+        IntentResult(intent="recommend", category=None, extracted_constraints={"product_type": "咖啡"})
+    ) is True
+
+
+def test_should_not_merge_when_chitchat():
+    """chitchat intent should never merge previous shopping context."""
+    assert _should_merge_previous_context(IntentResult(intent="chitchat")) is False
+
+
+def test_should_not_merge_when_feedback():
+    """feedback intent should not merge — it goes through its own handler path."""
+    assert _should_merge_previous_context(IntentResult(intent="feedback")) is False
+
+
+# ── Multi-turn context integration test ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_multi_turn_short_followup_merges_previous_category(monkeypatch):
+    """Turn 2 with a short ambiguous message inherits category from Turn 1 criteria."""
+    # Turn 1: use default mock (returns valid category), saves criteria to state
+    _ = [event async for event in chat_stream("s_multi", ChatStreamRequest(message="有什么零食"))]
+
+    # Override intent for Turn 2: simulate LLM returning no category
+    async def return_no_category(session_id, body):
+        del session_id
+        return IntentResult(intent="recommend", category=None, extracted_constraints={})
+
+    monkeypatch.setattr(pipeline_module, "run_intent", return_no_category)
+
+    # Turn 2: short follow-up that would trigger clarification without the fix
+    events = [event async for event in chat_stream("s_multi", ChatStreamRequest(message="咖啡"))]
+
+    clarification_events = [e for e in events if e.event == "clarification"]
+    assert len(clarification_events) == 0

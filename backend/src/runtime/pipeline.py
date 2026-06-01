@@ -338,9 +338,11 @@ async def _merge_followup_context(session_id: str, resolved: _ResolvedIntent) ->
 def _should_merge_previous_context(intent: IntentResult) -> bool:
     if intent.intent in {"clarify", "continue"}:
         return True
-    if intent.intent != "recommend" or intent.category:
+    if intent.intent != "recommend":
         return False
-    return any(_has_context_value(value) for value in (intent.extracted_constraints or {}).values())
+    if intent.category:
+        return False
+    return True
 
 
 def _unsupported_product_type(intent: IntentResult) -> bool:

@@ -114,9 +114,12 @@ def _resolve_database_url(raw_url: str | None) -> str:
             resolved = f"sqlite:///{BACKEND_DIR / db_path}"
         else:
             resolved = raw_url
-        # Allow SQLite under /tmp/ when running inside pytest (test isolation)
-        if "/tmp/" in resolved and "pytest" in sys.modules:
-            return resolved
+        # Allow SQLite under system temp dir when running inside pytest (test isolation)
+        if "pytest" in sys.modules:
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            if resolved.startswith(f"sqlite:///{temp_dir}"):
+                return resolved
         raise SystemExit(
             f"SQLite is not supported for runtime. Use PostgreSQL + pgvector.\n"
             f"Got: {raw_url}"

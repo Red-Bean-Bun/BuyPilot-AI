@@ -16,7 +16,7 @@ def test_dataset_is_runtime_product_source():
     assert len(products) == 100
     assert products[0].product_id == raw_products[0]["product_id"]
     assert get_raw_product(products[0].product_id) is not None
-    assert get_raw_product("p_food_001")["category"] == "食品饮料"
+    assert get_raw_product("p_food_001")["category"] == "食品生活"
     assert food_product.category == "食品生活"
 
 
@@ -65,8 +65,8 @@ async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
     assert products[0].product_metadata["chunking_version"] == "semantic_v1"
     food_product = next(product for product in products if product.id == "p_food_001")
     assert food_product.category == "食品生活"
-    assert food_product.product_metadata["source_category"] == "食品饮料"
-    assert food_product.product_metadata["knowledge_package"]["basic"]["source_category"] == "食品饮料"
+    assert food_product.product_metadata["source_category"] == "食品生活"
+    assert food_product.product_metadata["knowledge_package"]["basic"]["source_category"] == "食品生活"
     chunk_types = {chunk.chunk_metadata.get("chunk_type") for chunk in chunks}
     assert {"profile", "marketing", "faq", "positive_review", "negative_review", "warning", "compare"} <= chunk_types
     assert all("retrieval_role" in chunk.chunk_metadata for chunk in chunks)

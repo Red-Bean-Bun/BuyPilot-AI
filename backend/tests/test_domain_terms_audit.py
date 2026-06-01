@@ -12,7 +12,7 @@ def test_domain_terms_cover_all_dataset_sub_categories():
 def test_domain_terms_audit_preserves_raw_food_category_as_source_alias():
     report = build_audit(DEFAULT_DATASET_DIR)
 
-    food_mapping = next(row for row in report["category_mappings"] if row["raw_category"] == "食品饮料")
+    food_mapping = next(row for row in report["category_mappings"] if row["raw_category"] == "食品生活")
 
     assert food_mapping["canonical_category"] == "食品生活"
     assert report["product_count"] == 100
