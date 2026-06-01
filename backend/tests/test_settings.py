@@ -1,4 +1,4 @@
-from src.config.settings import BACKEND_DIR, PROJECT_DIR, get_settings
+from src.config.settings import PROJECT_DIR, get_settings
 import pytest
 import src.config.settings as settings_module
 

@@ -70,9 +70,7 @@ async def record_llm_call(
 
     # Response text
     response_text = response
-    response_preview = (
-        response_text[:preview_chars] if response_text and not capture_full else response_text
-    )
+    response_preview = response_text[:preview_chars] if response_text and not capture_full else response_text
     response_json = response_text if capture_full else None
 
     await safe_observability_task(

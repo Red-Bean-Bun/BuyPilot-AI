@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col, select
 
 from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import ObservabilityLLMCall, ObservabilitySSEEvent
@@ -74,8 +74,8 @@ async def list_llm_calls_by_turn(turn_id: str) -> list[dict[str, Any]]:
     await create_db_and_tables()
     statement = (
         select(ObservabilityLLMCall)
-        .where(ObservabilityLLMCall.turn_id == turn_id)
-        .order_by(ObservabilityLLMCall.created_at.asc())
+        .where(col(ObservabilityLLMCall.turn_id) == turn_id)
+        .order_by(col(ObservabilityLLMCall.created_at).asc())
     )
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         rows = (await session.execute(statement)).scalars().all()
@@ -93,9 +93,9 @@ async def update_llm_call_parsed_json(
         async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
             statement = (
                 select(ObservabilityLLMCall)
-                .where(ObservabilityLLMCall.turn_id == turn_id)
-                .where(ObservabilityLLMCall.task == task)
-                .order_by(ObservabilityLLMCall.created_at.desc())
+                .where(col(ObservabilityLLMCall.turn_id) == turn_id)
+                .where(col(ObservabilityLLMCall.task) == task)
+                .order_by(col(ObservabilityLLMCall.created_at).desc())
                 .limit(1)
             )
             row = (await session.execute(statement)).scalars().first()
@@ -156,8 +156,8 @@ async def list_sse_events_by_turn(turn_id: str) -> list[dict[str, Any]]:
     await create_db_and_tables()
     statement = (
         select(ObservabilitySSEEvent)
-        .where(ObservabilitySSEEvent.turn_id == turn_id)
-        .order_by(ObservabilitySSEEvent.seq.asc())
+        .where(col(ObservabilitySSEEvent.turn_id) == turn_id)
+        .order_by(col(ObservabilitySSEEvent.seq).asc())
     )
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         rows = (await session.execute(statement)).scalars().all()

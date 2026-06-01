@@ -45,9 +45,7 @@ def _check_postgres() -> None:
         return
     url = os.getenv("DATABASE_URL", "")
     if "postgresql" not in url:
-        raise SystemExit(
-            f"SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:80]}..."
-        )
+        raise SystemExit(f"SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:80]}...")
 
 
 EXPECTED_EMBEDDING_DIMENSIONS = 1024

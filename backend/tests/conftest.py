@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 import json
 import os
 import re
@@ -64,10 +65,22 @@ def mock_external_ai(monkeypatch):
 
 @pytest.fixture(autouse=True)
 async def reset_database_engine():
-    yield
+    loop_ticker = asyncio.create_task(_tick_event_loop())
+    try:
+        yield
+    finally:
+        loop_ticker.cancel()
+        with suppress(asyncio.CancelledError):
+            await loop_ticker
+
     from src.repos.database import dispose_async_engine
 
     await dispose_async_engine()
+
+
+async def _tick_event_loop() -> None:
+    while True:
+        await asyncio.sleep(0.01)
 
 
 @pytest.fixture(autouse=True)

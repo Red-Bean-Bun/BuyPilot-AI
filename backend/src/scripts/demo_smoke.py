@@ -54,9 +54,7 @@ def _check_postgres() -> None:
         return
     url = os.getenv("DATABASE_URL", "")
     if "postgresql" not in url:
-        raise SystemExit(
-            f"DEMO SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:80]}..."
-        )
+        raise SystemExit(f"DEMO SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:80]}...")
 
 
 REPORTS_DIR = BACKEND_DIR / "reports"

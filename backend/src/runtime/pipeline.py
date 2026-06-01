@@ -376,7 +376,11 @@ def _partial_criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) 
 async def _emit_unsupported_product_type(
     ctx: StreamContext, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    product_type = (intent.extracted_constraints or {}).get("product_type") or intent.category or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
+    product_type = (
+        (intent.extracted_constraints or {}).get("product_type")
+        or intent.category
+        or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
+    )
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,

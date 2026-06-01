@@ -6,7 +6,6 @@ Business code must depend on this module instead of calling os.getenv directly.
 from __future__ import annotations
 
 import os
-import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -104,24 +103,9 @@ def _resolve_database_url(raw_url: str | None) -> str:
             "Example: DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot\n"
             "Or use: docker-compose -f deploy/docker-compose.yml up"
         )
-    # Test escape hatches: :memory: and /tmp/ paths under pytest
+    # Test escape hatch: :memory: only
     if raw_url == "sqlite:///:memory:":
         return raw_url
     if raw_url.startswith("sqlite:///") and not raw_url.startswith("sqlite:////"):
-        raw_path = raw_url[len("sqlite:///"):]
-        db_path = Path(raw_path)
-        if not db_path.is_absolute():
-            resolved = f"sqlite:///{BACKEND_DIR / db_path}"
-        else:
-            resolved = raw_url
-        # Allow SQLite under system temp dir when running inside pytest (test isolation)
-        if "pytest" in sys.modules:
-            import tempfile
-            temp_dir = tempfile.gettempdir()
-            if resolved.startswith(f"sqlite:///{temp_dir}"):
-                return resolved
-        raise SystemExit(
-            f"SQLite is not supported for runtime. Use PostgreSQL + pgvector.\n"
-            f"Got: {raw_url}"
-        )
+        raise SystemExit(f"SQLite is not supported for runtime. Use PostgreSQL + pgvector.\nGot: {raw_url}")
     return raw_url

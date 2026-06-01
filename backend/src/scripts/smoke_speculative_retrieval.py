@@ -37,21 +37,15 @@ def _check_live_provider() -> None:
     bailian_url = os.environ.get("BAILIAN_BASE_URL")
     bailian_key = os.environ.get("BAILIAN_API_KEY")
     if not bailian_url or not bailian_key:
-        raise SystemExit(
-            "SMOKE GATE FAILED: BAILIAN_BASE_URL/BAILIAN_API_KEY not configured."
-        )
+        raise SystemExit("SMOKE GATE FAILED: BAILIAN_BASE_URL/BAILIAN_API_KEY not configured.")
     if bailian_key == "test-key":
-        raise SystemExit(
-            "SMOKE GATE FAILED: BAILIAN_API_KEY is set to mock value 'test-key'."
-        )
+        raise SystemExit("SMOKE GATE FAILED: BAILIAN_API_KEY is set to mock value 'test-key'.")
 
 
 def _check_postgres() -> None:
     url = os.environ.get("DATABASE_URL", "")
     if "postgresql" not in url:
-        raise SystemExit(
-            f"SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:60]}..."
-        )
+        raise SystemExit(f"SMOKE GATE FAILED: DATABASE_URL must use PostgreSQL + pgvector. Got: {url[:60]}...")
 
 
 def _speculative_summary(intent: IntentResult) -> str:
@@ -142,9 +136,7 @@ async def _compare_paths(
 
     # --- Start both speculative retrieval and criteria in parallel ---
     t0 = time.perf_counter()
-    retrieval_task = asyncio.create_task(
-        run_retrieval(spec_criteria, top_n=SPECULATIVE_TOP_N)
-    )
+    retrieval_task = asyncio.create_task(run_retrieval(spec_criteria, top_n=SPECULATIVE_TOP_N))
 
     try:
         criteria = await _run_criteria(session_id, body, intent)
@@ -171,14 +163,17 @@ async def _compare_paths(
         if _criteria_adds_new_filters(spec_criteria, criteria):
             before = len(spec_retrieval.products)
             kept = filter_products(
-                spec_retrieval.products, criteria, max_products=SERIAL_TOP_N,
+                spec_retrieval.products,
+                criteria,
+                max_products=SERIAL_TOP_N,
             )
             removed = before - len(kept)
             post_filtered = True
             spec_retrieval = RetrievalResult(
                 products=kept,
                 evidence_by_product={
-                    pid: ev for pid, ev in spec_retrieval.evidence_by_product.items()
+                    pid: ev
+                    for pid, ev in spec_retrieval.evidence_by_product.items()
                     if pid in {p.product_id for p in kept}
                 },
                 trace_details={**spec_retrieval.trace_details, "speculative_post_filtered": True},
@@ -188,7 +183,8 @@ async def _compare_paths(
             spec_retrieval = RetrievalResult(
                 products=spec_retrieval.products[:SERIAL_TOP_N],
                 evidence_by_product={
-                    pid: ev for pid, ev in spec_retrieval.evidence_by_product.items()
+                    pid: ev
+                    for pid, ev in spec_retrieval.evidence_by_product.items()
                     if pid in {p.product_id for p in spec_retrieval.products[:SERIAL_TOP_N]}
                 },
                 trace_details=spec_retrieval.trace_details,
@@ -202,9 +198,7 @@ async def _compare_paths(
     result.post_filter_removed = removed
     if spec_retrieval is not None:
         result.spec_product_ids = [p.product_id for p in spec_retrieval.products]
-        result.spec_evidence_count = sum(
-            len(ev) for ev in spec_retrieval.evidence_by_product.values()
-        )
+        result.spec_evidence_count = sum(len(ev) for ev in spec_retrieval.evidence_by_product.values())
 
     # --- Serial baseline: same criteria, sequential retrieval ---
     t2 = time.perf_counter()
@@ -212,9 +206,7 @@ async def _compare_paths(
     serial_time = criteria_time + (time.perf_counter() - t2)
     result.serial_time_s = serial_time
     result.serial_product_ids = [p.product_id for p in serial_retrieval.products]
-    result.serial_evidence_count = sum(
-        len(ev) for ev in serial_retrieval.evidence_by_product.values()
-    )
+    result.serial_evidence_count = sum(len(ev) for ev in serial_retrieval.evidence_by_product.values())
 
     # --- Compare ---
     result.top1_match = (
@@ -275,7 +267,7 @@ async def run_comparison() -> list[CompareResult]:
         session_id = f"{base_session}_{idx}"
         body = ChatStreamRequest(message=query, session_id=session_id)
 
-        print(f"\nQuery {idx+1}: \"{query}\"  ({intent_desc})")
+        print(f'\nQuery {idx + 1}: "{query}"  ({intent_desc})')
 
         # Shared intent
         try:
@@ -291,17 +283,23 @@ async def run_comparison() -> list[CompareResult]:
             results.append(result)
             continue
 
-        print(f"  投机: {result.spec_time_s:.2f}s → {len(result.spec_product_ids)} products"
-              + (f" (post-filter removed {result.post_filter_removed})" if result.post_filtered else ""))
+        print(
+            f"  投机: {result.spec_time_s:.2f}s → {len(result.spec_product_ids)} products"
+            + (f" (post-filter removed {result.post_filter_removed})" if result.post_filtered else "")
+        )
         print(f"  串行: {result.serial_time_s:.2f}s → {len(result.serial_product_ids)} products")
         if criteria.category:
-            print(f"  criteria: category={criteria.category} "
-                  + f"budget_max={criteria.constraints.budget_max} "
-                  + f"brand_avoid={criteria.constraints.brand_avoid}")
+            print(
+                f"  criteria: category={criteria.category} "
+                + f"budget_max={criteria.constraints.budget_max} "
+                + f"brand_avoid={criteria.constraints.brand_avoid}"
+            )
 
         status = "PASS" if result.passed else f"FAIL ({len(result.errors)} errors)"
-        print(f"  加速比: {result.speedup:.2f}x  Jaccard: {result.jaccard:.2f}  "
-              f"Top-1: {'一致' if result.top1_match else '不同'}  → {status}")
+        print(
+            f"  加速比: {result.speedup:.2f}x  Jaccard: {result.jaccard:.2f}  "
+            f"Top-1: {'一致' if result.top1_match else '不同'}  → {status}"
+        )
         if result.errors:
             for error in result.errors:
                 print(f"    !! {error}")
@@ -317,7 +315,7 @@ def print_summary(results: list[CompareResult]) -> None:
     avg_speedup = sum(r.speedup for r in results if r.speedup > 0) / max(total, 1)
     avg_jaccard = sum(r.jaccard for r in results) / max(total, 1)
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Results: {passed}/{total} passed")
     print(f"Average speedup: {avg_speedup:.2f}x")
     print(f"Average Jaccard: {avg_jaccard:.2f}")
@@ -325,7 +323,7 @@ def print_summary(results: list[CompareResult]) -> None:
         print(f"Failures ({total - passed}):")
         for result in results:
             if not result.passed:
-                print(f"  - \"{result.query}\": {', '.join(result.errors)}")
+                print(f'  - "{result.query}": {", ".join(result.errors)}')
         raise SystemExit(1)
     print("All queries passed.")
 

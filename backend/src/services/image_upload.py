@@ -74,7 +74,9 @@ def save_uploaded_image(file_name: str, content_type: str, data: bytes) -> Image
     if normalized_type not in ALLOWED_MIME_TYPES:
         raise ImageUploadError("IMAGE_FORMAT_INVALID", "Only JPEG, PNG, and WebP images are supported.")
     if len(data) > MAX_IMAGE_BYTES:
-        raise ImageUploadError("IMAGE_TOO_LARGE", "Image exceeds the 5MB limit.", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        raise ImageUploadError(
+            "IMAGE_TOO_LARGE", "Image exceeds the 5MB limit.", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+        )
 
     upload_dir = get_settings().upload_dir
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -98,7 +100,9 @@ def image_url_to_provider_url(image_url: str) -> str:
     file_name = Path(image_url).name
     path = get_settings().upload_dir / file_name
     if not path.exists() or not path.is_file():
-        raise ImageUploadError("IMAGE_FILE_NOT_FOUND", f"Uploaded image is not available: {file_name}", status_code=HTTPStatus.NOT_FOUND)
+        raise ImageUploadError(
+            "IMAGE_FILE_NOT_FOUND", f"Uploaded image is not available: {file_name}", status_code=HTTPStatus.NOT_FOUND
+        )
     mime_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"

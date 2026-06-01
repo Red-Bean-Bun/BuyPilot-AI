@@ -45,5 +45,8 @@ def test_qwen3_rerank_uses_dashscope_native_endpoint(monkeypatch):
 
     profile = reranker._resolve_rerank_profile("gte_rerank")
 
-    assert reranker._rerank_endpoint(profile) == "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    assert (
+        reranker._rerank_endpoint(profile)
+        == "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    )
     _reset_settings()

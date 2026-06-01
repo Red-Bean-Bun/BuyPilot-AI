@@ -102,6 +102,7 @@ def _schedule_parsed_json_update(
 
     return asyncio.create_task(_update())
 
+
 __all__ = [
     "LiveLLMUnavailable",
     "analyze_image",
@@ -300,7 +301,9 @@ async def generate_decision(
     decision = DecisionResult(
         winner_product_id=winner_id,
         summary=parsed.get("summary", msg.DECISION_SUMMARY_FALLBACK_TEMPLATE.format(winner_id=winner_id)),
-        why=parsed.get("why", [msg.DECISION_WHY_DEFAULT]) if isinstance(parsed.get("why"), list) else [msg.DECISION_WHY_DEFAULT],
+        why=parsed.get("why", [msg.DECISION_WHY_DEFAULT])
+        if isinstance(parsed.get("why"), list)
+        else [msg.DECISION_WHY_DEFAULT],
         not_for=parsed.get("not_for", []) if isinstance(parsed.get("not_for"), list) else [],
     )
     return _sanitize_decision(decision, valid_ids, products)

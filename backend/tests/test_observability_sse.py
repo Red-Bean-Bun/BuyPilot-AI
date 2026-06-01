@@ -194,12 +194,14 @@ async def test_schedule_sse_event_recording_fire_and_forget(monkeypatch, tmp_pat
 
     await seed_products_if_needed()
 
-    set_request_context(RequestContext(
-        request_id="req_sse_fire",
-        trace_id="trace_sse_fire",
-        session_id="sess_sse_fire",
-        turn_id="turn_sse_fire",
-    ))
+    set_request_context(
+        RequestContext(
+            request_id="req_sse_fire",
+            trace_id="trace_sse_fire",
+            session_id="sess_sse_fire",
+            turn_id="turn_sse_fire",
+        )
+    )
 
     start_time = time.time()
 
@@ -239,12 +241,14 @@ async def test_observability_disabled_skips_sse_recording(monkeypatch, tmp_path)
 
     await seed_products_if_needed()
 
-    set_request_context(RequestContext(
-        request_id="req_sse_off",
-        trace_id="trace_sse_off",
-        session_id="sess_sse_off",
-        turn_id="turn_sse_off",
-    ))
+    set_request_context(
+        RequestContext(
+            request_id="req_sse_off",
+            trace_id="trace_sse_off",
+            session_id="sess_sse_off",
+            turn_id="turn_sse_off",
+        )
+    )
 
     schedule_sse_event_recording(
         event_type="thinking",

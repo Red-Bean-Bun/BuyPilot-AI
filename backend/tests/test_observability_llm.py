@@ -246,16 +246,20 @@ async def test_schedule_llm_call_recording_fire_and_forget(monkeypatch, tmp_path
     settings_module._settings = None
 
     from src.services.product_ingest import seed_products_if_needed
+
     await seed_products_if_needed()
 
-    set_request_context(RequestContext(
-        request_id="req_fire_forget",
-        trace_id="trace_fire_forget",
-        session_id="sess_fire_forget",
-        turn_id="turn_fire_forget",
-    ))
+    set_request_context(
+        RequestContext(
+            request_id="req_fire_forget",
+            trace_id="trace_fire_forget",
+            session_id="sess_fire_forget",
+            turn_id="turn_fire_forget",
+        )
+    )
 
     import time
+
     start_time = time.time()
 
     schedule_llm_call_recording(
@@ -300,14 +304,17 @@ async def test_observability_local_enabled_zero_disables_recording(monkeypatch, 
     settings_module._settings = None
 
     from src.services.product_ingest import seed_products_if_needed
+
     await seed_products_if_needed()
 
-    set_request_context(RequestContext(
-        request_id="req_disabled",
-        trace_id="trace_disabled",
-        session_id="sess_disabled",
-        turn_id="turn_disabled",
-    ))
+    set_request_context(
+        RequestContext(
+            request_id="req_disabled",
+            trace_id="trace_disabled",
+            session_id="sess_disabled",
+            turn_id="turn_disabled",
+        )
+    )
 
     schedule_llm_call_recording(
         task="analyze_intent",

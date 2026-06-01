@@ -13,6 +13,7 @@ from src.services.cancellation import is_chat_turn_cancellation_requested
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
     CriteriaPayload,
+    DoneFinishReason,
     DoneEvent,
     EventSeq,
     EvidencePayload,
@@ -108,7 +109,7 @@ class StreamContext:
             message=message,
         )
 
-    def done(self, finish_reason: str = "completed", deck_id: str | None = None) -> DoneEvent:
+    def done(self, finish_reason: DoneFinishReason = "completed", deck_id: str | None = None) -> DoneEvent:
         return DoneEvent(
             session_id=self.session_id,
             turn_id=self.turn_id,

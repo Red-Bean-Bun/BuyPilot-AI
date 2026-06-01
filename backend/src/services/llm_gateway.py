@@ -65,7 +65,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
 
             return response
         except LiveLLMUnavailable as exc:
-            if 'started_at' in locals():
+            if "started_at" in locals():
                 duration_ms = (time.perf_counter() - started_at) * 1000
             else:
                 duration_ms = 0.0
@@ -73,7 +73,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if 'profile' in locals() else "unknown",
+                model=profile.model if "profile" in locals() else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
@@ -93,7 +93,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             logger.info("LLM profile unavailable for task %s profile %s: %s", task, profile_name, exc)
             continue
         except Exception as exc:
-            if 'started_at' in locals():
+            if "started_at" in locals():
                 duration_ms = (time.perf_counter() - started_at) * 1000
             else:
                 duration_ms = 0.0
@@ -101,7 +101,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if 'profile' in locals() else "unknown",
+                model=profile.model if "profile" in locals() else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
@@ -173,7 +173,7 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             )
             return
         except LiveLLMUnavailable as exc:
-            if 'started_at' in locals():
+            if "started_at" in locals():
                 duration_ms = (time.perf_counter() - started_at) * 1000
             else:
                 duration_ms = 0.0
@@ -181,12 +181,12 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if 'profile' in locals() else "unknown",
+                model=profile.model if "profile" in locals() else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
                 messages=messages,
-                response=accumulated_text if 'accumulated_text' in locals() else None,
+                response=accumulated_text if "accumulated_text" in locals() else None,
                 parsed_json=None,
                 validation_error=None,
                 token_usage=None,
@@ -201,7 +201,7 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             logger.info("LLM stream profile unavailable for task %s profile %s: %s", task, profile_name, exc)
             continue
         except Exception as exc:
-            if 'started_at' in locals():
+            if "started_at" in locals():
                 duration_ms = (time.perf_counter() - started_at) * 1000
             else:
                 duration_ms = 0.0
@@ -209,12 +209,12 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if 'profile' in locals() else "unknown",
+                model=profile.model if "profile" in locals() else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
                 messages=messages,
-                response=accumulated_text if 'accumulated_text' in locals() else None,
+                response=accumulated_text if "accumulated_text" in locals() else None,
                 parsed_json=None,
                 validation_error=None,
                 token_usage=None,

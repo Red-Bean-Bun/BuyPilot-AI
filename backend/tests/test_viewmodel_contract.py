@@ -14,17 +14,13 @@ import pytest
 
 from src.runtime.message_rules import extract_adjustment_hints
 from src.services.decision_scoring import (
-    SIGNAL_ADD_TO_CART,
-    SIGNAL_LIKE,
     SIGNAL_NOT_INTERESTED,
-    SIGNAL_VIEW_DETAIL,
     _compute_user_signal_scores,
     score_candidates,
 )
 from src.types.sse_events import (
     Constraints,
     CriteriaPayload,
-    EvidencePayload,
     ProductPayload,
 )
 from tests.conftest import parse_sse_stream
@@ -384,11 +380,17 @@ class TestGoldenTraceSemanticValidation:
             finish_reason = turn_done[0]["finish_reason"]
             has_final_decision = any(t == "final_decision" for t, _ in turn_events)
             if has_final_decision:
-                assert finish_reason in ("completed", "awaiting_criteria_adjustment"), \
+                assert finish_reason in ("completed", "awaiting_criteria_adjustment"), (
                     f"Turn {turn_id}: has final_decision but finish_reason={finish_reason}"
+                )
             else:
-                assert finish_reason in ("awaiting_product_feedback", "awaiting_criteria_adjustment", "completed", "cancelled", "error"), \
-                    f"Turn {turn_id}: unexpected finish_reason={finish_reason}"
+                assert finish_reason in (
+                    "awaiting_product_feedback",
+                    "awaiting_criteria_adjustment",
+                    "completed",
+                    "cancelled",
+                    "error",
+                ), f"Turn {turn_id}: unexpected finish_reason={finish_reason}"
 
     def test_multi_product_deck_no_same_turn_final_decision(self, budget_beauty_events):
         """PRD 05/06: 2+ product_cards → NO final_decision in same turn.

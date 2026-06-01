@@ -13,7 +13,8 @@ from src.services.request_context import RequestContext, clear_request_context, 
 
 # Exact-match paths to exclude from request logging (noise / self-referential).
 REQUEST_LOG_EXCLUDED_PATHS = {
-    "/health", "/health/",
+    "/health",
+    "/health/",
     "/",
     "/favicon.ico",
     "/sitemap.xml",

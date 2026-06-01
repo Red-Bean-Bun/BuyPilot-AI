@@ -135,11 +135,13 @@ def _normalize_sku_options(skus: Any) -> list[dict[str, Any]] | None:
     for sku in skus:
         if not isinstance(sku, dict) or "sku_id" not in sku:
             continue
-        options.append({
-            "sku_id": str(sku["sku_id"]),
-            "properties": sku.get("properties") or {},
-            "price": sku.get("price"),
-        })
+        options.append(
+            {
+                "sku_id": str(sku["sku_id"]),
+                "properties": sku.get("properties") or {},
+                "price": sku.get("price"),
+            }
+        )
     return options or None
 
 

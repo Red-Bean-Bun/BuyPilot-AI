@@ -99,11 +99,13 @@ class ViewModelState:
     criteria: CriteriaPayload | None = None
     product_ids: list[str] = field(default_factory=list)
     deck_id: str | None = None
-    feedback_context: dict[str, list[str]] = field(default_factory=lambda: {
-        "avoid_products": [],
-        "avoid_traits": [],
-        "prefer_traits": [],
-    })
+    feedback_context: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "avoid_products": [],
+            "avoid_traits": [],
+            "prefer_traits": [],
+        }
+    )
     products_registry: dict[str, ProductPayload] = field(default_factory=dict)
     evidence_registry: dict[str, list[EvidencePayload]] = field(default_factory=dict)
     intent_override: Any | None = None
@@ -330,6 +332,7 @@ async def _run_turn(session_id: str, message: str, **kwargs) -> list[SSEEventBas
 
 def _two_product_retrieval():
     """Return a retrieval stub that returns 2 products."""
+
     async def stub(criteria, top_n=5, feedback=None):
         del criteria, top_n, feedback
         return RetrievalResult(
@@ -339,11 +342,13 @@ def _two_product_retrieval():
                 VM_PRODUCT_B.product_id: VM_EVIDENCE,
             },
         )
+
     return stub
 
 
 def _three_product_retrieval():
     """Return a retrieval stub that returns 3 products."""
+
     async def stub(criteria, top_n=5, feedback=None):
         del criteria, top_n, feedback
         return RetrievalResult(
@@ -354,6 +359,7 @@ def _three_product_retrieval():
                 VM_PRODUCT_C.product_id: VM_EVIDENCE,
             },
         )
+
     return stub
 
 
@@ -546,7 +552,7 @@ async def test_viewmodel_natural_language_adjustment_equivalent_to_criteria_patc
     """
     # Turn 1: initial recommendation
     monkeypatch.setattr(pipeline_module, "run_retrieval", _two_product_retrieval())
-    events1 = await _run_turn("s_vm_3", "推荐护肤品")
+    await _run_turn("s_vm_3", "推荐护肤品")
 
     # Turn 2: natural language adjustment
     # Create criteria reflecting natural language adjustments
@@ -607,11 +613,7 @@ async def test_viewmodel_natural_language_adjustment_equivalent_to_criteria_patc
         product_avoids = set(pc.product.ingredient_avoid or [])
         criteria_avoids = set(cc.criteria.constraints.ingredient_avoid or [])
         overlap = product_avoids & criteria_avoids
-        # If hard filtering worked, no product should have overlap
-        # But our stub retrieval doesn't enforce hard filtering,
-        # so we just verify the criteria constraint is present.
-        # Real pipeline: retriever's _passes_hard_filters would exclude
-        # products with alcohol in ingredient_avoid.
+        assert not overlap
 
     # Price constraint: all product prices <= budget_max
     for pc in _product_cards(events2):
@@ -717,8 +719,7 @@ async def test_viewmodel_negative_user_signal_demotes_disliked_candidate(vm_stat
     fd = _final_decision(events2)
     assert fd is not None, "Convergence turn must emit final_decision"
     assert fd.winner_product_id == VM_PRODUCT_B.product_id, (
-        f"Disliked candidate (p_vm_a) must be demoted; winner should be "
-        f"p_vm_b, got {fd.winner_product_id}"
+        f"Disliked candidate (p_vm_a) must be demoted; winner should be p_vm_b, got {fd.winner_product_id}"
     )
 
     # Verify scoring independently: call score_candidates directly
@@ -802,6 +803,7 @@ async def test_viewmodel_llm_empty_object_produces_error_event(monkeypatch):
     fails ValidationError → RuntimeError), the outer handler catches it and yields
     ErrorEvent + done("error").
     """
+
     async def empty_payload_intent(session_id, body):
         del session_id, body
         raise RuntimeError("Live intent payload failed schema validation.")
@@ -829,7 +831,7 @@ async def test_viewmodel_decision_winner_not_in_candidates_locked_to_scoring_win
 
     # Step 1: run a full 2-product recommendation turn
     monkeypatch.setattr(pipeline_module, "run_retrieval", _two_product_retrieval())
-    events1 = await _run_turn("s_vm_bad3", "推荐洗面奶")
+    await _run_turn("s_vm_bad3", "推荐洗面奶")
 
     # Step 2: "继续" turn — inject hallucinated winner in decision
     # The scoring algorithm will lock the winner to the actual scored winner,
@@ -837,12 +839,14 @@ async def test_viewmodel_decision_winner_not_in_candidates_locked_to_scoring_win
     async def hallucinated_decision_completion(profile, messages, json_object=False):
         if profile and str(profile) == "generate_decision":
             # LLM hallucinates a product that doesn't exist
-            return json.dumps({
-                "winner_product_id": "p_hallucinated_999",
-                "summary": "优先选p_hallucinated_999。",
-                "why": ["综合匹配度最高"],
-                "not_for": [],
-            })
+            return json.dumps(
+                {
+                    "winner_product_id": "p_hallucinated_999",
+                    "summary": "优先选p_hallucinated_999。",
+                    "why": ["综合匹配度最高"],
+                    "not_for": [],
+                }
+            )
         # Other tasks return valid responses
         if profile and str(profile) == "analyze_intent":
             return json.dumps({"intent": "continue", "confidence": 0.95})
@@ -850,6 +854,7 @@ async def test_viewmodel_decision_winner_not_in_candidates_locked_to_scoring_win
 
     # Need to let the real decision generation code run (not the stub)
     from src.runtime.stages.decision import run_decision as real_run_decision
+
     monkeypatch.setattr(pipeline_module, "run_decision", real_run_decision)
     monkeypatch.setattr(llm_gateway, "_chat_completion", hallucinated_decision_completion)
 
@@ -858,9 +863,7 @@ async def test_viewmodel_decision_winner_not_in_candidates_locked_to_scoring_win
     # Winner must NOT be the hallucinated ID
     fd = _final_decision(events2)
     if fd is not None:
-        assert fd.winner_product_id != "p_hallucinated_999", (
-            "Hallucinated winner must not be exposed to client"
-        )
+        assert fd.winner_product_id != "p_hallucinated_999", "Hallucinated winner must not be exposed to client"
         # Winner must be one of the real candidate IDs
         assert fd.winner_product_id in [VM_PRODUCT_A.product_id, VM_PRODUCT_B.product_id]
 
@@ -951,14 +954,6 @@ async def test_viewmodel_cancel_during_slow_retrieval_ends_with_done_cancelled(v
     # Stream must end with done(cancelled)
     done = _done_event(events)
     assert done.finish_reason == "cancelled"
-
-    # No product_card or criteria_card after cancellation point
-    tags_after_cancel = [e.event for e in events[1:] if e.event not in ("thinking", "done")]
-    # thinking events before cancellation are fine, but no business events after
-    business_events = [e for e in events if e.event in ("product_card", "criteria_card", "final_decision")]
-    # If cancellation happened early enough, there should be no business events
-    # But if retrieval already completed before cancel propagated, we might see some.
-    # The key invariant: done(cancelled) is always emitted, turn is cleaned up.
 
     # Turn must be unregistered
     assert active_turn_count() == 0
