@@ -9,7 +9,7 @@ plugins {
 
 val useMockChat = providers.gradleProperty("USE_MOCK_CHAT")
     .map { it.equals("true", ignoreCase = true).toString() }
-    .orElse("true")
+    .orElse("false")
     .get()
 
 android {

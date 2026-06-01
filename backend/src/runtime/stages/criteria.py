@@ -8,6 +8,7 @@ from typing import Any
 
 from src.config import user_messages as msg
 from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, DEFAULT_CRITERIA_ID
+from src.services.audit import record_audit_event
 from src.services.criteria_sanitizer import sanitize_criteria_product_type, sanitize_product_type_constraint
 from src.services.conversation_state import get_conversation_summary, get_previous_criteria
 from src.services.feedback import get_feedback_context
@@ -26,14 +27,18 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
     if body.criteria_patch:
         feedback_task.cancel()
         summary_task.cancel()
-        return apply_criteria_patch(existing or CriteriaPayload(criteria_id=DEFAULT_CRITERIA_ID), body.criteria_patch)
+        final = apply_criteria_patch(existing or CriteriaPayload(criteria_id=DEFAULT_CRITERIA_ID), body.criteria_patch)
+        await diagnose_criteria_context(existing, final, intent)
+        return final
 
     feedback = await feedback_task
     ctx_summary = await summary_task
     criteria = await generate_criteria(
         body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
     )
-    return annotate_criteria_sources(criteria, intent, existing)
+    final = annotate_criteria_sources(criteria, intent, existing)
+    await diagnose_criteria_context(existing, final, intent)
+    return final
 
 
 def criteria_from_intent(
@@ -326,3 +331,65 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
         ],
     }
     return _ACTIONS.get(category, _ACTIONS[msg.DEFAULT_CATEGORY]) + [replace_action]
+
+
+async def diagnose_criteria_context(
+    existing: CriteriaPayload | None,
+    final: CriteriaPayload,
+    intent: IntentResult,
+) -> None:
+    """Check for context loss in multi-turn criteria merging.
+
+    Records audit events for:
+    - BUDGET_PATCH_LOST: User mentioned budget change but it wasn't applied
+    - EXCLUSION_LOST: User mentioned exclusion but it was lost in merge
+    """
+    if existing is None:
+        return
+
+    extracted = intent.extracted_constraints or {}
+
+    # Rule 1: BUDGET_PATCH_LOST
+    # User mentioned budget_max but final criteria didn't change it (or made it larger)
+    user_budget_max = extracted.get("budget_max")
+    if user_budget_max is not None and isinstance(user_budget_max, (int, float)):
+        before_budget_max = existing.constraints.budget_max
+        after_budget_max = final.constraints.budget_max
+
+        # Check if budget didn't change or got larger (user wanted to reduce)
+        if before_budget_max is not None and after_budget_max is not None:
+            if after_budget_max >= before_budget_max:
+                await record_audit_event(
+                    action="chat.context_diagnostic",
+                    metadata={
+                        "diagnostic_code": "BUDGET_PATCH_LOST",
+                        "severity": "warning",
+                        "user_budget_max": user_budget_max,
+                        "before_budget_max": before_budget_max,
+                        "after_budget_max": after_budget_max,
+                    },
+                )
+
+    # Rule 2: EXCLUSION_LOST
+    # User mentioned exclusion (brand_avoid, origin_avoid, ingredient_avoid) but it was lost
+    for field in ("brand_avoid", "origin_avoid", "ingredient_avoid"):
+        user_exclusions = extracted.get(field)
+        if not user_exclusions or not isinstance(user_exclusions, list):
+            continue
+
+        before_value = getattr(existing.constraints, field) or []
+        after_value = getattr(final.constraints, field) or []
+
+        for item in user_exclusions:
+            if item in before_value and item not in after_value:
+                await record_audit_event(
+                    action="chat.context_diagnostic",
+                    metadata={
+                        "diagnostic_code": "EXCLUSION_LOST",
+                        "severity": "warning",
+                        "field": field,
+                        "lost_item": item,
+                        "before_value": before_value,
+                        "after_value": after_value,
+                    },
+                )

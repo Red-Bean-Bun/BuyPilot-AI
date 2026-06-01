@@ -51,6 +51,10 @@ class Settings:
             PROJECT_DIR,
         )
         self.upload_dir = _resolve_path(os.getenv("UPLOAD_DIR"), BACKEND_DIR / "uploads", BACKEND_DIR)
+        self.observability_local_enabled = os.getenv("OBSERVABILITY_LOCAL_ENABLED", "1") == "1"
+        self.observability_capture_full_payload = os.getenv("OBSERVABILITY_CAPTURE_FULL_PAYLOAD", "0") == "1"
+        self.observability_preview_chars = int(os.getenv("OBSERVABILITY_PREVIEW_CHARS", "4000"))
+        self.admin_api_key = os.getenv("ADMIN_API_KEY", "")
         self.llm_profiles_path = BACKEND_DIR / "src" / "config" / "llm_profiles.yaml"
         profiles_data = load_llm_profiles(self.llm_profiles_path)
         self.task_model_map = profiles_data.get("task_model_map", {})

@@ -117,6 +117,67 @@ async def list_api_request_logs(
         return list((await session.exec(statement)).all())
 
 
+async def list_api_request_logs_by_request_ids(request_ids: list[str], limit: int = 50) -> list[ApiRequestLog]:
+    await create_db_and_tables()
+    unique_request_ids = [request_id for request_id in dict.fromkeys(request_ids) if request_id]
+    if not unique_request_ids:
+        return []
+
+    statement = (
+        select(ApiRequestLog)
+        .where(ApiRequestLog.request_id.in_(unique_request_ids))
+        .order_by(ApiRequestLog.created_at.desc())
+        .limit(limit)
+    )
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return list((await session.exec(statement)).all())
+
+
+async def map_turn_ids_by_request_ids(request_ids: list[str]) -> dict[str, str]:
+    await create_db_and_tables()
+    unique_request_ids = [request_id for request_id in dict.fromkeys(request_ids) if request_id]
+    if not unique_request_ids:
+        return {}
+
+    statement = (
+        select(AuditEvent)
+        .where(AuditEvent.request_id.in_(unique_request_ids))
+        .where(AuditEvent.turn_id.is_not(None))
+        .order_by(AuditEvent.created_at.asc())
+    )
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        rows = list((await session.exec(statement)).all())
+
+    turn_ids: dict[str, str] = {}
+    for row in rows:
+        if row.request_id and row.turn_id and row.request_id not in turn_ids:
+            turn_ids[row.request_id] = row.turn_id
+    return turn_ids
+
+
+async def list_request_ids_by_turn_id(turn_id: str) -> list[str]:
+    await create_db_and_tables()
+    if not turn_id:
+        return []
+
+    statement = (
+        select(AuditEvent)
+        .where(AuditEvent.turn_id == turn_id)
+        .where(AuditEvent.request_id.is_not(None))
+        .order_by(AuditEvent.created_at.desc())
+    )
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        rows = list((await session.exec(statement)).all())
+
+    request_ids: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        if row.request_id and row.request_id not in seen:
+            seen.add(row.request_id)
+            request_ids.append(row.request_id)
+    return request_ids
+
+
 async def list_audit_events(
     *,
     trace_id: str | None = None,

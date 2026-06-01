@@ -106,6 +106,54 @@ async def test_live_llm_strict_mode_raises_when_profile_config_missing(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_schedule_parsed_json_update_retries_until_llm_row_exists(monkeypatch, tmp_path):
+    import asyncio
+
+    from src.repos.observability_llm import insert_llm_call, list_llm_calls_by_turn
+    from src.repos.database import create_db_and_tables
+    from src.services.request_context import RequestContext, clear_request_context, set_request_context
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'parsed_retry.db'}")
+    monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "1")
+    _reset_settings()
+    await create_db_and_tables()
+    set_request_context(
+        RequestContext(
+            request_id="req_retry",
+            trace_id="trace_retry",
+            session_id="sess_retry",
+            turn_id="turn_retry",
+        )
+    )
+
+    try:
+        task = llm_client._schedule_parsed_json_update("generate_criteria", {"ok": True}, None)
+
+        assert task is not None
+        await asyncio.sleep(0.03)
+        await insert_llm_call(
+            turn_id="turn_retry",
+            session_id="sess_retry",
+            task="generate_criteria",
+            profile="qwen-plus",
+            model="qwen-plus",
+            provider="Qwen",
+            status="success",
+            duration_ms=10.0,
+            prompt_hash="hash_retry",
+            parsed_json=None,
+        )
+        await task
+
+        rows = await list_llm_calls_by_turn("turn_retry")
+        assert len(rows) == 1
+        assert rows[0]["parsed_json"] == {"ok": True}
+    finally:
+        clear_request_context()
+        _reset_settings()
+
+
+@pytest.mark.asyncio
 async def test_analyze_intent_does_not_parse_age_as_budget():
     result = await llm_client.analyze_intent("给4岁孩子买零食")
 

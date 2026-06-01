@@ -34,6 +34,7 @@ services:
       AUTO_SEED_STRICT_EMBEDDINGS: "1"
     volumes:
       - ../data:/data:ro
+      - ../backend/static:/app/static:ro
       - api_uploads:/app/uploads
     depends_on:
       postgres:

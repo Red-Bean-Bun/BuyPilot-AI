@@ -362,15 +362,33 @@ class TestGoldenTraceSemanticValidation:
         Derived from: handlers.py — if final_decision present, finish_reason
         should be 'completed' (or 'awaiting_criteria_adjustment' for
         no_suitable_winner). If awaiting_product_feedback, no final_decision.
+
+        For multi-turn traces, check the done event in the same turn as final_decision.
         """
         done_events = [d for t, d in budget_beauty_events if t == "done"]
         assert len(done_events) >= 1
-        finish_reason = done_events[0]["finish_reason"]
-        has_final_decision = any(t == "final_decision" for t, _ in budget_beauty_events)
-        if has_final_decision:
-            assert finish_reason in ("completed", "awaiting_criteria_adjustment")
-        else:
-            assert finish_reason in ("awaiting_product_feedback", "awaiting_criteria_adjustment", "completed", "cancelled", "error")
+
+        # Group events by turn_id
+        events_by_turn = {}
+        for tag, data in budget_beauty_events:
+            turn_id = data.get("turn_id")
+            if turn_id not in events_by_turn:
+                events_by_turn[turn_id] = []
+            events_by_turn[turn_id].append((tag, data))
+
+        # Check each turn's done event against its own final_decision
+        for turn_id, turn_events in events_by_turn.items():
+            turn_done = [d for t, d in turn_events if t == "done"]
+            if not turn_done:
+                continue
+            finish_reason = turn_done[0]["finish_reason"]
+            has_final_decision = any(t == "final_decision" for t, _ in turn_events)
+            if has_final_decision:
+                assert finish_reason in ("completed", "awaiting_criteria_adjustment"), \
+                    f"Turn {turn_id}: has final_decision but finish_reason={finish_reason}"
+            else:
+                assert finish_reason in ("awaiting_product_feedback", "awaiting_criteria_adjustment", "completed", "cancelled", "error"), \
+                    f"Turn {turn_id}: unexpected finish_reason={finish_reason}"
 
     def test_multi_product_deck_no_same_turn_final_decision(self, budget_beauty_events):
         """PRD 05/06: 2+ product_cards → NO final_decision in same turn.
@@ -397,14 +415,25 @@ class TestGoldenTraceSemanticValidation:
                 pass  # TODO: update golden trace to remove same-turn final_decision
 
     def test_seq_numbers_are_monotonic(self, budget_beauty_events):
-        """Event seq must be strictly increasing within a turn.
+        """Event seq must be strictly increasing within each turn.
 
         Derived from: EventSeq class increments by 1 each next() call.
+        Multi-turn traces reset seq to 1 for each turn.
         """
-        seqs = [d["seq"] for _, d in budget_beauty_events]
-        assert seqs == sorted(seqs)
-        # Strictly increasing (no duplicates)
-        assert len(seqs) == len(set(seqs))
+        # Group events by turn_id
+        events_by_turn = {}
+        for tag, data in budget_beauty_events:
+            turn_id = data.get("turn_id")
+            if turn_id not in events_by_turn:
+                events_by_turn[turn_id] = []
+            events_by_turn[turn_id].append(data)
+
+        # Check monotonicity per turn
+        for turn_id, turn_events in events_by_turn.items():
+            seqs = [d["seq"] for d in turn_events]
+            assert seqs == sorted(seqs), f"Turn {turn_id}: seq not sorted"
+            # Strictly increasing (no duplicates)
+            assert len(seqs) == len(set(seqs)), f"Turn {turn_id}: duplicate seq numbers"
 
     def test_clarification_trace_ends_with_done(self, clarification_events):
         """Clarification trace must end with done event.

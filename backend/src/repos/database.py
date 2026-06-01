@@ -142,6 +142,12 @@ async def ensure_runtime_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_retrieval_traces_created_at ON retrieval_traces (created_at)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_links_conversation_id ON evidence_links (conversation_id)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_links_product_id ON evidence_links (product_id)",
+        "CREATE INDEX IF NOT EXISTS ix_obs_llm_turn_id ON observability_llm_calls (turn_id)",
+        "CREATE INDEX IF NOT EXISTS ix_obs_llm_session_id ON observability_llm_calls (session_id)",
+        "CREATE INDEX IF NOT EXISTS ix_obs_llm_created_at ON observability_llm_calls (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_obs_sse_turn_id ON observability_sse_events (turn_id)",
+        "CREATE INDEX IF NOT EXISTS ix_obs_sse_session_id ON observability_sse_events (session_id)",
+        "CREATE INDEX IF NOT EXISTS ix_obs_sse_created_at ON observability_sse_events (created_at)",
     )
     for statement in statements:
         await conn.execute(text(statement))

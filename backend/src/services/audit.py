@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+from datetime import timezone
 from typing import Any
 
 from src.repos.audit import (
     insert_api_request_log,
     insert_audit_event,
     list_api_request_logs,
+    list_api_request_logs_by_request_ids,
     list_audit_events,
+    list_request_ids_by_turn_id,
+    map_turn_ids_by_request_ids,
 )
 from src.services.request_context import get_request_context
+
+
+def _ensure_utc_iso(dt) -> str:
+    """Serialize datetime to ISO-8601 with explicit UTC offset.
+
+    SQLite strips tzinfo on round-trip, producing naive datetimes.
+    Without ``+00:00``, JS ``new Date()`` interprets the string as
+    local time, causing an 8-hour offset in UTC+8 browsers.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 async def record_api_request(
@@ -88,7 +104,7 @@ def api_request_log_payload(row) -> dict[str, Any]:
         "user_agent": row.user_agent,
         "error_code": row.error_code,
         "error_type": row.error_type,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _ensure_utc_iso(row.created_at),
     }
 
 
@@ -107,12 +123,32 @@ def audit_event_payload(row) -> dict[str, Any]:
         "before_json": row.before_json,
         "after_json": row.after_json,
         "metadata": row.audit_metadata,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _ensure_utc_iso(row.created_at),
     }
 
 
 async def list_request_log_payloads(**filters: Any) -> list[dict[str, Any]]:
-    return [api_request_log_payload(row) for row in await list_api_request_logs(**filters)]
+    rows = await list_api_request_logs(**filters)
+    turn_id = filters.get("turn_id")
+    if turn_id:
+        existing_request_ids = {row.request_id for row in rows}
+        request_ids = await list_request_ids_by_turn_id(turn_id)
+        missing_request_ids = [request_id for request_id in request_ids if request_id not in existing_request_ids]
+        if missing_request_ids:
+            limit = int(filters.get("limit") or 50)
+            rows.extend(await list_api_request_logs_by_request_ids(missing_request_ids, limit=limit))
+            rows = sorted(rows, key=lambda row: row.created_at, reverse=True)[:limit]
+
+    payloads = [api_request_log_payload(row) for row in rows]
+    missing_turn_request_ids = [
+        payload["request_id"] for payload in payloads if payload.get("request_id") and not payload.get("turn_id")
+    ]
+    if missing_turn_request_ids:
+        turn_ids_by_request = await map_turn_ids_by_request_ids(missing_turn_request_ids)
+        for payload in payloads:
+            if not payload.get("turn_id"):
+                payload["turn_id"] = turn_ids_by_request.get(payload["request_id"])
+    return payloads
 
 
 async def list_audit_event_payloads(**filters: Any) -> list[dict[str, Any]]:

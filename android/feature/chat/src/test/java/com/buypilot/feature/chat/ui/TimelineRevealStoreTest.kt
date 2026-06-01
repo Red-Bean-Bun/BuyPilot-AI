@@ -519,17 +519,25 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun thinkingStatusNeverFallsBackToEnglishTechnicalText() {
+    fun thinkingStatusUsesBackendTextWithoutFrontendFallbackCopy() {
         assertEquals(
-            "正在检索匹配商品...",
+            "正在理解您的需求...",
+            ThinkingPayload(stage = "understanding", message = "正在理解您的需求...").userFacingThinkingMessage(),
+        )
+        assertEquals(
+            "",
+            ThinkingPayload(stage = "intent_analysis", message = "").userFacingThinkingMessage(),
+        )
+        assertEquals(
+            "",
             ThinkingPayload(stage = "searching", message = "Searching products").userFacingThinkingMessage(),
         )
         assertEquals(
-            "正在处理...",
+            "",
             ThinkingPayload(stage = "backend_phase", message = "fallback_decision").userFacingThinkingMessage(),
         )
         assertEquals(
-            "正在比较候选商品...",
+            "",
             ThinkingPayload(stage = "ranking", message = "").userFacingThinkingMessage(),
         )
         assertEquals(

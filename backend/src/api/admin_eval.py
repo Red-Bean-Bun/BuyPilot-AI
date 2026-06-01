@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from src.api.admin_auth import require_admin_key
 from src.services.audit import record_audit_event
 from src.services.eval.admin import get_eval_run, list_eval_runs, list_eval_samples, seed_eval_samples
 
-admin_eval_router = APIRouter(tags=["admin_eval"], prefix="/admin/eval")
+admin_eval_router = APIRouter(
+    tags=["admin_eval"],
+    prefix="/admin/eval",
+    dependencies=[Depends(require_admin_key)],
+)
 
 
 @admin_eval_router.get("/runs")
