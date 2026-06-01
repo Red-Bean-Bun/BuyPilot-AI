@@ -65,6 +65,7 @@ MOCK_ALLOWED_INTERNAL = {
     "src.runtime.pipeline.run_recommendation_text_stream",
     "src.runtime.pipeline.run_decision",
     "src.runtime.pipeline.run_multimodal",
+    "src.runtime.pipeline.run_image_embedding",
     "src.runtime.pipeline.HEARTBEAT_INTERVAL_SECONDS",
     "src.runtime.pipeline.register_chat_turn",
     "src.runtime.pipeline.clear_chat_turn",
@@ -99,6 +100,7 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/conftest.py::mock_external_ai -> src.services.llm_gateway._chat_completion",
     "tests/conftest.py::mock_external_ai -> src.services.llm_gateway._chat_completion_stream",
     "tests/conftest.py::mock_external_ai -> src.services.embedding._embedding_request",
+    "tests/conftest.py::mock_external_ai -> src.services.embedding._vl_embedding_request",
     "tests/conftest.py::mock_external_ai -> src.services.reranker._rerank_request",
     "tests/conftest.py::_patch_vector_search_for_sqlite_tests -> src.services.retriever.list_vector_chunks_by_similarity",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_vector_chunks_by_similarity",
@@ -113,6 +115,11 @@ _MOCK_KNOWN_VIOLATIONS = {
     # Demo smoke: mock internal constants and helpers for timeout testing
     "tests/test_demo_smoke.py::test_demo_smoke_run_turn_times_out -> demo_smoke.TURN_TIMEOUT_SECONDS",
     "tests/test_demo_smoke.py::test_demo_smoke_run_turn_times_out -> demo_smoke._collect_turn_events",
+    # VL embedding tests: mock internal _vl_embedding_request for payload/error testing
+    "tests/test_image_embedding.py::test_vl_embedding_request_sends_correct_payload -> src.services.embedding._vl_embedding_request",
+    "tests/test_image_embedding.py::test_vl_embedding_request_omits_parameters_when_no_dimensions -> client.post",
+    "tests/test_image_embedding.py::test_vl_embedding_raises_on_empty_response -> src.services.embedding._vl_embedding_request",
+    "tests/test_image_embedding.py::test_vl_embedding_raises_on_malformed_embedding -> src.services.embedding._vl_embedding_request",
 }
 
 

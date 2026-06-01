@@ -18,6 +18,11 @@ from src.types.sse_events import (
 )
 
 
+@pytest.fixture(autouse=True)
+async def _seed_products_for_judge_acceptance(seeded_products):
+    del seeded_products
+
+
 def _collect_events(events: list[SSEEventBase]) -> dict:
     """Extract event summary from a collected event list."""
     tags = [e.event for e in events]

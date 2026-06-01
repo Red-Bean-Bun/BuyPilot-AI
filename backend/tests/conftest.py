@@ -30,6 +30,11 @@ def mock_external_ai(monkeypatch):
     monkeypatch.setenv("BAILIAN_API_KEY", "test-key")
     monkeypatch.setenv("DOUBAO_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("DOUBAO_API_KEY", "test-key")
+    monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "0")
+
+    import src.config.settings as settings_module
+
+    settings_module._settings = None
 
     async def fake_chat_completion(profile, messages, json_object=False):
         del profile, json_object
@@ -55,11 +60,16 @@ def mock_external_ai(monkeypatch):
         del profile, query
         return list(range(min(top_n, len(documents))))
 
+    async def fake_vl_embedding_request(profile, image_source):
+        del profile, image_source
+        return [0.01] * 1024
+
     from src.services import embedding, llm_gateway, reranker
 
     monkeypatch.setattr(llm_gateway, "_chat_completion", fake_chat_completion)
     monkeypatch.setattr(llm_gateway, "_chat_completion_stream", fake_chat_completion_stream)
     monkeypatch.setattr(embedding, "_embedding_request", fake_embedding_request)
+    monkeypatch.setattr(embedding, "_vl_embedding_request", fake_vl_embedding_request)
     monkeypatch.setattr(reranker, "_rerank_request", fake_rerank_request)
 
 
@@ -69,18 +79,19 @@ async def reset_database_engine():
     try:
         yield
     finally:
+        from src.repos.database import dispose_async_engine
+        from src.services.observability_llm import drain_observability_tasks
+
+        await drain_observability_tasks()
+        await dispose_async_engine()
         loop_ticker.cancel()
         with suppress(asyncio.CancelledError):
             await loop_ticker
 
-    from src.repos.database import dispose_async_engine
-
-    await dispose_async_engine()
-
 
 async def _tick_event_loop() -> None:
     while True:
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.001)
 
 
 @pytest.fixture(autouse=True)

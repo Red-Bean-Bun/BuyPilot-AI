@@ -92,8 +92,8 @@ def _stub_pipeline_io(monkeypatch):
             },
         )
 
-    async def default_retrieval(criteria, top_n=5, feedback=None):
-        del criteria, top_n, feedback
+    async def default_retrieval(criteria, top_n=5, feedback=None, **kwargs):
+        del criteria, top_n, feedback, kwargs
         return RetrievalResult(products=[product], evidence_by_product={product.product_id: evidence})
 
     async def default_decision(criteria, products, evidence_by_product=None):
@@ -104,12 +104,17 @@ def _stub_pipeline_io(monkeypatch):
         del criteria, products, evidence_by_product
         yield "这款更适合油皮日常使用。"
 
+    async def default_image_embedding(image_url):
+        del image_url
+        return None
+
     monkeypatch.setattr(pipeline_module, "register_chat_turn", noop)
     monkeypatch.setattr(pipeline_module, "clear_chat_turn", noop)
     monkeypatch.setattr(pipeline_module, "record_audit_event", noop)
     monkeypatch.setattr(pipeline_module, "get_previous_criteria", previous_criteria)
     monkeypatch.setattr(pipeline_module, "maybe_intercept_budget_patch", no_budget_intercept)
     monkeypatch.setattr(pipeline_module, "run_intent", default_intent)
+    monkeypatch.setattr(pipeline_module, "run_image_embedding", default_image_embedding)
     monkeypatch.setattr(pipeline_module, "run_criteria", default_criteria)
     monkeypatch.setattr(pipeline_module, "run_retrieval", default_retrieval)
     monkeypatch.setattr(pipeline_module, "run_recommendation_text_stream", default_stream)
@@ -192,7 +197,7 @@ async def test_pipeline_multi_product_first_turn_waits_for_convergence(monkeypat
     product_b = ProductPayload(product_id="p_initial_b", name="候选B", category="美妆护肤", price=109)
     evidence = [EvidencePayload(source_type="product_chunk", source_id="initial_chunk", snippet="初步证据")]
 
-    async def two_product_retrieval(criteria, top_n=5, feedback=None):
+    async def two_product_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del criteria, top_n, feedback
         return RetrievalResult(
             products=[product_a, product_b],
@@ -218,7 +223,7 @@ async def test_pipeline_records_fallback_when_recommendation_stream_fails(monkey
     product_b = ProductPayload(product_id="p_stream_b", name="候选B", category="美妆护肤", price=109)
     evidence = [EvidencePayload(source_type="product_chunk", source_id="stream_chunk", snippet="流式证据")]
 
-    async def two_product_retrieval(criteria, top_n=5, feedback=None):
+    async def two_product_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del criteria, top_n, feedback
         return RetrievalResult(
             products=[product_a, product_b],
@@ -269,7 +274,7 @@ async def test_pipeline_locks_scored_winner_before_decision_explanation(monkeypa
     evidence = [EvidencePayload(source_type="product_chunk", source_id="lock_chunk", snippet="锁定证据")]
     captured: dict[str, object] = {}
 
-    async def two_product_retrieval(criteria, top_n=5, feedback=None):
+    async def two_product_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del criteria, top_n, feedback
         return RetrievalResult(
             products=[product_a, product_b],
@@ -314,7 +319,7 @@ async def test_pipeline_replace_deck_excludes_previous_products(monkeypatch):
     evidence = [EvidencePayload(source_type="product_chunk", source_id="replace_chunk", snippet="换组证据")]
     retrieval_feedbacks: list[dict | None] = []
 
-    async def replacement_retrieval(criteria, top_n=5, feedback=None):
+    async def replacement_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del criteria, top_n
         retrieval_feedbacks.append(feedback)
         avoided = set((feedback or {}).get("avoid_products", []))
@@ -420,23 +425,25 @@ def test_should_merge_when_intent_is_continue():
 
 def test_should_not_merge_when_recommend_has_category():
     """recommend with a category means the LLM already understood context — no merge needed."""
-    assert _should_merge_previous_context(
-        IntentResult(intent="recommend", category="食品生活")
-    ) is False
+    assert _should_merge_previous_context(IntentResult(intent="recommend", category="食品生活")) is False
 
 
 def test_should_merge_when_recommend_no_category_no_constraints():
     """recommend without category and without constraints — should merge (the fix for context-loss)."""
-    assert _should_merge_previous_context(
-        IntentResult(intent="recommend", category=None, extracted_constraints={})
-    ) is True
+    assert (
+        _should_merge_previous_context(IntentResult(intent="recommend", category=None, extracted_constraints={}))
+        is True
+    )
 
 
 def test_should_merge_when_recommend_no_category_with_constraints():
     """recommend without category but with constraints — should merge (original behaviour, regression)."""
-    assert _should_merge_previous_context(
-        IntentResult(intent="recommend", category=None, extracted_constraints={"product_type": "咖啡"})
-    ) is True
+    assert (
+        _should_merge_previous_context(
+            IntentResult(intent="recommend", category=None, extracted_constraints={"product_type": "咖啡"})
+        )
+        is True
+    )
 
 
 def test_should_not_merge_when_chitchat():

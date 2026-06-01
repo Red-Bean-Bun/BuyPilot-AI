@@ -117,7 +117,7 @@ class TestExtractAdjustmentHints:
     to avoid greedy cross-clause capture and digit-swallowing:
     - _ADJUST_AVOID_PATTERN `r"不要([^，。！？；、,.!?;:\n]{1,8})"`
       stops at punctuation boundaries, preventing cross-clause capture.
-    - _ADJUST_BUDGET_CAP_PATTERN `r"预算[^0-9]{0,3}(\d+(?:\.\d+)?)"`
+    - _ADJUST_BUDGET_CAP_PATTERN `r"预算[^0-9]{0,3}(\\d+(?:\\.\\d+)?)"`
       excludes digits from gap match, preventing digit-swallowing.
     - Stop-word prefixes filter degree modifiers ("太贵", "再温和") from
       ingredient_avoid, routing them to avoid_trait/preference instead.
@@ -135,7 +135,7 @@ class TestExtractAdjustmentHints:
     def test_budget_cap_with_gap_chars(self):
         """'预算降到200' → budget_max=200.0.
 
-        Derived from: _ADJUST_BUDGET_CAP_PATTERN = r"预算[^0-9]{0,3}(\d+(?:\.\d+)?)"
+        Derived from: _ADJUST_BUDGET_CAP_PATTERN = r"预算[^0-9]{0,3}(\\d+(?:\\.\\d+)?)"
         "降到" (2 non-digit chars) matches [^0-9]{0,3}, then "200" is fully
         captured as the number group. float("200") = 200.0.
         """

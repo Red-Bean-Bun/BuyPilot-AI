@@ -267,7 +267,7 @@ def _stub_viewmodel_pipeline_io(monkeypatch):
         del session_id, body, intent
         return VM_CRITERIA
 
-    async def default_retrieval(criteria, top_n=5, feedback=None):
+    async def default_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         if state.retrieval_override is not None:
             return state.retrieval_override
         del criteria, top_n, feedback
@@ -288,12 +288,17 @@ def _stub_viewmodel_pipeline_io(monkeypatch):
         del criteria, products, evidence_by_product
         yield "这款更适合油皮日常使用。"
 
+    async def default_image_embedding(image_url):
+        del image_url
+        return None
+
     monkeypatch.setattr(pipeline_module, "register_chat_turn", noop)
     monkeypatch.setattr(pipeline_module, "clear_chat_turn", noop)
     monkeypatch.setattr(pipeline_module, "record_audit_event", noop)
     monkeypatch.setattr(pipeline_module, "get_previous_criteria", previous_criteria)
     monkeypatch.setattr(pipeline_module, "maybe_intercept_budget_patch", no_budget_intercept)
     monkeypatch.setattr(pipeline_module, "run_intent", default_intent)
+    monkeypatch.setattr(pipeline_module, "run_image_embedding", default_image_embedding)
     monkeypatch.setattr(pipeline_module, "run_criteria", default_criteria)
     monkeypatch.setattr(pipeline_module, "run_retrieval", default_retrieval)
     monkeypatch.setattr(pipeline_module, "run_recommendation_text_stream", default_stream)
@@ -333,8 +338,8 @@ async def _run_turn(session_id: str, message: str, **kwargs) -> list[SSEEventBas
 def _two_product_retrieval():
     """Return a retrieval stub that returns 2 products."""
 
-    async def stub(criteria, top_n=5, feedback=None):
-        del criteria, top_n, feedback
+    async def stub(criteria, top_n=5, feedback=None, **kwargs):
+        del criteria, top_n, feedback, kwargs
         return RetrievalResult(
             products=[VM_PRODUCT_A, VM_PRODUCT_B],
             evidence_by_product={
@@ -349,8 +354,8 @@ def _two_product_retrieval():
 def _three_product_retrieval():
     """Return a retrieval stub that returns 3 products."""
 
-    async def stub(criteria, top_n=5, feedback=None):
-        del criteria, top_n, feedback
+    async def stub(criteria, top_n=5, feedback=None, **kwargs):
+        del criteria, top_n, feedback, kwargs
         return RetrievalResult(
             products=[VM_PRODUCT_A, VM_PRODUCT_B, VM_PRODUCT_C],
             evidence_by_product={
@@ -488,7 +493,7 @@ async def test_viewmodel_criteria_patch_produces_new_deck_with_patched_constrain
     vm_state.products_registry[vm_safe_product.product_id] = vm_safe_product
     vm_state.evidence_registry[vm_safe_product.product_id] = VM_EVIDENCE
 
-    async def safe_retrieval(criteria, top_n=5, feedback=None):
+    async def safe_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del top_n, feedback
         return RetrievalResult(
             products=[vm_safe_product],
@@ -589,7 +594,7 @@ async def test_viewmodel_natural_language_adjustment_equivalent_to_criteria_patc
     vm_state.products_registry[nl_safe.product_id] = nl_safe
     vm_state.evidence_registry[nl_safe.product_id] = VM_EVIDENCE
 
-    async def nl_retrieval(criteria, top_n=5, feedback=None):
+    async def nl_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del top_n, feedback
         return RetrievalResult(
             products=[nl_safe],
@@ -927,7 +932,7 @@ async def test_viewmodel_cancel_during_slow_retrieval_ends_with_done_cancelled(v
     # Make retrieval slow to give cancellation time to trigger
     monkeypatch.setattr(pipeline_module, "HEARTBEAT_INTERVAL_SECONDS", 0.01)
 
-    async def slow_retrieval(criteria, top_n=5, feedback=None):
+    async def slow_retrieval(criteria, top_n=5, feedback=None, **kwargs):
         del criteria, top_n, feedback
         await asyncio.sleep(0.5)  # Simulate slow retrieval
         return RetrievalResult(
