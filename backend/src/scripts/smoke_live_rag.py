@@ -85,8 +85,10 @@ async def run_checks() -> None:
         sys.exit(1)
 
     session_id = f"sess_smoke_live_rag_{uuid.uuid4().hex[:8]}"
+
+    # ── Turn 1: 推荐查询 → 期望 product_card + criteria_card + done ──
     events = await _run_step(
-        "chat_stream",
+        "chat_stream_turn1",
         _collect_chat_events(
             session_id,
             ChatStreamRequest(
@@ -99,26 +101,27 @@ async def run_checks() -> None:
     tags = [event.event for event in events]
     product_events = [event for event in events if event.event == "product_card"]
     first_evidence = product_events[0].evidence[0] if product_events and product_events[0].evidence else None
+    done_events = [event for event in events if event.event == "done"]
+    done_finish = done_events[0].finish_reason if done_events else None
     fallback_events = get_fallback_events()
     critical_fallbacks = [event for event in fallback_events if not str(event.get("component", "")).startswith("llm.")]
     evidence_ok = bool(product_events) and all(event.evidence for event in product_events)
-    chat_ok = (
+    turn1_ok = (
         len(product_events) >= 1
         and evidence_ok
         and "criteria_card" in tags
-        and "final_decision" in tags
         and "error" not in tags
         and not critical_fallbacks
     )
     _print_json(
         {
-            "check": "chat_stream",
-            "ok": chat_ok,
+            "check": "chat_stream_turn1",
+            "ok": turn1_ok,
             "session_id": session_id,
             "events": tags,
             "product_count": len(product_events),
             "has_criteria": "criteria_card" in tags,
-            "has_decision": "final_decision" in tags,
+            "done_finish_reason": done_finish,
             "has_error": "error" in tags,
             "evidence_ok": evidence_ok,
             "first_evidence_source_id": first_evidence.source_id if first_evidence else None,
@@ -127,7 +130,33 @@ async def run_checks() -> None:
             "critical_fallbacks": critical_fallbacks,
         }
     )
-    if not chat_ok:
+    if not turn1_ok:
+        sys.exit(1)
+
+    # ── Turn 2: 发送"继续" → 期望 final_decision ──
+    events2 = await _run_step(
+        "chat_stream_turn2",
+        _collect_chat_events(
+            session_id,
+            ChatStreamRequest(
+                message="继续",
+                client_turn_id=f"turn_smoke_{uuid.uuid4().hex[:8]}",
+            ),
+        ),
+        timeout_seconds=CHAT_TIMEOUT_SECONDS,
+    )
+    tags2 = [event.event for event in events2]
+    turn2_ok = "final_decision" in tags2 and "error" not in tags2
+    _print_json(
+        {
+            "check": "chat_stream_turn2",
+            "ok": turn2_ok,
+            "events": tags2,
+            "has_decision": "final_decision" in tags2,
+            "has_error": "error" in tags2,
+        }
+    )
+    if not turn2_ok:
         sys.exit(1)
 
 
