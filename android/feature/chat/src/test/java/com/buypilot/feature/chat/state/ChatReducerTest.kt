@@ -24,6 +24,7 @@ import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ThinkingNode
+import com.buypilot.feature.chat.model.UserMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -224,6 +225,22 @@ class ChatReducerTest {
         assertEquals("预算降到150，不要香精", state.lastRetryableRequest?.message)
         assertEquals("mock://image", state.lastRetryableRequest?.imageUrl)
         assertTrue(state.lastRetryableRequest?.fromEditResubmit == true)
+    }
+
+    @Test
+    fun addUserMessageSupportsImageOnlyInput() {
+        val state = ChatReducer.addUserMessage(
+            state = ChatUiState(),
+            key = "user_image",
+            content = "",
+            imageUrl = "/uploads/upload_demo.jpg",
+        )
+
+        val userNode = state.nodes.single() as UserMessageNode
+        assertEquals("", userNode.content)
+        assertEquals("/uploads/upload_demo.jpg", userNode.imageUrl)
+        assertEquals("/uploads/upload_demo.jpg", state.lastRetryableRequest?.imageUrl)
+        assertTrue(state.isStreaming)
     }
 
     @Test

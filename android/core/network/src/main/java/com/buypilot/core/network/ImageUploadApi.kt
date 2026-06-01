@@ -30,12 +30,6 @@ class OkHttpImageUploadApi(
                 fileName,
                 bytes.toRequestBody(mimeType.toMediaType()),
             )
-            .apply {
-                if (sessionId != null) {
-                    addFormDataPart("session_id", sessionId)
-                }
-                addFormDataPart("purpose", "chat_input")
-            }
             .build()
 
         return restClient.postMultipart(

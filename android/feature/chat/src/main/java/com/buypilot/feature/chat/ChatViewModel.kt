@@ -349,6 +349,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun selectImage(uri: Uri) {
+        if (_uiState.value.imageAttachment.isUploading) return
         val localUri = uri.toString()
         _uiState.update {
             it.copy(
@@ -412,6 +413,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun captureImage(bitmap: Bitmap) {
+        if (_uiState.value.imageAttachment.isUploading) return
         viewModelScope.launch {
             runCatching {
                 withContext(dispatchers.io) { prepareCameraImage(bitmap) }

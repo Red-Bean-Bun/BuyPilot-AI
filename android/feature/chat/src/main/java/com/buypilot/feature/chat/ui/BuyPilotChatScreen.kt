@@ -615,6 +615,7 @@ fun BuyPilotChatScreen(
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+    var imagePreviewAttachment by remember { mutableStateOf<ChatImageAttachmentState?>(null) }
     var sheetContent by remember { mutableStateOf<ChatSheetContent?>(null) }
     var sheetExiting by remember { mutableStateOf(false) }
     var sheetTransitionId by remember { mutableStateOf(0) }
@@ -738,6 +739,12 @@ fun BuyPilotChatScreen(
         if (requestId > 0L) {
             openSheet(ChatSheetContent.Cart)
             onCartSheetRequestHandled(requestId)
+        }
+    }
+
+    LaunchedEffect(state.isStreaming) {
+        if (state.isStreaming) {
+            showAttachmentMenu = false
         }
     }
 
@@ -1049,6 +1056,7 @@ fun BuyPilotChatScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter),
             onAttachmentClick = {
+                if (state.isStreaming) return@BottomComposer
                 showAttachmentMenu = !showAttachmentMenu
                 focusManager.clearFocus()
             },
@@ -1065,6 +1073,7 @@ fun BuyPilotChatScreen(
                 keyboardFlightSnapshot = it
             },
             onRemoveImage = onClearImageAttachment,
+            onPreviewImage = { imagePreviewAttachment = state.imageAttachment },
             onSubmit = {
                 if (state.isStreaming) {
                     onCancel()
@@ -1100,6 +1109,14 @@ fun BuyPilotChatScreen(
                 }
             },
         )
+
+        imagePreviewAttachment?.let { attachment ->
+            ImageAttachmentPreviewSheet(
+                attachment = attachment,
+                backendBaseUrl = state.backendBaseUrl,
+                onDismiss = { imagePreviewAttachment = null },
+            )
+        }
 
         ClarificationFlightOverlay(
             flight = activeClarificationFlight,
@@ -9612,6 +9629,7 @@ private fun InlineSystemNotice(message: String) {
 private fun ImageAttachmentPreview(
     attachment: ChatImageAttachmentState,
     onRemove: () -> Unit,
+    onPreview: () -> Unit,
 ) {
     AnimatedVisibility(
         visible = attachment.hasImage,
@@ -9637,7 +9655,12 @@ private fun ImageAttachmentPreview(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFF3F5F8)),
+                    .background(Color(0xFFF3F5F8))
+                    .clickable(
+                        enabled = attachment.hasImage,
+                        role = Role.Button,
+                        onClick = onPreview,
+                    ),
             )
             Spacer(Modifier.width(10.dp))
             Column(
@@ -9700,6 +9723,77 @@ private fun UploadingDot() {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ImageAttachmentPreviewSheet(
+    attachment: ChatImageAttachmentState,
+    backendBaseUrl: String,
+    onDismiss: () -> Unit,
+) {
+    val previewModel = attachment.localUri
+        .takeIf { it.isNotBlank() }
+        ?: attachment.imageUrl.resolveProductImageUrl(backendBaseUrl)
+        ?: return
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = BuyPilotColors.SurfaceCard,
+        dragHandle = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = attachment.fileName.ifBlank { "图片预览" },
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.LargeBody,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                M3IconButton(
+                    iconRes = R.drawable.ic_close_24,
+                    contentDescription = "关闭图片预览",
+                    tint = BuyPilotColors.TextMuted,
+                    modifier = Modifier.size(40.dp),
+                    onClick = onDismiss,
+                )
+            }
+            AsyncImage(
+                model = previewModel,
+                contentDescription = "图片预览",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 220.dp, max = 520.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(BuyPilotColors.SurfaceMuted),
+            )
+            attachment.error?.let { message ->
+                Text(
+                    text = message,
+                    color = BuyPilotColors.Danger,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 18.sp,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun BottomComposer(
     text: String,
@@ -9718,6 +9812,7 @@ private fun BottomComposer(
     onHeightChanged: (Int) -> Unit,
     onKeyboardFlightSourceChanged: (ClarificationChipSnapshot) -> Unit,
     onRemoveImage: () -> Unit,
+    onPreviewImage: () -> Unit,
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -9762,6 +9857,7 @@ private fun BottomComposer(
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
         label = "attachment_icon_rotation",
     )
+    val attachmentEnabled = !isStreaming
 
     Box(
         modifier = modifier
@@ -9783,6 +9879,7 @@ private fun BottomComposer(
             ImageAttachmentPreview(
                 attachment = imageAttachment,
                 onRemove = onRemoveImage,
+                onPreview = onPreviewImage,
             )
             Row(
                 modifier = Modifier
@@ -9795,12 +9892,13 @@ private fun BottomComposer(
             ) {
                 IconButton(
                     onClick = onAttachmentClick,
+                    enabled = attachmentEnabled,
                     modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_add_24),
                         contentDescription = if (isAttachmentMenuOpen) "收起更多输入方式" else "打开更多输入方式",
-                        tint = BuyPilotColors.TextSecondary,
+                        tint = if (attachmentEnabled) BuyPilotColors.TextSecondary else BuyPilotColors.TextMuted,
                         modifier = Modifier
                             .size(24.dp)
                             .rotate(attachmentIconRotation),
@@ -9809,6 +9907,7 @@ private fun BottomComposer(
                 BasicTextField(
                     value = text,
                     onValueChange = onTextChange,
+                    enabled = !isStreaming,
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester)
