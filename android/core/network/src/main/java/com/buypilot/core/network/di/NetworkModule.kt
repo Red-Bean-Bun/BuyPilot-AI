@@ -1,6 +1,7 @@
 package com.buypilot.core.network.di
 
 import com.buypilot.core.common.json.AppJson
+import com.buypilot.core.network.AdminAuthInterceptor
 import com.buypilot.core.network.BaseUrlProvider
 import com.buypilot.core.network.BuildConfigBaseUrlProvider
 import com.buypilot.core.network.CartApi
@@ -43,6 +44,7 @@ object NetworkModule {
             .connectTimeout(10, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS)
+            .addInterceptor(AdminAuthInterceptor(com.buypilot.core.network.BuildConfig.ADMIN_API_KEY))
             .build()
 
     @Provides

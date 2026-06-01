@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from src.services.retrieval_features import _brand_in_summary, product_match_score
 from src.types.sse_events import Constraints, CriteriaPayload, ProductPayload
 

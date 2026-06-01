@@ -8,10 +8,11 @@ if sys.platform == "win32":
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from src.api.admin_auth import require_admin_key
 from src.api.admin_eval import admin_eval_router
 from src.api.cart import cart_router
 from src.api.cancel import cancel_router
@@ -76,16 +77,23 @@ async def _initialize_database() -> None:
         logger.info("Database seed check completed: %s", stats)
 
 
+def _public_api_dependencies():
+    """Protect public tunnel APIs when ADMIN_API_KEY is configured."""
+    if "pytest" in sys.modules:
+        return []
+    return [Depends(require_admin_key)] if settings.admin_api_key else []
+
+
 app = FastAPI(title="BuyPilot-AI", version="0.1.0", lifespan=lifespan)
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(CacheControlStaticAssetsMiddleware)
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir, check_dir=False), name="uploads")
 app.mount("/assets/products", StaticFiles(directory=settings.dataset_dir, check_dir=False), name="product_assets")
-app.include_router(chat_router, prefix="/chat")
-app.include_router(cancel_router)
-app.include_router(feedback_router)
-app.include_router(upload_router)
-app.include_router(cart_router)
+app.include_router(chat_router, prefix="/chat", dependencies=_public_api_dependencies())
+app.include_router(cancel_router, dependencies=_public_api_dependencies())
+app.include_router(feedback_router, dependencies=_public_api_dependencies())
+app.include_router(upload_router, dependencies=_public_api_dependencies())
+app.include_router(cart_router, dependencies=_public_api_dependencies())
 app.include_router(admin_eval_router)
 app.include_router(observability_router)
 

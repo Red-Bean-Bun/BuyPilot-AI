@@ -960,5 +960,57 @@ async def test_viewmodel_cancel_during_slow_retrieval_ends_with_done_cancelled(v
     done = _done_event(events)
     assert done.finish_reason == "cancelled"
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Goal: converge=true forces continue intent, skips LLM intent classification
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Business rule (pipeline.py _resolve_intent):
+#   When body.converge=True, the pipeline skips LLM intent classification
+#   and forces intent="continue" deterministically. This is the protocol-level
+#   signal from the frontend's convergence state machine, replacing the
+#   unreliable LLM classification of phrases like "帮我选".
+#
+# Assertion values derived from handlers.py handle_continue (lines 398-415)
+# and continue_decision_from_current_deck (lines 557-669).
+
+
+@pytest.mark.asyncio
+async def test_viewmodel_converge_flag_forces_continue_intent(vm_state, monkeypatch):
+    """converge=true must route to continue handler, emit final_decision, skip LLM intent.
+
+    Turn 1: normal recommendation → product_card + done(awaiting_product_feedback)
+    Turn 2: converge=true (message="帮我选") → final_decision + done(completed)
+
+    The key assertion: turn 2 emits final_decision even though the message
+    is "帮我选" (which LLM would classify as recommend, not continue).
+    This verifies the converge flag bypasses LLM intent classification.
+    """
+    monkeypatch.setattr(pipeline_module, "run_retrieval", _two_product_retrieval())
+
+    # Turn 1: standard recommendation
+    events1 = await _run_turn("s_vm_converge", "推荐适合油皮的洗面奶，200元以内")
+    tags1 = _event_tags(events1)
+    assert "product_card" in tags1, "Turn 1 must have product_card events"
+    assert "final_decision" not in tags1, "Turn 1 must NOT have final_decision (PRD 05/06)"
+    assert _done_event(events1).finish_reason == "awaiting_product_feedback"
+
+    # Turn 2: converge=true with "帮我选" message
+    events2 = await _run_turn("s_vm_converge", "帮我选", converge=True)
+    tags2 = _event_tags(events2)
+
+    # Must emit final_decision (continue handler path)
+    assert "final_decision" in tags2, "Turn 2 must have final_decision when converge=True"
+    fd = _final_decision(events2)
+    assert fd.winner_product_id in [
+        VM_PRODUCT_A.product_id,
+        VM_PRODUCT_B.product_id,
+    ], f"Winner must be one of the deck products, got {fd.winner_product_id}"
+    assert _done_event(events2).finish_reason == "completed"
+
+    # Must NOT emit product_card (continue handler skips retrieval)
+    assert "product_card" not in tags2, "Turn 2 must NOT emit new product_card (convergence uses existing deck)"
+    assert "criteria_card" not in tags2, "Turn 2 must NOT emit criteria_card (convergence uses existing criteria)"
+
     # Turn must be unregistered
     assert active_turn_count() == 0

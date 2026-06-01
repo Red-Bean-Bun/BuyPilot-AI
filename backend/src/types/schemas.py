@@ -26,6 +26,7 @@ class ChatStreamRequest(BaseModel):
     skip_stages: list[str] = Field(default_factory=list)
     client_turn_id: str | None = None
     client_trace_id: str | None = None
+    converge: bool = False
 
 
 class CancelRequest(BaseModel):

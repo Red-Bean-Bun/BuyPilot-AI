@@ -588,6 +588,7 @@ class ChatViewModel @Inject constructor(
         convergenceDeckId: String? = null,
         forcedClientTurnId: String? = null,
         pendingCartProductId: String? = null,
+        converge: Boolean = false,
     ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = forcedClientTurnId ?: Ids.clientTurnId()
@@ -643,6 +644,7 @@ class ChatViewModel @Inject constructor(
                 skipStages = skipStages,
                 clientTurnId = clientTurnId,
                 clientTraceId = Ids.clientTraceId(),
+                converge = converge,
             )
             var convergenceProducedDecision = false
             var convergenceFinished = false
@@ -1220,6 +1222,7 @@ class ChatViewModel @Inject constructor(
             showUserMessage = showUserMessage,
             convergenceDeckId = deckId,
             forcedClientTurnId = convergenceTurnId,
+            converge = true,
         )
     }
 

@@ -2,7 +2,7 @@
 
 > 最后核实：2026-06-02（图片 embedding 索引 + Makefile 运维 + bug 修复）
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 本次改动摘要：图片 VL embedding 索引（qwen3-vl-embedding 1024 维）+ 运维 Makefile + 上传目录 bind mount + 4 个检索/索引 bug 修复
+> 本次改动摘要：**前后端收敛协议修复** — 新增 `converge: bool` 字段显式传递收敛信号，跳过 LLM 意图分类，强制 `continue` 路由
 > 历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过
 
 ---
@@ -54,6 +54,7 @@
 | 40 | SSE 类型扩展 | ✅ 已完成 | PRD 06 | `types/sse_events.py` `contracts/` | DoneFinishReason 新增 awaiting_criteria_adjustment；FinalDecisionEvent 新增 decision_status/confidence/next_step；ProductPayload 新增 sku_options |
 | 41 | 数据路径清理 | ✅ 已完成 | 总评 #8 | `data/processed/*.json` | 100 处个人绝对路径替换为 `/assets/products/...` |
 | 42 | 前后端契约文档刷新 | ✅ 已完成 | 总评 #5 | `contracts/frontend-integration.md` | cancel 状态更新、JSON 上传兼容删除、新字段补充 |
+| 43 | 前后端收敛协议修复 | ✅ 已完成 | PRD 06 | `types/schemas.py` `runtime/pipeline.py` | **2026-06-02：新增 `converge: bool` 字段**。前端收敛状态机已决策时，显式传 `converge=true`，后端跳过 LLM 意图分类，强制路由到 `continue` handler。解决 "帮我选" 被误分类为 `recommend` 导致前端收敛契约失败的问题。测试 `test_viewmodel_converge_flag_forces_continue_intent` 已覆盖。 |
 
 ## 工程质量（评审权重 25%）
 

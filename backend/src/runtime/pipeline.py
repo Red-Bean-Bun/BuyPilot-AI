@@ -239,6 +239,15 @@ async def _resolve_intent(
     # Deterministic pre-checks before LLM intent (铁律3)
     pipeline_body, synthetic_intent = await maybe_intercept_budget_patch(ctx.session_id, pipeline_body)
 
+    # Converge signal from frontend: skip LLM intent, force continue handler
+    if synthetic_intent is None and pipeline_body.converge:
+        prev = await get_previous_criteria(ctx.session_id)
+        synthetic_intent = IntentResult(
+            intent="continue",
+            confidence=1.0,
+            category=prev.category or None if prev else None,
+        )
+
     # "换一组" / replace-deck: force recommend intent without LLM call
     if synthetic_intent is None and is_replace_deck_phrase(pipeline_body.message):
         prev = await get_previous_criteria(ctx.session_id)

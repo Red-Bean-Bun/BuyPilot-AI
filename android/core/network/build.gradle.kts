@@ -42,6 +42,13 @@ val buyPilotBaseUrl = providers
     ?: loadRootDotEnv()["BUY_PILOT_BASE_URL"]?.takeIf { it.isNotBlank() }
     ?: defaultBuyPilotBaseUrl
 
+val adminApiKey = providers
+    .environmentVariable("ADMIN_API_KEY")
+    .orNull
+    ?.takeIf { it.isNotBlank() }
+    ?: loadRootDotEnv()["ADMIN_API_KEY"]?.takeIf { it.isNotBlank() }
+    ?: ""
+
 android {
     namespace = "com.buypilot.core.network"
     compileSdk = 35
@@ -50,6 +57,7 @@ android {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BUY_PILOT_BASE_URL", buyPilotBaseUrl.asBuildConfigString())
+        buildConfigField("String", "ADMIN_API_KEY", adminApiKey.asBuildConfigString())
     }
 
     buildFeatures {

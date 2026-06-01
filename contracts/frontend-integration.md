@@ -14,6 +14,7 @@
 - 新增购物车变更端点（PATCH/DELETE）
 - 新增 SSE 自定义响应头
 - 新增 admin 鉴权机制说明
+- **新增公开 API 端点鉴权（当 ADMIN_API_KEY 配置时，chat/cancel/feedback/upload/cart 也需要 admin key）**
 - 修正 health 响应 `fallback_policy` 值
 
 ---
@@ -72,10 +73,22 @@ cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 - `/uploads` — 上传的图片（bind mount 到宿主机 `backend/uploads/`）
 - `/assets/products` — 商品原始图片（只读挂载 `data/raw/`）
 
-**Admin 鉴权：**
-- 所有 `/admin/*` 端点需要 `Authorization: Bearer <ADMIN_API_KEY>` 或 `?token=<ADMIN_API_KEY>`
+**鉴权机制：**
+
+*Admin 端点（`/admin/*`）：*
+- 始终需要 `Authorization: Bearer <ADMIN_API_KEY>` 或 `?token=<ADMIN_API_KEY>`
 - 未配置 `ADMIN_API_KEY` 时返回 **404**（隐藏端点存在）
 - 已配置但 key 错误/缺失时返回 **401**
+
+*公开 API 端点（`/chat/*`、`/upload/*`、`/feedback`、`/cart/*`）：*
+- 当 `ADMIN_API_KEY` **未配置**时：无需鉴权，行为不变
+- 当 `ADMIN_API_KEY` **已配置**时：同样需要 `Authorization: Bearer <ADMIN_API_KEY>` 或 `?token=<ADMIN_API_KEY>`，缺失或错误返回 **401**
+
+> **Android 客户端注意：** 如果部署环境配置了 `ADMIN_API_KEY`，所有 API 请求都必须携带 `Authorization: Bearer <key>` 头。客户端已内置 `AdminAuthInterceptor` 自动注入，但需要确保项目根目录 `.env` 文件包含：
+> ```env
+> ADMIN_API_KEY=b72d57075018654b8d7ad1ab6e71fb0be3f2ec02fc300015
+> ```
+> 构建时 Gradle 会自动读取并注入 `BuildConfig.ADMIN_API_KEY`，运行时所有请求自动携带 Bearer token。本地开发若不需要鉴权，留空或不配置即可。
 
 ---
 
