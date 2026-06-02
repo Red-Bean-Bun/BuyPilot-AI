@@ -43,6 +43,7 @@
         "use_scenario": { "type": ["string", "null"] },
         "skin_type": { "type": ["string", "null"] },
         "brand_avoid": { "type": "array", "items": { "type": "string" } },
+        "brand_prefer": { "type": "array", "items": { "type": "string" } },
         "origin_avoid": { "type": "array", "items": { "type": "string" } },
         "product_type": { "type": ["string", "null"] },
         "ingredient_avoid": { "type": "array", "items": { "type": "string" } },

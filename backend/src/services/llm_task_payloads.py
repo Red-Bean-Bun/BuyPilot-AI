@@ -490,7 +490,7 @@ def _sanitize_constraints(raw: dict[str, Any]) -> dict[str, Any]:
 
     allowed = set(Constraints.model_fields)
     numeric = {"budget_min", "budget_max"}
-    list_fields = {"brand_avoid", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
+    list_fields = {"brand_avoid", "brand_prefer", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
     cleaned: dict[str, Any] = {}
     for key, value in raw.items():
         if key not in allowed:

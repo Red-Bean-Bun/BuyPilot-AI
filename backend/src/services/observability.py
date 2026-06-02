@@ -48,14 +48,29 @@ async def get_turn_debug_bundle(turn_id: str, limit: int = 100) -> dict[str, Any
 
 
 async def get_session_debug_bundle(session_id: str, limit: int = 100) -> dict[str, Any]:
+    from src.repos.observability_llm import list_llm_calls_by_turn, list_sse_events_by_turn
+
+    requests = await list_requests(session_id=session_id, limit=limit)
     audit_events = await list_audit(session_id=session_id, limit=limit)
     context_diagnostics = [e for e in audit_events if e.get("action") == "chat.context_diagnostic"]
+
+    # Aggregate llm_calls and sse_events across all turns in this session
+    all_llm_calls: list[dict[str, Any]] = []
+    all_sse_events: list[dict[str, Any]] = []
+    seen_turns: set[str] = set()
+    for req in requests:
+        turn_id = req.get("turn_id")
+        if turn_id and turn_id not in seen_turns:
+            seen_turns.add(turn_id)
+            all_llm_calls.extend(await list_llm_calls_by_turn(turn_id))
+            all_sse_events.extend(await list_sse_events_by_turn(turn_id))
+
     return {
         "session_id": session_id,
-        "requests": await list_requests(session_id=session_id, limit=limit),
+        "requests": requests,
         "audit_events": audit_events,
-        "llm_calls": [],  # Session-level LLM calls not aggregated
-        "sse_events": [],  # Session-level SSE events not aggregated
+        "llm_calls": all_llm_calls,
+        "sse_events": all_sse_events,
         "context_diagnostics": context_diagnostics,
     }
 

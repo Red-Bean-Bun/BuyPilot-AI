@@ -16,10 +16,20 @@ SKIN_TERMS: dict[str, str] = {
 }
 
 CATEGORY_TERMS: dict[str, tuple[str, ...]] = {
-    "美妆护肤": ("洗面奶", "防晒", "护肤", "肤", "洁面", "面霜"),
-    "数码电子": ("耳机", "手机", "电脑", "笔记本", "平板", "数码"),
-    "服饰运动": ("跑鞋", "运动", "衣服", "服饰"),
-    "食品生活": ("食品", "饮料", "零食", "无糖", "麦片", "咖啡", "茶饮", "调味品", "酱油"),
+    "美妆护肤": ("洗面奶", "防晒", "护肤", "肤", "洁面", "面霜", "精华", "化妆", "卸妆",
+                  "面膜", "粉底", "隔离", "爽肤", "柔肤", "神仙水", "美白", "祛痘", "抗老", "抗皱",
+                  "保湿", "控油", "祛斑", "修复", "敏感肌"),
+    "数码电子": ("耳机", "手机", "电脑", "笔记本", "平板", "数码", "拍照", "摄影", "相机",
+                  "拍摄", "单反", "微单", "镜头", "自拍", "存储", "屏幕", "处理器", "芯片",
+                  "充电器", "数据线", "移动电源", "充电宝", "音箱", "蓝牙", "智能手表", "手环"),
+    "服饰运动": ("跑鞋", "运动", "衣服", "服饰", "穿搭", "穿", "鞋", "T恤", "卫衣",
+                  "外套", "裤子", "裙子", "背包", "帽", "袜子", "篮球", "足球", "瑜伽",
+                  "跑步", "健身", "户外", "徒步", "登山", "骑行", "游泳"),
+    "食品生活": ("食品", "饮料", "零食", "无糖", "麦片", "咖啡", "茶饮", "调味品", "酱油",
+                  "喝", "吃", "饮", "牛奶", "酸奶", "果汁", "坚果", "饼干", "巧克力",
+                  "蛋糕", "面包", "米", "油", "盐", "糖", "酒", "啤酒", "红酒",
+                  "矿泉", "纯净水", "苏打", "碳酸", "豆浆", "豆奶", "燕麦", "冲调",
+                  "方便面", "速食", "冷冻", "冷藏"),
 }
 
 KNOWN_CATEGORIES = frozenset(CATEGORY_TERMS)
@@ -69,6 +79,21 @@ PRODUCT_TYPE_ALIASES: dict[str, tuple[str, ...]] = {
     "牛奶": ("牛奶", "纯牛奶"),
     "酸奶": ("酸奶", "风味酸奶"),
     "调味品": ("调味品", "酱油", "生抽", "老抽"),
+}
+
+# Parent→children hierarchy: when a user queries a broad term (e.g. "裤子"),
+# expand to all child canonical types so the SQL IN filter catches subcategories.
+# Children MUST be canonical keys in PRODUCT_TYPE_ALIASES.
+PRODUCT_TYPE_HIERARCHY: dict[str, tuple[str, ...]] = {
+    "裤子": ("户外裤", "运动长裤", "运动短裤", "瑜伽裤"),
+    "上衣": ("短袖T恤", "速干T恤", "卫衣"),
+    "鞋": ("跑步鞋", "篮球鞋", "徒步鞋"),
+    "耳机": ("真无线耳机",),
+    "洁面": ("洁面",),
+    "饮品": ("茶饮", "碳酸饮料", "功能饮料", "咖啡", "牛奶", "酸奶"),
+    "零食": ("坚果/零食",),
+    "电脑": ("笔记本电脑", "平板电脑"),
+    "手机": ("智能手机",),
 }
 
 PRODUCT_TYPE_TO_CATEGORY: dict[str, str] = {
@@ -330,12 +355,29 @@ def product_type_aliases(value: str | None) -> tuple[str, ...]:
     canonical = normalize_product_type(value)
     if not canonical:
         return ()
-    return (canonical, *PRODUCT_TYPE_ALIASES.get(canonical, ()))
+    result = {canonical, *PRODUCT_TYPE_ALIASES.get(canonical, ())}
+    # Expand hierarchy: if this type is a parent, include all children's aliases
+    children = PRODUCT_TYPE_HIERARCHY.get(canonical, ())
+    for child in children:
+        result.add(child)
+        result.update(PRODUCT_TYPE_ALIASES.get(child, ()))
+    return tuple(result)
 
 
 def infer_category_from_product_type(value: str | None) -> str | None:
     canonical = normalize_product_type(value)
-    return PRODUCT_TYPE_TO_CATEGORY.get(canonical or "")
+    if not canonical:
+        return None
+    direct = PRODUCT_TYPE_TO_CATEGORY.get(canonical)
+    if direct:
+        return direct
+    # Hierarchy fallback: "裤子" is a parent, not a canonical key, so check children
+    children = PRODUCT_TYPE_HIERARCHY.get(canonical, ())
+    for child in children:
+        cat = PRODUCT_TYPE_TO_CATEGORY.get(child)
+        if cat:
+            return cat
+    return None
 
 
 def normalize_product_type_for_category(
@@ -369,7 +411,14 @@ def _is_exact_category_label(value: str) -> bool:
 
 def is_supported_product_type(value: str | None) -> bool:
     canonical = normalize_product_type(value)
-    return bool(canonical and canonical in PRODUCT_TYPE_ALIASES)
+    if not canonical:
+        return False
+    if canonical in PRODUCT_TYPE_ALIASES:
+        return True
+    # Hierarchy parents (裤子, 上衣, 鞋, 手机...) are also supported
+    if canonical in PRODUCT_TYPE_HIERARCHY:
+        return True
+    return False
 
 
 def first_skin_type(text: str) -> str | None:

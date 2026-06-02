@@ -10,6 +10,7 @@ data class Constraints(
     @SerialName("budget_max") val budgetMax: Double? = null,
     @SerialName("use_scenario") val useScenario: String? = null,
     @SerialName("brand_avoid") val brandAvoid: List<String> = emptyList(),
+    @SerialName("brand_prefer") val brandPrefer: List<String> = emptyList(),
     @SerialName("origin_avoid") val originAvoid: List<String> = emptyList(),
     @SerialName("product_type") val productType: String? = null,
     @SerialName("skin_type") val skinType: String? = null,

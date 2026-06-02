@@ -36,6 +36,8 @@ data class CriteriaPayload(
     @SerialName("budget_max") val budgetMax: Double? = null,
     @SerialName("brand_avoid") @Serializable(with = FlexibleStringListSerializer::class)
     val brandAvoid: List<String> = emptyList(),
+    @SerialName("brand_prefer") @Serializable(with = FlexibleStringListSerializer::class)
+    val brandPrefer: List<String> = emptyList(),
     @SerialName("origin_avoid") @Serializable(with = FlexibleStringListSerializer::class)
     val originAvoid: List<String> = emptyList(),
     @SerialName("ingredient_avoid") @Serializable(with = FlexibleStringListSerializer::class)

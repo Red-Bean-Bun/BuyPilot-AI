@@ -52,7 +52,7 @@ def criteria_from_intent(
     1. Clarification continuity   — summary defaults to chip concatenation
     2. Speculative retrieval       — summary uses natural-language template
     """
-    _LIST_FIELDS = {"brand_avoid", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
+    _LIST_FIELDS = {"brand_avoid", "brand_prefer", "origin_avoid", "ingredient_avoid", "ingredient_prefer", "dietary"}
     allowed = set(Constraints.model_fields)
     category = intent.category or ""
     constraint_kwargs: dict[str, Any] = {}
@@ -81,7 +81,7 @@ def criteria_from_intent(
     )
 
 
-_MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "origin_avoid", "dietary"}
+_MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "brand_prefer", "origin_avoid", "dietary"}
 
 
 def apply_criteria_patch(criteria: CriteriaPayload, patch: dict[str, Any]) -> CriteriaPayload:
@@ -213,6 +213,8 @@ def _constraint_chips(constraints: Constraints) -> list[str]:
         chips.append(constraints.use_scenario)
     for item in constraints.ingredient_avoid:
         chips.append(f"不要{item}")
+    for item in constraints.brand_prefer:
+        chips.append(item)
     for item in constraints.brand_avoid:
         chips.append(f"不要{item}")
     for item in constraints.origin_avoid:

@@ -20,6 +20,7 @@ def criteria_query_text(criteria: CriteriaPayload) -> str:
         constraints.use_scenario or "",
         " ".join(constraints.dietary),
         " ".join(constraints.ingredient_prefer),
+        " ".join(constraints.brand_prefer),
         " ".join(f"不要{item}" for item in constraints.ingredient_avoid),
         f"{constraints.budget_max:g}元内" if constraints.budget_max is not None else "",
     ]
@@ -59,6 +60,7 @@ def product_match_score(
     budget_weight: float,
     scenario_weight: float = 0.0,
     brand_weight: float = 0.0,
+    brand_prefer_weight: float = 0.0,
 ) -> float:
     score = 0.0
     if normalize_category(product.category) == normalize_category(criteria.category):
@@ -80,9 +82,58 @@ def product_match_score(
         score += scenario_weight
     if brand_weight and _brand_in_summary(product.brand, criteria.summary):
         score += brand_weight
+    if brand_prefer_weight and product.brand and product.brand in criteria.constraints.brand_prefer:
+        score += brand_prefer_weight
     return score
 
 
 def avoid_trait_penalty(criteria: CriteriaPayload, product: ProductPayload) -> bool:
     haystack = " ".join(product.ingredient_tags + product.ingredient_avoid)
     return any(item in haystack for item in criteria.constraints.ingredient_avoid)
+
+
+# Chinese stopwords to exclude from keyword extraction
+_KEYWORD_STOPWORDS = frozenset({
+    "我想", "想要", "想买", "想吃", "想喝", "想用", "推荐", "帮我",
+    "一个", "一款", "一台", "一件", "一些", "一下", "有没有", "有吗",
+    "什么", "怎么", "哪个", "那种", "不要", "排除", "只要", "只看",
+    "便宜", "贵的", "好的", "新的",
+})
+
+
+def extract_user_keywords(message: str) -> list[str]:
+    """Extract meaningful product-intent keywords from a user message.
+
+    Removes common shopping phrases and stopwords, returning the likely
+    product-related words. Used to boost products matching explicit user terms.
+    """
+    text = message.strip()
+    # Remove known stop-phrases
+    for sw in sorted(_KEYWORD_STOPWORDS, key=len, reverse=True):
+        text = text.replace(sw, " ")
+    # Split and filter
+    keywords: list[str] = []
+    for token in text.split():
+        token = token.strip("，。！？；、,.!?;:\n \"'（）()")
+        if len(token) >= 2:
+            keywords.append(token)
+    return keywords
+
+
+def keyword_boost_score(product: ProductPayload, keywords: list[str]) -> float:
+    """Additional score boost when a product matches user's explicit keywords.
+
+    Each matching keyword adds a small boost. Multiple matches compound.
+    """
+    if not keywords:
+        return 0.0
+    haystack = " ".join(
+        part
+        for part in (product.name, product.brand or "", product.sub_category or "", product.category)
+        if part
+    )
+    score = 0.0
+    for kw in keywords:
+        if kw in haystack:
+            score += 1.5
+    return score

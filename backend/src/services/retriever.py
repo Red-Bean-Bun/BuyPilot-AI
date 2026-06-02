@@ -16,6 +16,7 @@ from src.config.domain_terms import (
 )
 from src.config.tuning import (
     FILTER_SCORE_BRAND,
+    FILTER_SCORE_BRAND_PREFER,
     FILTER_SCORE_BUDGET,
     FILTER_SCORE_CATEGORY,
     FILTER_SCORE_SCENARIO,
@@ -440,7 +441,16 @@ def _passes_product_type_filter(criteria: CriteriaPayload, product: ProductPaylo
     del filters
     criteria_product_type = normalize_product_type(criteria.constraints.product_type)
     product_type = normalize_product_type(product.sub_category)
-    return not criteria_product_type or product_type == criteria_product_type
+    if not criteria_product_type:
+        return True
+    if product_type == criteria_product_type:
+        return True
+    # Containment match for hierarchy: "裤子" matches "户外裤" via substring
+    if criteria_product_type in (product_type or ""):
+        return True
+    if (product_type or "") in criteria_product_type:
+        return True
+    return False
 
 
 def _passes_avoid_trait_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
@@ -544,6 +554,7 @@ def _filter_score(criteria: CriteriaPayload, product: ProductPayload) -> float:
         budget_weight=FILTER_SCORE_BUDGET,
         scenario_weight=FILTER_SCORE_SCENARIO,
         brand_weight=FILTER_SCORE_BRAND,
+        brand_prefer_weight=FILTER_SCORE_BRAND_PREFER,
     )
 
 

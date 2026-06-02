@@ -24,6 +24,7 @@ THINKING_CONFIRM_CART = "需要确认购物车商品。"
 # ── Greeting and general intro ──────────────────────────────────────────
 
 GREETING = "我是电商导购助手，可以帮你推荐商品、添加购物车。请问你想买什么？"
+CHITCHAT_HINT = "我是购物助手，可以帮你找商品、比价格、加购物车。你想看哪个品类？"
 INTRO_NO_CONSTRAINTS = "正在分析你的需求，马上为你查找匹配商品..."
 
 # ── Recommendation followup text ────────────────────────────────────────
