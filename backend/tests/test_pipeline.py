@@ -477,3 +477,39 @@ async def test_multi_turn_short_followup_merges_previous_category(monkeypatch):
 
     clarification_events = [e for e in events if e.event == "clarification"]
     assert len(clarification_events) == 0
+
+
+# ── add_to_cart reclassification test ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_no_product_reference_reclassified_to_recommend(monkeypatch):
+    """LLM says add_to_cart but no target_product_id and no previous products → reclassify to recommend."""
+    async def add_to_cart_intent(session_id, body):
+        del session_id, body
+        return IntentResult(intent="add_to_cart", confidence=0.9, category="食品生活", target_product_id=None)
+
+    async def no_previous_products(session_id):
+        del session_id
+        return []
+
+    monkeypatch.setattr(pipeline_module, "run_intent", add_to_cart_intent)
+    monkeypatch.setattr(pipeline_module, "get_previous_product_ids", no_previous_products)
+
+    events = [
+        event
+        async for event in chat_stream(
+            "s_reclassify_cart",
+            ChatStreamRequest(message="想买个这个"),
+        )
+    ]
+
+    tags = [event.event for event in events]
+    # Should follow recommend path, not cart clarification
+    assert "product_card" in tags
+    assert "cart_action" not in tags
+    # No cart-specific clarification (required_slots=["target_product"])
+    cart_clarifications = [
+        e for e in events if e.event == "clarification" and getattr(e, "required_slots", None) == ["target_product"]
+    ]
+    assert cart_clarifications == []

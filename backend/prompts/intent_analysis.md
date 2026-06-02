@@ -57,7 +57,7 @@
    - clarify: 用户在澄清需求、回答追问，或信息不足需要追问
    - continue: 用户确认已有标准、要求继续筛选，或已看过候选商品后要求收敛最终建议
    - feedback: 用户表达不喜欢、排除某商品/品牌/特征等反馈
-   - add_to_cart: 用户要加购物车
+   - add_to_cart: 用户要把系统已推荐或已展示的商品加入购物车（必须有明确的商品指向，如"把这个加到购物车"、"第一款加购"）。当用户附带图片并说"想买这个"/"帮我找找这个"/"有没有这个"时，这是 recommend（找类似商品），不是 add_to_cart。
    - remove_from_cart: 用户要从购物车删除/移出商品
    - update_cart_quantity: 用户要修改购物车里商品数量
    - view_cart: 用户要查看购物车
@@ -117,6 +117,19 @@ Output:
   "category": null,
   "extracted_constraints": {},
   "soft_preferences": ["用户在闲聊，非购物咨询"],
+  "target_product_id": null
+}
+```
+
+Input: "想买个这个"（附带图片，图片分析显示品类=食品生活，描述=一瓶冰溶C100橙汁饮料）
+Output:
+```json
+{
+  "intent": "recommend",
+  "confidence": 0.9,
+  "category": "食品生活",
+  "extracted_constraints": {},
+  "soft_preferences": ["用户想购买图片中的橙汁饮料"],
   "target_product_id": null
 }
 ```

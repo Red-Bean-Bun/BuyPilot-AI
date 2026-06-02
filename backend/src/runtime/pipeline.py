@@ -30,7 +30,7 @@ from src.config.domain_terms import KNOWN_CATEGORIES, is_supported_product_type,
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
-from src.services.conversation_state import get_previous_criteria, save_recommendation_turn
+from src.services.conversation_state import get_previous_criteria, get_previous_product_ids, save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
@@ -293,6 +293,13 @@ async def _resolve_intent(
             else:
                 merged[key] = value
         intent = intent.model_copy(update={"extracted_constraints": merged})
+
+    # Guard: reclassify unresolvable add_to_cart → recommend
+    if intent.intent == "add_to_cart" and not intent.target_product_id:
+        previous_ids = await get_previous_product_ids(ctx.session_id)
+        if not previous_ids:
+            logger.info("Reclassified add_to_cart → recommend (no product reference)")
+            intent = intent.model_copy(update={"intent": "recommend"})
 
     yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent))
 
