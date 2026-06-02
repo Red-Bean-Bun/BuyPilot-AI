@@ -92,34 +92,6 @@ def avoid_trait_penalty(criteria: CriteriaPayload, product: ProductPayload) -> b
     return any(item in haystack for item in criteria.constraints.ingredient_avoid)
 
 
-# Chinese stopwords to exclude from keyword extraction
-_KEYWORD_STOPWORDS = frozenset({
-    "我想", "想要", "想买", "想吃", "想喝", "想用", "推荐", "帮我",
-    "一个", "一款", "一台", "一件", "一些", "一下", "有没有", "有吗",
-    "什么", "怎么", "哪个", "那种", "不要", "排除", "只要", "只看",
-    "便宜", "贵的", "好的", "新的",
-})
-
-
-def extract_user_keywords(message: str) -> list[str]:
-    """Extract meaningful product-intent keywords from a user message.
-
-    Removes common shopping phrases and stopwords, returning the likely
-    product-related words. Used to boost products matching explicit user terms.
-    """
-    text = message.strip()
-    # Remove known stop-phrases
-    for sw in sorted(_KEYWORD_STOPWORDS, key=len, reverse=True):
-        text = text.replace(sw, " ")
-    # Split and filter
-    keywords: list[str] = []
-    for token in text.split():
-        token = token.strip("，。！？；、,.!?;:\n \"'（）()")
-        if len(token) >= 2:
-            keywords.append(token)
-    return keywords
-
-
 def keyword_boost_score(product: ProductPayload, keywords: list[str]) -> float:
     """Additional score boost when a product matches user's explicit keywords.
 

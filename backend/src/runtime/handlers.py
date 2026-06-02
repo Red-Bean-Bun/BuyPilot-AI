@@ -23,6 +23,7 @@ from src.runtime.cart_rules import message_refers_to_previous_product, quantity_
 from src.runtime.message_rules import is_replace_deck_phrase
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
+from src.config.domain_terms import normalize_product_type, product_type_aliases
 from src.services.retrieval_features import keyword_boost_score
 from src.runtime.stages.slot_checker import build_clarification_question
 from src.runtime.streaming import (
@@ -498,7 +499,6 @@ async def continue_recommendation_from_criteria(
                 products = fallback_retrieval.products
                 evidences_by_product = dict(fallback_retrieval.evidence_by_product)
                 # Check if any returned products match the requested type via hierarchy
-                from src.config.domain_terms import product_type_aliases, normalize_product_type
                 _expanded = {a.lower() for a in product_type_aliases(product_type)}
                 _has_match = any(
                     normalize_product_type(p.sub_category).lower() in _expanded

@@ -11,6 +11,7 @@ from src.config.domain_terms import (
     PRODUCT_TYPE_HIERARCHY,
     category_from_text,
     extract_skin_types,
+    get_known_brands,
     normalize_category,
     normalize_product_type,
 )
@@ -190,24 +191,32 @@ _ADJUST_BUDGET_CAP_PATTERN = re.compile(r"预算[^0-9]{0,3}(\d+(?:\.\d+)?)")
 _ADJUST_BUDGET_LOWER = ("预算再低", "再便宜", "便宜点", "便宜些")
 _ADJUST_BUDGET_HIGHER = ("预算再高", "贵一点", "好一点")
 
-# Patterns for distinguishing brand names from ingredient names in avoid-phrases
-_BRAND_PATTERNS = (
-    re.compile(r"^[A-Za-z0-9\s\-]+$"),        # pure ASCII (OPPO, Nike, SK-II)
-    re.compile(r"^[一-鿿]{2,4}$"),     # 2-4 Chinese chars (华为, 小米)
-)
-_INGREDIENT_KEYWORDS = (
-    "油", "糖", "精", "素", "醇", "酸", "碱", "粉", "剂", "胶",
-    "脂", "酶", "香", "钠", "钙", "铁", "锌", "维", "胺", "酚",
-    "醛", "乳", "蜜", "霜", "露", "液", "膏", "膜",
-)
 _ORIGIN_MARKERS = ("日系", "国产", "进口", "欧美", "韩系", "国货", "日本", "韩国", "美国", "德国")
 
 
 def _looks_like_brand(term: str) -> bool:
-    """True when a user-specified avoid-term looks like a brand name."""
-    if re.match(_BRAND_PATTERNS[0], term):
+    """Check if term matches a known brand in the product catalog.
+
+    Primary: exact/substring match against runtime product data.
+    Fallback: ASCII uppercase or 2-4 CJK chars (catches brands not in current catalog).
+    """
+    term_lower = term.strip().lower()
+    known = get_known_brands()
+    if term_lower in known:
         return True
-    if re.match(_BRAND_PATTERNS[1], term) and not any(kw in term for kw in _INGREDIENT_KEYWORDS):
+    for brand in known:
+        if len(term_lower) >= 2 and (term_lower in brand or brand in term_lower):
+            return True
+    # Heuristic fallback for brands not in current product data.
+    # CJK terms that look like ingredient/feature words are excluded.
+    _INGREDIENT_LIKE = {
+        "油", "糖", "精", "素", "醇", "酸", "碱", "粉", "剂", "胶",
+        "脂", "酶", "香", "钠", "钙", "铁", "锌", "维", "胺", "酚",
+        "醛", "乳", "蜜", "霜", "露", "液", "膏", "膜",
+    }
+    if re.match(r"^[A-Z][A-Za-z0-9\- ]{1,20}$", term):
+        return True
+    if re.match(r"^[一-鿿]{2,4}$", term) and not any(kw in term for kw in _INGREDIENT_LIKE):
         return True
     return False
 
@@ -242,10 +251,10 @@ def extract_adjustment_hints(message: str) -> dict[str, Any]:
         # not an ingredient named "太贵").
         _AVOID_STOP_PREFIXES = ("太", "再", "那么", "这么", "很", "特别", "非常", "最", "含", "含有")
         if not any(term.startswith(p) for p in _AVOID_STOP_PREFIXES):
-            if _looks_like_brand(term):
-                hints.setdefault("brand_avoid", []).append(term)
-            elif _looks_like_origin(term):
+            if _looks_like_origin(term):
                 hints.setdefault("origin_avoid", []).append(term)
+            elif _looks_like_brand(term):
+                hints.setdefault("brand_avoid", []).append(term)
             else:
                 hints.setdefault("ingredient_avoid", []).append(term)
 
@@ -334,12 +343,6 @@ _SHOPPING_SIGNAL_MARKERS: tuple[str, ...] = (
     "找一下", "有没有", "买个", "求推荐",
 )
 
-_BRAND_PREFER_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(?:我要|只要|只看|就要|指定|锁定|选)(.{1,8})(?:的|品牌|牌)?"),
-    re.compile(r"(.{1,8})(?:的|品牌|牌)(?:有|可以|能|能不能)"),
-)
-
-
 def maybe_shopping_intent(message: str) -> IntentResult | None:
     """Deterministic pre-check for clearly non-shopping inputs only.
 
@@ -381,26 +384,18 @@ def has_shopping_signal(message: str) -> bool:
 
 
 def extract_brand_prefer_from_message(message: str) -> list[str]:
-    """Extract brand preference from natural-language messages.
+    """Extract brand preference by matching known brands from product data.
 
-    Matches patterns like "我要华为", "只要小米", "只看Apple".
-    Returns a list of brand name strings.
+    Returns brands from the product catalog that appear in the user's message.
+    Longer brand names are checked first to avoid partial matches
+    (e.g. "华为" matches before "华").
     """
+    brands = get_known_brands()
     results: list[str] = []
-    text = message.strip()
-
-    for pat in _BRAND_PREFER_PATTERNS:
-        m = pat.search(text)
-        if m and m.lastindex and m.lastindex >= 1:
-            brand = m.group(1).strip()
-            # Filter out generic filler words
-            if brand and len(brand) >= 2 and brand not in {
-                "什么", "哪个", "那种", "哪种", "好的", "便宜", "贵的",
-                "最新", "最好", "一个", "一款", "一台",
-            }:
-                if brand not in results:
-                    results.append(brand)
-
+    text_lower = message.strip().lower()
+    for brand in sorted(brands, key=len, reverse=True):
+        if len(brand) >= 2 and brand.lower() in text_lower:
+            results.append(brand)
     return results
 
 

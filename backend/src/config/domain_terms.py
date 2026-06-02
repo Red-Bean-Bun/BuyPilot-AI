@@ -26,10 +26,10 @@ CATEGORY_TERMS: dict[str, tuple[str, ...]] = {
                   "外套", "裤子", "裙子", "背包", "帽", "袜子", "篮球", "足球", "瑜伽",
                   "跑步", "健身", "户外", "徒步", "登山", "骑行", "游泳"),
     "食品生活": ("食品", "饮料", "零食", "无糖", "麦片", "咖啡", "茶饮", "调味品", "酱油",
-                  "喝", "吃", "饮", "牛奶", "酸奶", "果汁", "坚果", "饼干", "巧克力",
+                  "牛奶", "酸奶", "果汁", "坚果", "饼干", "巧克力",
                   "蛋糕", "面包", "米", "油", "盐", "糖", "酒", "啤酒", "红酒",
-                  "矿泉", "纯净水", "苏打", "碳酸", "豆浆", "豆奶", "燕麦", "冲调",
-                  "方便面", "速食", "冷冻", "冷藏"),
+                  "纯净水", "苏打", "碳酸", "豆浆", "豆奶", "燕麦", "冲调",
+                  "方便面"),
 }
 
 KNOWN_CATEGORIES = frozenset(CATEGORY_TERMS)
@@ -475,3 +475,38 @@ def avoid_trait_aliases(token: str) -> tuple[str, ...]:
         return ()
     aliases = AVOID_TRAIT_MATCH_TERMS.get(normalized.lower()) or AVOID_TRAIT_MATCH_TERMS.get(normalized)
     return aliases or (normalized,)
+
+
+# ── Data-driven product indices (lazy, built from actual product data) ──────
+
+_brand_set: frozenset[str] | None = None
+_sub_category_set: frozenset[str] | None = None
+
+
+def _ensure_data_indices() -> None:
+    global _brand_set, _sub_category_set
+    if _brand_set is not None:
+        return
+    from src.repos.products import load_raw_products  # lazy to avoid circular import
+
+    raw = load_raw_products()
+    _brand_set = frozenset(
+        p.get("brand", "").strip().lower()
+        for p in raw
+        if p.get("brand") and p.get("brand", "").strip()
+    )
+    _sub_category_set = frozenset(
+        p.get("sub_category", "").strip()
+        for p in raw
+        if p.get("sub_category") and p.get("sub_category", "").strip()
+    )
+
+
+def get_known_brands() -> frozenset[str]:
+    _ensure_data_indices()
+    return _brand_set  # type: ignore[return-value]
+
+
+def get_known_sub_categories() -> frozenset[str]:
+    _ensure_data_indices()
+    return _sub_category_set  # type: ignore[return-value]
