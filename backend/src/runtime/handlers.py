@@ -23,6 +23,8 @@ from src.runtime.cart_rules import message_refers_to_previous_product, quantity_
 from src.runtime.message_rules import is_replace_deck_phrase
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
+from src.config.domain_terms import normalize_product_type, product_type_aliases
+from src.services.retrieval_features import keyword_boost_score
 from src.runtime.stages.slot_checker import build_clarification_question
 from src.runtime.streaming import (
     StageResult,
@@ -198,6 +200,8 @@ async def handle_chitchat(
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body, intent
     yield ctx.thinking("understanding", msg.THINKING_PROCESSING)
+    # Guide user toward shopping: emit a helpful text + category clarification
+    # instead of a dead-end greeting.
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -206,8 +210,20 @@ async def handle_chitchat(
         node_id=f"ai_text_{ctx.turn_id}",
         created_at_ms=now_ms(),
         message_id=f"msg_{ctx.turn_id}",
-        delta=msg.GREETING,
+        delta=msg.CHITCHAT_HINT,
         done=True,
+    )
+    question, options = build_clarification_question(["category"])
+    yield ClarificationEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"clarification_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        question=question,
+        required_slots=["category"],
+        suggested_options=options,
     )
     yield ctx.done()
 
@@ -460,17 +476,77 @@ async def continue_recommendation_from_criteria(
 
     # Branch 0: no matching products
     if not products:
-        yield _criteria_card_event(ctx, criteria)
-        async for event in stream_text(
-            ctx,
-            _no_match_followup_text(criteria),
-            message_id=f"no_match_{ctx.turn_id}",
-            node_id=f"no_match_{ctx.turn_id}",
-        ):
-            yield event
-        await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
-        yield ctx.done("awaiting_criteria_adjustment")
-        return
+        # Retry without product_type filter — recommend related same-category items
+        product_type = criteria.constraints.product_type
+        if product_type:
+            relaxed = criteria.model_copy(update={
+                "constraints": criteria.constraints.model_copy(update={"product_type": None}),
+            })
+            ctx.ensure_active()
+            async for event in _capture_stage_result(
+                retrieval_capture,
+                run_with_heartbeat(
+                    ctx,
+                    ctx.stages.run_retrieval(relaxed, feedback=feedback, image_embedding=image_embedding),
+                    "searching",
+                    msg.THINKING_SEARCHING,
+                    timing_key="retrieve",
+                ),
+            ):
+                yield event
+            fallback_retrieval = retrieval_capture.require("retrieval")
+            if fallback_retrieval.products:
+                products = fallback_retrieval.products
+                evidences_by_product = dict(fallback_retrieval.evidence_by_product)
+                # Check if any returned products match the requested type via hierarchy
+                _expanded = {a.lower() for a in product_type_aliases(product_type)}
+                _has_match = any(
+                    normalize_product_type(p.sub_category).lower() in _expanded
+                    for p in products
+                )
+                if _has_match:
+                    fallback_text = f"以下是为你筛选的{product_type}相关商品"
+                else:
+                    fallback_text = f"当前商品库没有{product_type}，以下是同品类的相关推荐"
+                yield _criteria_card_event(ctx, criteria)
+                async for event in stream_text(ctx, fallback_text):
+                    yield event
+                # Fall through to product card emission below
+            else:
+                yield _criteria_card_event(ctx, criteria)
+                async for event in stream_text(
+                    ctx,
+                    _no_match_followup_text(criteria),
+                    message_id=f"no_match_{ctx.turn_id}",
+                    node_id=f"no_match_{ctx.turn_id}",
+                ):
+                    yield event
+                await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
+                yield ctx.done("awaiting_criteria_adjustment")
+                return
+        else:
+            yield _criteria_card_event(ctx, criteria)
+            async for event in stream_text(
+                ctx,
+                _no_match_followup_text(criteria),
+                message_id=f"no_match_{ctx.turn_id}",
+                node_id=f"no_match_{ctx.turn_id}",
+            ):
+                yield event
+            await save_recommendation_turn(ctx.session_id, criteria, [], user_message=body.message)
+            yield ctx.done("awaiting_criteria_adjustment")
+            return
+
+    # Boost products matching explicit user intent keywords (e.g. "坚果" → nut products first)
+    _keyword_hints = list(criteria.chips) if criteria.chips else []
+    if criteria.constraints.product_type:
+        _keyword_hints.append(criteria.constraints.product_type)
+    if _keyword_hints:
+        products = sorted(
+            products,
+            key=lambda p: (keyword_boost_score(p, _keyword_hints), -(p.price or float('inf'))),
+            reverse=True,
+        )
 
     # Emit product cards with pacing delay (built into _product_card_events)
     async for event in _product_card_events(

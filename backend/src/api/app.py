@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        from src.services.observability_llm import drain_observability_tasks
+        await drain_observability_tasks(timeout=5.0)
         await close_http_client()
 
 

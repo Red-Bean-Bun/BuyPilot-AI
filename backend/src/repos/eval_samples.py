@@ -15,7 +15,7 @@ from src.types.sse_events import Constraints
 
 GROUND_TRUTH_SCHEMA_VERSION = "2026-05-31"
 _CURRENT_CONSTRAINT_KEYS = set(Constraints.model_fields) | {"category"}
-_EVAL_ONLY_CONSTRAINT_KEYS = {"must_match_terms", "forbidden_terms", "brand_prefer"}
+_EVAL_ONLY_CONSTRAINT_KEYS = {"must_match_terms", "forbidden_terms"}
 _ALLOWED_CONSTRAINT_KEYS = _CURRENT_CONSTRAINT_KEYS | _EVAL_ONLY_CONSTRAINT_KEYS
 
 

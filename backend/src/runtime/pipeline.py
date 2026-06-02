@@ -14,9 +14,14 @@ from src.runtime.handlers import INTENT_HANDLERS, handle_clarification
 from src.runtime.message_rules import (
     COMMERCIAL_CLAIM_REPLY,
     extract_adjustment_hints,
+    extract_brand_prefer_from_message,
+    extract_product_lookup_hints,
+    extract_product_type_hint,
+    has_shopping_signal,
     is_commercial_claim_question,
     is_replace_deck_phrase,
     maybe_intercept_budget_patch,
+    maybe_shopping_intent,
     message_with_image_context,
 )
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions, run_criteria
@@ -26,7 +31,7 @@ from src.runtime.stages.multimodal import run_image_embedding, run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.config import user_messages as msg
-from src.config.domain_terms import KNOWN_CATEGORIES, is_supported_product_type, normalize_category
+from src.config.domain_terms import KNOWN_CATEGORIES, category_from_text, infer_category_from_product_type, is_supported_product_type, normalize_category
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
@@ -197,9 +202,29 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
     resolved = await _merge_followup_context(ctx.session_id, resolved)
 
     if _unsupported_product_type(resolved.intent):
-        async for event in _emit_unsupported_product_type(ctx, resolved.intent):
-            yield event
-        return
+        # Not a hard stop: strip unsupported product_type and fall through
+        # so the handler can recommend related same-category products.
+        _pt = (resolved.intent.extracted_constraints or {}).get("product_type")
+        yield TextDeltaEvent(
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            seq=ctx.seq.next(),
+            event_id=ctx.seq.event_id(),
+            node_id=f"unsupported_{ctx.turn_id}",
+            created_at_ms=now_ms(),
+            message_id=f"unsupported_{ctx.turn_id}",
+            delta=msg.UNSUPPORTED_PRODUCT_TYPE_TEMPLATE.format(
+                product_type=_pt or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
+            ),
+            done=True,
+        )
+        constraints = dict(resolved.intent.extracted_constraints or {})
+        constraints["product_type"] = None
+        resolved = _ResolvedIntent(
+            body=resolved.body,
+            intent=resolved.intent.model_copy(update={"extracted_constraints": constraints}),
+        )
+        # Falls through to normal recommendation below — no return here.
 
     missing_slots = _missing_slots(resolved.body, resolved.intent)
     if missing_slots:
@@ -248,6 +273,15 @@ async def _resolve_intent(
             category=prev.category or None if prev else None,
         )
 
+    # Deterministic shopping-intent pre-check (铁律3):
+    # short-circuit LLM intent for obvious shopping / non-shopping phrases.
+    # Only fires when no higher-priority rule has claimed the turn, and
+    # only for text-only messages (image uploads carry VL analysis context).
+    if synthetic_intent is None and not pipeline_body.image_url and not pipeline_body.criteria_patch:
+        determined = maybe_shopping_intent(pipeline_body.message)
+        if determined is not None:
+            synthetic_intent = determined
+
     # "换一组" / replace-deck: force recommend intent without LLM call
     if synthetic_intent is None and is_replace_deck_phrase(pipeline_body.message):
         prev = await get_previous_criteria(ctx.session_id)
@@ -293,6 +327,62 @@ async def _resolve_intent(
             else:
                 merged[key] = value
         intent = intent.model_copy(update={"extracted_constraints": merged})
+
+    # Extract brand preference from natural language (铁律3)
+    brand_prefer = extract_brand_prefer_from_message(pipeline_body.message)
+    if brand_prefer and intent.intent in {"recommend", "clarify", "feedback"}:
+        merged = dict(intent.extracted_constraints or {})
+        existing = merged.get("brand_prefer", [])
+        merged["brand_prefer"] = list(dict.fromkeys(
+            existing + brand_prefer if isinstance(existing, list) else brand_prefer
+        ))
+        intent = intent.model_copy(update={"extracted_constraints": merged})
+
+    # Post-LLM safety net: if the LLM classified as chitchat or feedback
+    # but the message contains clear shopping signals, override to clarify.
+    if intent.intent in {"chitchat", "feedback"} and not pipeline_body.image_url:
+        if has_shopping_signal(pipeline_body.message):
+            prev = await get_previous_criteria(ctx.session_id)
+            inferred_category = intent.category or (prev.category if prev else None) or category_from_text(pipeline_body.message)
+            intent = IntentResult(
+                intent="clarify",
+                confidence=intent.confidence,
+                category=inferred_category,
+                extracted_constraints=intent.extracted_constraints or {},
+            )
+
+    # Fallback category inference: when the LLM identified a shopping intent
+    # but left category=null, try to infer from the message text directly.
+    # This catches "我想喝什么" (recommend but no category) and similar.
+    if intent.intent in {"recommend", "clarify"} and not intent.category and not pipeline_body.image_url:
+        inferred = category_from_text(pipeline_body.message)
+        if inferred:
+            intent = intent.model_copy(update={"category": inferred})
+
+    # Product-lookup extraction: "有鼠标吗" → product_type="鼠标"
+    # Runs for all shopping intents to catch queries the LLM may miss.
+    lookup = extract_product_lookup_hints(pipeline_body.message)
+    if lookup and intent.intent in {"recommend", "clarify", "feedback"}:
+        merged = dict(intent.extracted_constraints or {})
+        merged.update(lookup)
+        intent = intent.model_copy(update={"extracted_constraints": merged})
+
+    # Deterministic product_type extraction: fills LLM gaps for "手机"/"裤子"/"鞋"
+    product_hint = extract_product_type_hint(pipeline_body.message)
+    if product_hint and intent.intent in {"recommend", "clarify", "feedback"}:
+        merged = dict(intent.extracted_constraints or {})
+        if "product_type" not in merged:
+            merged["product_type"] = product_hint
+        # Validate category against product_type: if the LLM hallucinated the wrong
+        # category (e.g. "有裤子吗"→食品 but 裤子→服饰), override with the correct one.
+        expected_cat = infer_category_from_product_type(product_hint)
+        if expected_cat and normalize_category(intent.category) != expected_cat:
+            intent = intent.model_copy(update={
+                "category": expected_cat,
+                "extracted_constraints": merged,
+            })
+        else:
+            intent = intent.model_copy(update={"extracted_constraints": merged})
 
     # Guard: reclassify unresolvable add_to_cart → recommend
     if intent.intent == "add_to_cart" and not intent.target_product_id:

@@ -107,7 +107,7 @@ async def update_llm_call_parsed_json(
             await session.commit()
             return True
     except SQLAlchemyError:
-        logger.warning("update_llm_call_parsed_json failed", exc_info=True)
+        logger.error("update_llm_call_parsed_json failed", exc_info=True)
         return False
 
 

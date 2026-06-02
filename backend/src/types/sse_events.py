@@ -68,6 +68,7 @@ class Constraints(BaseModel):
     use_scenario: str | None = None
     # 排除与限定
     brand_avoid: list[str] = Field(default_factory=list)
+    brand_prefer: list[str] = Field(default_factory=list)
     origin_avoid: list[str] = Field(default_factory=list)
     product_type: str | None = None
     # 美妆护肤专属

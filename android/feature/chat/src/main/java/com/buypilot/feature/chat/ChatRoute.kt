@@ -13,9 +13,11 @@ fun ChatRoute(
     onOpenProductDetail: (String, String) -> Unit = { _, _ -> },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val timelinePresentation by viewModel.timelinePresentationState.collectAsStateWithLifecycle()
 
     BuyPilotChatScreen(
         state = uiState,
+        timelinePresentation = timelinePresentation,
         onInputChanged = viewModel::onInputChanged,
         onSendMessage = viewModel::sendMessage,
         onImageSelected = viewModel::selectImage,

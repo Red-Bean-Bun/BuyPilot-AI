@@ -8,8 +8,10 @@ from typing import Any
 from src.config import user_messages as msg
 from src.config.domain_terms import (
     PRODUCT_TYPE_ALIASES,
+    PRODUCT_TYPE_HIERARCHY,
     category_from_text,
     extract_skin_types,
+    get_known_brands,
     normalize_category,
     normalize_product_type,
 )
@@ -64,12 +66,18 @@ _BUDGET_REDUCTION_MARKERS = (
     "压低预算",
 )
 
-_CHEAPER_MARKERS = ("便宜点", "便宜一点", "再便宜点", "再便宜一点", "便宜些", "降价")
+_CHEAPER_MARKERS = (
+    "便宜点", "便宜一点", "再便宜点", "再便宜一点", "便宜些", "降价",
+    "降低预算", "压低预算", "预算低一点", "预算降一点", "预算低一些",
+)
 
 _BUDGET_CAP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(\d+(?:\.\d+)?)\s*(?:元)?\s*(?:以内|以下|内|之内)"),
     re.compile(r"(?:预算|价格).*?(\d+(?:\.\d+)?)"),
 )
+
+# Budget range: "1000-1500元", "2000到3000"
+_BUDGET_RANGE_PATTERN = re.compile(r"(\d+)\s*[-~到至]\s*(\d+)\s*(?:元)?")
 
 
 def message_with_image_context(message: str, image_analysis: dict[str, Any] | None) -> str:
@@ -132,12 +140,16 @@ async def maybe_intercept_budget_patch(
     budget_value = _parse_budget_from_message(body.message, previous.constraints.budget_max)
     if budget_value is None:
         return body, None
+    budget_min = _parse_budget_min_from_message(body.message)
     skip = list(body.skip_stages)
     if "recommendation" not in skip:
         skip.append("recommendation")
+    patch_constraints: dict[str, Any] = {"budget_max": budget_value}
+    if budget_min is not None:
+        patch_constraints["budget_min"] = budget_min
     patched = body.model_copy(
         update={
-            "criteria_patch": {"constraints": {"budget_max": budget_value}},
+            "criteria_patch": {"constraints": patch_constraints},
             "skip_stages": skip,
         }
     )
@@ -179,6 +191,40 @@ _ADJUST_BUDGET_CAP_PATTERN = re.compile(r"预算[^0-9]{0,3}(\d+(?:\.\d+)?)")
 _ADJUST_BUDGET_LOWER = ("预算再低", "再便宜", "便宜点", "便宜些")
 _ADJUST_BUDGET_HIGHER = ("预算再高", "贵一点", "好一点")
 
+_ORIGIN_MARKERS = ("日系", "国产", "进口", "欧美", "韩系", "国货", "日本", "韩国", "美国", "德国")
+
+
+def _looks_like_brand(term: str) -> bool:
+    """Check if term matches a known brand in the product catalog.
+
+    Primary: exact/substring match against runtime product data.
+    Fallback: ASCII uppercase or 2-4 CJK chars (catches brands not in current catalog).
+    """
+    term_lower = term.strip().lower()
+    known = get_known_brands()
+    if term_lower in known:
+        return True
+    for brand in known:
+        if len(term_lower) >= 2 and (term_lower in brand or brand in term_lower):
+            return True
+    # Heuristic fallback for brands not in current product data.
+    # CJK terms that look like ingredient/feature words are excluded.
+    _INGREDIENT_LIKE = {
+        "油", "糖", "精", "素", "醇", "酸", "碱", "粉", "剂", "胶",
+        "脂", "酶", "香", "钠", "钙", "铁", "锌", "维", "胺", "酚",
+        "醛", "乳", "蜜", "霜", "露", "液", "膏", "膜",
+    }
+    if re.match(r"^[A-Z][A-Za-z0-9\- ]{1,20}$", term):
+        return True
+    if re.match(r"^[一-鿿]{2,4}$", term) and not any(kw in term for kw in _INGREDIENT_LIKE):
+        return True
+    return False
+
+
+def _looks_like_origin(term: str) -> bool:
+    """True when a user-specified avoid-term looks like an origin/country marker."""
+    return any(origin in term for origin in _ORIGIN_MARKERS)
+
 
 def extract_adjustment_hints(message: str) -> dict[str, Any]:
     """Extract fuzzy adjustment hints from natural-language follow-up messages.
@@ -205,7 +251,12 @@ def extract_adjustment_hints(message: str) -> dict[str, Any]:
         # not an ingredient named "太贵").
         _AVOID_STOP_PREFIXES = ("太", "再", "那么", "这么", "很", "特别", "非常", "最", "含", "含有")
         if not any(term.startswith(p) for p in _AVOID_STOP_PREFIXES):
-            hints.setdefault("ingredient_avoid", []).append(term)
+            if _looks_like_origin(term):
+                hints.setdefault("origin_avoid", []).append(term)
+            elif _looks_like_brand(term):
+                hints.setdefault("brand_avoid", []).append(term)
+            else:
+                hints.setdefault("ingredient_avoid", []).append(term)
 
     if any(phrase in text for phrase in _ADJUST_BUDGET_LOWER):
         hints["budget_direction"] = "lower"
@@ -243,6 +294,13 @@ def is_replace_deck_phrase(message: str) -> bool:
 
 
 def _parse_budget_from_message(message: str, current_budget_max: float | None) -> float | None:
+    # Try range pattern first: "1000-1500元" → extract budget_max=1500
+    m = _BUDGET_RANGE_PATTERN.search(message)
+    if m:
+        try:
+            return float(m.group(2))
+        except (ValueError, IndexError):
+            pass
     for pattern in _BUDGET_CAP_PATTERNS:
         match = pattern.search(message)
         if not match:
@@ -255,4 +313,142 @@ def _parse_budget_from_message(message: str, current_budget_max: float | None) -
         if current_budget_max is not None:
             return max(CHEAPER_BUDGET_MIN_MAX, round(current_budget_max * CHEAPER_BUDGET_RATIO, 2))
         return CHEAPER_BUDGET_DEFAULT_MAX
+    return None
+
+
+def _parse_budget_min_from_message(message: str) -> float | None:
+    """Extract budget_min from range formats like '1000-1500元'."""
+    m = _BUDGET_RANGE_PATTERN.search(message)
+    if m:
+        try:
+            return float(m.group(1))
+        except (ValueError, IndexError):
+            pass
+    return None
+
+
+# ── Shopping-intent deterministic pre-check ──────────────────────────
+
+_SHORT_GREETING_PATTERNS: tuple[str, ...] = (
+    "你好", "hi", "hello", "嗨", "在吗", "在不在",
+)
+
+_CAPABILITY_QUESTION_MARKERS: tuple[str, ...] = (
+    "你能做什么", "有什么功能", "能帮我做什么", "会做什么",
+    "你是做什么的", "怎么用",
+)
+
+_SHOPPING_SIGNAL_MARKERS: tuple[str, ...] = (
+    "想喝", "想吃", "想买", "想要", "想用", "推荐", "帮我选",
+    "找一下", "有没有", "买个", "求推荐",
+)
+
+def maybe_shopping_intent(message: str) -> IntentResult | None:
+    """Deterministic pre-check for clearly non-shopping inputs only.
+
+    Only short-circuits for obvious mismatches (greetings, capability questions).
+    Does NOT short-circuit for shopping signals — those go through the LLM
+    for proper intent classification and constraint extraction.
+    """
+    text = message.strip()
+
+    lowered = text.lower()
+    if len(text) <= 5 and any(g in lowered for g in _SHORT_GREETING_PATTERNS):
+        return IntentResult(intent="chitchat", confidence=1.0)
+
+    if any(m in text for m in _CAPABILITY_QUESTION_MARKERS):
+        return IntentResult(intent="chitchat", confidence=1.0)
+
+    return None
+
+
+def has_shopping_signal(message: str) -> bool:
+    """True when the message contains strong shopping-intent signals.
+
+    Used as a post-LLM safety net: if the LLM classified a message as chitchat
+    or feedback but it clearly contains shopping signals, the pipeline overrides
+    to clarify/recommend.
+    """
+    text = message.strip()
+    if any(m in text for m in _SHOPPING_SIGNAL_MARKERS):
+        return True
+    if extract_brand_prefer_from_message(text):
+        return True
+    # A detectable product type is itself a shopping signal (e.g. "一条裤子")
+    if extract_product_type_hint(text):
+        return True
+    # Product lookup queries ("有XX吗")
+    if extract_product_lookup_hints(text):
+        return True
+    return False
+
+
+def extract_brand_prefer_from_message(message: str) -> list[str]:
+    """Extract brand preference by matching known brands from product data.
+
+    Returns brands from the product catalog that appear in the user's message.
+    Longer brand names are checked first to avoid partial matches
+    (e.g. "华为" matches before "华").
+    """
+    brands = get_known_brands()
+    results: list[str] = []
+    text_lower = message.strip().lower()
+    for brand in sorted(brands, key=len, reverse=True):
+        if len(brand) >= 2 and brand.lower() in text_lower:
+            results.append(brand)
+    return results
+
+
+# ── Product-lookup extraction ────────────────────────────────────────
+
+_PRODUCT_LOOKUP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"有(.{1,8})吗[？?]?"),
+    re.compile(r"有没有(.{1,8})[？?]?"),
+    re.compile(r"(.{1,8})有吗[？?]?"),
+)
+
+
+def extract_product_lookup_hints(message: str) -> dict[str, Any] | None:
+    """Detect product-existence queries like '有鼠标吗' or '有没有咖啡'.
+
+    Returns a dict with product_type to inject into intent constraints,
+    or None if no product-lookup pattern is detected.
+    """
+    text = message.strip()
+    for pat in _PRODUCT_LOOKUP_PATTERNS:
+        m = pat.search(text)
+        if m:
+            product = m.group(1).strip()
+            if len(product) >= 2 and product not in {
+                "什么", "哪些", "哪个", "那种", "好的", "便宜",
+                "贵的", "新的", "旧的", "大的", "小的",
+            }:
+                return {"product_type": product}
+    return None
+
+
+# ── Deterministic product_type extraction ────────────────────────────
+
+def extract_product_type_hint(message: str) -> str | None:
+    """Deterministic product_type extraction from user message.
+
+    Walks all PRODUCT_TYPE_ALIASES to find if any alias is a substring of the
+    user's message. Also checks PRODUCT_TYPE_HIERARCHY for parent→child matching.
+
+    Returns the canonical product_type string, or None.
+    Used as a safety net when the LLM fails to extract product_type.
+    """
+    text = message.strip()
+    # Direct alias match: known alias appears in user message
+    for canonical, aliases in PRODUCT_TYPE_ALIASES.items():
+        for alias in aliases:
+            if len(alias) >= 2 and alias in text:
+                return canonical
+    # Hierarchy parent match: user mentioned a parent term like "裤子"
+    for parent, children in PRODUCT_TYPE_HIERARCHY.items():
+        if parent in text:
+            return parent  # parent will be expanded to children by product_type_aliases
+        for child in children:
+            if child in text:
+                return child
     return None
