@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.repos.eval_samples import list_all as list_all_samples
-from src.repos.eval_runs import save_run
+from src.repos.eval_runs import EvalRun, save_run
 
 
 async def load_eval_samples():
@@ -21,7 +21,7 @@ async def save_eval_run(
     sample_count: int,
     prompt_version: str | None,
     git_commit: str | None,
-) -> str:
+) -> EvalRun:
     return await save_run(
         run_name=run_name,
         strategy_tag=strategy_tag,

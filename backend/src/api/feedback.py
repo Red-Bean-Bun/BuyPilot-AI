@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter
 
 from src.services.audit import record_audit_event
 from src.services.feedback import submit_feedback_request
 from src.services.request_context import update_request_context
 from src.types.schemas import FeedbackRequest, FeedbackResponse
+
+logger = logging.getLogger(__name__)
 
 feedback_router = APIRouter(tags=["feedback"])
 
@@ -16,18 +20,21 @@ feedback_router = APIRouter(tags=["feedback"])
 async def submit_feedback(body: FeedbackRequest) -> FeedbackResponse:
     update_request_context(session_id=body.session_id)
     response = await submit_feedback_request(body)
-    await record_audit_event(
-        "feedback.created",
-        session_id=body.session_id,
-        resource_type="feedback",
-        resource_id=body.product_id,
-        metadata={
-            "deck_id": body.deck_id,
-            "feedback_type": body.feedback_type,
-            "action": body.action,
-            "reason": body.reason,
-        },
-    )
+    try:
+        await record_audit_event(
+            "feedback.created",
+            session_id=body.session_id,
+            resource_type="feedback",
+            resource_id=body.product_id,
+            metadata={
+                "deck_id": body.deck_id,
+                "feedback_type": body.feedback_type,
+                "action": body.action,
+                "reason": body.reason,
+            },
+        )
+    except Exception:
+        logger.warning("Failed to record audit event: feedback.created", exc_info=True)
     return response
 
 

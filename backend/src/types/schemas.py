@@ -123,3 +123,22 @@ class SessionState(BaseModel):
     session_id: str
     last_criteria: CriteriaPayload | None = None
     last_product_ids: list[str] = Field(default_factory=list)
+
+
+class FaqItem(BaseModel):
+    question: str
+    answer: str
+
+
+class ReviewItem(BaseModel):
+    nickname: str
+    rating: int
+    content: str
+
+
+class ProductDetailResponse(BaseModel):
+    product: ProductPayload
+    marketing_description: str | None = None
+    highlights: list[str] = Field(default_factory=list)
+    faqs: list[FaqItem] = Field(default_factory=list)
+    reviews: list[ReviewItem] = Field(default_factory=list)

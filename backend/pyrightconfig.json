@@ -1,0 +1,19 @@
+{
+  "include": ["src"],
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux",
+
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv"
+  ],
+
+  "reportAttributeAccessIssue": "none",
+  "reportIncompatibleVariableOverride": "none",
+  "reportAssignmentType": "none",
+  "reportGeneralTypeIssues": "none",
+
+  "reportArgumentType": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportCallIssue": "none"
+}

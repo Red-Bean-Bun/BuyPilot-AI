@@ -36,6 +36,8 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
     last_error: Exception | None = None
     fallback_from: str | None = None
     for idx, profile_name in enumerate(_task_profile_names(task)):
+        profile: ChatProfile | None = None
+        started_at: float = 0.0
         try:
             profile = _resolve_chat_profile(profile_name)
             started_at = time.perf_counter()
@@ -65,15 +67,12 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
 
             return response
         except LiveLLMUnavailable as exc:
-            if "started_at" in locals():
-                duration_ms = (time.perf_counter() - started_at) * 1000
-            else:
-                duration_ms = 0.0
+            duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
             provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if "profile" in locals() else "unknown",
+                model=profile.model if profile else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
@@ -93,15 +92,12 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             logger.info("LLM profile unavailable for task %s profile %s: %s", task, profile_name, exc)
             continue
         except Exception as exc:
-            if "started_at" in locals():
-                duration_ms = (time.perf_counter() - started_at) * 1000
-            else:
-                duration_ms = 0.0
+            duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
             provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if "profile" in locals() else "unknown",
+                model=profile.model if profile else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
@@ -138,10 +134,12 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
     yielded = False
     fallback_from: str | None = None
     for idx, profile_name in enumerate(_task_profile_names(task)):
+        profile: ChatProfile | None = None
+        started_at: float = 0.0
+        accumulated_text: str = ""
         try:
             profile = _resolve_chat_profile(profile_name)
             started_at = time.perf_counter()
-            accumulated_text = ""
             first_delta_emitted = False
             async for delta in _chat_completion_stream(profile, messages):
                 if not first_delta_emitted:
@@ -173,20 +171,17 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             )
             return
         except LiveLLMUnavailable as exc:
-            if "started_at" in locals():
-                duration_ms = (time.perf_counter() - started_at) * 1000
-            else:
-                duration_ms = 0.0
+            duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
             provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if "profile" in locals() else "unknown",
+                model=profile.model if profile else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
                 messages=messages,
-                response=accumulated_text if "accumulated_text" in locals() else None,
+                response=accumulated_text or None,
                 parsed_json=None,
                 validation_error=None,
                 token_usage=None,
@@ -201,20 +196,17 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             logger.info("LLM stream profile unavailable for task %s profile %s: %s", task, profile_name, exc)
             continue
         except Exception as exc:
-            if "started_at" in locals():
-                duration_ms = (time.perf_counter() - started_at) * 1000
-            else:
-                duration_ms = 0.0
+            duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
             provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
-                model=profile.model if "profile" in locals() else "unknown",
+                model=profile.model if profile else "unknown",
                 provider=provider,
                 status="failed",
                 duration_ms=duration_ms,
                 messages=messages,
-                response=accumulated_text if "accumulated_text" in locals() else None,
+                response=accumulated_text or None,
                 parsed_json=None,
                 validation_error=None,
                 token_usage=None,

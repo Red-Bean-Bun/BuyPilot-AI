@@ -17,7 +17,6 @@ from src.config.domain_terms import (
     scenario_from_text,
     extract_skin_types,
     extract_terms,
-    has_negation_prefix,
     normalize_category,
 )
 from src.config.settings import get_settings
@@ -67,6 +66,27 @@ def get_product(product_id: str) -> ProductPayload | None:
     return product.model_copy(deep=True) if product else None
 
 
+async def get_product_detail_rows(product_id: str) -> dict[str, Any] | None:
+    """Read detail fields from the Product DB table."""
+    from sqlmodel import select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from src.repos.database import get_async_engine
+    from src.repos.models import Product
+
+    async with AsyncSession(get_async_engine()) as session:
+        product = (await session.exec(select(Product).where(Product.id == product_id))).one_or_none()
+        if product is None:
+            return None
+        metadata = dict(product.product_metadata or {})
+        return {
+            "marketing_description": product.marketing_description,
+            "official_faq": product.official_faq or [],
+            "user_reviews": product.user_reviews or [],
+            "highlights": metadata.get("highlights") or [],
+        }
+
+
 def build_product_text(raw: dict[str, Any]) -> str:
     knowledge = raw.get("rag_knowledge") or {}
     parts = [
@@ -107,10 +127,10 @@ def _payload_from_raw(raw: dict[str, Any]) -> ProductPayload:
         category=normalize_category(source_category) or source_category,
         sub_category=raw.get("sub_category"),
         brand=raw.get("brand"),
-        skin_type_match=_extract_skin_types(text),
-        ingredient_tags=_extract_terms(text, INGREDIENT_TERMS),
+        skin_type_match=extract_skin_types(text),
+        ingredient_tags=extract_terms(text, INGREDIENT_TERMS),
         ingredient_avoid=[],
-        use_scenario=_extract_scenario(text),
+        use_scenario=scenario_from_text(text),
         sku_options=sku_options,
     )
 
@@ -153,19 +173,3 @@ def _product_payloads() -> tuple[ProductPayload, ...]:
 @lru_cache(maxsize=1)
 def _product_index() -> dict[str, ProductPayload]:
     return {product.product_id: product for product in _product_payloads()}
-
-
-def _extract_terms(text: str, terms: list[str] | tuple[str, ...]) -> list[str]:
-    return extract_terms(text, terms)
-
-
-def _has_negation_prefix(text: str, term: str) -> bool:
-    return has_negation_prefix(text, term)
-
-
-def _extract_skin_types(text: str) -> list[str]:
-    return extract_skin_types(text)
-
-
-def _extract_scenario(text: str) -> str | None:
-    return scenario_from_text(text)

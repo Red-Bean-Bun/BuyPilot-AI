@@ -54,7 +54,26 @@ async def seed_products(
             source_category = str(raw.get("category") or "")
             source_hash = _source_hash(raw)
             knowledge_package = build_product_knowledge_package(raw)
+            knowledge = raw.get("rag_knowledge") or {}
             await session.exec(delete(ProductChunk).where(ProductChunk.product_id == product_id))
+            existing = (await session.exec(select(Product).where(Product.id == product_id))).one_or_none()
+            existing_highlights = (
+                existing.product_metadata.get("highlights") if existing and existing.product_metadata else None
+            )
+            product_metadata = {
+                "dataset_version": DATASET_VERSION,
+                "source_hash": source_hash,
+                "source_category": source_category,
+                "source_file": raw.get("_source_file"),
+                "skus": raw.get("skus") or [],
+                "rag_knowledge": raw.get("rag_knowledge") or {},
+                "knowledge_package": knowledge_package,
+                "chunking_version": CHUNKING_VERSION,
+                "embedding_model": embedding_model,
+                "indexed_at": indexed_at,
+            }
+            if existing_highlights is not None:
+                product_metadata["highlights"] = existing_highlights
             await session.merge(
                 Product(
                     id=product_id,
@@ -64,18 +83,10 @@ async def seed_products(
                     price=float(raw["base_price"]) if raw.get("base_price") is not None else None,
                     brand=raw.get("brand"),
                     image_urls=[str(raw.get("image_path") or "")],
-                    product_metadata={
-                        "dataset_version": DATASET_VERSION,
-                        "source_hash": source_hash,
-                        "source_category": source_category,
-                        "source_file": raw.get("_source_file"),
-                        "skus": raw.get("skus") or [],
-                        "rag_knowledge": raw.get("rag_knowledge") or {},
-                        "knowledge_package": knowledge_package,
-                        "chunking_version": CHUNKING_VERSION,
-                        "embedding_model": embedding_model,
-                        "indexed_at": indexed_at,
-                    },
+                    marketing_description=knowledge.get("marketing_description"),
+                    official_faq=knowledge.get("official_faq") or [],
+                    user_reviews=knowledge.get("user_reviews") or [],
+                    product_metadata=product_metadata,
                 )
             )
         for row, embedding in zip(chunk_rows, embeddings, strict=True):

@@ -10,7 +10,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.repos.database import create_db_and_tables, get_async_engine
-from src.repos.models import EvidenceLink, ProductChunk, RetrievalTrace
+from src.repos.models import Conversation, EvidenceLink, ProductChunk, RetrievalTrace
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,50 @@ async def list_recent_retrieval_traces(limit: int = 50) -> list[RetrievalTrace]:
         return list(
             (await session.exec(select(RetrievalTrace).order_by(RetrievalTrace.created_at.desc()).limit(limit))).all()
         )
+
+
+async def list_retrieval_traces(
+    *,
+    criteria_ids: list[str] | None = None,
+    conversation_ids: list[str] | None = None,
+    session_id: str | None = None,
+    limit: int = 50,
+) -> list[RetrievalTrace]:
+    await create_db_and_tables()
+    statement = select(RetrievalTrace)
+    if session_id:
+        statement = statement.join(Conversation, Conversation.id == RetrievalTrace.conversation_id).where(
+            Conversation.session_id == session_id
+        )
+    if criteria_ids:
+        statement = statement.where(RetrievalTrace.criteria_id.in_(criteria_ids))
+    if conversation_ids:
+        statement = statement.where(RetrievalTrace.conversation_id.in_(conversation_ids))
+    statement = statement.order_by(RetrievalTrace.created_at.desc()).limit(limit)
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return list((await session.exec(statement)).all())
+
+
+async def list_evidence_links(
+    *,
+    conversation_ids: list[str] | None = None,
+    session_id: str | None = None,
+    product_id: str | None = None,
+    limit: int = 200,
+) -> list[EvidenceLink]:
+    await create_db_and_tables()
+    statement = select(EvidenceLink)
+    if session_id:
+        statement = statement.join(Conversation, Conversation.id == EvidenceLink.conversation_id).where(
+            Conversation.session_id == session_id
+        )
+    if conversation_ids:
+        statement = statement.where(EvidenceLink.conversation_id.in_(conversation_ids))
+    if product_id:
+        statement = statement.where(EvidenceLink.product_id == product_id)
+    statement = statement.limit(limit)
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return list((await session.exec(statement)).all())
 
 
 async def _persistable_chunk_id(session: AsyncSession, source_id: str | None) -> str | None:
