@@ -188,6 +188,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
@@ -369,6 +371,7 @@ internal fun BuyPilotChatScreen(
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val keyboardVisible = imeBottomPx > 0
+    val stableTimelineImeBottomPx = imeBottomPx
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val focusManager = LocalFocusManager.current
     val composerFocusRequester = remember { FocusRequester() }
@@ -688,6 +691,12 @@ internal fun BuyPilotChatScreen(
                     onRetryLastMessage = onRetryLastMessage,
                     onEditLastMessage = { editAndFocus(it) },
                     onQuickAction = ::dispatchQuickAction,
+                    onUserImagePreview = { imageUrl ->
+                        imagePreviewAttachment = ChatImageAttachmentState(
+                            imageUrl = imageUrl,
+                            fileName = "图片预览",
+                        )
+                    },
                     onClarificationManualInput = { focusComposer() },
                     onClarificationManualSource = { nodeKey, snapshot ->
                         clarificationManualSource = ClarificationManualSource(nodeKey, snapshot)
@@ -695,6 +704,7 @@ internal fun BuyPilotChatScreen(
                     onTimelineDrag = { closeTransientComposerUi() },
                     composerHeightPx = composerHeightPx,
                     imeBottomPx = imeBottomPx,
+                    stableImeBottomPx = stableTimelineImeBottomPx,
                     isComposerFocused = composerFocused,
                     isAssistantVisualActive = assistantVisualActive,
                     isClarificationFlightActive = clarificationFlightActive,
@@ -827,7 +837,7 @@ internal fun BuyPilotChatScreen(
         )
 
         imagePreviewAttachment?.let { attachment ->
-            ImageAttachmentPreviewSheet(
+            ImageAttachmentPreviewDialog(
                 attachment = attachment,
                 backendBaseUrl = state.backendBaseUrl,
                 onDismiss = { imagePreviewAttachment = null },
@@ -1002,9 +1012,11 @@ private fun ConversationStage(
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onUserImagePreview: (String) -> Unit,
     onTimelineDrag: () -> Unit,
     composerHeightPx: Int,
     imeBottomPx: Int,
+    stableImeBottomPx: Int,
     isComposerFocused: Boolean,
     isAssistantVisualActive: Boolean,
     isClarificationFlightActive: Boolean,
@@ -1079,9 +1091,10 @@ private fun ConversationStage(
                 onRetryLastMessage = onRetryLastMessage,
                 onEditLastMessage = onEditLastMessage,
                 onQuickAction = onQuickAction,
+                onUserImagePreview = onUserImagePreview,
                 onTimelineDrag = onTimelineDrag,
                 composerHeightPx = composerHeightPx,
-                imeBottomPx = imeBottomPx,
+                stableImeBottomPx = stableImeBottomPx,
                 isComposerFocused = isComposerFocused,
                 isAssistantVisualActive = isAssistantVisualActive,
                 isClarificationFlightActive = isClarificationFlightActive,
@@ -1382,23 +1395,6 @@ private fun WelcomeHome(
                     .fillMaxHeight(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Spacer(Modifier.height(104.dp))
-                Text(
-                    text = "今天想买什么？",
-                    color = BuyPilotColors.TextPrimary,
-                    fontSize = 23.sp,
-                    lineHeight = 30.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "说出预算、偏好或纠结点",
-                    color = BuyPilotColors.TextMuted,
-                    fontSize = BuyPilotType.Body,
-                    lineHeight = 20.sp,
-                    textAlign = TextAlign.Center,
-                )
                 Spacer(Modifier.weight(1f))
                 PromptSuggestions(
                     modifier = Modifier
@@ -4167,65 +4163,91 @@ private fun ImageAttachmentPreview(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f))
-                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.58f), RoundedCornerShape(18.dp))
-                .padding(8.dp),
+                .padding(start = 2.dp, bottom = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AsyncImage(
-                model = attachment.localUri.takeIf { it.isNotBlank() } ?: attachment.imageUrl,
-                contentDescription = "已选择的图片",
-                contentScale = ContentScale.Crop,
+            Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(BuyPilotColors.SurfaceSubtle)
+                    .size(64.dp)
+                    .shadow(
+                        elevation = 6.dp,
+                        shape = RoundedCornerShape(15.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.07f),
+                        spotColor = Color.Black.copy(alpha = 0.10f),
+                    )
+                    .background(BuyPilotColors.SurfaceCard, RoundedCornerShape(15.dp))
+                    .border(
+                        1.dp,
+                        if (attachment.error != null) {
+                            BuyPilotColors.Danger.copy(alpha = 0.52f)
+                        } else {
+                            BuyPilotColors.Border.copy(alpha = 0.78f)
+                        },
+                        RoundedCornerShape(15.dp),
+                    )
                     .clickable(
                         enabled = attachment.hasImage,
                         role = Role.Button,
                         onClick = onPreview,
                     ),
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    text = attachment.fileName.ifBlank { "图片输入" },
-                    color = BuyPilotColors.TextPrimary,
-                    fontSize = BuyPilotType.Label,
-                    lineHeight = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                AsyncImage(
+                    model = attachment.localUri.takeIf { it.isNotBlank() } ?: attachment.imageUrl,
+                    contentDescription = "已选择的图片，点按预览",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(3.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(BuyPilotColors.SurfaceSubtle),
                 )
-                Text(
-                    text = when {
-                        attachment.isUploading -> "正在上传，稍等一下"
-                        attachment.error != null -> attachment.error
-                        else -> "已准备好，可随消息发送"
-                    },
-                    color = if (attachment.error != null) BuyPilotColors.Danger else BuyPilotColors.TextMuted,
-                    fontSize = BuyPilotType.Tiny,
-                    lineHeight = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 7.dp, y = (-7).dp)
+                        .size(24.dp)
+                        .background(BuyPilotColors.SurfaceCard, CircleShape)
+                        .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.88f), CircleShape)
+                        .clickable(role = Role.Button, onClick = onRemove),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_close_24),
+                        contentDescription = "移除图片",
+                        tint = BuyPilotColors.TextSecondary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                when {
+                    attachment.isUploading -> Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(7.dp)
+                            .size(18.dp)
+                            .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.9f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        UploadingDot()
+                    }
+                    attachment.error != null -> Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(7.dp)
+                            .size(18.dp)
+                            .background(BuyPilotColors.Attention, CircleShape)
+                            .border(1.dp, BuyPilotColors.PrimarySoft, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "!",
+                            color = BuyPilotColors.Danger,
+                            fontSize = 11.sp,
+                            lineHeight = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             }
-            if (attachment.isUploading) {
-                UploadingDot()
-                Spacer(Modifier.width(8.dp))
-            }
-            M3IconButton(
-                iconRes = R.drawable.ic_close_24,
-                contentDescription = "移除图片",
-                tint = BuyPilotColors.TextMuted,
-                modifier = Modifier.size(36.dp),
-                onClick = onRemove,
-            )
         }
     }
 }
@@ -4249,9 +4271,8 @@ private fun UploadingDot() {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ImageAttachmentPreviewSheet(
+private fun ImageAttachmentPreviewDialog(
     attachment: ChatImageAttachmentState,
     backendBaseUrl: String,
     onDismiss: () -> Unit,
@@ -4261,59 +4282,101 @@ private fun ImageAttachmentPreviewSheet(
         ?: attachment.imageUrl.resolveProductImageUrl(backendBaseUrl)
         ?: return
 
-    ModalBottomSheet(
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = BuyPilotColors.SurfaceCard,
-        dragHandle = null,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
     ) {
-        Column(
+        var visible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            visible = true
+        }
+        val scrimInteraction = remember { MutableInteractionSource() }
+        val imageInteraction = remember { MutableInteractionSource() }
+
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = attachment.fileName.ifBlank { "图片预览" },
-                    color = BuyPilotColors.TextPrimary,
-                    fontSize = BuyPilotType.LargeBody,
-                    lineHeight = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                M3IconButton(
-                    iconRes = R.drawable.ic_close_24,
-                    contentDescription = "关闭图片预览",
-                    tint = BuyPilotColors.TextMuted,
-                    modifier = Modifier.size(40.dp),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.74f))
+                .clickable(
+                    interactionSource = scrimInteraction,
+                    indication = null,
                     onClick = onDismiss,
                 )
-            }
-            AsyncImage(
-                model = previewModel,
-                contentDescription = "图片预览",
-                contentScale = ContentScale.Fit,
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 16.dp),
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) +
+                    scaleIn(
+                        initialScale = 0.985f,
+                        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                    ),
+                exit = fadeOut(animationSpec = tween(durationMillis = 120, easing = MenuEaseIn)) +
+                    scaleOut(
+                        targetScale = 0.985f,
+                        animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
+                    ),
                 modifier = Modifier
+                    .align(Alignment.Center)
                     .fillMaxWidth()
-                    .heightIn(min = 220.dp, max = 520.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(BuyPilotColors.SurfaceMuted),
-            )
+                    .fillMaxHeight(0.84f),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = imageInteraction,
+                            indication = null,
+                            onClick = {},
+                        ),
+                    color = Color.Black.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(22.dp),
+                    shadowElevation = 12.dp,
+                ) {
+                    AsyncImage(
+                        model = previewModel,
+                        contentDescription = "图片预览",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(22.dp)),
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(42.dp)
+                    .background(Color.Black.copy(alpha = 0.36f), CircleShape)
+                    .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_close_24),
+                    contentDescription = "关闭图片预览",
+                    tint = Color.White.copy(alpha = 0.92f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+
             attachment.error?.let { message ->
                 Text(
                     text = message,
-                    color = BuyPilotColors.Danger,
+                    color = Color.White.copy(alpha = 0.86f),
                     fontSize = BuyPilotType.Label,
                     lineHeight = 18.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .background(Color.Black.copy(alpha = 0.42f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
         }
@@ -4694,6 +4757,7 @@ private fun CriteriaEditSheet(
             )
             BudgetSliderBlock(
                 value = budgetMax,
+                productContext = "${criteria.category} $productType",
                 onValueChange = { budgetMax = it },
             )
             EditableFieldBlock(
@@ -5724,11 +5788,15 @@ private fun EditableFieldBlock(
 @Composable
 private fun BudgetSliderBlock(
     value: String,
+    productContext: String,
     onValueChange: (String) -> Unit,
 ) {
     val parsedBudget = value.extractFirstNumber()?.roundToInt()
-    val budgetOptions = remember(parsedBudget) { budgetSliderOptions(parsedBudget) }
-    val selectedBudget = parsedBudget?.nearestBudgetOption(budgetOptions) ?: DefaultBudgetPreset
+    val budgetOptions = remember(parsedBudget, productContext) {
+        budgetSliderOptions(parsedBudget, productContext)
+    }
+    val selectedBudget = parsedBudget?.nearestBudgetOption(budgetOptions)
+        ?: defaultBudgetPreset(productContext)
     val selectedIndex = budgetOptions.indexOf(selectedBudget).takeIf { it >= 0 } ?: 0
     val sliderInteractionSource = remember { MutableInteractionSource() }
     val isDragging by sliderInteractionSource.collectIsDraggedAsState()
@@ -5737,6 +5805,11 @@ private fun BudgetSliderBlock(
         animationSpec = tween(durationMillis = 260, easing = MenuEaseOut),
         label = "budget_slider_display_index",
     )
+    LaunchedEffect(parsedBudget, selectedBudget, budgetOptions) {
+        if (parsedBudget != null && parsedBudget !in budgetOptions) {
+            onValueChange(selectedBudget.toString())
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -5754,7 +5827,7 @@ private fun BudgetSliderBlock(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "预算上限",
+                    text = "预算",
                     color = BuyPilotColors.TextSecondary,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 16.sp,

@@ -45,7 +45,9 @@ import kotlinx.serialization.json.putJsonObject
 private const val CriteriaCardEnterMs = 560
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
 private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
+private val DigitalBudgetPresets = listOf(800, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000)
 internal const val DefaultBudgetPreset = 200
+private const val DefaultDigitalBudgetPreset = 3000
 
 private data class CriteriaReceiptProperty(
     val label: String,
@@ -427,8 +429,21 @@ internal fun String.withoutSkinSuffix(): String =
 internal fun String.extractFirstNumber(): Double? =
     Regex("""\d+(?:\.\d+)?""").find(this)?.value?.toDoubleOrNull()
 
-internal fun budgetSliderOptions(currentBudget: Int?): List<Int> {
+internal fun budgetSliderOptions(currentBudget: Int?, productContext: String = ""): List<Int> {
     val positiveBudget = currentBudget?.takeIf { it > 0 }
+    if (productContext.isDigitalBudgetContext()) {
+        val ceiling = when {
+            positiveBudget == null -> DigitalBudgetPresets.last()
+            positiveBudget <= DigitalBudgetPresets.last() -> DigitalBudgetPresets.last()
+            else -> positiveBudget.roundUpBudgetCeiling()
+        }
+        return (
+            DigitalBudgetPresets.filter { it <= ceiling } +
+                listOfNotNull(positiveBudget?.takeIf { it >= DigitalBudgetPresets.first() })
+            )
+            .distinct()
+            .sorted()
+    }
     val ceiling = when {
         positiveBudget == null -> BudgetBasePresets.last()
         positiveBudget <= BudgetBasePresets.last() -> BudgetBasePresets.last()
@@ -439,8 +454,19 @@ internal fun budgetSliderOptions(currentBudget: Int?): List<Int> {
         .sorted()
 }
 
+internal fun defaultBudgetPreset(productContext: String = ""): Int =
+    if (productContext.isDigitalBudgetContext()) DefaultDigitalBudgetPreset else DefaultBudgetPreset
+
 internal fun Int.nearestBudgetOption(options: List<Int>): Int =
     options.minByOrNull { abs(it - this) } ?: this
+
+private fun String.isDigitalBudgetContext(): Boolean {
+    val normalized = trim()
+    if (normalized.isBlank()) return false
+    return listOf("数码", "电子", "智能手机", "手机", "平板", "电脑", "笔记本", "相机").any {
+        normalized.contains(it)
+    }
+}
 
 private fun Int.roundUpBudgetCeiling(): Int {
     val step = 5000
@@ -448,7 +474,7 @@ private fun Int.roundUpBudgetCeiling(): Int {
 }
 
 internal fun List<Int>.midBudgetLabel(): String {
-    val midBudget = firstOrNull { it >= 500 } ?: get(size / 2)
+    val midBudget = get(size / 2)
     return "¥$midBudget"
 }
 

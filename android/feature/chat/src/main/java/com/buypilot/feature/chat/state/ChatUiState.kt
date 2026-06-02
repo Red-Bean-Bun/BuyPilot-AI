@@ -50,6 +50,7 @@ data class ChatUiState(
     val sessionId: String? = null,
     val currentTurnId: String? = null,
     val nodes: List<ChatUiNode> = emptyList(),
+    val staleCriteriaNodeKeys: Set<String> = emptySet(),
     val inputState: ChatInputState = ChatInputState.Idle,
     val isStreaming: Boolean = false,
     val lastError: String? = null,

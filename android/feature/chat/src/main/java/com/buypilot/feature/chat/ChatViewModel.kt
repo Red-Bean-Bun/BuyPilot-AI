@@ -574,6 +574,12 @@ class ChatViewModel @Inject constructor(
 
     fun sendCriteriaPatch(criteriaPatch: JsonObject) {
         val patchMessage = "应用并重新推荐"
+        _uiState.update { state ->
+            val staleCriteriaKeys = state.nodes
+                .filterIsInstance<CriteriaNode>()
+                .mapTo(mutableSetOf()) { it.key }
+            state.copy(staleCriteriaNodeKeys = state.staleCriteriaNodeKeys + staleCriteriaKeys)
+        }
         if (BuildConfig.USE_MOCK_CHAT) {
             sendMockMessage(patchMessage, imageUrl = null)
             return

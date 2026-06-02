@@ -143,6 +143,9 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
     }
 
     for (node in nodes) {
+        if (node is CriteriaNode && node.key in staleCriteriaNodeKeys) {
+            continue
+        }
         revealKeys += node.key
         node.revealTextKey()?.let { revealKeys += it }
         when (node) {

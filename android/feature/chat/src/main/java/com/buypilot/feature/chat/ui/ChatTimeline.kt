@@ -129,6 +129,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -265,11 +266,11 @@ private const val ClarificationCardEnterMs = 640
 
 private val TimelineNearEndThreshold = 24.dp
 private val TimelineFollowCorrectionTolerance = 8.dp
-private val TimelineSafeGap = 20.dp
-private val TimelineBottomReadingBuffer = 220.dp
-private val TimelineKeyboardBottomReadingBuffer = 300.dp
+private val TimelineSafeGap = 12.dp
+private val TimelineBottomReadingBuffer = 72.dp
+private val TimelineKeyboardBottomReadingBuffer = 56.dp
 private val TimelineAnchorTopGap = 28.dp
-private val TimelineAnchorBottomReserve = 560.dp
+private val TimelineAnchorBottomReserve = 460.dp
 private const val TimelineViewportSettleMs = 48L
 private val FloatingPanelComposerGap = 8.dp
 private val TimelineJumpButtonComposerGap = 14.dp
@@ -278,7 +279,7 @@ private const val TurnRevealIntroChars = 18
 private const val TurnRevealIntroRatio = 0.42f
 private const val TurnStructuredEnterMs = 320
 private const val TurnStructuredEnterDelayMs = 90
-private const val ThinkingToTextHandoffMs = 190L
+private const val ThinkingToTextHandoffMs = 0L
 private const val TimelineRevealScrollThrottleMs = 40L
 private const val TextRevealProgressReportStep = 24
 
@@ -396,9 +397,10 @@ internal fun ChatTimeline(
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onUserImagePreview: (String) -> Unit,
     onTimelineDrag: () -> Unit,
     composerHeightPx: Int,
-    imeBottomPx: Int,
+    stableImeBottomPx: Int,
     isComposerFocused: Boolean,
     isAssistantVisualActive: Boolean,
     isClarificationFlightActive: Boolean,
@@ -442,12 +444,36 @@ internal fun ChatTimeline(
     var routeReturnItemIndex by rememberSaveable { mutableStateOf(0) }
     var routeReturnScrollOffset by rememberSaveable { mutableStateOf(0) }
     var routeReturnFinalDecisionKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var routeReturnSettledTurnId by rememberSaveable { mutableStateOf<String?>(null) }
+    var routeReturnSettledFinalDecisionKey by rememberSaveable { mutableStateOf<String?>(null) }
     var clarificationFreezeCaptured by remember { mutableStateOf(false) }
     var clarificationFreezeItemKey by remember { mutableStateOf<String?>(null) }
     var clarificationFreezeItemIndex by remember { mutableStateOf(0) }
     var clarificationFreezeScrollOffset by remember { mutableStateOf(0) }
     val suppressTimelineAutoFocus = suppressReturnAutoFocus || isClarificationFlightActive
-    val revealStore = remember { TimelineRevealStore() }
+    val revealStore = remember {
+        TimelineRevealStore().also { store ->
+            revealedMessageKeys.forEach { key -> store.markTextCompleted(key) }
+            timelinePresentation.items.forEach { item ->
+                if (item is AssistantTurnTimelineItem) {
+                    item.nodes.forEach { node ->
+                        if (node !is AiStreamNode && node !is ThinkingNode) {
+                            store.markStructuredNodeStarted(node.key)
+                            store.markStructuredNodeEntered(node.key)
+                        }
+                    }
+                }
+                store.markTimelineItemEntered(item.key)
+            }
+        }
+    }
+    LaunchedEffect(revealedMessageKeys) {
+        revealedMessageKeys.forEach { key ->
+            if (!revealStore.hasCompletedText(key)) {
+                revealStore.markTextCompleted(key)
+            }
+        }
+    }
     val hasTimelineError = timelinePresentation.hasTimelineError
     val timelineItems = timelinePresentation.items
     val latestFinalDecisionKey = timelinePresentation.latestFinalDecisionKey
@@ -501,17 +527,15 @@ internal fun ChatTimeline(
     }
     fun markStructuredEnteredAndFollow(key: String) {
         revealStore.markStructuredNodeEntered(key)
-        if (key !in finalDecisionKeys) {
-            requestRevealFollowScroll()
-        }
     }
     val timelineViewportBottomInset = calculateTimelineViewportBottomInset(
         density = density,
         composerHeightPx = composerHeightPx,
-        imeBottomPx = imeBottomPx,
+        imeBottomPx = stableImeBottomPx,
     )
     val timelineBottomPadding = TimelineSafeGap
-    val timelineReadingBuffer = if (imeBottomPx > 0) {
+    val keyboardVisible = stableImeBottomPx > 0
+    val timelineReadingBuffer = if (keyboardVisible) {
         TimelineKeyboardBottomReadingBuffer
     } else {
         TimelineBottomReadingBuffer
@@ -523,6 +547,12 @@ internal fun ChatTimeline(
             72.dp.toPx(),
         ).toDp()
     }
+    val shouldRetainAnchorSpacer = retainedAnchorUserMessageKey != null &&
+        retainedAnchorUserMessageKey == state.lastUserMessageKey
+    val shouldRetainAssistantAnchorSpacer = retainedAnchorAssistantTurnId != null &&
+        retainedAnchorAssistantTurnId == state.currentTurnId
+    val targetEndReadingBuffer = timelineReadingBuffer
+    val endReadingBuffer = targetEndReadingBuffer
     val nearEndThresholdPx = with(density) { TimelineNearEndThreshold.toPx() }
     val followCorrectionTolerancePx = with(density) { TimelineFollowCorrectionTolerance.toPx() }
     val latestContentBottomPaddingPx = with(density) {
@@ -641,7 +671,7 @@ internal fun ChatTimeline(
         suppressReturnAutoFocus = false
     }
 
-    LaunchedEffect(routeReturnRestorePending, timelineItems.size, latestFinalDecisionKey) {
+    LaunchedEffect(routeReturnRestorePending, timelineItems.size) {
         if (!routeReturnRestorePending || timelineItems.isEmpty()) return@LaunchedEffect
         suppressReturnAutoFocus = true
         activeTurnAnchored = false
@@ -649,37 +679,28 @@ internal fun ChatTimeline(
         retainedAnchorUserMessageKey = null
         retainedAnchorAssistantTurnId = null
         forceAssistantReadableTurnId = null
-        kotlinx.coroutines.delay(48L)
-        val newFinalDecisionKey = latestFinalDecisionKey
-            ?.takeIf { it != routeReturnFinalDecisionKey }
-        if (newFinalDecisionKey != null) {
-            val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(newFinalDecisionKey) }
-            if (decisionItemIndex >= 0) {
-                lastFocusedFinalDecisionKey = newFinalDecisionKey
-                animateTimelineItemToAnchor(
-                    listState = listState,
-                    itemIndex = decisionItemIndex,
-                    anchorTopPx = anchorTopOffsetPx,
-                    tolerancePx = followCorrectionTolerancePx,
-                )
-            }
-        } else {
-            val keyedIndex = routeReturnItemKey
-                ?.let { key -> timelineItems.indexOfFirst { it.key == key } }
-                ?: -1
-            val targetIndex = keyedIndex
-                .takeIf { it >= 0 }
-                ?: routeReturnItemIndex.coerceIn(0, timelineItems.lastIndex)
-            listState.scrollToItem(
-                index = targetIndex,
-                scrollOffset = routeReturnScrollOffset.coerceAtLeast(0),
-            )
-        }
-        kotlinx.coroutines.delay(360L)
+        withFrameNanos { }
+        val keyedIndex = routeReturnItemKey
+            ?.let { key -> timelineItems.indexOfFirst { it.key == key } }
+            ?: -1
+        val targetIndex = keyedIndex
+            .takeIf { it >= 0 }
+            ?: routeReturnItemIndex.coerceIn(0, timelineItems.lastIndex)
+        listState.scrollToItem(
+            index = targetIndex,
+            scrollOffset = routeReturnScrollOffset.coerceAtLeast(0),
+        )
+        routeReturnSettledTurnId = state.currentTurnId
+        routeReturnSettledFinalDecisionKey = routeReturnFinalDecisionKey
+        lastAnchoredAssistantTurnId = state.currentTurnId
+        lastFocusedFinalDecisionKey = latestFinalDecisionKey
+        lastAutoSettledUserMessageKey = state.lastUserMessageKey
         routeReturnRestorePending = false
         routeReturnAnchorCaptured = false
         routeReturnWasCovered = false
         routeReturnItemKey = null
+        routeReturnFinalDecisionKey = null
+        kotlinx.coroutines.delay(420L)
         suppressReturnAutoFocus = false
     }
 
@@ -701,7 +722,6 @@ internal fun ChatTimeline(
         isClarificationFlightActive,
         timelineItems.size,
         composerHeightPx,
-        imeBottomPx,
     ) {
         if (!isClarificationFlightActive || !clarificationFreezeCaptured || timelineItems.isEmpty()) {
             return@LaunchedEffect
@@ -724,14 +744,15 @@ internal fun ChatTimeline(
         if (key == activeFlightMessageKey) return@LaunchedEffect
         val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
         if (index >= 0 && key != lastHandledUserMessageKey) {
+            routeReturnSettledTurnId = null
+            routeReturnSettledFinalDecisionKey = null
             lastHandledUserMessageKey = key
             lastAutoSettledUserMessageKey = null
-            activeTurnAnchored = true
-            retainedAnchorUserMessageKey = key
+            activeTurnAnchored = false
+            retainedAnchorUserMessageKey = null
             retainedAnchorAssistantTurnId = null
             forceAssistantReadableTurnId = null
             followStreamingText = false
-            keepLatestUserMessageAnchored()
         }
     }
 
@@ -740,10 +761,9 @@ internal fun ChatTimeline(
         state.lastUserMessageKey,
         activeFlightMessageKey,
         composerHeightPx,
-        imeBottomPx,
-        timelineItems.size,
     ) {
         if (suppressTimelineAutoFocus) return@LaunchedEffect
+        if (state.isStreaming || isAssistantVisualActive) return@LaunchedEffect
         if (!activeTurnAnchored || isUserDragging) return@LaunchedEffect
         val key = state.lastUserMessageKey ?: return@LaunchedEffect
         if (key == activeFlightMessageKey) return@LaunchedEffect
@@ -755,16 +775,17 @@ internal fun ChatTimeline(
 
     LaunchedEffect(
         state.currentTurnId,
-        timelineItems.size,
         activeTurnAnchored,
         activeFlightMessageKey,
         suppressTimelineAutoFocus,
         isUserDragging,
     ) {
         if (suppressTimelineAutoFocus) return@LaunchedEffect
+        if (state.isStreaming || isAssistantVisualActive) return@LaunchedEffect
         val turnId = state.currentTurnId ?: return@LaunchedEffect
         if (
             turnId == lastAnchoredAssistantTurnId ||
+            turnId == routeReturnSettledTurnId ||
             activeFlightMessageKey != null ||
             isUserDragging
         ) {
@@ -792,19 +813,19 @@ internal fun ChatTimeline(
         animateAssistantTurnToReadableArea(turnId)
     }
 
-    LaunchedEffect(isComposerFocused, imeBottomPx, composerHeightPx, timelineItems.size) {
-        if (suppressTimelineAutoFocus) return@LaunchedEffect
-        if (!isComposerFocused || imeBottomPx <= 0 || isUserDragging || activeTurnAnchored) return@LaunchedEffect
-        kotlinx.coroutines.delay(TimelineViewportSettleMs)
-        if (isNearTimelineEnd) {
-            scrollActiveTurnIfNeeded(
-                listState = listState,
-                lastContentIndex = lastContentIndex(),
-                bottomPaddingPx = latestContentBottomPaddingPx,
-                tolerancePx = followCorrectionTolerancePx,
-                settleFrames = 2,
-            )
+    var previousImeBottom by remember { mutableIntStateOf(0) }
+    var wasNearEndBeforeKeyboard by remember { mutableStateOf(true) }
+    LaunchedEffect(stableImeBottomPx) {
+        val delta = stableImeBottomPx - previousImeBottom
+        if (delta > 0 && isComposerFocused && !isUserDragging && wasNearEndBeforeKeyboard) {
+            listState.scrollBy(delta.toFloat())
         }
+        if (stableImeBottomPx == 0) {
+            val lastIdx = lastContentIndex()
+            val lastVisibleIdx = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            wasNearEndBeforeKeyboard = lastIdx < 0 || lastVisibleIdx >= lastIdx - 1
+        }
+        previousImeBottom = stableImeBottomPx
     }
 
     LaunchedEffect(isNearTimelineEnd, isUserDragging) {
@@ -835,19 +856,23 @@ internal fun ChatTimeline(
             lastAutoSettledUserMessageKey = state.lastUserMessageKey
             activeTurnAnchored = false
             followStreamingText = false
+            retainedAnchorUserMessageKey = null
+            retainedAnchorAssistantTurnId = null
+            forceAssistantReadableTurnId = null
         }
     }
 
     LaunchedEffect(
         state.activeConvergenceDeckId,
         state.currentTurnId,
-        timelineItems.size,
         suppressTimelineAutoFocus,
         isUserDragging,
     ) {
         if (suppressTimelineAutoFocus || isUserDragging) return@LaunchedEffect
+        if (state.isStreaming || isAssistantVisualActive) return@LaunchedEffect
         val turnId = state.currentTurnId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         if (state.activeConvergenceDeckId.isNullOrBlank()) return@LaunchedEffect
+        if (turnId == routeReturnSettledTurnId) return@LaunchedEffect
         if (forceAssistantReadableTurnId == turnId) return@LaunchedEffect
         val hasAssistantTurn = timelineItems.any {
             it is AssistantTurnTimelineItem && it.turnId == turnId
@@ -866,12 +891,12 @@ internal fun ChatTimeline(
         latestFinalDecisionKey,
         timelineItems.size,
         composerHeightPx,
-        imeBottomPx,
         suppressTimelineAutoFocus,
         isUserDragging,
     ) {
         if (suppressTimelineAutoFocus) return@LaunchedEffect
         val decisionKey = latestFinalDecisionKey ?: return@LaunchedEffect
+        if (decisionKey == routeReturnSettledFinalDecisionKey) return@LaunchedEffect
         if (decisionKey == lastFocusedFinalDecisionKey || isUserDragging) return@LaunchedEffect
         val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(decisionKey) }
         if (decisionItemIndex < 0) return@LaunchedEffect
@@ -899,7 +924,6 @@ internal fun ChatTimeline(
         isAssistantVisualActive,
         forceAssistantReadableTurnId,
         composerHeightPx,
-        imeBottomPx,
     ) {
         if (suppressTimelineAutoFocus || isUserDragging) return@LaunchedEffect
         val decisionKey = latestFinalDecisionKey ?: return@LaunchedEffect
@@ -922,8 +946,6 @@ internal fun ChatTimeline(
     }
 
     LaunchedEffect(
-        timelineItems.size,
-        state.streamingTextKey,
         state.isStreaming,
         latestContentBottomPaddingPx,
         revealScrollTick,
@@ -932,22 +954,7 @@ internal fun ChatTimeline(
         retainedAnchorAssistantTurnId,
         forceAssistantReadableTurnId,
     ) {
-        if (suppressTimelineAutoFocus) return@LaunchedEffect
-        if (forceAssistantReadableTurnId != null && timelineItems.isNotEmpty()) {
-            animateAssistantTurnToReadableArea(forceAssistantReadableTurnId, settleFrames = 1)
-        } else if ((activeTurnAnchored || retainedAnchorUserMessageKey != null) && timelineItems.isNotEmpty()) {
-            keepLatestUserMessageAnchored()
-        } else if (retainedAnchorAssistantTurnId != null && timelineItems.isNotEmpty()) {
-            keepAssistantTurnAnchored(retainedAnchorAssistantTurnId)
-        } else if (followStreamingText && timelineItems.isNotEmpty()) {
-            scrollActiveTurnIfNeeded(
-                listState = listState,
-                lastContentIndex = lastContentIndex(),
-                bottomPaddingPx = latestContentBottomPaddingPx,
-                tolerancePx = followCorrectionTolerancePx,
-                settleFrames = 2,
-            )
-        }
+        // Disabled: no auto-scroll during or after streaming
     }
 
     LaunchedEffect(
@@ -958,18 +965,7 @@ internal fun ChatTimeline(
         suppressTimelineAutoFocus,
         isUserDragging,
     ) {
-        if (!followLatestActive || suppressTimelineAutoFocus || isUserDragging) return@LaunchedEffect
-        while (true) {
-            if (timelineItems.isNotEmpty()) {
-                scrollActiveTurnIfNeeded(
-                    listState = listState,
-                    lastContentIndex = lastContentIndex(),
-                    bottomPaddingPx = latestContentBottomPaddingPx,
-                    tolerancePx = followCorrectionTolerancePx,
-                )
-            }
-            kotlinx.coroutines.delay(72L)
-        }
+        // Disabled: don't auto-scroll to follow streaming text
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -1022,9 +1018,10 @@ internal fun ChatTimeline(
                                 onRetryLastMessage = onRetryLastMessage,
                                 onEditLastMessage = onEditLastMessage,
                                 onQuickAction = onQuickAction,
+                                onUserImagePreview = onUserImagePreview,
                                 onMessageRevealComplete = onMessageRevealComplete,
                                 onMessageRevealActiveChange = onMessageRevealActiveChange,
-                                onStreamingTextProgress = { requestRevealFollowScroll() },
+                                onStreamingTextProgress = {},
                                 onTextRevealProgress = { _, _, _ -> },
                                 onStructuredEntered = ::markStructuredEnteredAndFollow,
                                 onUserBubblePositioned = onUserBubblePositioned,
@@ -1058,6 +1055,7 @@ internal fun ChatTimeline(
                             onRetryLastMessage = onRetryLastMessage,
                             onEditLastMessage = onEditLastMessage,
                             onQuickAction = onQuickAction,
+                            onUserImagePreview = onUserImagePreview,
                             onMessageRevealComplete = onMessageRevealComplete,
                             onMessageRevealActiveChange = onMessageRevealActiveChange,
                             onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
@@ -1106,6 +1104,7 @@ internal fun ChatTimeline(
                             onRetryLastMessage = onRetryLastMessage,
                             onEditLastMessage = onEditLastMessage,
                             onQuickAction = onQuickAction,
+                            onUserImagePreview = onUserImagePreview,
                             onMessageRevealComplete = { key ->
                                 revealStore.markTextCompleted(key)
                                 onMessageRevealComplete(key)
@@ -1133,19 +1132,6 @@ internal fun ChatTimeline(
                 }
             }
 
-            val shouldRetainAnchorSpacer = retainedAnchorUserMessageKey != null &&
-                retainedAnchorUserMessageKey == state.lastUserMessageKey
-            val shouldRetainAssistantAnchorSpacer = retainedAnchorAssistantTurnId != null &&
-                retainedAnchorAssistantTurnId == state.currentTurnId
-            val endReadingBuffer = if (
-                activeTurnAnchored ||
-                shouldRetainAnchorSpacer ||
-                shouldRetainAssistantAnchorSpacer
-            ) {
-                activeTurnBottomReserve
-            } else {
-                timelineReadingBuffer
-            }
             if (timelineItems.isNotEmpty()) {
                 item("timeline_bottom_reading_buffer") {
                     Spacer(Modifier.height(endReadingBuffer))
@@ -1154,7 +1140,7 @@ internal fun ChatTimeline(
         }
 
         AnimatedVisibility(
-            visible = !isComposerFocused && imeBottomPx <= 0 && !isNearTimelineEnd && !followLatestActive,
+            visible = !isComposerFocused && stableImeBottomPx <= 0 && !isNearTimelineEnd && !followLatestActive,
             enter = fadeIn(animationSpec = tween(durationMillis = 160, easing = MenuEaseOut)) +
                 slideInVertically(
                     animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
@@ -1215,6 +1201,7 @@ private fun AssistantTurnBlock(
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onUserImagePreview: (String) -> Unit,
     onMessageRevealComplete: (String) -> Unit,
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
     onAssistantTurnVisualActiveChange: (String, Boolean) -> Unit,
@@ -1251,6 +1238,35 @@ private fun AssistantTurnBlock(
         item.nodes.forEachIndexed { index, node ->
             val nodeVisible = node.key in coordinator.visibleNodeKeys
             if (!nodeVisible && node !is ThinkingNode) return@forEachIndexed
+            if (node is ThinkingNode) {
+                val nextNode = item.nodes.getOrNull(index + 1)
+                if (nextNode != null && nextNode.isTextOrThinkingNode()) {
+                    return@forEachIndexed
+                }
+                key(node.key) {
+                    TurnNodeMotion(
+                        node = node,
+                        orderIndex = index,
+                        motionEnabled = timelineMotionEnabled,
+                        hasStarted = turnSettled || revealStore.hasStartedStructuredNode(node.key),
+                        hasEntered = turnSettled || revealStore.hasEnteredStructuredNode(node.key),
+                        onStarted = {},
+                        onEntered = {},
+                    ) {
+                        ThinkingNodeVisibility(visible = nodeVisible) {
+                            AssistantInlineStatus(
+                                message = (node as ThinkingNode).payload.userFacingThinkingMessage(),
+                                motionEnabled = renderContext.currentTurnId == node.turnId,
+                            )
+                        }
+                    }
+                }
+                return@forEachIndexed
+            }
+            val precedingThinking = item.nodes.getOrNull(index - 1)
+                ?.takeIf { it is ThinkingNode } as? ThinkingNode
+            val thinkingVisible = precedingThinking != null &&
+                precedingThinking.key in coordinator.visibleNodeKeys
             key(node.key) {
                 TurnNodeMotion(
                     node = node,
@@ -1271,90 +1287,93 @@ private fun AssistantTurnBlock(
                 ) {
                     if (node is ThinkingNode) {
                         ThinkingNodeVisibility(visible = nodeVisible) {
-                            TimelineNodeContent(
-                                node = node,
-                                renderContext = renderContext,
-                                timelineMotionEnabled = timelineMotionEnabled,
-                                hiddenUserMessage = false,
-                                activeFlightMessageKey = activeFlightMessageKey,
-                                revealedMessageKeys = revealedMessageKeys,
-                                textRevealProgress = null,
-                                textCompleted = false,
-                                dismissingClarificationKey = dismissingClarificationKey,
-                                dismissedClarificationKeys = dismissedClarificationKeys,
-                                selectedClarificationOption = selectedClarificationOption,
-                                onClarificationOption = onClarificationOption,
-                                onClarificationManualInput = onClarificationManualInput,
-                                onClarificationManualSource = onClarificationManualSource,
-                                onCriteriaEdit = onCriteriaEdit,
-                                onProductOpen = onProductOpen,
-                                onProductDetailOpen = onProductDetailOpen,
-                                onConvergeRecommendation = onConvergeRecommendation,
-                                onDecisionEvidence = onDecisionEvidence,
-                                onRetryLastMessage = onRetryLastMessage,
-                                onEditLastMessage = onEditLastMessage,
-                                onQuickAction = onQuickAction,
-                                onMessageRevealComplete = onMessageRevealComplete,
-                                onMessageRevealActiveChange = onMessageRevealActiveChange,
-                                onStreamingTextProgress = onStreamingTextProgress,
-                                onTextRevealProgress = coordinator.updateTextProgress,
-                                onStructuredEntered = coordinator.markStructuredEntered,
-                                onUserBubblePositioned = onUserBubblePositioned,
-                                onClarificationCardDismissed = onClarificationCardDismissed,
+                            AssistantInlineStatus(
+                                message = node.payload.userFacingThinkingMessage(),
+                                motionEnabled = renderContext.currentTurnId == node.turnId,
                             )
                         }
                     } else if (nodeVisible) {
-                        val productConvergeActionReady = turnSettled || (
-                            (!renderContext.isStreaming || renderContext.currentTurnId != item.turnId) &&
-                                item.nodes.allTurnTextRevealed(revealStore, revealedMessageKeys)
+                        if (thinkingVisible && precedingThinking != null) {
+                            AssistantInlineStatus(
+                                message = precedingThinking.payload.userFacingThinkingMessage(),
+                                motionEnabled = renderContext.currentTurnId == precedingThinking.turnId,
                             )
-                        TimelineNodeContent(
-                            node = node,
-                            renderContext = renderContext,
-                            timelineMotionEnabled = timelineMotionEnabled,
-                            productConvergeActionReady = productConvergeActionReady,
-                            structuredMotionEnabled = !turnSettled &&
-                                timelineMotionEnabled &&
-                                !revealStore.hasStartedStructuredNode(node.key),
-                            structuredAlreadyEntered = turnSettled ||
-                                revealStore.hasEnteredStructuredNode(node.key),
-                            hiddenUserMessage = false,
-                            activeFlightMessageKey = activeFlightMessageKey,
-                            revealedMessageKeys = revealedMessageKeys,
-                            textRevealProgress = node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
-                            textCompleted = node.revealTextKey()?.let {
-                                turnSettled || revealStore.hasCompletedText(it) || it in revealedMessageKeys
-                            } == true,
-                            textLiveRevealed = node.revealTextKey()?.let {
-                                revealStore.hasLiveRevealedText(it) || it in revealedMessageKeys
-                            } == true,
-                            delayTextReveal = !turnSettled &&
-                                node.revealTextKey()?.let { it in coordinator.textHandoffKeys } == true,
-                            dismissingClarificationKey = dismissingClarificationKey,
-                            dismissedClarificationKeys = dismissedClarificationKeys,
-                            selectedClarificationOption = selectedClarificationOption,
-                            onClarificationOption = onClarificationOption,
-                            onClarificationManualInput = onClarificationManualInput,
-                            onClarificationManualSource = onClarificationManualSource,
-                            onCriteriaEdit = onCriteriaEdit,
-                            onProductOpen = onProductOpen,
-                            onProductDetailOpen = onProductDetailOpen,
-                            onConvergeRecommendation = onConvergeRecommendation,
-                            onDecisionEvidence = onDecisionEvidence,
-                            onRetryLastMessage = onRetryLastMessage,
-                            onEditLastMessage = onEditLastMessage,
-                            onQuickAction = onQuickAction,
-                            onMessageRevealComplete = { key ->
-                                coordinator.markTextCompleted(key)
-                                onMessageRevealComplete(key)
-                            },
-                            onMessageRevealActiveChange = onMessageRevealActiveChange,
-                            onStreamingTextProgress = onStreamingTextProgress,
-                            onTextRevealProgress = coordinator.updateTextProgress,
-                            onStructuredEntered = coordinator.markStructuredEntered,
-                            onUserBubblePositioned = onUserBubblePositioned,
-                            onClarificationCardDismissed = onClarificationCardDismissed,
-                        )
+                        } else {
+                            val showThinkingFade = !turnSettled &&
+                                precedingThinking != null && !thinkingVisible
+                            val thinkingAlpha = remember { Animatable(if (showThinkingFade) 1f else 0f) }
+                            var thinkingFadeDone by remember { mutableStateOf(!showThinkingFade) }
+                            if (showThinkingFade) {
+                                LaunchedEffect(Unit) {
+                                    thinkingAlpha.animateTo(
+                                        0f,
+                                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                                    )
+                                    thinkingFadeDone = true
+                                }
+                            }
+                            if (!thinkingFadeDone) {
+                                Box(Modifier.graphicsLayer { alpha = thinkingAlpha.value }) {
+                                    AssistantInlineStatus(
+                                        message = precedingThinking!!.payload.userFacingThinkingMessage(),
+                                        motionEnabled = false,
+                                    )
+                                }
+                            } else {
+                                val productConvergeActionReady = turnSettled || (
+                                    (!renderContext.isStreaming || renderContext.currentTurnId != item.turnId) &&
+                                        item.nodes.allTurnTextRevealed(revealStore, revealedMessageKeys)
+                                    )
+                                TimelineNodeContent(
+                                    node = node,
+                                    renderContext = renderContext,
+                                    timelineMotionEnabled = timelineMotionEnabled,
+                                    productConvergeActionReady = productConvergeActionReady,
+                                    structuredMotionEnabled = !turnSettled &&
+                                        timelineMotionEnabled &&
+                                        !revealStore.hasStartedStructuredNode(node.key),
+                                    structuredAlreadyEntered = turnSettled ||
+                                        revealStore.hasEnteredStructuredNode(node.key),
+                                    hiddenUserMessage = false,
+                                    activeFlightMessageKey = activeFlightMessageKey,
+                                    revealedMessageKeys = revealedMessageKeys,
+                                    textRevealProgress = node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
+                                    textCompleted = node.revealTextKey()?.let {
+                                        turnSettled || revealStore.hasCompletedText(it) || it in revealedMessageKeys
+                                    } == true,
+                                    textLiveRevealed = node.revealTextKey()?.let {
+                                        revealStore.hasLiveRevealedText(it) || it in revealedMessageKeys
+                                    } == true,
+                                    delayTextReveal = !turnSettled &&
+                                        node.revealTextKey()?.let { it in coordinator.textHandoffKeys } == true,
+                                    dismissingClarificationKey = dismissingClarificationKey,
+                                    dismissedClarificationKeys = dismissedClarificationKeys,
+                                    selectedClarificationOption = selectedClarificationOption,
+                                    onClarificationOption = onClarificationOption,
+                                    onClarificationManualInput = onClarificationManualInput,
+                                    onClarificationManualSource = onClarificationManualSource,
+                                    onCriteriaEdit = onCriteriaEdit,
+                                    onProductOpen = onProductOpen,
+                                    onProductDetailOpen = onProductDetailOpen,
+                                    onConvergeRecommendation = onConvergeRecommendation,
+                                    onDecisionEvidence = onDecisionEvidence,
+                                    onRetryLastMessage = onRetryLastMessage,
+                                    onEditLastMessage = onEditLastMessage,
+                                    onQuickAction = onQuickAction,
+                                    onUserImagePreview = onUserImagePreview,
+                                    onMessageRevealComplete = { key ->
+                                        coordinator.markTextCompleted(key)
+                                        onMessageRevealComplete(key)
+                                    },
+                                    onMessageRevealActiveChange = onMessageRevealActiveChange,
+                                    onStreamingTextProgress = onStreamingTextProgress,
+                                    onTextRevealProgress = coordinator.updateTextProgress,
+                                    onStructuredEntered = coordinator.markStructuredEntered,
+                                    onUserBubblePositioned = onUserBubblePositioned,
+                                    onClarificationCardDismissed = onClarificationCardDismissed,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1367,25 +1386,25 @@ private fun ThinkingNodeVisibility(
     visible: Boolean,
     content: @Composable () -> Unit,
 ) {
+    var delayedVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(visible) {
+        if (visible && !delayedVisible) {
+            kotlinx.coroutines.delay(400L)
+            delayedVisible = true
+        } else if (!visible) {
+            delayedVisible = false
+        }
+    }
     AnimatedVisibility(
-        visible = visible,
+        visible = visible && delayedVisible,
         enter = fadeIn(
-            animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
-        ) + expandVertically(
-            animationSpec = tween(durationMillis = 210, easing = MenuEaseOut),
-            expandFrom = Alignment.Top,
-        ) + slideInVertically(
-            animationSpec = tween(durationMillis = 210, easing = MenuEaseOut),
-            initialOffsetY = { it / 5 },
+            animationSpec = tween(durationMillis = 250, easing = MenuEaseOut),
         ),
         exit = fadeOut(
-            animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+            animationSpec = tween(durationMillis = 220, easing = MenuEaseIn),
         ) + shrinkVertically(
-            animationSpec = tween(durationMillis = 170, easing = MenuEaseIn),
+            animationSpec = tween(durationMillis = 160, delayMillis = 220, easing = MenuEaseIn),
             shrinkTowards = Alignment.Top,
-        ) + slideOutVertically(
-            animationSpec = tween(durationMillis = 170, easing = MenuEaseIn),
-            targetOffsetY = { -it / 6 },
         ),
     ) {
         content()
@@ -1728,6 +1747,7 @@ private fun TimelineNodeContent(
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onUserImagePreview: (String) -> Unit,
     onMessageRevealComplete: (String) -> Unit,
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
     onStreamingTextProgress: () -> Unit,
@@ -1741,6 +1761,7 @@ private fun TimelineNodeContent(
             node = node,
             backendBaseUrl = renderContext.backendBaseUrl,
             hidden = hiddenUserMessage,
+            onImagePreview = onUserImagePreview,
             onPositioned = if (node.key == activeFlightMessageKey) {
                 { onUserBubblePositioned(node.key, it) }
             } else {
@@ -1945,6 +1966,7 @@ private fun UserBubble(
     node: UserMessageNode,
     backendBaseUrl: String,
     hidden: Boolean = false,
+    onImagePreview: (String) -> Unit,
     onPositioned: ((ClarificationChipSnapshot) -> Unit)? = null,
 ) {
     val bubbleShape = RoundedCornerShape(18.dp)
@@ -1965,21 +1987,29 @@ private fun UserBubble(
     ) {
         val resolvedImageUrl = node.imageUrl.resolveProductImageUrl(backendBaseUrl)
         if (resolvedImageUrl != null) {
-            Box(
+            Surface(
                 modifier = Modifier
-                    .widthIn(max = 228.dp)
-                    .aspectRatio(4f / 3f)
+                    .width(176.dp)
+                    .height(132.dp)
                     .then(if (node.content.isBlank()) positionModifier else Modifier)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(BuyPilotColors.SurfaceMuted)
-                    .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f), RoundedCornerShape(18.dp)),
-                contentAlignment = Alignment.Center,
+                    .clickable(role = Role.Button) { onImagePreview(resolvedImageUrl) },
+                color = BuyPilotColors.SurfaceCard,
+                shape = RoundedCornerShape(18.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    BuyPilotColors.Border.copy(alpha = 0.78f),
+                ),
+                shadowElevation = 2.dp,
             ) {
                 AsyncImage(
                     model = resolvedImageUrl,
-                    contentDescription = "发送的图片",
+                    contentDescription = "发送的图片，点按放大",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(3.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(BuyPilotColors.SurfaceMuted),
                 )
             }
         }

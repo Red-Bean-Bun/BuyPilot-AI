@@ -25,6 +25,7 @@ import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import com.buypilot.feature.chat.presentation.toTimelinePresentationState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -616,6 +617,44 @@ class ChatReducerTest {
         assertEquals(1, state.nodes.filterIsInstance<AiStreamNode>().size)
         assertEquals("我会先整理标准。", (state.nodes[0] as AiStreamNode).content)
         assertTrue(state.nodes[1] is CriteriaNode)
+    }
+
+    @Test
+    fun criteriaPatchHidesOldCriteriaAndNewCriteriaUsesCurrentTurnKey() {
+        val payload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_1",
+                category = "数码电子",
+                summary = "智能手机，3000 元以内",
+            ),
+        )
+        val oldState = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_1",
+                turnId = "turn_old",
+                payload = payload,
+            ),
+        ).copy(staleCriteriaNodeKeys = setOf("criteria_1"))
+
+        val nextState = ChatReducer.reduce(
+            oldState,
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_1",
+                turnId = "turn_new",
+                payload = payload,
+            ),
+        )
+
+        val criteriaNodes = nextState.nodes.filterIsInstance<CriteriaNode>()
+        assertEquals(listOf("criteria_1", "criteria_1_turn_new"), criteriaNodes.map { it.key })
+        assertEquals("turn_new", criteriaNodes.last().turnId)
+
+        val presentation = nextState.toTimelinePresentationState()
+        assertFalse(presentation.revealKeys.contains("criteria_1"))
+        assertTrue(presentation.revealKeys.contains("criteria_1_turn_new"))
     }
 
     @Test

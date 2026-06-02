@@ -382,13 +382,28 @@ object ChatReducer {
         if (payload.criteria.isCategoryMismatchedWithTurnDeck(state, envelope.turnId)) {
             return state
         }
+        val rawNodeKey = envelope.nodeId.ifBlank {
+            payload.criteria.criteriaId.ifBlank { "criteria_${envelope.turnId}" }
+        }
+        val existing = state.nodes.filterIsInstance<CriteriaNode>()
+            .firstOrNull {
+                it.turnId == envelope.turnId &&
+                    (
+                        it.key == rawNodeKey ||
+                            (
+                                payload.criteria.criteriaId.isNotBlank() &&
+                                    it.payload.criteria.criteriaId == payload.criteria.criteriaId
+                                )
+                        )
+            }
+        val nodeKey = existing?.key ?: state.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
         return state.upsertNode(
             CriteriaNode(
-                key = envelope.nodeId,
+                key = nodeKey,
                 payload = payload,
                 turnId = envelope.turnId,
             ),
-        )
+        ).copy(staleCriteriaNodeKeys = state.staleCriteriaNodeKeys - nodeKey)
     }
 
     private fun reduceClarification(
