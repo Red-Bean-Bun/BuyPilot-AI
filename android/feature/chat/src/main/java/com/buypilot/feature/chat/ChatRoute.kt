@@ -9,8 +9,8 @@ import com.buypilot.feature.chat.ui.BuyPilotChatScreen
 @Composable
 fun ChatRoute(
     viewModel: ChatViewModel = hiltViewModel(),
-    onOpenProductDeck: (String, String?) -> Unit = { _, _ -> },
-    onOpenProductDetail: (String, String) -> Unit = { _, _ -> },
+    onOpenProductDeck: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onOpenProductDetail: (String, String, String?) -> Unit = { _, _, _ -> },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val timelinePresentation by viewModel.timelinePresentationState.collectAsStateWithLifecycle()

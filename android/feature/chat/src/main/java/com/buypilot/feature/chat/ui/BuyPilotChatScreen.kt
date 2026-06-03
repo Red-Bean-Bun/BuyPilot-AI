@@ -266,6 +266,7 @@ private const val CriteriaCardEnterMs = 560
 private const val DecisionCardEnterMs = 760
 private const val DecisionReasonBaseDelayMs = 240
 private const val DecisionReasonStaggerMs = 120
+private val ProductDeckFooterHeight = 46.dp
 
 private data class PendingClarificationAnswer(
     val nodeKey: String,
@@ -331,8 +332,8 @@ internal fun BuyPilotChatScreen(
     onCartOpen: () -> Unit,
     onCartSheetRequestHandled: (Long) -> Unit,
     onCartQuantityChange: (String, Int) -> Unit,
-    onOpenProductDeck: (String, String?) -> Unit,
-    onOpenProductDetail: (String, String) -> Unit,
+    onOpenProductDeck: (String, String?, String?) -> Unit,
+    onOpenProductDetail: (String, String, String?) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onClearConversation: () -> Unit,
@@ -344,6 +345,10 @@ internal fun BuyPilotChatScreen(
     var sheetContent by rememberSaveable(stateSaver = ChatSheetContentSaver) {
         mutableStateOf<ChatSheetContent?>(null)
     }
+    var timelineExternalRouteFreezeRequestId by remember { mutableIntStateOf(0) }
+    var pendingProductDetailAfterTimelineFreeze by remember {
+        mutableStateOf<PendingProductDetailRoute?>(null)
+    }
     var sheetExiting by remember { mutableStateOf(false) }
     var sheetTransitionId by remember { mutableStateOf(0) }
     var dismissedClarificationKeys by rememberSaveable(stateSaver = StringSetSaver) {
@@ -352,9 +357,13 @@ internal fun BuyPilotChatScreen(
     var dismissingClarificationKey by remember { mutableStateOf<String?>(null) }
     var revealedMessageKeyList by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val revealedMessageKeys = remember(revealedMessageKeyList) { revealedMessageKeyList.toSet() }
+    var liveRevealedMessageKeys by rememberSaveable(stateSaver = StringSetSaver) {
+        mutableStateOf(emptySet<String>())
+    }
     var typingMessageKeys by rememberSaveable(stateSaver = StringSetSaver) {
         mutableStateOf(emptySet<String>())
     }
+    var timelineInstanceId by rememberSaveable { mutableIntStateOf(0) }
     var visualActiveTurnKeys by remember { mutableStateOf(emptySet<String>()) }
     var pendingClarificationAnswer by remember { mutableStateOf<PendingClarificationAnswer?>(null) }
     var activeClarificationFlight by remember { mutableStateOf<ClarificationFlight?>(null) }
@@ -401,6 +410,12 @@ internal fun BuyPilotChatScreen(
         !keyboardVisible
     val activeClarificationKey = timelinePresentation.clarificationKeys
         .lastOrNull { it !in dismissedClarificationKeys }
+    val timelineItemKeySignature = remember(timelinePresentation.items) {
+        timelinePresentation.items.joinToString(separator = "|") { it.key }
+    }
+    val timelineItemKeys = remember(timelineItemKeySignature) {
+        timelinePresentation.items.mapTo(mutableSetOf()) { it.key }
+    }
     val pendingFlightMessageKey = pendingClarificationAnswer?.let { pending ->
         state.lastUserMessageKey?.takeIf { key ->
             pending.awaitsFlight && key != pending.previousUserMessageKey
@@ -421,6 +436,21 @@ internal fun BuyPilotChatScreen(
     LaunchedEffect(shouldDismissWelcomeContent) {
         if (shouldDismissWelcomeContent) {
             welcomePromptDismissed = true
+        }
+    }
+    LaunchedEffect(timelinePresentation.revealKeys, timelineItemKeySignature) {
+        val currentRevealKeys = timelinePresentation.revealKeys
+        if (revealedMessageKeyList.any { it !in currentRevealKeys }) {
+            revealedMessageKeyList = revealedMessageKeyList.filter { it in currentRevealKeys }
+        }
+        if (liveRevealedMessageKeys.any { it !in currentRevealKeys }) {
+            liveRevealedMessageKeys = liveRevealedMessageKeys.filterTo(mutableSetOf()) { it in currentRevealKeys }
+        }
+        if (typingMessageKeys.any { it !in currentRevealKeys }) {
+            typingMessageKeys = typingMessageKeys.filterTo(mutableSetOf()) { it in currentRevealKeys }
+        }
+        if (visualActiveTurnKeys.any { it !in timelineItemKeys }) {
+            visualActiveTurnKeys = visualActiveTurnKeys.filterTo(mutableSetOf()) { it in timelineItemKeys }
         }
     }
 
@@ -454,6 +484,30 @@ internal fun BuyPilotChatScreen(
                 sheetExiting = false
             }
         }
+    }
+
+    fun openProductDetailAfterTimelineFreeze(
+        deckId: String,
+        productId: String,
+        anchorNodeKey: String? = null,
+        deckNodeKey: String? = null,
+    ) {
+        pendingProductDetailAfterTimelineFreeze = PendingProductDetailRoute(
+            requestId = timelineExternalRouteFreezeRequestId + 1,
+            deckId = deckId,
+            productId = productId,
+            anchorNodeKey = anchorNodeKey.orEmpty(),
+            deckNodeKey = deckNodeKey.orEmpty(),
+        )
+        timelineExternalRouteFreezeRequestId += 1
+    }
+
+    fun finishProductDetailFreeze(requestId: Int) {
+        val route = pendingProductDetailAfterTimelineFreeze
+            ?.takeIf { it.requestId == requestId }
+            ?: return
+        pendingProductDetailAfterTimelineFreeze = null
+        onOpenProductDetail(route.deckId, route.productId, route.deckNodeKey.takeIf { it.isNotBlank() })
     }
 
     LaunchedEffect(state.cartSheetRequestId) {
@@ -491,7 +545,12 @@ internal fun BuyPilotChatScreen(
         when (action.action) {
             "compare", "open_evidence" -> {
                 if (latestDecision != null) {
-                    openSheet(ChatSheetContent.DecisionEvidence(latestDecision))
+                    openSheet(
+                        ChatSheetContent.DecisionEvidence(
+                            payload = latestDecision,
+                            sourceNodeKey = timelinePresentation.latestFinalDecisionKey.orEmpty(),
+                        ),
+                    )
                 } else {
                     onQuickAction(action)
                 }
@@ -525,11 +584,14 @@ internal fun BuyPilotChatScreen(
         sheetContent = null
         sheetExiting = false
         sheetTransitionId += 1
+        pendingProductDetailAfterTimelineFreeze = null
         dismissedClarificationKeys = emptySet()
         dismissingClarificationKey = null
         welcomePromptDismissed = false
         revealedMessageKeyList = emptyList()
+        liveRevealedMessageKeys = emptySet()
         typingMessageKeys = emptySet()
+        timelineInstanceId += 1
         visualActiveTurnKeys = emptySet()
         pendingClarificationAnswer = null
         activeClarificationFlight = null
@@ -675,6 +737,10 @@ internal fun BuyPilotChatScreen(
                     welcomeContentVisible = welcomeContentVisible,
                     state = state,
                     timelinePresentation = timelinePresentation,
+                    timelineInstanceId = timelineInstanceId,
+                    externalRouteFreezeRequestId = timelineExternalRouteFreezeRequestId,
+                    externalRouteFreezeAnchorNodeKey = pendingProductDetailAfterTimelineFreeze?.anchorNodeKey,
+                    onExternalRouteFreezeReady = ::finishProductDetailFreeze,
                     onClarificationOption = { label, snapshot ->
                         answerClarification(
                             label.toClarificationUserMessage(defaultSkinTypeOptions),
@@ -687,7 +753,14 @@ internal fun BuyPilotChatScreen(
                     onProductDetailOpen = onOpenProductDetail,
                     onConvergeRecommendation = onConvergeProductDeck,
                     onWelcomePromptClick = { loadWelcomePrompt(it) },
-                    onDecisionEvidence = { openSheet(ChatSheetContent.DecisionEvidence(it)) },
+                    onDecisionEvidence = { payload, sourceNodeKey ->
+                        openSheet(
+                            ChatSheetContent.DecisionEvidence(
+                                payload = payload,
+                                sourceNodeKey = sourceNodeKey.orEmpty(),
+                            ),
+                        )
+                    },
                     onRetryLastMessage = onRetryLastMessage,
                     onEditLastMessage = { editAndFocus(it) },
                     onQuickAction = ::dispatchQuickAction,
@@ -714,13 +787,15 @@ internal fun BuyPilotChatScreen(
                     hiddenUserMessageKeys = hiddenUserMessageKeysForFlight,
                     activeFlightMessageKey = activeFlightMessageKey,
                     revealedMessageKeys = revealedMessageKeys,
+                    liveRevealedMessageKeys = liveRevealedMessageKeys,
                     onMessageRevealComplete = { key ->
-                        if (key !in revealedMessageKeys) {
+                        if (key !in revealedMessageKeyList) {
                             revealedMessageKeyList = revealedMessageKeyList + key
                         }
                     },
                     onMessageRevealActiveChange = { key, active ->
                         typingMessageKeys = if (active) {
+                            liveRevealedMessageKeys = liveRevealedMessageKeys + key
                             typingMessageKeys + key
                         } else {
                             typingMessageKeys - key
@@ -734,7 +809,12 @@ internal fun BuyPilotChatScreen(
                         }
                     },
                     onUserBubblePositioned = { key, snapshot ->
-                        if (key !in userBubbleSnapshots) {
+                        val shouldTrackLiveFlightTarget =
+                            key == pendingFlightMessageKey || key == activeFlightMessageKey
+                        if (
+                            key !in userBubbleSnapshots ||
+                            (shouldTrackLiveFlightTarget && userBubbleSnapshots[key] != snapshot)
+                        ) {
                             userBubbleSnapshots = userBubbleSnapshots + (key to snapshot)
                         }
                     },
@@ -881,6 +961,8 @@ internal fun BuyPilotChatScreen(
 
     val sheetProductsById = timelinePresentation.productsById
     val sheetProductDeckIdByProductId = timelinePresentation.productDeckIdByProductId
+    val sheetProductDeckNodeByKey = timelinePresentation.productDeckNodeByKey
+    val sheetFinalDecisionSourceDeckKeyByDecisionKey = timelinePresentation.finalDecisionSourceDeckKeyByDecisionKey
     val content = sheetContent
     if (content != null) {
         ModalBottomSheet(
@@ -908,11 +990,25 @@ internal fun BuyPilotChatScreen(
                     )
                     is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(
                         payload = targetContent.payload,
-                        productsById = sheetProductsById,
-                        productDeckIdByProductId = sheetProductDeckIdByProductId,
+                        productsById = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey]
+                            ?.let { sheetProductDeckNodeByKey[it] }
+                            ?.productsByProductId()
+                            ?: sheetProductsById,
+                        productDeckIdByProductId = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey]
+                            ?.let { sheetProductDeckNodeByKey[it] }
+                            ?.deckIdsByProductId()
+                            ?: sheetProductDeckIdByProductId,
+                        sourceDeckNodeKey = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey],
                         cartState = state.cartState,
-                        onProductDetailOpen = { deckId, productId ->
-                            dismissSheet { onOpenProductDetail(deckId, productId) }
+                        onProductDetailOpen = { deckId, productId, deckNodeKey ->
+                            dismissSheet {
+                                openProductDetailAfterTimelineFreeze(
+                                    deckId = deckId,
+                                    productId = productId,
+                                    anchorNodeKey = targetContent.sourceNodeKey,
+                                    deckNodeKey = deckNodeKey,
+                                )
+                            }
                         },
                         onQuickAction = ::dispatchQuickAction,
                     )
@@ -923,7 +1019,7 @@ internal fun BuyPilotChatScreen(
                         onProductDetailOpen = { productId ->
                             val deckId = sheetProductDeckIdByProductId[productId]
                             if (deckId != null) {
-                                dismissSheet { onOpenProductDetail(deckId, productId) }
+                                dismissSheet { openProductDetailAfterTimelineFreeze(deckId, productId) }
                             }
                         },
                     )
@@ -987,6 +1083,14 @@ private data class WelcomePrompt(
     val tint: Color,
 )
 
+private data class PendingProductDetailRoute(
+    val requestId: Int,
+    val deckId: String,
+    val productId: String,
+    val anchorNodeKey: String = "",
+    val deckNodeKey: String = "",
+)
+
 private val WelcomePrompts = listOf(
     WelcomePrompt(R.drawable.ic_search_24, "油皮洁面怎么选？", BuyPilotColors.Info),
     WelcomePrompt(R.drawable.ic_shield_24, "敏感肌面霜，帮我避开酒精香精", BuyPilotColors.Success),
@@ -1000,15 +1104,19 @@ private fun ConversationStage(
     welcomeContentVisible: Boolean,
     state: ChatUiState,
     timelinePresentation: TimelinePresentationState,
+    timelineInstanceId: Int,
+    externalRouteFreezeRequestId: Int,
+    externalRouteFreezeAnchorNodeKey: String?,
+    onExternalRouteFreezeReady: (Int) -> Unit,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
     onClarificationManualSource: (String, ClarificationChipSnapshot) -> Unit,
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
-    onProductOpen: (String, String?) -> Unit,
-    onProductDetailOpen: (String, String) -> Unit,
+    onProductOpen: (String, String?, String?) -> Unit,
+    onProductDetailOpen: (String, String, String?) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onWelcomePromptClick: (String) -> Unit,
-    onDecisionEvidence: (FinalDecisionPayload) -> Unit,
+    onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
@@ -1026,6 +1134,7 @@ private fun ConversationStage(
     hiddenUserMessageKeys: Set<String>,
     activeFlightMessageKey: String?,
     revealedMessageKeys: Set<String>,
+    liveRevealedMessageKeys: Set<String>,
     onMessageRevealComplete: (String) -> Unit,
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
     onAssistantTurnVisualActiveChange: (String, Boolean) -> Unit,
@@ -1063,53 +1172,51 @@ private fun ConversationStage(
             visible = timelinePresentation.hasNodes,
             enter = fadeIn(
                 animationSpec = tween(
-                    durationMillis = 220,
-                    delayMillis = 90,
+                    durationMillis = 140,
                     easing = FastOutSlowInEasing,
                 ),
-            ) + slideInVertically(
-                animationSpec = tween(
-                    durationMillis = 240,
-                    delayMillis = 90,
-                    easing = FastOutSlowInEasing,
-                ),
-                initialOffsetY = { it / 32 },
             ),
             exit = fadeOut(animationSpec = tween(durationMillis = 120)),
         ) {
-            ChatTimeline(
-                state = state,
-                timelinePresentation = timelinePresentation,
-                onClarificationOption = onClarificationOption,
-                onClarificationManualInput = onClarificationManualInput,
-                onClarificationManualSource = onClarificationManualSource,
-                onCriteriaEdit = onCriteriaEdit,
-                onProductOpen = onProductOpen,
-                onProductDetailOpen = onProductDetailOpen,
-                onConvergeRecommendation = onConvergeRecommendation,
-                onDecisionEvidence = onDecisionEvidence,
-                onRetryLastMessage = onRetryLastMessage,
-                onEditLastMessage = onEditLastMessage,
-                onQuickAction = onQuickAction,
-                onUserImagePreview = onUserImagePreview,
-                onTimelineDrag = onTimelineDrag,
-                composerHeightPx = composerHeightPx,
-                stableImeBottomPx = stableImeBottomPx,
-                isComposerFocused = isComposerFocused,
-                isAssistantVisualActive = isAssistantVisualActive,
-                isClarificationFlightActive = isClarificationFlightActive,
-                dismissingClarificationKey = dismissingClarificationKey,
-                dismissedClarificationKeys = dismissedClarificationKeys,
-                selectedClarificationOption = selectedClarificationOption,
-                hiddenUserMessageKeys = hiddenUserMessageKeys,
-                activeFlightMessageKey = activeFlightMessageKey,
-                revealedMessageKeys = revealedMessageKeys,
-                onMessageRevealComplete = onMessageRevealComplete,
-                onMessageRevealActiveChange = onMessageRevealActiveChange,
-                onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
-                onUserBubblePositioned = onUserBubblePositioned,
-                onClarificationCardDismissed = onClarificationCardDismissed,
-            )
+            key(timelineInstanceId) {
+                ChatTimeline(
+                    state = state,
+                    timelinePresentation = timelinePresentation,
+                    externalRouteFreezeRequestId = externalRouteFreezeRequestId,
+                    externalRouteFreezeAnchorNodeKey = externalRouteFreezeAnchorNodeKey,
+                    onExternalRouteFreezeReady = onExternalRouteFreezeReady,
+                    onClarificationOption = onClarificationOption,
+                    onClarificationManualInput = onClarificationManualInput,
+                    onClarificationManualSource = onClarificationManualSource,
+                    onCriteriaEdit = onCriteriaEdit,
+                    onProductOpen = onProductOpen,
+                    onProductDetailOpen = onProductDetailOpen,
+                    onConvergeRecommendation = onConvergeRecommendation,
+                    onDecisionEvidence = onDecisionEvidence,
+                    onRetryLastMessage = onRetryLastMessage,
+                    onEditLastMessage = onEditLastMessage,
+                    onQuickAction = onQuickAction,
+                    onUserImagePreview = onUserImagePreview,
+                    onTimelineDrag = onTimelineDrag,
+                    composerHeightPx = composerHeightPx,
+                    stableImeBottomPx = stableImeBottomPx,
+                    isComposerFocused = isComposerFocused,
+                    isAssistantVisualActive = isAssistantVisualActive,
+                    isClarificationFlightActive = isClarificationFlightActive,
+                    dismissingClarificationKey = dismissingClarificationKey,
+                    dismissedClarificationKeys = dismissedClarificationKeys,
+                    selectedClarificationOption = selectedClarificationOption,
+                    hiddenUserMessageKeys = hiddenUserMessageKeys,
+                    activeFlightMessageKey = activeFlightMessageKey,
+                    revealedMessageKeys = revealedMessageKeys,
+                    liveRevealedMessageKeys = liveRevealedMessageKeys,
+                    onMessageRevealComplete = onMessageRevealComplete,
+                    onMessageRevealActiveChange = onMessageRevealActiveChange,
+                    onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
+                    onUserBubblePositioned = onUserBubblePositioned,
+                    onClarificationCardDismissed = onClarificationCardDismissed,
+                )
+            }
         }
     }
 }
@@ -1859,7 +1966,12 @@ internal fun ProductRecommendationStrip(
     onConverge: () -> Unit,
 ) {
     val products = node.products
-    if (products.isEmpty()) return
+    if (products.isEmpty()) {
+        LaunchedEffect(node.key, alreadyEntered) {
+            if (!alreadyEntered) onEntered()
+        }
+        return
+    }
     if (compactHistory) {
         LaunchedEffect(node.key, alreadyEntered) {
             if (!alreadyEntered) onEntered()
@@ -1872,9 +1984,12 @@ internal fun ProductRecommendationStrip(
         )
         return
     }
-    val singleCandidate = products.size == 1 && !deckStillStreaming
+    val singleCandidate = isSingleCandidateDeck(products.size)
     val deckFullyHandled = isProductDeckFullyHandled(products, swipeState)
     val preferredPage = preferredProductCarouselPage(products, swipeState)
+    val productIdSignature = remember(products) {
+        products.joinToString(separator = "|") { it.product.productId }
+    }
 
     val pagerState = rememberPagerState(
         initialPage = preferredPage,
@@ -1882,7 +1997,7 @@ internal fun ProductRecommendationStrip(
     )
     val activeIndex = pagerState.currentPage.coerceIn(0, products.lastIndex)
 
-    LaunchedEffect(node.deckId, preferredPage, products.size) {
+    LaunchedEffect(node.deckId, productIdSignature, preferredPage, products.size) {
         if (preferredPage != pagerState.currentPage && !pagerState.isScrollInProgress) {
             pagerState.scrollToPage(preferredPage)
         }
@@ -1894,7 +2009,7 @@ internal fun ProductRecommendationStrip(
         alreadyEntered = alreadyEntered,
         onEntered = onEntered,
     )
-    val chromeProgress = remember { { segmentProgress(arrivalProgress(), 0.46f, 1f) } }
+    val chromeProgress = remember(arrivalProgress) { { segmentProgress(arrivalProgress(), 0.46f, 1f) } }
     val convergeButtonTargetProgress = if (awaitingConvergence && !deckFullyHandled && convergeActionReady) 1f else 0f
     val convergeButtonProgress by animateFloatAsState(
         targetValue = convergeButtonTargetProgress,
@@ -2020,7 +2135,7 @@ private fun ProductDeckFooterControls(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (showIndicators) 46.dp else 30.dp)
+            .height(ProductDeckFooterHeight)
             .graphicsLayer {
                 val chrome = chromeProgress()
                 alpha = maxOf(chrome, buttonProgress * 0.96f)
@@ -2614,20 +2729,21 @@ internal fun DecisionSummaryCard(
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
+    sourceDeckNodeKey: String? = null,
     cartState: ChatCartUiState,
     backendBaseUrl: String,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     onEntered: () -> Unit,
     onEvidence: () -> Unit,
-    onProductDetailOpen: (String, String) -> Unit,
+    onProductDetailOpen: (String, String, String?) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val winnerProductId = payload.winnerProductId?.takeIf { it.isNotBlank() }
     val winner = winnerProductId?.let { winnerId -> productsById[winnerId] }
     val winnerDeckId = winnerProductId?.let { productDeckIdByProductId[it] }
     val openWinnerDetail = winnerDeckId?.let { deckId ->
-        { onProductDetailOpen(deckId, winnerProductId.orEmpty()) }
+        { onProductDetailOpen(deckId, winnerProductId.orEmpty(), sourceDeckNodeKey) }
     }
     val product = winner?.product
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
@@ -2641,6 +2757,20 @@ internal fun DecisionSummaryCard(
     }
     val winnerAlreadyInCart = winnerProductId?.let { id -> cartState.items.any { it.productId == id } } == true
     val winnerAddPending = winnerProductId?.let { it in cartState.pendingAddProductIds } == true
+    val hasDecisionBody = winner != null ||
+        !winnerProductId.isNullOrBlank() ||
+        whyItems.isNotEmpty() ||
+        notForItems.isNotEmpty() ||
+        statusBadge?.showCardWhenEmpty == true
+
+    LaunchedEffect(motionKey, hasDecisionBody, alreadyEntered, motionEnabled) {
+        if (!hasDecisionBody && !alreadyEntered) {
+            if (motionEnabled) {
+                kotlinx.coroutines.delay(420L)
+            }
+            onEntered()
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         DecisionSummaryIntro(
@@ -2649,13 +2779,7 @@ internal fun DecisionSummaryCard(
             motionEnabled = motionEnabled,
             alreadyEntered = alreadyEntered,
         )
-        if (
-            winner != null ||
-            !winnerProductId.isNullOrBlank() ||
-            whyItems.isNotEmpty() ||
-            notForItems.isNotEmpty() ||
-            statusBadge?.showCardWhenEmpty == true
-        ) {
+        if (hasDecisionBody) {
             StructuredCardMotion(
                 key = motionKey,
                 motionEnabled = motionEnabled,
@@ -3004,46 +3128,52 @@ private fun DecisionMetaPill(
 fun ProductHeroDetailScreen(
     state: ChatUiState,
     deckId: String,
+    deckNodeKey: String? = null,
     productId: String,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onOpenEvidence: (String, String) -> Unit,
+    onOpenEvidence: (String, String, String?) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
-    onDeckCompleted: (String) -> Unit,
     onAddToCart: (String) -> Unit = {},
 ) {
-    var activeProductId by rememberSaveable(deckId, productId) { mutableStateOf(productId) }
-    val payload = state.findProduct(deckId, activeProductId)
+    var activeProductId by rememberSaveable(deckId, deckNodeKey, productId) { mutableStateOf(productId) }
+    val payload = state.findProduct(deckId, activeProductId, deckNodeKey)
     val haptics = LocalHapticFeedback.current
     val latestOnBack by rememberUpdatedState(onBack)
-    var submittedFeedback by rememberSaveable(deckId, activeProductId) { mutableStateOf<String?>(null) }
-    var pendingAdvanceProductId by rememberSaveable(deckId, activeProductId) { mutableStateOf<String?>(null) }
+    var submittedFeedback by rememberSaveable(deckId, deckNodeKey, activeProductId) { mutableStateOf<String?>(null) }
+    var pendingAdvanceProductId by rememberSaveable(deckId, deckNodeKey, activeProductId) { mutableStateOf<String?>(null) }
+    val productInSourceDeck = state.isProductInDeck(deckId, activeProductId, deckNodeKey)
     val handledProductIds = state.productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
-    val deckCanConverge = state.canOpenDeckForConvergence(deckId)
-    val readOnlyByState = !deckCanConverge ||
-        state.hasConvergedDecisionForDeck(deckId) ||
+    val deckCanConverge = state.canOpenDeckForConvergence(deckId, deckNodeKey)
+    val readOnlyByState = !productInSourceDeck ||
+        !deckCanConverge ||
+        state.hasConvergedDecisionForDeck(deckId, deckNodeKey) ||
         activeProductId in handledProductIds
-    var choiceActionsAvailable by rememberSaveable(deckId, activeProductId) {
+    var choiceActionsAvailable by rememberSaveable(deckId, deckNodeKey, activeProductId) {
         mutableStateOf(!readOnlyByState)
     }
-    val nextUnhandledProductId = state.findProductDeck(deckId)
-        ?.products
-        .orEmpty()
-        .map { it.product.productId }
-        .firstOrNull { id ->
-            id.isNotBlank() && id != activeProductId && id !in handledProductIds
-        }
-    val deckWillBeFullyHandledAfterCurrentChoice = state.findProductDeck(deckId)
-        ?.products
-        .orEmpty()
-        .mapNotNull { it.product.productId.takeIf(String::isNotBlank) }
-        .let { productIds ->
-            productIds.size >= 2 &&
-                activeProductId.isNotBlank() &&
-                productIds.all { id -> id == activeProductId || id in handledProductIds }
-        }
-    var completionRequested by rememberSaveable(deckId) { mutableStateOf(false) }
-    val latestOnDeckCompleted by rememberUpdatedState(onDeckCompleted)
+    val latestDeckProducts = state.findProductDeck(deckId, deckNodeKey)?.products.orEmpty()
+    val nextUnhandledProductId = if (productInSourceDeck) {
+        latestDeckProducts
+            .map { it.product.productId }
+            .firstOrNull { id ->
+                id.isNotBlank() && id != activeProductId && id !in handledProductIds
+            }
+    } else {
+        null
+    }
+    val deckWillBeFullyHandledAfterCurrentChoice = if (productInSourceDeck) {
+        latestDeckProducts
+            .mapNotNull { it.product.productId.takeIf(String::isNotBlank) }
+            .let { productIds ->
+                productIds.size >= 2 &&
+                    activeProductId.isNotBlank() &&
+                    productIds.all { id -> id == activeProductId || id in handledProductIds }
+            }
+    } else {
+        false
+    }
+    var completionRequested by rememberSaveable(deckId, deckNodeKey) { mutableStateOf(false) }
 
     LaunchedEffect(readOnlyByState, submittedFeedback) {
         if (readOnlyByState && submittedFeedback == null) {
@@ -3122,7 +3252,7 @@ fun ProductHeroDetailScreen(
         }
     }
     val routeProgressState = rememberRouteEnterProgress(
-        key = "detail_${deckId}_${activeProductId}",
+        key = "detail_${deckId}_${deckNodeKey.orEmpty()}_${activeProductId}",
         durationMillis = ProductDetailEnterMs,
     )
 
@@ -3155,7 +3285,6 @@ fun ProductHeroDetailScreen(
                 detailListState.scrollToItem(0)
             } else if (deckWillBeFullyHandledAfterCurrentChoice && deckCanConverge && !completionRequested) {
                 completionRequested = true
-                latestOnDeckCompleted(deckId)
                 latestOnBack()
             } else {
                 latestOnBack()
@@ -3226,7 +3355,7 @@ fun ProductHeroDetailScreen(
         ImmersiveCircleButton(
             iconRes = R.drawable.ic_article_24,
             contentDescription = "推荐证据",
-            onClick = { onOpenEvidence(deckId, activeProductId) },
+            onClick = { onOpenEvidence(deckId, activeProductId, deckNodeKey) },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
@@ -3992,42 +4121,7 @@ internal fun CartActionCard(
     }
 }
 
-private data class ErrorPresentation(
-    val title: String,
-    val reason: String,
-    val action: String,
-)
-
-private fun ErrorNode.presentation(): ErrorPresentation {
-    val normalized = code.uppercase()
-    return when {
-        "NETWORK" in normalized || "TIMEOUT" in normalized || "CONNECTION" in normalized -> ErrorPresentation(
-            title = "网络连接失败",
-            reason = message.userFacingErrorReason("当前连接不稳定，商品证据或模型回复没有完整返回。"),
-            action = "可以直接重试，或先编辑问题让条件更短。",
-        )
-        "MODEL" in normalized || "LLM" in normalized || "GENERATION" in normalized -> ErrorPresentation(
-            title = "模型生成失败",
-            reason = message.userFacingErrorReason("模型这轮没有生成出可用答案。"),
-            action = "保留了最近的问题，可以重新生成。",
-        )
-        "EVIDENCE" in normalized || "INSUFFICIENT" in normalized -> ErrorPresentation(
-            title = "证据不足",
-            reason = message.userFacingErrorReason("当前商品资料不足以支撑可靠推荐。"),
-            action = "建议编辑问题，补充预算、肤质或排除项。",
-        )
-        "IMAGE" in normalized || "VISION" in normalized -> ErrorPresentation(
-            title = "图片识别失败",
-            reason = message.userFacingErrorReason("图片主体可能不够清晰，暂时无法稳定识别商品。"),
-            action = "可以换一张更清晰的图，或改用文字描述。",
-        )
-        else -> ErrorPresentation(
-            title = "这轮回复中断了",
-            reason = message.userFacingErrorReason("系统没有拿到完整结果。"),
-            action = "你可以重试，或编辑最近问题后重新发送。",
-        )
-    }
-}
+internal const val MinimalErrorText = "服务暂时无响应"
 
 private val TechnicalErrorMarkerRegex = Regex(
     """(?i)\b(?:exception|traceback|timeout|failed|failure|network|http|ssl|socket|connect|connection|json|cancelled|canceled|unable|unknown host|econnreset)\b""",
@@ -4080,70 +4174,30 @@ private fun String.looksLikeTechnicalStatusText(): Boolean {
 @Composable
 internal fun ErrorCard(
     node: ErrorNode,
-    latestUserMessage: String?,
-    onRetry: () -> Unit,
-    onEditMessage: (String) -> Unit,
 ) {
     if (node.message.isBlank() && node.code.isBlank()) return
-    val presentation = node.presentation()
-    Surface(
-        color = BuyPilotColors.Attention,
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.PrimarySoft),
-    ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                presentation.title,
-                color = BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                presentation.reason,
-                color = BuyPilotColors.TextSecondary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 20.sp,
-            )
-            Text(
-                presentation.action,
-                color = BuyPilotColors.TextMuted,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 18.sp,
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (node.retryable) {
-                    GhostButton(label = "重试", onClick = onRetry)
-                }
-                latestUserMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                    GhostButton(
-                        label = "编辑问题",
-                        leadingIconRes = R.drawable.ic_edit_24,
-                        onClick = { onEditMessage(message) },
-                    )
-                }
-            }
-        }
-    }
+    Text(
+        text = MinimalErrorText,
+        color = BuyPilotColors.TextSecondary,
+        fontSize = BuyPilotType.Body,
+        lineHeight = 20.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    )
 }
 
 @Composable
 internal fun InlineSystemNotice(message: String) {
+    val isMinimalError = message == MinimalErrorText
     Text(
         text = message,
-        color = BuyPilotColors.TextSecondary,
-        fontSize = BuyPilotType.Label,
-        lineHeight = 18.sp,
+        color = if (isMinimalError) BuyPilotColors.TextSecondary else BuyPilotColors.TextMuted,
+        fontSize = if (isMinimalError) BuyPilotType.Body else BuyPilotType.Label,
+        lineHeight = if (isMinimalError) 20.sp else 18.sp,
+        fontWeight = if (isMinimalError) FontWeight.SemiBold else FontWeight.Normal,
         modifier = Modifier
             .fillMaxWidth()
-            .background(BuyPilotColors.SurfaceMuted, RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .padding(horizontal = 4.dp, vertical = 2.dp),
     )
 }
 
@@ -4408,7 +4462,6 @@ private fun BottomComposer(
     val placeholder = when {
         inputState == ChatInputState.Clarifying -> "请回答上面的问题"
         inputState == ChatInputState.Streaming -> "正在生成，可随时停止"
-        inputState == ChatInputState.Error -> "输入后重试"
         imageAttachment.isUploading -> "图片上传中..."
         imageAttachment.error != null -> "移除图片后重试，或重新选择"
         isTextRevealing -> "正在显示回复，可继续查看"
@@ -4417,10 +4470,8 @@ private fun BottomComposer(
     }
     val attachmentBlocksSubmit = imageAttachment.hasImage && !imageAttachment.canSend
     val canSubmit = isStreaming || (!attachmentBlocksSubmit && (text.isNotBlank() || imageAttachment.canSend))
-    val hasError = inputState == ChatInputState.Error
     val containerColor by animateColorAsState(
         targetValue = when {
-            hasError -> BuyPilotColors.Attention
             isFocused -> BuyPilotColors.SurfaceCard
             else -> BuyPilotColors.SurfaceMuted
         },
@@ -4429,7 +4480,6 @@ private fun BottomComposer(
     )
     val borderColor by animateColorAsState(
         targetValue = when {
-            hasError -> BuyPilotColors.Danger.copy(alpha = 0.58f)
             isFocused -> BuyPilotColors.Primary.copy(alpha = 0.68f)
             else -> BuyPilotColors.Border
         },
@@ -4437,7 +4487,7 @@ private fun BottomComposer(
         label = "composer_border_color",
     )
     val borderWidth by animateDpAsState(
-        targetValue = if (isFocused || hasError) 1.5.dp else 1.dp,
+        targetValue = if (isFocused) 1.5.dp else 1.dp,
         animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
         label = "composer_border_width",
     )
@@ -5120,8 +5170,9 @@ private fun DecisionEvidenceSheet(
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
+    sourceDeckNodeKey: String? = null,
     cartState: ChatCartUiState,
-    onProductDetailOpen: (String, String) -> Unit,
+    onProductDetailOpen: (String, String, String?) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
@@ -5149,6 +5200,7 @@ private fun DecisionEvidenceSheet(
                 winnerProductId = payload.winnerProductId,
                 productsById = productsById,
                 productDeckIdByProductId = productDeckIdByProductId,
+                sourceDeckNodeKey = sourceDeckNodeKey,
                 onProductDetailOpen = onProductDetailOpen,
             )
         }
@@ -5177,6 +5229,7 @@ private fun DecisionEvidenceSheet(
             DecisionAlternativesSection(
                 alternatives = alternatives,
                 productDeckIdByProductId = productDeckIdByProductId,
+                sourceDeckNodeKey = sourceDeckNodeKey,
                 onProductDetailOpen = onProductDetailOpen,
             )
         }
@@ -5197,7 +5250,8 @@ private fun DecisionEvidenceSummary(
     winnerProductId: String?,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
-    onProductDetailOpen: (String, String) -> Unit,
+    sourceDeckNodeKey: String? = null,
+    onProductDetailOpen: (String, String, String?) -> Unit,
 ) {
     val cleanWinnerProductId = winnerProductId?.takeIf { it.isNotBlank() }
     val winnerDeckId = cleanWinnerProductId?.let { productDeckIdByProductId[it] }
@@ -5205,7 +5259,7 @@ private fun DecisionEvidenceSummary(
         ?.let { productsById[it]?.product?.displayName("") }
         ?.takeIf { it.isNotBlank() }
     val openWinnerDetail = winnerDeckId?.let { deckId ->
-        { onProductDetailOpen(deckId, cleanWinnerProductId.orEmpty()) }
+        { onProductDetailOpen(deckId, cleanWinnerProductId.orEmpty(), sourceDeckNodeKey) }
     }
     Surface(
         modifier = Modifier
@@ -5350,7 +5404,8 @@ private fun DecisionEvidenceListRow(
 private fun DecisionAlternativesSection(
     alternatives: List<com.buypilot.core.model.AlternativePayload>,
     productDeckIdByProductId: Map<String, String>,
-    onProductDetailOpen: (String, String) -> Unit,
+    sourceDeckNodeKey: String? = null,
+    onProductDetailOpen: (String, String, String?) -> Unit,
 ) {
     if (alternatives.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -5371,6 +5426,7 @@ private fun DecisionAlternativesSection(
                         name = alternative.name.withoutInternalDebugTokens(),
                         productId = alternative.productId,
                         productDeckIdByProductId = productDeckIdByProductId,
+                        sourceDeckNodeKey = sourceDeckNodeKey,
                         onProductDetailOpen = onProductDetailOpen,
                     )
                     if (index != alternatives.lastIndex) {
@@ -5391,12 +5447,13 @@ private fun DecisionAlternativeRow(
     name: String,
     productId: String,
     productDeckIdByProductId: Map<String, String>,
-    onProductDetailOpen: (String, String) -> Unit,
+    sourceDeckNodeKey: String? = null,
+    onProductDetailOpen: (String, String, String?) -> Unit,
 ) {
     val cleanProductId = productId.takeIf { it.isNotBlank() }
     val deckId = cleanProductId?.let { productDeckIdByProductId[it] }
     val openDetail = deckId?.let { resolvedDeckId ->
-        { onProductDetailOpen(resolvedDeckId, cleanProductId.orEmpty()) }
+        { onProductDetailOpen(resolvedDeckId, cleanProductId.orEmpty(), sourceDeckNodeKey) }
     }
     Row(
         modifier = Modifier

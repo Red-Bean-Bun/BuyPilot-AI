@@ -54,16 +54,16 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 ChatRoute(
                     viewModel = viewModel,
-                    onOpenProductDeck = { deckId, productId ->
+                    onOpenProductDeck = { deckId, productId, deckNodeKey ->
                         val targetProductId = productId.orEmpty()
-                        if (uiState.canOpenDeckForConvergence(deckId)) {
-                            navController.navigate(Routes.productDeck(deckId, productId))
+                        if (uiState.canOpenDeckForConvergence(deckId, deckNodeKey)) {
+                            navController.navigate(Routes.productDeck(deckId, productId, deckNodeKey))
                         } else if (targetProductId.isNotBlank()) {
-                            navController.navigate(Routes.productDetail(deckId, targetProductId))
+                            navController.navigate(Routes.productDetail(deckId, targetProductId, deckNodeKey))
                         }
                     },
-                    onOpenProductDetail = { deckId, productId ->
-                        navController.navigate(Routes.productDetail(deckId, productId))
+                    onOpenProductDetail = { deckId, productId, deckNodeKey ->
+                        navController.navigate(Routes.productDetail(deckId, productId, deckNodeKey))
                     },
                 )
             }
@@ -73,6 +73,11 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 arguments = listOf(
                     navArgument("deckId") { type = NavType.StringType },
                     navArgument("productId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                    navArgument("deckNodeKey") {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
@@ -90,37 +95,28 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val deckId = backStackEntry.decodedArg("deckId")
                 val productId = backStackEntry.decodedArg("productId")
+                val deckNodeKey = backStackEntry.decodedArg("deckNodeKey")
 
-                androidx.compose.runtime.LaunchedEffect(deckId, productId, uiState.latestConvergeableDeckId) {
-                    if (!uiState.canOpenDeckForConvergence(deckId)) {
-                        if (productId.isNotBlank()) {
-                            navController.navigate(Routes.productDetail(deckId, productId)) {
-                                popUpTo(Routes.ChatDeck) { inclusive = true }
-                            }
-                        } else {
-                            navController.popBackStack()
-                        }
+                androidx.compose.runtime.LaunchedEffect(deckId, productId, deckNodeKey, uiState.latestConvergeableDeckId) {
+                    if (!uiState.canOpenDeckForConvergence(deckId, deckNodeKey)) {
+                        navController.popBackStack()
                     }
                 }
 
-                androidx.compose.runtime.LaunchedEffect(deckId, productId) {
-                    viewModel.selectProduct(deckId, productId)
+                androidx.compose.runtime.LaunchedEffect(deckId, productId, deckNodeKey, uiState.latestConvergeableDeckId) {
+                    if (uiState.canOpenDeckForConvergence(deckId, deckNodeKey)) {
+                        viewModel.selectProduct(deckId, productId)
+                    }
                 }
 
                 ProductSwipeModeScreen(
                     state = uiState,
                     deckId = deckId,
+                    deckNodeKey = deckNodeKey,
                     initialProductId = productId,
                     onBack = { navController.popBackStack() },
-                    onDeckCompleted = { completedDeckId ->
-                        viewModel.convergeProductDeck(
-                            deckId = completedDeckId,
-                            showUserMessage = false,
-                            allowFullyHandled = true,
-                        )
-                    },
                     onOpenDetail = { targetDeckId, targetProductId ->
-                        navController.navigate(Routes.productDetail(targetDeckId, targetProductId))
+                        navController.navigate(Routes.productDetail(targetDeckId, targetProductId, deckNodeKey))
                     },
                     onSwipe = viewModel::swipeProduct,
                     onUndo = viewModel::undoSwipe,
@@ -132,6 +128,11 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 arguments = listOf(
                     navArgument("deckId") { type = NavType.StringType },
                     navArgument("productId") { type = NavType.StringType },
+                    navArgument("deckNodeKey") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
                 ),
                 enterTransition = { productForwardEnter() },
                 exitTransition = {
@@ -157,24 +158,19 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val deckId = backStackEntry.decodedArg("deckId")
                 val productId = backStackEntry.decodedArg("productId")
+                val deckNodeKey = backStackEntry.decodedArg("deckNodeKey")
 
                 ProductHeroDetailScreen(
                     state = uiState,
                     deckId = deckId,
+                    deckNodeKey = deckNodeKey,
                     productId = productId,
                     onBack = { navController.popBackStack() },
-                    onOpenEvidence = { targetDeckId, targetProductId ->
+                    onOpenEvidence = { targetDeckId, targetProductId, targetDeckNodeKey ->
                         viewModel.openProductEvidence(targetDeckId, targetProductId)
-                        navController.navigate(Routes.productEvidence(targetDeckId, targetProductId))
+                        navController.navigate(Routes.productEvidence(targetDeckId, targetProductId, targetDeckNodeKey))
                     },
                     onSwipe = viewModel::swipeProduct,
-                    onDeckCompleted = { completedDeckId ->
-                        viewModel.convergeProductDeck(
-                            deckId = completedDeckId,
-                            showUserMessage = false,
-                            allowFullyHandled = true,
-                        )
-                    },
                     onAddToCart = viewModel::addProductToCart,
                 )
             }
@@ -184,6 +180,11 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 arguments = listOf(
                     navArgument("deckId") { type = NavType.StringType },
                     navArgument("productId") { type = NavType.StringType },
+                    navArgument("deckNodeKey") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
                 ),
                 enterTransition = { productEvidenceEnter() },
                 exitTransition = { productEvidenceExit() },
@@ -200,6 +201,7 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     state = uiState,
                     deckId = backStackEntry.decodedArg("deckId"),
                     productId = backStackEntry.decodedArg("productId"),
+                    deckNodeKey = backStackEntry.decodedArg("deckNodeKey"),
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -210,18 +212,21 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
 object Routes {
     const val ChatGraph = "chat_graph"
     const val ChatHome = "chat/home"
-    const val ChatDeck = "chat/decks/{deckId}?productId={productId}"
-    const val ChatProductDetail = "chat/decks/{deckId}/products/{productId}"
-    const val ChatProductEvidence = "chat/decks/{deckId}/products/{productId}/evidence"
+    const val ChatDeck = "chat/decks/{deckId}?productId={productId}&deckNodeKey={deckNodeKey}"
+    const val ChatProductDetail = "chat/decks/{deckId}/products/{productId}?deckNodeKey={deckNodeKey}"
+    const val ChatProductEvidence = "chat/decks/{deckId}/products/{productId}/evidence?deckNodeKey={deckNodeKey}"
 
-    fun productDeck(deckId: String, productId: String?): String =
-        "chat/decks/${deckId.routeEncode()}?productId=${productId.orEmpty().routeEncode()}"
+    fun productDeck(deckId: String, productId: String?, deckNodeKey: String? = null): String =
+        "chat/decks/${deckId.routeEncode()}?productId=${productId.orEmpty().routeEncode()}" +
+            "&deckNodeKey=${deckNodeKey.orEmpty().routeEncode()}"
 
-    fun productDetail(deckId: String, productId: String): String =
-        "chat/decks/${deckId.routeEncode()}/products/${productId.routeEncode()}"
+    fun productDetail(deckId: String, productId: String, deckNodeKey: String? = null): String =
+        "chat/decks/${deckId.routeEncode()}/products/${productId.routeEncode()}" +
+            "?deckNodeKey=${deckNodeKey.orEmpty().routeEncode()}"
 
-    fun productEvidence(deckId: String, productId: String): String =
-        "chat/decks/${deckId.routeEncode()}/products/${productId.routeEncode()}/evidence"
+    fun productEvidence(deckId: String, productId: String, deckNodeKey: String? = null): String =
+        "chat/decks/${deckId.routeEncode()}/products/${productId.routeEncode()}/evidence" +
+            "?deckNodeKey=${deckNodeKey.orEmpty().routeEncode()}"
 }
 
 private fun String.routeEncode(): String =

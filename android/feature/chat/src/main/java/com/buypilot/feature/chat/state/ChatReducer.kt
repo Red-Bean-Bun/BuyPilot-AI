@@ -105,13 +105,24 @@ object ChatReducer {
 
             AgentEventType.CartAction -> {
                 val payload = envelope.payload as CartActionPayload
+                val rawNodeKey = envelope.nodeId.ifBlank { "cart_action_${envelope.turnId}" }
+                val existing = contentBase.nodes.filterIsInstance<CartActionNode>()
+                    .lastOrNull {
+                        it.turnId == envelope.turnId &&
+                            it.key.matchesRawOrTurnScopedNodeKey(rawNodeKey, envelope.turnId)
+                    }
+                val nodeKey = existing?.key ?: contentBase.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
                 val nextCart = payload.cart
                 val pendingAddProductIds = payload.productId
                     .takeIf { it.isNotBlank() }
                     ?.let { contentBase.cartState.pendingAddProductIds - it }
                     ?: contentBase.cartState.pendingAddProductIds
                 contentBase.upsertNode(
-                    CartActionNode(envelope.nodeId, payload),
+                    CartActionNode(
+                        key = nodeKey,
+                        payload = payload,
+                        turnId = envelope.turnId,
+                    ),
                 ).let { nextState ->
                     if (nextCart == null) {
                         nextState.copy(
@@ -185,12 +196,20 @@ object ChatReducer {
 
             AgentEventType.Error -> {
                 val payload = envelope.payload as ErrorPayload
+                val rawNodeKey = envelope.nodeId.ifBlank { "error_${envelope.turnId}" }
+                val existing = contentBase.nodes.filterIsInstance<ErrorNode>()
+                    .lastOrNull {
+                        it.turnId == envelope.turnId &&
+                            it.key.matchesRawOrTurnScopedNodeKey(rawNodeKey, envelope.turnId)
+                    }
+                val nodeKey = existing?.key ?: contentBase.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
                 contentBase.upsertNode(
                     ErrorNode(
-                        key = envelope.nodeId,
+                        key = nodeKey,
                         code = payload.code,
                         message = payload.message,
                         retryable = payload.retryable,
+                        turnId = envelope.turnId,
                     ),
                 ).copy(
                     inputState = ChatInputState.Error,
@@ -352,6 +371,11 @@ object ChatReducer {
                             (payload.messageId.isNotBlank() && it.messageId == payload.messageId)
                         )
             }
+        if (existing == null && payload.delta.isEmpty()) {
+            return state.copy(
+                lastError = null,
+            )
+        }
         val messageKey = existing?.key ?: state.uniqueNodeKeyForTurn(rawMessageKey, envelope.turnId)
         val textBase = state
         val node = AiStreamNode(
@@ -397,13 +421,18 @@ object ChatReducer {
                         )
             }
         val nodeKey = existing?.key ?: state.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
+        val stalePreviousCriteriaKeys = state.nodes
+            .filterIsInstance<CriteriaNode>()
+            .mapNotNullTo(mutableSetOf()) { node ->
+                node.key.takeIf { node.key != nodeKey && node.turnId != envelope.turnId }
+            }
         return state.upsertNode(
             CriteriaNode(
                 key = nodeKey,
                 payload = payload,
                 turnId = envelope.turnId,
             ),
-        ).copy(staleCriteriaNodeKeys = state.staleCriteriaNodeKeys - nodeKey)
+        ).copy(staleCriteriaNodeKeys = (state.staleCriteriaNodeKeys + stalePreviousCriteriaKeys) - nodeKey)
     }
 
     private fun reduceClarification(
@@ -414,10 +443,17 @@ object ChatReducer {
         if (state.isActiveConvergenceTurn(envelope)) {
             return state
         }
+        val rawNodeKey = envelope.nodeId.ifBlank { "clarification_${envelope.turnId}" }
+        val existing = state.nodes.filterIsInstance<ClarificationNode>()
+            .firstOrNull {
+                it.turnId == envelope.turnId &&
+                    it.key.matchesRawOrTurnScopedNodeKey(rawNodeKey, envelope.turnId)
+            }
+        val nodeKey = existing?.key ?: state.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
         return state
             .upsertNode(
                 ClarificationNode(
-                    key = envelope.nodeId,
+                    key = nodeKey,
                     payload = payload,
                     turnId = envelope.turnId,
                 ),
@@ -440,16 +476,24 @@ object ChatReducer {
             return state
         }
         val existing = state.nodes.filterIsInstance<ProductDeckNode>()
-            .firstOrNull { it.deckId == deckId }
+            .lastOrNull { it.deckId == deckId && it.turnId == envelope.turnId }
+        val isNewDeckInstance = existing == null &&
+            state.nodes.any { it is ProductDeckNode && it.deckId == deckId }
+        val deckBaseState = if (isNewDeckInstance) {
+            state.clearDeckRuntimeState(deckId)
+        } else {
+            state
+        }
+        val nodeKey = existing?.key ?: state.uniqueNodeKeyForTurn(deckId, envelope.turnId)
         val products = (existing?.products.orEmpty()
             .filterNot { it.product.productId == payload.product.productId } + payload)
             .sortedBy { it.rank }
-        val nextState = state.upsertNode(
+        val nextState = deckBaseState.upsertNode(
             ProductDeckNode(
-                key = deckId,
+                key = nodeKey,
                 deckId = deckId,
                 products = products,
-                turnId = existing?.turnId ?: envelope.turnId,
+                turnId = envelope.turnId,
             ),
         ).pruneMismatchedTurnCriteriaAndFollowup(envelope.turnId)
         return if (products.size <= 1 || nextState.isDeckFullyHandled(deckId)) {
@@ -470,12 +514,26 @@ object ChatReducer {
         return "${turnScopedKey}_$index"
     }
 
+    private fun String.matchesRawOrTurnScopedNodeKey(rawKey: String, turnId: String): Boolean {
+        if (this == rawKey) return true
+        if (turnId.isBlank()) return false
+        val turnScopedPrefix = "${rawKey}_$turnId"
+        return this == turnScopedPrefix || startsWith("${turnScopedPrefix}_")
+    }
+
     private fun reduceFinalDecision(
         state: ChatUiState,
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as FinalDecisionPayload
         val explicitDeckId = envelope.deckId?.takeIf { it.isNotBlank() }
+        val rawNodeKey = envelope.nodeId.ifBlank { "decision_${envelope.turnId}" }
+        val existing = state.nodes.filterIsInstance<FinalDecisionNode>()
+            .lastOrNull {
+                it.turnId == envelope.turnId &&
+                    it.key.matchesRawOrTurnScopedNodeKey(rawNodeKey, envelope.turnId)
+            }
+        val nodeKey = existing?.key ?: state.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
         if (
             state.activeConvergenceDeckId != null &&
             explicitDeckId != null &&
@@ -486,7 +544,7 @@ object ChatReducer {
         val latestDeck = state.nodes.filterIsInstance<ProductDeckNode>().lastOrNull()
         val associatedDeck = explicitDeckId
             ?.let { deckId ->
-                state.nodes.filterIsInstance<ProductDeckNode>().firstOrNull { it.deckId == deckId }
+                state.nodes.filterIsInstance<ProductDeckNode>().lastOrNull { it.deckId == deckId }
             }
             ?: latestDeck?.takeIf { deck ->
                 deck.products.size >= 2 && envelope.turnId == deck.turnId
@@ -501,26 +559,22 @@ object ChatReducer {
             if (state.isDeckFullyHandled(deckId)) {
                 return state.clearDeckConvergence(deckId)
             }
-            return if (deckId in state.awaitingConvergenceDeckIds) {
-                state.copy(
-                    awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds + deckId,
-                    latestConvergeableDeckId = state.latestConvergeableDeckId.takeIf { it == deckId },
-                    pendingDecisions = state.pendingDecisions + (
-                        deckId to PendingDecision(
-                            key = envelope.nodeId,
-                            payload = payload,
-                            turnId = envelope.turnId,
-                        )
-                        ),
-                )
-            } else {
-                state
-            }
+            return state.copy(
+                awaitingConvergenceDeckIds = state.awaitingConvergenceDeckIds,
+                latestConvergeableDeckId = state.latestConvergeableDeckId.takeIf { it == deckId },
+                pendingDecisions = state.pendingDecisions + (
+                    deckId to PendingDecision(
+                        key = nodeKey,
+                        payload = payload,
+                        turnId = envelope.turnId,
+                    )
+                    ),
+            )
         }
 
         val withDecision = state.upsertNode(
             FinalDecisionNode(
-                key = envelope.nodeId,
+                key = nodeKey,
                 payload = payload,
                 turnId = envelope.turnId,
                 deckId = deckId,
@@ -535,7 +589,7 @@ object ChatReducer {
 
     private fun ChatUiState.productIdsForDeck(deckId: String): List<String> =
         nodes.filterIsInstance<ProductDeckNode>()
-            .firstOrNull { it.deckId == deckId }
+            .lastOrNull { it.deckId == deckId }
             ?.products
             .orEmpty()
             .map { it.product.productId }
@@ -543,7 +597,7 @@ object ChatReducer {
 
     private fun ChatUiState.productCountForDeck(deckId: String): Int =
         nodes.filterIsInstance<ProductDeckNode>()
-            .firstOrNull { it.deckId == deckId }
+            .lastOrNull { it.deckId == deckId }
             ?.products
             .orEmpty()
             .size
@@ -639,6 +693,11 @@ object ChatReducer {
             pendingDecisions = pendingDecisions - deckId,
         )
 
+    private fun ChatUiState.clearDeckRuntimeState(deckId: String): ChatUiState =
+        clearDeckConvergence(deckId).copy(
+            productSwipeStates = productSwipeStates - deckId,
+        )
+
     private fun ChatUiState.upsertNode(node: ChatUiNode): ChatUiState {
         val index = nodes.indexOfFirst { it.key == node.key }
         val nextNodes = if (index >= 0) {
@@ -693,9 +752,9 @@ object ChatReducer {
             AgentEventType.TextDelta,
             AgentEventType.CriteriaCard,
             AgentEventType.ProductCard,
+            AgentEventType.Clarification,
             AgentEventType.Unknown -> false
             AgentEventType.FinalDecision -> true
-            AgentEventType.Clarification -> true
             AgentEventType.Done -> !state.hasClarificationForTurn(turnId)
             else -> true
         }

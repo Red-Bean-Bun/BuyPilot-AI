@@ -94,6 +94,32 @@ class ChatReducerTest {
     }
 
     @Test
+    fun blankTextDeltaWithoutExistingNodeDoesNotCreateEmptyAssistantBubble() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_1",
+                payload = ThinkingPayload(stage = "understanding", message = "正在理解你的需求"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "assistant_intro_turn_1",
+                payload = TextDeltaPayload(messageId = "assistant_intro_turn_1", delta = "", done = false),
+            ),
+        )
+
+        assertEquals(1, state.nodes.size)
+        assertTrue(state.nodes.single() is ThinkingNode)
+        assertEquals(null, state.streamingTextKey)
+        assertEquals(0, state.streamingTextLength)
+    }
+
+    @Test
     fun repeatedMessageIdAcrossTurnsCreatesSeparateTextNodes() {
         val firstTurn = ChatReducer.reduce(
             ChatUiState(),
@@ -119,6 +145,118 @@ class ChatReducerTest {
         assertEquals(2, nodes.size)
         assertEquals(listOf("第一轮建议。", "第二轮建议。"), nodes.map { it.content })
         assertEquals(listOf("assistant_intro", "assistant_intro_turn_2"), nodes.map { it.key })
+    }
+
+    @Test
+    fun repeatedClarificationNodeIdAcrossTurnsCreatesSeparateCards() {
+        val firstTurn = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Clarification,
+                nodeId = "clarify_missing_slot",
+                turnId = "turn_1",
+                payload = ClarificationPayload(question = "你想买哪一类商品？"),
+            ),
+        )
+
+        val secondTurn = ChatReducer.reduce(
+            firstTurn,
+            envelope(
+                event = AgentEventType.Clarification,
+                nodeId = "clarify_missing_slot",
+                turnId = "turn_2",
+                payload = ClarificationPayload(question = "预算大概是多少？"),
+            ),
+        )
+
+        val nodes = secondTurn.nodes.filterIsInstance<ClarificationNode>()
+        assertEquals(2, nodes.size)
+        assertEquals(listOf("你想买哪一类商品？", "预算大概是多少？"), nodes.map { it.payload.question })
+        assertEquals(listOf("clarify_missing_slot", "clarify_missing_slot_turn_2"), nodes.map { it.key })
+    }
+
+    @Test
+    fun repeatedFinalDecisionNodeIdAcrossTurnsCreatesSeparateCards() {
+        val firstTurn = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_result",
+                turnId = "turn_1",
+                payload = FinalDecisionPayload(summary = "第一轮结论"),
+            ),
+        )
+
+        val secondTurn = ChatReducer.reduce(
+            firstTurn,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_result",
+                turnId = "turn_2",
+                payload = FinalDecisionPayload(summary = "第二轮结论"),
+            ),
+        )
+
+        val nodes = secondTurn.nodes.filterIsInstance<FinalDecisionNode>()
+        assertEquals(2, nodes.size)
+        assertEquals(listOf("第一轮结论", "第二轮结论"), nodes.map { it.payload.summary })
+        assertEquals(listOf("decision_result", "decision_result_turn_2"), nodes.map { it.key })
+    }
+
+    @Test
+    fun repeatedCartActionNodeIdAcrossTurnsCreatesSeparateReceipts() {
+        val firstTurn = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "cart_action",
+                turnId = "turn_1",
+                payload = CartActionPayload(action = "add", productId = "p1", status = "success"),
+            ),
+        )
+
+        val secondTurn = ChatReducer.reduce(
+            firstTurn,
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "cart_action",
+                turnId = "turn_2",
+                payload = CartActionPayload(action = "add", productId = "p2", status = "success"),
+            ),
+        )
+
+        val nodes = secondTurn.nodes.filterIsInstance<CartActionNode>()
+        assertEquals(2, nodes.size)
+        assertEquals(listOf("p1", "p2"), nodes.map { it.payload.productId })
+        assertEquals(listOf("cart_action", "cart_action_turn_2"), nodes.map { it.key })
+    }
+
+    @Test
+    fun repeatedErrorNodeIdAcrossTurnsCreatesSeparateErrorCards() {
+        val firstTurn = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Error,
+                nodeId = "stream_error",
+                turnId = "turn_1",
+                payload = ErrorPayload(code = "FIRST", message = "第一轮错误"),
+            ),
+        )
+
+        val secondTurn = ChatReducer.reduce(
+            firstTurn,
+            envelope(
+                event = AgentEventType.Error,
+                nodeId = "stream_error",
+                turnId = "turn_2",
+                payload = ErrorPayload(code = "SECOND", message = "第二轮错误"),
+            ),
+        )
+
+        val nodes = secondTurn.nodes.filterIsInstance<ErrorNode>()
+        assertEquals(2, nodes.size)
+        assertEquals(listOf("FIRST", "SECOND"), nodes.map { it.code })
+        assertEquals(listOf("stream_error", "stream_error_turn_2"), nodes.map { it.key })
     }
 
     @Test
@@ -245,7 +383,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun clarificationClearsThinkingAndShowsOnlyClarificationCardWhenNoTextDeltaArrived() {
+    fun clarificationKeepsThinkingForUiExitAnimationWhenNoTextDeltaArrived() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -264,10 +402,10 @@ class ChatReducerTest {
             ),
         )
 
-        assertEquals(1, state.nodes.size)
-        assertFalse(state.nodes.any { it is ThinkingNode })
+        assertEquals(2, state.nodes.size)
+        assertTrue(state.nodes.first() is ThinkingNode)
         assertFalse(state.nodes.any { it is AiStreamNode })
-        val card = state.nodes.single() as ClarificationNode
+        val card = state.nodes.single { it is ClarificationNode } as ClarificationNode
         assertEquals("clarify_turn_1", card.key)
         assertEquals("", card.anchorMessageKey)
         assertEquals("请问你的肤质是？", card.payload.question)
@@ -413,6 +551,84 @@ class ChatReducerTest {
     }
 
     @Test
+    fun repeatedDeckIdAcrossTurnsCreatesSeparateTimelineDecks() {
+        val firstTurn = ChatReducer.reduce(
+            ChatUiState(),
+            product(rank = 1, productId = "p1", turnId = "turn_1"),
+        )
+        val secondTurn = ChatReducer.reduce(
+            firstTurn,
+            product(rank = 1, productId = "p2", turnId = "turn_2"),
+        )
+
+        val decks = secondTurn.nodes.filterIsInstance<ProductDeckNode>()
+
+        assertEquals(2, decks.size)
+        assertEquals(listOf("turn_1", "turn_2"), decks.map { it.turnId })
+        assertEquals(listOf("deck_1", "deck_1_turn_2"), decks.map { it.key })
+        assertEquals(listOf(listOf("p1"), listOf("p2")), decks.map { deck ->
+            deck.products.map { it.product.productId }
+        })
+    }
+
+    @Test
+    fun deckInteractionsUseLatestDeckWhenBackendReusesDeckId() {
+        val state = listOf(
+            product(rank = 1, productId = "p1", turnId = "turn_1"),
+            product(rank = 2, productId = "p2", turnId = "turn_1"),
+            product(rank = 1, productId = "p3", turnId = "turn_2"),
+            product(rank = 2, productId = "p4", turnId = "turn_2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+
+        val selected = ChatReducer.selectProduct(state, deckId = "deck_1", productId = "p4")
+        val swiped = ChatReducer.swipeProduct(
+            state = selected,
+            deckId = "deck_1",
+            productId = "p4",
+            feedbackType = "like",
+            action = "like",
+        )
+
+        assertEquals("p4", selected.productSwipeStates["deck_1"]?.currentProductId)
+        assertTrue(swiped.productSwipeStates["deck_1"]?.swipedProductIds.orEmpty().contains("p4"))
+    }
+
+    @Test
+    fun repeatedDeckIdAcrossTurnsClearsPreviousSwipeAndPendingState() {
+        val firstTurn = listOf(
+            product(rank = 1, productId = "p1", turnId = "turn_1"),
+            product(rank = 2, productId = "p2", turnId = "turn_1"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+        val swiped = ChatReducer.swipeProduct(
+            state = firstTurn.copy(
+                awaitingConvergenceDeckIds = setOf("deck_1"),
+                latestConvergeableDeckId = "deck_1",
+                pendingDecisions = mapOf(
+                    "deck_1" to com.buypilot.feature.chat.model.PendingDecision(
+                        key = "decision_old",
+                        payload = FinalDecisionPayload(summary = "旧缓存结论"),
+                        turnId = "turn_1",
+                    ),
+                ),
+            ),
+            deckId = "deck_1",
+            productId = "p1",
+            feedbackType = "like",
+            action = "like",
+        )
+
+        val secondTurn = ChatReducer.reduce(
+            swiped,
+            product(rank = 1, productId = "p3", turnId = "turn_2"),
+        )
+
+        assertEquals(null, secondTurn.productSwipeStates["deck_1"])
+        assertFalse("deck_1" in secondTurn.awaitingConvergenceDeckIds)
+        assertEquals(null, secondTurn.latestConvergeableDeckId)
+        assertFalse("deck_1" in secondTurn.pendingDecisions)
+    }
+
+    @Test
     fun doneAndErrorCloseStreaming() {
         val streaming = ChatUiState(isStreaming = true, inputState = ChatInputState.Streaming)
         val clarifying = ChatUiState(isStreaming = true, inputState = ChatInputState.Clarifying)
@@ -499,7 +715,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun doneKeepsClarificationCardWithoutReducerInjectedText() {
+    fun doneKeepsClarificationCardAndPriorThinkingForUiExitAnimationWithoutReducerInjectedText() {
         val thinking = ChatReducer.reduce(
             ChatUiState(),
             envelope(
@@ -526,10 +742,10 @@ class ChatReducerTest {
             ),
         )
 
-        assertFalse(state.nodes.any { it is ThinkingNode })
         assertFalse(state.nodes.any { it is AiStreamNode })
-        assertEquals(1, state.nodes.size)
-        assertTrue(state.nodes.single() is ClarificationNode)
+        assertEquals(2, state.nodes.size)
+        assertTrue(state.nodes[0] is ThinkingNode)
+        assertTrue(state.nodes[1] is ClarificationNode)
         assertFalse(state.isStreaming)
         assertEquals(ChatInputState.Clarifying, state.inputState)
     }
@@ -620,7 +836,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun criteriaPatchHidesOldCriteriaAndNewCriteriaUsesCurrentTurnKey() {
+    fun newCriteriaHidesPreviousTurnCriteriaAndUsesCurrentTurnKey() {
         val payload = CriteriaCardPayload(
             criteria = CriteriaPayload(
                 criteriaId = "criteria_1",
@@ -636,7 +852,7 @@ class ChatReducerTest {
                 turnId = "turn_old",
                 payload = payload,
             ),
-        ).copy(staleCriteriaNodeKeys = setOf("criteria_1"))
+        )
 
         val nextState = ChatReducer.reduce(
             oldState,
@@ -651,10 +867,53 @@ class ChatReducerTest {
         val criteriaNodes = nextState.nodes.filterIsInstance<CriteriaNode>()
         assertEquals(listOf("criteria_1", "criteria_1_turn_new"), criteriaNodes.map { it.key })
         assertEquals("turn_new", criteriaNodes.last().turnId)
+        assertEquals(setOf("criteria_1"), nextState.staleCriteriaNodeKeys)
 
         val presentation = nextState.toTimelinePresentationState()
         assertFalse(presentation.revealKeys.contains("criteria_1"))
         assertTrue(presentation.revealKeys.contains("criteria_1_turn_new"))
+    }
+
+    @Test
+    fun sameTurnCriteriaUpdateDoesNotMarkCurrentCriteriaStale() {
+        val firstPayload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_1",
+                category = "数码电子",
+                summary = "智能手机",
+            ),
+        )
+        val updatedPayload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_1",
+                category = "数码电子",
+                summary = "智能手机，4000 元以内",
+            ),
+        )
+        val firstState = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_1",
+                turnId = "turn_1",
+                payload = firstPayload,
+            ),
+        )
+
+        val updatedState = ChatReducer.reduce(
+            firstState,
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_1",
+                turnId = "turn_1",
+                payload = updatedPayload,
+            ),
+        )
+
+        val criteriaNodes = updatedState.nodes.filterIsInstance<CriteriaNode>()
+        assertEquals(1, criteriaNodes.size)
+        assertEquals("智能手机，4000 元以内", criteriaNodes.single().payload.criteria.summary)
+        assertTrue(updatedState.staleCriteriaNodeKeys.isEmpty())
     }
 
     @Test
@@ -739,6 +998,45 @@ class ChatReducerTest {
         assertFalse("deck_1" in secondSwipe.awaitingConvergenceDeckIds)
         assertEquals(null, deckState.latestConvergeableDeckId)
         assertFalse("deck_1" in secondSwipe.pendingDecisions)
+    }
+
+    @Test
+    fun multiProductDeckCachesInitialDecisionBeforeBackendDoneWithoutShowingIt() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1"),
+            product(rank = 2, productId = "p2"),
+        ).fold(ChatUiState()) { acc, envelope -> ChatReducer.reduce(acc, envelope) }
+
+        val earlyDecision = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.FinalDecision,
+                nodeId = "decision_turn_1",
+                payload = FinalDecisionPayload(
+                    winnerProductId = "p1",
+                    summary = "当前先把 p1 作为首选候选；继续反馈后我会再收敛。",
+                    decisionStatus = "needs_more_signal",
+                    confidence = "low",
+                    nextStep = "continue_current_deck",
+                ),
+            ),
+        )
+        val done = ChatReducer.reduce(
+            earlyDecision,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done_turn_1",
+                deckId = "deck_1",
+                payload = DonePayload(deckId = "deck_1", finishReason = "awaiting_product_feedback"),
+            ),
+        )
+
+        assertFalse(earlyDecision.nodes.any { it is FinalDecisionNode })
+        assertTrue("deck_1" in earlyDecision.pendingDecisions)
+        assertFalse("deck_1" in earlyDecision.awaitingConvergenceDeckIds)
+        assertTrue("deck_1" in done.pendingDecisions)
+        assertTrue("deck_1" in done.awaitingConvergenceDeckIds)
+        assertFalse(done.nodes.any { it is FinalDecisionNode })
     }
 
     @Test

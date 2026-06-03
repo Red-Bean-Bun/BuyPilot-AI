@@ -3,9 +3,12 @@ package com.buypilot.feature.chat.ui
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
+import com.buypilot.core.model.CartActionPayload
+import com.buypilot.core.model.CartSummaryPayload
 import com.buypilot.core.model.ClarificationPayload
 import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.model.AiStreamNode
+import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -13,17 +16,972 @@ import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.presentation.AssistantTurnTimelineItem
+import com.buypilot.feature.chat.presentation.StandaloneTimelineItem
 import com.buypilot.feature.chat.presentation.toTimelinePresentationState
 import com.buypilot.feature.chat.presentation.toTimelineRenderItems
 import com.buypilot.feature.chat.state.ChatUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TimelineRevealStoreTest {
+    @Test
+    fun scrollCoordinatorKeepsHighestPriorityIntent() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertEquals(TimelineScrollIntentKind.FollowLatest, coordinator.pendingIntent?.intent?.kind)
+        assertEquals(1, coordinator.pendingIntentCount)
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FinalDecision, key = "final_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertEquals(TimelineScrollIntentKind.FinalDecision, coordinator.pendingIntent?.intent?.kind)
+        assertEquals(listOf(TimelineScrollIntentKind.FinalDecision), coordinator.queuedIntentKinds)
+
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertEquals(TimelineScrollIntentKind.FinalDecision, coordinator.pendingIntent?.intent?.kind)
+    }
+
+    @Test
+    fun scrollCoordinatorDropsKeyboardCorrectionBehindCurrentAnchor() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.UserSent, key = "user_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.KeyboardChanged, deltaPx = 120),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.UserSent),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorAllowsAssistantAnchorAfterUserAnchor() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.UserSent, key = "user_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.AssistantStarted, turnId = "turn_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.UserSent, TimelineScrollIntentKind.AssistantStarted),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorReadableAnchorSupersedesViewportFreeze() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.ViewportFreeze, index = 1),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.AssistantStarted, turnId = "turn_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.AssistantStarted),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorDropsViewportFreezeBehindReadableAnchor() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.AssistantStarted, turnId = "turn_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.ViewportFreeze, index = 1),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.AssistantStarted),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorKeyboardCorrectionSupersedesQueuedFollowLatest() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.KeyboardChanged, deltaPx = 320),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.KeyboardChanged),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorFinalDecisionDropsQueuedLowerAnchorsAfterVolatileCorrectionsWereSkipped() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.UserSent, key = "user_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.KeyboardChanged, deltaPx = 120),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.AssistantStarted, turnId = "turn_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FinalDecision, key = "final_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.FinalDecision),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorDoesNotRestartSamePriorityIntent() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                autoFocusSuppressed = false,
+            ),
+        )
+        val firstPending = coordinator.pendingIntent ?: error("missing first pending intent")
+
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertSame(firstPending, coordinator.pendingIntent)
+    }
+
+    @Test
+    fun scrollCoordinatorReplacesSamePriorityWhenTargetChanges() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FinalDecision, key = "final_1"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        val firstPending = coordinator.pendingIntent ?: error("missing first pending intent")
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FinalDecision, key = "final_2"),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        val replaced = coordinator.pendingIntent ?: error("missing replacement pending intent")
+        assertEquals(TimelineScrollIntentKind.FinalDecision, replaced.intent.kind)
+        assertEquals("final_2", replaced.intent.key)
+        assertTrue(replaced.serial > firstPending.serial)
+    }
+
+    @Test
+    fun scrollCoordinatorAllowsExplicitUserAnchorDuringAutoFocusSuppression() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.UserSent, key = "user_1"),
+                autoFocusSuppressed = true,
+            ),
+        )
+        assertEquals(TimelineScrollIntentKind.UserSent, coordinator.pendingIntent?.intent?.kind)
+        coordinator.clear(coordinator.pendingIntent?.serial ?: error("missing user sent intent"))
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.RouteReturn, key = "assistant_1"),
+                autoFocusSuppressed = true,
+            ),
+        )
+        assertEquals(TimelineScrollIntentKind.RouteReturn, coordinator.pendingIntent?.intent?.kind)
+    }
+
+    @Test
+    fun explicitUserAnchorSupersedesStaleRouteReturn() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.RouteReturn,
+                    key = "deck_before_detail",
+                    index = 4,
+                    scrollOffset = 120,
+                ),
+                autoFocusSuppressed = true,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.UserSent,
+                    key = "user_after_detail",
+                    index = 9,
+                ),
+                autoFocusSuppressed = true,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.UserSent),
+            coordinator.queuedIntentKinds,
+        )
+        assertEquals("user_after_detail", coordinator.pendingIntent?.intent?.key)
+    }
+
+    @Test
+    fun staleRouteReturnCannotSupersedeQueuedUserAnchor() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.UserSent,
+                    key = "user_after_detail",
+                    index = 9,
+                ),
+                autoFocusSuppressed = true,
+            ),
+        )
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.RouteReturn,
+                    key = "deck_before_detail",
+                    index = 4,
+                    scrollOffset = 120,
+                ),
+                autoFocusSuppressed = true,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.UserSent),
+            coordinator.queuedIntentKinds,
+        )
+        assertEquals("user_after_detail", coordinator.pendingIntent?.intent?.key)
+    }
+
+    @Test
+    fun viewportFreezeDoesNotQueueBehindRouteReturn() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.RouteReturn,
+                    key = "deck_before_detail",
+                    index = 4,
+                    scrollOffset = 120,
+                ),
+                autoFocusSuppressed = true,
+            ),
+        )
+        assertFalse(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.ViewportFreeze,
+                    key = "clarification_before_detail",
+                    index = 5,
+                    scrollOffset = 80,
+                ),
+                autoFocusSuppressed = true,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.RouteReturn),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun explicitUserAnchorSupersedesStaleSystemAnchors() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FinalDecision, key = "old_final"),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.UserSent, key = "new_user"),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimelineScrollIntentKind.UserSent),
+            coordinator.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun suppressionBlockerMatchesScrollCoordinatorAllowedKinds() {
+        assertFalse(
+            shouldBlockTimelineAutoFocusForSuppression(
+                intentKind = TimelineScrollIntentKind.UserSent,
+                isAutoFocusSuppressed = true,
+            ),
+        )
+        assertFalse(
+            shouldBlockTimelineAutoFocusForSuppression(
+                intentKind = TimelineScrollIntentKind.RouteReturn,
+                isAutoFocusSuppressed = true,
+            ),
+        )
+        assertFalse(
+            shouldBlockTimelineAutoFocusForSuppression(
+                intentKind = TimelineScrollIntentKind.ViewportFreeze,
+                isAutoFocusSuppressed = true,
+            ),
+        )
+        assertTrue(
+            shouldBlockTimelineAutoFocusForSuppression(
+                intentKind = TimelineScrollIntentKind.AssistantStarted,
+                isAutoFocusSuppressed = true,
+            ),
+        )
+        assertFalse(
+            shouldBlockTimelineAutoFocusForSuppression(
+                intentKind = TimelineScrollIntentKind.AssistantStarted,
+                isAutoFocusSuppressed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun scrollCoordinatorUserDragInterruptsPendingIntentAndClearUsesSerial() {
+        val coordinator = TimelineScrollCoordinator()
+        coordinator.request(
+            intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FinalDecision, key = "final_1"),
+            autoFocusSuppressed = false,
+        )
+        val previousSerial = coordinator.pendingIntent?.serial ?: error("missing initial pending intent")
+
+        coordinator.interruptWithUserDrag()
+
+        val dragIntent = coordinator.pendingIntent ?: error("missing user drag intent")
+        assertEquals(TimelineScrollIntentKind.UserDrag, dragIntent.intent.kind)
+        assertTrue(dragIntent.serial > previousSerial)
+
+        coordinator.clear(previousSerial)
+        assertSame(dragIntent, coordinator.pendingIntent)
+
+        coordinator.clear(dragIntent.serial)
+        assertNull(coordinator.pendingIntent)
+    }
+
+    @Test
+    fun keyboardScrollOnlyRunsWhenComposerOpensNearTimelineEnd() {
+        assertTrue(
+            shouldScrollTimelineForKeyboardChange(
+                deltaPx = 320,
+                isComposerFocused = true,
+                isUserDragging = false,
+                wasNearEndBeforeKeyboard = true,
+            ),
+        )
+        assertFalse(
+            shouldScrollTimelineForKeyboardChange(
+                deltaPx = 320,
+                isComposerFocused = true,
+                isUserDragging = false,
+                wasNearEndBeforeKeyboard = false,
+            ),
+        )
+        assertFalse(
+            shouldScrollTimelineForKeyboardChange(
+                deltaPx = 320,
+                isComposerFocused = true,
+                isUserDragging = true,
+                wasNearEndBeforeKeyboard = true,
+            ),
+        )
+        assertFalse(
+            shouldScrollTimelineForKeyboardChange(
+                deltaPx = 0,
+                isComposerFocused = true,
+                isUserDragging = false,
+                wasNearEndBeforeKeyboard = true,
+            ),
+        )
+    }
+
+    @Test
+    fun followLatestBubbleRequiresUserDetachedFromLatestContent() {
+        assertTrue(
+            shouldShowTimelineFollowLatestBubble(
+                isComposerFocused = false,
+                keyboardVisible = false,
+                isNearTimelineEnd = false,
+                userDetachedFromLatest = true,
+                followLatestActive = false,
+            ),
+        )
+        assertFalse(
+            shouldShowTimelineFollowLatestBubble(
+                isComposerFocused = false,
+                keyboardVisible = false,
+                isNearTimelineEnd = true,
+                userDetachedFromLatest = true,
+                followLatestActive = false,
+            ),
+        )
+        assertFalse(
+            shouldShowTimelineFollowLatestBubble(
+                isComposerFocused = false,
+                keyboardVisible = false,
+                isNearTimelineEnd = false,
+                userDetachedFromLatest = false,
+                followLatestActive = false,
+            ),
+        )
+        assertFalse(
+            shouldShowTimelineFollowLatestBubble(
+                isComposerFocused = true,
+                keyboardVisible = false,
+                isNearTimelineEnd = false,
+                userDetachedFromLatest = true,
+                followLatestActive = false,
+            ),
+        )
+        assertFalse(
+            shouldShowTimelineFollowLatestBubble(
+                isComposerFocused = false,
+                keyboardVisible = true,
+                isNearTimelineEnd = false,
+                userDetachedFromLatest = true,
+                followLatestActive = false,
+            ),
+        )
+        assertFalse(
+            shouldShowTimelineFollowLatestBubble(
+                isComposerFocused = false,
+                keyboardVisible = false,
+                isNearTimelineEnd = false,
+                userDetachedFromLatest = true,
+                followLatestActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun userDragPausesStreamingFollowOnlyAfterLeavingLatestContent() {
+        assertFalse(
+            shouldPauseTimelineFollowForUserDrag(
+                isUserDragging = true,
+                isNearTimelineEnd = true,
+            ),
+        )
+        assertTrue(
+            shouldPauseTimelineFollowForUserDrag(
+                isUserDragging = true,
+                isNearTimelineEnd = false,
+            ),
+        )
+        assertFalse(
+            shouldPauseTimelineFollowForUserDrag(
+                isUserDragging = false,
+                isNearTimelineEnd = false,
+            ),
+        )
+    }
+
+    @Test
+    fun finalDecisionAutoFocusOnlyTargetsCurrentTurn() {
+        assertTrue(
+            shouldAutoFocusTimelineFinalDecision(
+                decisionKey = "final_current",
+                decisionTurnId = "turn_2",
+                currentTurnId = "turn_2",
+                lastFocusedDecisionKey = null,
+                routeReturnSettledDecisionKey = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+            ),
+        )
+        assertFalse(
+            shouldAutoFocusTimelineFinalDecision(
+                decisionKey = "final_old",
+                decisionTurnId = "turn_1",
+                currentTurnId = "turn_2",
+                lastFocusedDecisionKey = null,
+                routeReturnSettledDecisionKey = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+            ),
+        )
+        assertFalse(
+            shouldAutoFocusTimelineFinalDecision(
+                decisionKey = "final_current",
+                decisionTurnId = "turn_2",
+                currentTurnId = "turn_2",
+                lastFocusedDecisionKey = "final_current",
+                routeReturnSettledDecisionKey = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+            ),
+        )
+        assertFalse(
+            shouldAutoFocusTimelineFinalDecision(
+                decisionKey = "final_current",
+                decisionTurnId = "turn_2",
+                currentTurnId = "turn_2",
+                lastFocusedDecisionKey = null,
+                routeReturnSettledDecisionKey = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = true,
+            ),
+        )
+        assertFalse(
+            shouldAutoFocusTimelineFinalDecision(
+                decisionKey = "final_current",
+                decisionTurnId = "turn_2",
+                currentTurnId = "turn_2",
+                lastFocusedDecisionKey = null,
+                routeReturnSettledDecisionKey = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+                userDetachedFromLatest = true,
+            ),
+        )
+    }
+
+    @Test
+    fun manualScrollSettleBlocksOnlySystemAutoFocusIntents() {
+        assertFalse(
+            shouldBlockTimelineAutoFocusForManualScroll(
+                intentKind = TimelineScrollIntentKind.UserSent,
+                isManualScrollActive = true,
+            ),
+        )
+        assertFalse(
+            shouldBlockTimelineAutoFocusForManualScroll(
+                intentKind = TimelineScrollIntentKind.RouteReturn,
+                isManualScrollActive = true,
+            ),
+        )
+        assertTrue(
+            shouldBlockTimelineAutoFocusForManualScroll(
+                intentKind = TimelineScrollIntentKind.AssistantStarted,
+                isManualScrollActive = true,
+            ),
+        )
+        assertTrue(
+            shouldBlockTimelineAutoFocusForManualScroll(
+                intentKind = TimelineScrollIntentKind.FinalDecision,
+                isManualScrollActive = true,
+            ),
+        )
+        assertTrue(
+            shouldBlockTimelineAutoFocusForManualScroll(
+                intentKind = TimelineScrollIntentKind.FollowLatest,
+                isManualScrollActive = true,
+            ),
+        )
+        assertFalse(
+            shouldBlockTimelineAutoFocusForManualScroll(
+                intentKind = TimelineScrollIntentKind.FinalDecision,
+                isManualScrollActive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun assistantStartedAnchorIgnoresClarificationFlightSuppression() {
+        assertFalse(
+            isTimelineAutoFocusSuppressedForIntent(
+                intentKind = TimelineScrollIntentKind.AssistantStarted,
+                isRouteReturnSuppressed = false,
+                isClarificationFlightActive = true,
+            ),
+        )
+        assertTrue(
+            isTimelineAutoFocusSuppressedForIntent(
+                intentKind = TimelineScrollIntentKind.AssistantStarted,
+                isRouteReturnSuppressed = true,
+                isClarificationFlightActive = false,
+            ),
+        )
+        assertTrue(
+            isTimelineAutoFocusSuppressedForIntent(
+                intentKind = TimelineScrollIntentKind.FollowLatest,
+                isRouteReturnSuppressed = false,
+                isClarificationFlightActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun viewportFreezeOnlyRunsAfterActualScrollDrift() {
+        assertFalse(
+            shouldFreezeTimelineViewport(
+                currentIndex = 3,
+                currentOffset = 120,
+                targetIndex = 3,
+                targetOffset = 124,
+                tolerancePx = 8f,
+            ),
+        )
+        assertTrue(
+            shouldFreezeTimelineViewport(
+                currentIndex = 3,
+                currentOffset = 120,
+                targetIndex = 4,
+                targetOffset = 120,
+                tolerancePx = 8f,
+            ),
+        )
+        assertTrue(
+            shouldFreezeTimelineViewport(
+                currentIndex = 3,
+                currentOffset = 120,
+                targetIndex = 3,
+                targetOffset = 136,
+                tolerancePx = 8f,
+            ),
+        )
+    }
+
+    @Test
+    fun timelineMotionStopsChangingHeightAfterDragOrEntry() {
+        assertTrue(shouldAnimateTimelineItem(animateEnter = true, hasEntered = false))
+        assertFalse(shouldAnimateTimelineItem(animateEnter = false, hasEntered = false))
+        assertFalse(shouldAnimateTimelineItem(animateEnter = true, hasEntered = true))
+
+        assertTrue(shouldAnimateTurnNode(motionEnabled = true, hasStarted = false))
+        assertFalse(shouldAnimateTurnNode(motionEnabled = false, hasStarted = false))
+        assertFalse(shouldAnimateTurnNode(motionEnabled = true, hasStarted = true))
+    }
+
+    @Test
+    fun flightUserAnchorIsConsumedWithoutRequestingASecondUserScroll() {
+        assertTrue(
+            shouldConsumeFlightUserAnchor(
+                userMessageKey = "user_after_clarification",
+                activeFlightMessageKey = "user_after_clarification",
+            ),
+        )
+        assertFalse(
+            shouldConsumeFlightUserAnchor(
+                userMessageKey = "user_after_clarification",
+                activeFlightMessageKey = "previous_user",
+            ),
+        )
+        assertFalse(
+            shouldConsumeFlightUserAnchor(
+                userMessageKey = null,
+                activeFlightMessageKey = "user_after_clarification",
+            ),
+        )
+    }
+
+    @Test
+    fun initialCompletedTextDoesNotReplayAfterItWasLiveRevealed() {
+        assertTrue(
+            shouldAnimateInitialCompletedText(
+                turnId = "turn_1",
+                currentTurnId = "turn_1",
+                revealKey = "text_1",
+                revealedMessageKeys = emptySet(),
+                liveRevealedMessageKeys = emptySet(),
+            ),
+        )
+        assertFalse(
+            shouldAnimateInitialCompletedText(
+                turnId = "turn_1",
+                currentTurnId = "turn_1",
+                revealKey = "text_1",
+                revealedMessageKeys = setOf("text_1"),
+                liveRevealedMessageKeys = emptySet(),
+            ),
+        )
+        assertFalse(
+            shouldAnimateInitialCompletedText(
+                turnId = "turn_1",
+                currentTurnId = "turn_1",
+                revealKey = "text_1",
+                revealedMessageKeys = emptySet(),
+                liveRevealedMessageKeys = setOf("text_1"),
+            ),
+        )
+    }
+
+    @Test
+    fun timelineStructureSignatureChangesForNewNodesButNotTextContentGrowth() {
+        val intro = text("intro_text")
+        val textOnlyTurn = AssistantTurnTimelineItem(
+            turnId = "turn_1",
+            nodes = listOf(intro),
+            segmentIndex = 0,
+        )
+        val longerTextTurn = textOnlyTurn.copy(
+            nodes = listOf(intro.copy(content = intro.content + "，继续展开更多内容")),
+        )
+        val structuredTurn = textOnlyTurn.copy(
+            nodes = listOf(intro, deck("deck_1")),
+        )
+
+        assertEquals(textOnlyTurn.structureSignature(), longerTextTurn.structureSignature())
+        assertTrue(textOnlyTurn.structureSignature() != structuredTurn.structureSignature())
+    }
+
+    @Test
+    fun timelineStructureSignatureChangesWhenProductDeckGrowsInPlace() {
+        val intro = text("intro_text")
+        val firstDeck = deck("deck_1").copy(products = listOf(product("p1")))
+        val grownDeck = firstDeck.copy(products = listOf(product("p1"), product("p2")))
+        val firstTurn = AssistantTurnTimelineItem(
+            turnId = "turn_1",
+            nodes = listOf(intro, firstDeck),
+            segmentIndex = 0,
+        )
+        val grownTurn = firstTurn.copy(nodes = listOf(intro, grownDeck))
+
+        assertTrue(firstTurn.structureSignature() != grownTurn.structureSignature())
+    }
+
+    @Test
+    fun timelineStructureSignatureChangesWhenFinalDecisionContentGrowsInPlace() {
+        val compactFinal = finalDecision("final_decision")
+        val detailedFinal = compactFinal.copy(
+            payload = FinalDecisionPayload(
+                summary = "优先选这一款。",
+                why = listOf("预算匹配", "核心功能更接近你的需求"),
+                notFor = listOf("如果你更在意轻薄，可以继续看备选。"),
+            ),
+        )
+        val compactTurn = AssistantTurnTimelineItem(
+            turnId = "turn_1",
+            nodes = listOf(compactFinal),
+            segmentIndex = 0,
+        )
+        val detailedTurn = compactTurn.copy(nodes = listOf(detailedFinal))
+
+        assertTrue(compactTurn.structureSignature() != detailedTurn.structureSignature())
+    }
+
+    @Test
+    fun scrollAnchorSignatureIgnoresContentGrowthInsideStableTimelineItems() {
+        val intro = text("intro_text")
+        val firstDeck = deck("deck_1").copy(products = listOf(product("p1")))
+        val grownDeck = firstDeck.copy(products = listOf(product("p1"), product("p2")))
+        val compactFinal = finalDecision("final_decision")
+        val detailedFinal = compactFinal.copy(
+            payload = FinalDecisionPayload(
+                summary = "优先选这一款。",
+                why = listOf("预算匹配", "核心功能更接近你的需求"),
+                notFor = listOf("如果你更在意轻薄，可以继续看备选。"),
+            ),
+        )
+        val compactTurn = AssistantTurnTimelineItem(
+            turnId = "turn_1",
+            nodes = listOf(intro, firstDeck, compactFinal),
+            segmentIndex = 0,
+        )
+        val grownTurn = compactTurn.copy(nodes = listOf(intro.copy(content = intro.content + "，继续展开"), grownDeck, detailedFinal))
+
+        assertEquals(
+            listOf(compactTurn).scrollAnchorSignature(),
+            listOf(grownTurn).scrollAnchorSignature(),
+        )
+    }
+
+    @Test
+    fun scrollAnchorSignatureChangesWhenNodeShapeChanges() {
+        val intro = text("intro_text")
+        val deck = deck("deck_1")
+        val textOnlyTurn = AssistantTurnTimelineItem(
+            turnId = "turn_1",
+            nodes = listOf(intro),
+            segmentIndex = 0,
+        )
+        val deckTurn = textOnlyTurn.copy(nodes = listOf(intro, deck))
+
+        assertTrue(
+            listOf(textOnlyTurn).scrollAnchorSignature() != listOf(deckTurn).scrollAnchorSignature(),
+        )
+    }
+
+    @Test
+    fun routeReturnKeepsNewFinalDecisionEligibleForReadableFocus() {
+        assertEquals(
+            "final_before_detail",
+            routeAwareFocusedFinalDecisionKey(
+                currentFocusedKey = "final_before_detail",
+                routeReturnAnchorCaptured = true,
+                capturedFinalDecisionKey = "final_before_detail",
+                latestFinalDecisionKey = "final_after_convergence",
+            ),
+        )
+        assertEquals(
+            null,
+            routeAwareFocusedFinalDecisionKey(
+                currentFocusedKey = null,
+                routeReturnAnchorCaptured = true,
+                capturedFinalDecisionKey = null,
+                latestFinalDecisionKey = "final_after_convergence",
+            ),
+        )
+        assertEquals(
+            "final_after_convergence",
+            routeAwareFocusedFinalDecisionKey(
+                currentFocusedKey = "final_after_convergence",
+                routeReturnAnchorCaptured = false,
+                capturedFinalDecisionKey = null,
+                latestFinalDecisionKey = "final_after_convergence",
+            ),
+        )
+    }
+
+    @Test
+    fun routeReturnAnchorUsesAnchoredItemTurnInsteadOfGlobalCurrentTurn() {
+        val oldDeck = deck("deck_old").copy(turnId = "turn_old")
+        val oldTurn = AssistantTurnTimelineItem(
+            turnId = "turn_old",
+            nodes = listOf(oldDeck),
+            segmentIndex = 0,
+        )
+        val newTurn = AssistantTurnTimelineItem(
+            turnId = "turn_new",
+            nodes = listOf(text("text_new").copy(turnId = "turn_new")),
+            segmentIndex = 0,
+        )
+
+        assertEquals(
+            "turn_old",
+            routeReturnAnchorTurnId(
+                timelineItems = listOf(oldTurn, newTurn),
+                visibleItemIndex = 1,
+                anchorNodeKey = oldDeck.key,
+                currentTurnId = "turn_new",
+            ),
+        )
+    }
+
+    @Test
+    fun timelineStructureSignatureChangesWhenCartOrErrorContentChanges() {
+        val cartPending = StandaloneTimelineItem(
+            CartActionNode(
+                key = "cart_action",
+                payload = CartActionPayload(action = "add", productId = "p1", status = "pending"),
+            ),
+        )
+        val cartSuccess = StandaloneTimelineItem(
+            CartActionNode(
+                key = "cart_action",
+                payload = CartActionPayload(
+                    action = "add",
+                    productId = "p1",
+                    status = "success",
+                    cart = CartSummaryPayload(totalItems = 2),
+                ),
+            ),
+        )
+        val shortError = StandaloneTimelineItem(
+            ErrorNode(key = "error_1", code = "NETWORK", message = "失败", retryable = true),
+        )
+        val longError = StandaloneTimelineItem(
+            ErrorNode(key = "error_1", code = "NETWORK", message = "连接失败，请稍后重试", retryable = true),
+        )
+
+        assertTrue(cartPending.structureSignature() != cartSuccess.structureSignature())
+        assertTrue(shortError.structureSignature() != longError.structureSignature())
+    }
+
     @Test
     fun updateTextProgressKeepsLatestProgressWithoutSnapshottingEveryCharacter() {
         val store = TimelineRevealStore()
@@ -39,6 +997,23 @@ class TimelineRevealStoreTest {
 
         assertEquals(25, store.textRevealProgressByKey["text_1"]?.visibleLength)
         assertEquals(25, store.textRevealProgress("text_1")?.visibleLength)
+    }
+
+    @Test
+    fun visibilityProgressUsesLatestPrivateTextProgressInsteadOfSnapshotCheckpoint() {
+        val store = TimelineRevealStore()
+        val text = text("text_1", content = "这里是一段很长很长的流式文字，用来验证回到瀑布区时不会倒退")
+
+        store.updateTextProgress(key = text.key, visible = 1, total = 100)
+        store.updateTextProgress(key = text.key, visible = 2, total = 100)
+
+        val progress = listOf<ChatUiNode>(text).textRevealProgressForVisibility(
+            revealStore = store,
+            liveRevealedMessageKeys = emptySet(),
+        )
+
+        assertEquals(1, store.textRevealProgressByKey[text.key]?.visibleLength)
+        assertEquals(2, progress[text.key]?.visibleLength)
     }
 
     @Test
@@ -92,12 +1067,76 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun blankTextAfterThinkingKeepsThinkingInOwnSlotAndDoesNotStartHandoff() {
+        val thinking = thinking("thinking_search")
+        val blankText = text("intro_text", content = "")
+        val state = listOf(thinking, blankText).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertTrue(thinking.key in state.visibleNodeKeys)
+        assertFalse(blankText.key in state.visibleNodeKeys)
+        assertFalse(blankText.key in state.textHandoffKeys)
+        assertTrue(listOf<ChatUiNode>(thinking, blankText).shouldRenderThinkingNodeInOwnSlot(0))
+    }
+
+    @Test
+    fun blankTextNodeDoesNotBlockFollowingStructuredCard() {
+        val blankText = text("empty_intro", content = "")
+        val deck = deck("deck_after_empty_text")
+        val state = listOf<ChatUiNode>(blankText, deck).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertFalse(blankText.key in state.visibleNodeKeys)
+        assertTrue(deck.key in state.visibleNodeKeys)
+    }
+
+    @Test
+    fun blankThinkingDoesNotDelayFollowingText() {
+        val thinking = thinking("thinking_empty", message = "")
+        val text = text("intro_text")
+        val state = listOf(thinking, text).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertFalse(thinking.key in state.visibleNodeKeys)
+        assertTrue(text.key in state.visibleNodeKeys)
+        assertFalse(text.key in state.textHandoffKeys)
+    }
+
+    @Test
     fun textAfterThinkingHidesThinkingAfterTextStarts() {
         val thinking = thinking("thinking_search")
         val text = text("intro_text")
         val state = listOf(thinking, text).visibleTurnNodeKeys(
             completedTextKeys = emptySet(),
             textRevealProgress = mapOf(text.key to TextRevealProgress(visibleLength = 1, totalLength = 20)),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertFalse(thinking.key in state.visibleNodeKeys)
+        assertTrue(text.key in state.visibleNodeKeys)
+        assertFalse(text.key in state.textHandoffKeys)
+    }
+
+    @Test
+    fun textAfterThinkingDoesNotBringThinkingBackWhenLiveProgressWasRestored() {
+        val thinking = thinking("thinking_search")
+        val text = text("intro_text")
+        val restoredLiveProgress = TextRevealProgress(
+            visibleLength = text.content.length,
+            totalLength = text.content.length,
+        )
+        val state = listOf(thinking, text).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = mapOf(text.key to restoredLiveProgress),
             enteredStructuredKeys = emptySet(),
         )
 
@@ -124,6 +1163,68 @@ class TimelineRevealStoreTest {
         assertTrue(thinking.key in waitingState.visibleNodeKeys)
         assertTrue(thinking.key in handoffState.visibleNodeKeys)
         assertTrue(text.key in handoffState.visibleNodeKeys)
+    }
+
+    @Test
+    fun thinkingBeforeTextRevealNodeUsesHandoffSlotInsteadOfRenderingTwice() {
+        val thinking = thinking("thinking_clarify", stage = "clarification", message = "正在确认你的预算范围...")
+        val clarification = clarification("clarify_budget")
+        val text = text("intro_text")
+        val deck = deck("deck_1")
+
+        assertFalse(listOf<ChatUiNode>(thinking, clarification).shouldRenderThinkingNodeInOwnSlot(0))
+        assertFalse(listOf<ChatUiNode>(thinking, text).shouldRenderThinkingNodeInOwnSlot(0))
+        assertFalse(listOf<ChatUiNode>(thinking, deck).shouldRenderThinkingNodeInOwnSlot(0))
+        assertTrue(listOf<ChatUiNode>(thinking).shouldRenderThinkingNodeInOwnSlot(0))
+    }
+
+    @Test
+    fun thinkingBeforeStructuredCardStaysVisibleUntilCardEntered() {
+        val thinking = thinking("thinking_search", stage = "searching", message = "正在检索匹配商品...")
+        val deck = deck("deck_1")
+        val nodes = listOf<ChatUiNode>(thinking, deck)
+
+        val beforeDeckEntered = nodes.visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+        val afterDeckEntered = nodes.visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = setOf(deck.key),
+        )
+
+        assertTrue(thinking.key in beforeDeckEntered.visibleNodeKeys)
+        assertTrue(deck.key in beforeDeckEntered.visibleNodeKeys)
+        assertTrue(deck.key in beforeDeckEntered.structuredHandoffKeys)
+        assertFalse(thinking.key in afterDeckEntered.visibleNodeKeys)
+        assertTrue(deck.key in afterDeckEntered.visibleNodeKeys)
+        assertFalse(deck.key in afterDeckEntered.structuredHandoffKeys)
+    }
+
+    @Test
+    fun clarificationQuestionAfterThinkingUsesHandoffUntilQuestionStarts() {
+        val thinking = thinking("thinking_clarify", stage = "clarification", message = "正在确认你的预算范围...")
+        val clarification = clarification("clarify_budget")
+        val questionKey = "${clarification.key}_question"
+
+        val beforeQuestionStarts = listOf(thinking, clarification).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = emptyMap(),
+            enteredStructuredKeys = emptySet(),
+        )
+        val afterQuestionStarts = listOf(thinking, clarification).visibleTurnNodeKeys(
+            completedTextKeys = emptySet(),
+            textRevealProgress = mapOf(questionKey to TextRevealProgress(visibleLength = 1, totalLength = 12)),
+            enteredStructuredKeys = emptySet(),
+        )
+
+        assertTrue(thinking.key in beforeQuestionStarts.visibleNodeKeys)
+        assertTrue(clarification.key in beforeQuestionStarts.visibleNodeKeys)
+        assertTrue(questionKey in beforeQuestionStarts.textHandoffKeys)
+        assertFalse(thinking.key in afterQuestionStarts.visibleNodeKeys)
+        assertTrue(clarification.key in afterQuestionStarts.visibleNodeKeys)
     }
 
     @Test
@@ -196,7 +1297,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckCanEnterAfterIntroGateAndFinalCardWaitsForDeckAndTextCompletion() {
+    fun productDeckWaitsForTextCompletionBeforeEntering() {
         val text = text("intro_text")
         val deck = deck("deck_1")
         val final = finalDecision("final_decision")
@@ -224,9 +1325,11 @@ class TimelineRevealStoreTest {
         )
 
         assertFalse(deck.key in beforeIntroGate.visibleNodeKeys)
-        assertTrue(deck.key in afterIntroGate.visibleNodeKeys)
+        assertFalse(deck.key in afterIntroGate.visibleNodeKeys)
         assertFalse(final.key in afterIntroGate.visibleNodeKeys)
+        assertFalse(deck.key in afterDeckEnteredBeforeTextDone.visibleNodeKeys)
         assertFalse(final.key in afterDeckEnteredBeforeTextDone.visibleNodeKeys)
+        assertTrue(deck.key in afterDeckEnteredAndTextDone.visibleNodeKeys)
         assertTrue(final.key in afterDeckEnteredAndTextDone.visibleNodeKeys)
     }
 
@@ -247,6 +1350,7 @@ class TimelineRevealStoreTest {
         assertTrue(deck.key in state.visibleNodeKeys)
         assertTrue(final.key in state.visibleNodeKeys)
         assertTrue(state.textHandoffKeys.isEmpty())
+        assertTrue(state.structuredHandoffKeys.isEmpty())
     }
 
     @Test
@@ -304,6 +1408,13 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun singleCandidateDeckLayoutDependsOnlyOnProductCount() {
+        assertTrue(isSingleCandidateDeck(1))
+        assertFalse(isSingleCandidateDeck(0))
+        assertFalse(isSingleCandidateDeck(2))
+    }
+
+    @Test
     fun productCarouselOpensCardsAsDetailWhenProductIdExists() {
         assertTrue(
             shouldOpenProductCardAsDetail(
@@ -346,7 +1457,8 @@ class TimelineRevealStoreTest {
         val final = finalDecision("final_decision", deckId = "deck_1")
 
         assertFalse(ChatUiState(nodes = listOf(deck, unrelatedFinal)).hasConvergedDecisionForDeck("deck_1"))
-        assertTrue(ChatUiState(nodes = listOf(final, deck)).hasConvergedDecisionForDeck("deck_1"))
+        assertFalse(ChatUiState(nodes = listOf(final, deck)).hasConvergedDecisionForDeck("deck_1"))
+        assertTrue(ChatUiState(nodes = listOf(deck, final)).hasConvergedDecisionForDeck("deck_1"))
     }
 
     @Test
@@ -427,9 +1539,17 @@ class TimelineRevealStoreTest {
         assertEquals("deck_1", presentation.latestFinalDecisionDeckId)
         assertEquals(listOf("clarify_budget"), presentation.clarificationKeys)
         assertEquals("deck_1", presentation.productDeckIdByProductId["p1"])
+        assertEquals(deck, presentation.productDeckNodeByKey["deck_1"])
+        assertEquals("deck_1", presentation.finalDecisionSourceDeckKeyByDecisionKey["final_decision"])
         assertEquals(setOf("deck_1"), presentation.convergedDeckIds)
+        assertEquals(setOf("deck_1"), presentation.convergedProductDeckKeys)
         assertSame(presentation.productsById, presentation.renderContext.productsById)
         assertSame(presentation.productDeckIdByProductId, presentation.renderContext.productDeckIdByProductId)
+        assertSame(presentation.productDeckNodeByKey, presentation.renderContext.productDeckNodeByKey)
+        assertSame(
+            presentation.finalDecisionSourceDeckKeyByDecisionKey,
+            presentation.renderContext.finalDecisionSourceDeckKeyByDecisionKey,
+        )
         assertEquals("http://localhost:8000", presentation.renderContext.backendBaseUrl)
         assertEquals(true, presentation.renderContext.isStreaming)
         assertEquals("turn_1", presentation.renderContext.currentTurnId)
@@ -437,6 +1557,59 @@ class TimelineRevealStoreTest {
         assertEquals(setOf("deck_1"), presentation.renderContext.awaitingConvergenceDeckIds)
         assertEquals("deck_1", presentation.renderContext.latestConvergeableDeckId)
         assertEquals("帮我选", presentation.renderContext.lastUserMessage)
+    }
+
+    @Test
+    fun timelinePresentationScopesConvergedStateToExactProductDeckNode() {
+        val oldDeck = ProductDeckNode(
+            key = "deck_1",
+            deckId = "deck_1",
+            products = listOf(product("p1"), product("p2")),
+            turnId = "turn_1",
+        )
+        val oldDecision = finalDecision("final_old", deckId = "deck_1")
+        val newDeck = ProductDeckNode(
+            key = "deck_1_turn_2",
+            deckId = "deck_1",
+            products = listOf(product("p3"), product("p4")),
+            turnId = "turn_2",
+        )
+
+        val presentation = ChatUiState(nodes = listOf(oldDeck, oldDecision, newDeck)).toTimelinePresentationState()
+
+        assertEquals(setOf("deck_1"), presentation.convergedDeckIds)
+        assertEquals(setOf("deck_1"), presentation.convergedProductDeckKeys)
+        assertEquals(setOf("deck_1"), presentation.renderContext.convergedProductDeckKeys)
+        assertEquals("deck_1", presentation.finalDecisionSourceDeckKeyByDecisionKey["final_old"])
+        assertEquals(oldDeck, presentation.productDeckNodeByKey["deck_1"])
+        assertEquals(newDeck, presentation.productDeckNodeByKey["deck_1_turn_2"])
+        assertEquals("deck_1_turn_2", presentation.latestProductDeckKey)
+    }
+
+    @Test
+    fun timelinePresentationBindsEachDecisionToNearestPreviousDeckWithSameDeckId() {
+        val firstDeck = ProductDeckNode(
+            key = "deck_1",
+            deckId = "deck_1",
+            products = listOf(product("p1"), product("p2")),
+            turnId = "turn_1",
+        )
+        val firstDecision = finalDecision("final_1", deckId = "deck_1")
+        val secondDeck = ProductDeckNode(
+            key = "deck_1_turn_2",
+            deckId = "deck_1",
+            products = listOf(product("p3"), product("p4")),
+            turnId = "turn_2",
+        )
+        val secondDecision = finalDecision("final_2", deckId = "deck_1")
+
+        val presentation = ChatUiState(
+            nodes = listOf(firstDeck, firstDecision, secondDeck, secondDecision),
+        ).toTimelinePresentationState()
+
+        assertEquals("deck_1", presentation.finalDecisionSourceDeckKeyByDecisionKey["final_1"])
+        assertEquals("deck_1_turn_2", presentation.finalDecisionSourceDeckKeyByDecisionKey["final_2"])
+        assertEquals(setOf("deck_1", "deck_1_turn_2"), presentation.convergedProductDeckKeys)
     }
 
     @Test
@@ -457,11 +1630,11 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckHistoryCompactsOldTurnWhileNewTurnIsStreaming() {
+    fun productDeckHistoryKeepsOldTurnShapeWhileNewTurnIsStreaming() {
         val previousDeck = deck("deck_previous", turnId = "turn_1")
         val currentDeck = deck("deck_current", turnId = "turn_2")
 
-        assertTrue(
+        assertFalse(
             shouldCompactProductDeckHistory(
                 node = previousDeck,
                 deckConverged = false,
@@ -482,11 +1655,11 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckHistoryKeepsOnlyLatestDeckExpandedAfterStreamingSettles() {
+    fun productDeckHistoryKeepsDeckShapeAfterStreamingSettles() {
         val previousDeck = deck("deck_previous", turnId = "turn_1")
         val latestDeck = deck("deck_latest", turnId = "turn_2")
 
-        assertTrue(
+        assertFalse(
             shouldCompactProductDeckHistory(
                 node = previousDeck,
                 deckConverged = false,
@@ -507,10 +1680,10 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckHistoryCompactsLatestDeckAfterDecisionAppears() {
+    fun productDeckHistoryKeepsLatestDeckShapeAfterDecisionAppears() {
         val latestDeck = deck("deck_latest", turnId = "turn_1")
 
-        assertTrue(
+        assertFalse(
             shouldCompactProductDeckHistory(
                 node = latestDeck,
                 deckConverged = true,
@@ -519,7 +1692,7 @@ class TimelineRevealStoreTest {
                 latestProductDeckKey = latestDeck.key,
             ),
         )
-        assertTrue(
+        assertFalse(
             shouldCompactProductDeckHistory(
                 node = latestDeck,
                 deckConverged = true,
@@ -528,6 +1701,76 @@ class TimelineRevealStoreTest {
                 latestProductDeckKey = latestDeck.key,
             ),
         )
+    }
+
+    @Test
+    fun productDeckLookupUsesLatestDeckWhenBackendReusesDeckId() {
+        val oldDeck = ProductDeckNode(
+            key = "deck_1",
+            deckId = "deck_1",
+            products = listOf(product("p1"), product("p2")),
+            turnId = "turn_1",
+        )
+        val oldDecision = finalDecision("final_old", deckId = "deck_1")
+        val newDeck = ProductDeckNode(
+            key = "deck_1_turn_2",
+            deckId = "deck_1",
+            products = listOf(product("p3"), product("p4")),
+            turnId = "turn_2",
+        )
+        val state = ChatUiState(nodes = listOf(oldDeck, oldDecision, newDeck))
+
+        assertEquals("deck_1_turn_2", state.findProductDeck("deck_1")?.key)
+        assertEquals("p3", state.findProduct("deck_1", "p3")?.product?.productId)
+        assertEquals("p1", state.findProduct("deck_1", "p1")?.product?.productId)
+        assertTrue(state.isProductInDeck("deck_1", "p3"))
+        assertFalse(state.isProductInDeck("deck_1", "p1"))
+        assertFalse(state.hasConvergedDecisionForDeck("deck_1"))
+        assertTrue(state.canOpenDeckForConvergence("deck_1").not())
+    }
+
+    @Test
+    fun productDeckLookupCanPinHistoricalDeckWhenBackendReusesDeckId() {
+        val oldDeck = ProductDeckNode(
+            key = "deck_1",
+            deckId = "deck_1",
+            products = listOf(product("p1"), product("p2")),
+            turnId = "turn_1",
+        )
+        val oldDecision = finalDecision("final_old", deckId = "deck_1")
+        val newDeck = ProductDeckNode(
+            key = "deck_1_turn_2",
+            deckId = "deck_1",
+            products = listOf(product("p3"), product("p4")),
+            turnId = "turn_2",
+        )
+        val state = ChatUiState(
+            nodes = listOf(oldDeck, oldDecision, newDeck),
+            latestConvergeableDeckId = "deck_1",
+            awaitingConvergenceDeckIds = setOf("deck_1"),
+        )
+
+        assertEquals("deck_1", state.findProductDeck("deck_1", "deck_1")?.key)
+        assertEquals("p1", state.findProduct("deck_1", "p1", "deck_1")?.product?.productId)
+        assertNull(state.findProduct("deck_1", "p3", "deck_1"))
+        assertTrue(state.isProductInDeck("deck_1", "p1", "deck_1"))
+        assertFalse(state.isProductInDeck("deck_1", "p3", "deck_1"))
+        assertTrue(state.hasConvergedDecisionForDeck("deck_1", "deck_1"))
+        assertFalse(state.canOpenDeckForConvergence("deck_1", "deck_1"))
+    }
+
+    @Test
+    fun latestDeckCountsAsConvergedOnlyWhenDecisionAppearsAfterIt() {
+        val deck = ProductDeckNode(
+            key = "deck_1_turn_2",
+            deckId = "deck_1",
+            products = listOf(product("p3"), product("p4")),
+            turnId = "turn_2",
+        )
+        val decision = finalDecision("final_new", deckId = "deck_1")
+        val state = ChatUiState(nodes = listOf(deck, decision))
+
+        assertTrue(state.hasConvergedDecisionForDeck("deck_1"))
     }
 
     @Test
@@ -652,6 +1895,37 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun streamedTextRestoresCurrentLengthAfterLiveRevealInsteadOfReplaying() {
+        assertEquals(
+            18,
+            initialStreamingVisibleLength(
+                contentLength = 18,
+                revealVisibleLength = null,
+                alreadyCompleted = false,
+                stablePlainAfterLiveReveal = true,
+            ),
+        )
+        assertEquals(
+            7,
+            initialStreamingVisibleLength(
+                contentLength = 18,
+                revealVisibleLength = 7,
+                alreadyCompleted = false,
+                stablePlainAfterLiveReveal = false,
+            ),
+        )
+        assertEquals(
+            18,
+            initialStreamingVisibleLength(
+                contentLength = 18,
+                revealVisibleLength = 7,
+                alreadyCompleted = true,
+                stablePlainAfterLiveReveal = false,
+            ),
+        )
+    }
+
+    @Test
     fun clarificationManualPromptFollowsMissingSlotContext() {
         val category = clarificationManualPromptFor(
             ClarificationPayload(
@@ -670,6 +1944,18 @@ class TimelineRevealStoreTest {
         assertEquals("直接输入预算范围", budget)
     }
 
+    @Test
+    fun productSeedShimmerStopsAfterArrivalSettles() {
+        assertTrue(shouldRenderProductImageLoadingSeed(0f))
+        assertTrue(shouldRenderProductImageLoadingSeed(0.5f))
+        assertFalse(shouldRenderProductImageLoadingSeed(0.99f))
+        assertFalse(shouldRenderProductImageLoadingSeed(1f))
+
+        assertFalse(shouldRenderProductArrivalSeedBubble(0f))
+        assertTrue(shouldRenderProductArrivalSeedBubble(0.5f))
+        assertTrue(shouldRenderProductArrivalSeedBubble(1f))
+    }
+
     private fun thinking(
         key: String,
         stage: String = key,
@@ -680,10 +1966,13 @@ class TimelineRevealStoreTest {
         turnId = "turn_1",
     )
 
-    private fun text(key: String) = AiStreamNode(
+    private fun text(
+        key: String,
+        content: String = "这里是一段正在展开的文字",
+    ) = AiStreamNode(
         key = key,
         messageId = key,
-        content = "这里是一段正在展开的文字",
+        content = content,
         done = false,
         turnId = "turn_1",
     )
