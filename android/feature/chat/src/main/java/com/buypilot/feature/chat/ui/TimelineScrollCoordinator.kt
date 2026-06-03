@@ -30,7 +30,7 @@ internal enum class TimelineScrollIntentKind(val priority: Int) {
     UserSent(70),
     AssistantStarted(60),
     KeyboardChanged(50),
-    FollowLatest(40),
+    FollowReadableTurn(40),
 }
 
 internal data class TimelineScrollIntent(
@@ -40,12 +40,163 @@ internal data class TimelineScrollIntent(
     val index: Int = -1,
     val scrollOffset: Int = 0,
     val deltaPx: Int = 0,
+    val allowOffscreenAnchor: Boolean = false,
 )
 
 internal data class PendingTimelineScrollIntent(
     val serial: Int,
     val intent: TimelineScrollIntent,
 )
+
+@Stable
+internal class TimelineViewportController(
+    private val coordinator: TimelineScrollCoordinator = TimelineScrollCoordinator(),
+) {
+    val pendingIntent: PendingTimelineScrollIntent?
+        get() = coordinator.pendingIntent
+
+    val pendingIntentCount: Int
+        get() = coordinator.pendingIntentCount
+
+    val queuedIntentKinds: List<TimelineScrollIntentKind>
+        get() = coordinator.queuedIntentKinds
+
+    private fun request(
+        intent: TimelineScrollIntent,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        coordinator.request(
+            intent = intent,
+            autoFocusSuppressed = isTimelineAutoFocusSuppressedForIntent(
+                intentKind = intent.kind,
+                isRouteReturnSuppressed = isRouteReturnSuppressed,
+                isClarificationFlightActive = isClarificationFlightActive,
+            ),
+        )
+
+    fun requestRouteReturn(
+        key: String?,
+        index: Int,
+        scrollOffset: Int,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.RouteReturn,
+                key = key,
+                index = index,
+                scrollOffset = scrollOffset,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun requestViewportFreeze(
+        key: String?,
+        index: Int,
+        scrollOffset: Int,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.ViewportFreeze,
+                key = key,
+                index = index,
+                scrollOffset = scrollOffset,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun requestUserSent(
+        key: String,
+        index: Int,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.UserSent,
+                key = key,
+                index = index,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun requestAssistantStarted(
+        turnId: String,
+        index: Int,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.AssistantStarted,
+                turnId = turnId,
+                index = index,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun requestKeyboardChanged(
+        deltaPx: Int,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.KeyboardChanged,
+                deltaPx = deltaPx,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun requestFinalDecision(
+        key: String,
+        turnId: String?,
+        index: Int,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.FinalDecision,
+                key = key,
+                turnId = turnId,
+                index = index,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun requestReadableTurnFollow(
+        allowOffscreenAnchor: Boolean,
+        isRouteReturnSuppressed: Boolean,
+        isClarificationFlightActive: Boolean,
+    ): Boolean =
+        request(
+            intent = TimelineScrollIntent(
+                kind = TimelineScrollIntentKind.FollowReadableTurn,
+                allowOffscreenAnchor = allowOffscreenAnchor,
+            ),
+            isRouteReturnSuppressed = isRouteReturnSuppressed,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
+
+    fun interruptWithUserDrag() {
+        coordinator.interruptWithUserDrag()
+    }
+
+    fun clear(serial: Int) {
+        coordinator.clear(serial)
+    }
+}
 
 @Stable
 internal class TimelineScrollCoordinator {
@@ -135,7 +286,8 @@ internal class TimelineScrollCoordinator {
             turnId == other.turnId &&
             index == other.index &&
             scrollOffset == other.scrollOffset &&
-            deltaPx == other.deltaPx
+            deltaPx == other.deltaPx &&
+            allowOffscreenAnchor == other.allowOffscreenAnchor
 }
 
 private val TimelineScrollIntentKind.canRunWhileAutoFocusSuppressed: Boolean
@@ -145,7 +297,7 @@ private val TimelineScrollIntentKind.canRunWhileAutoFocusSuppressed: Boolean
 
 private val TimelineScrollIntentKind.isVolatile: Boolean
     get() = this == TimelineScrollIntentKind.ViewportFreeze
-        || this == TimelineScrollIntentKind.FollowLatest
+        || this == TimelineScrollIntentKind.FollowReadableTurn
         || this == TimelineScrollIntentKind.KeyboardChanged
 
 private fun TimelineScrollIntentKind.supersedesQueuedIntent(queuedKind: TimelineScrollIntentKind): Boolean =
@@ -159,17 +311,17 @@ private fun TimelineScrollIntentKind.supersedesQueuedIntent(queuedKind: Timeline
         TimelineScrollIntentKind.FinalDecision -> queuedKind == TimelineScrollIntentKind.UserSent ||
             queuedKind == TimelineScrollIntentKind.AssistantStarted ||
             queuedKind == TimelineScrollIntentKind.KeyboardChanged ||
-            queuedKind == TimelineScrollIntentKind.FollowLatest
+            queuedKind == TimelineScrollIntentKind.FollowReadableTurn
         TimelineScrollIntentKind.UserSent -> queuedKind == TimelineScrollIntentKind.RouteReturn ||
             queuedKind == TimelineScrollIntentKind.ViewportFreeze ||
             queuedKind == TimelineScrollIntentKind.FinalDecision ||
             queuedKind == TimelineScrollIntentKind.AssistantStarted ||
             queuedKind == TimelineScrollIntentKind.KeyboardChanged ||
-            queuedKind == TimelineScrollIntentKind.FollowLatest
+            queuedKind == TimelineScrollIntentKind.FollowReadableTurn
         TimelineScrollIntentKind.AssistantStarted -> queuedKind == TimelineScrollIntentKind.ViewportFreeze ||
-            queuedKind == TimelineScrollIntentKind.FollowLatest
-        TimelineScrollIntentKind.KeyboardChanged -> queuedKind == TimelineScrollIntentKind.FollowLatest
-        TimelineScrollIntentKind.FollowLatest -> false
+            queuedKind == TimelineScrollIntentKind.FollowReadableTurn
+        TimelineScrollIntentKind.KeyboardChanged -> queuedKind == TimelineScrollIntentKind.FollowReadableTurn
+        TimelineScrollIntentKind.FollowReadableTurn -> false
     }
 
 private val TimelineScrollIntentKind.isReadableTurnAnchor: Boolean
@@ -186,18 +338,26 @@ internal fun shouldScrollTimelineForKeyboardChange(
     !isUserDragging &&
     wasNearEndBeforeKeyboard
 
-internal fun shouldShowTimelineFollowLatestBubble(
+internal fun shouldReanchorReadableTurnAfterKeyboardCollapse(
+    deltaPx: Int,
+    currentTurnFollowActive: Boolean,
+    isUserDragging: Boolean,
+): Boolean = deltaPx < 0 &&
+    currentTurnFollowActive &&
+    !isUserDragging
+
+internal fun shouldShowTimelineReadableTurnBubble(
     isComposerFocused: Boolean,
     keyboardVisible: Boolean,
     isNearTimelineEnd: Boolean,
     userDetachedFromLatest: Boolean,
-    followLatestActive: Boolean,
+    currentTurnFollowActive: Boolean,
 ): Boolean =
     !isComposerFocused &&
         !keyboardVisible &&
         !isNearTimelineEnd &&
         userDetachedFromLatest &&
-        !followLatestActive
+        !currentTurnFollowActive
 
 internal fun shouldPauseTimelineFollowForUserDrag(
     isUserDragging: Boolean,
@@ -220,6 +380,17 @@ internal fun shouldAutoFocusTimelineFinalDecision(
     val decisionTurn = decisionTurnId?.takeIf { it.isNotBlank() }
     val currentTurn = currentTurnId?.takeIf { it.isNotBlank() }
     return decisionTurn == null || currentTurn == null || decisionTurn == currentTurn
+}
+
+internal fun shouldPreserveUserBubbleAnchorForAssistantStart(
+    pendingUserBubbleAnchorKey: String?,
+    latestUserMessageKey: String?,
+    userItemIndex: Int,
+    assistantItemIndex: Int,
+): Boolean {
+    val anchorKey = pendingUserBubbleAnchorKey?.takeIf { it.isNotBlank() } ?: return false
+    val userKey = latestUserMessageKey?.takeIf { it.isNotBlank() } ?: return false
+    return anchorKey == userKey && userItemIndex >= 0 && assistantItemIndex > userItemIndex
 }
 
 internal fun shouldBlockTimelineAutoFocusForManualScroll(
@@ -252,7 +423,7 @@ internal fun isTimelineAutoFocusSuppressedForIntent(
 
         TimelineScrollIntentKind.FinalDecision,
         TimelineScrollIntentKind.KeyboardChanged,
-        TimelineScrollIntentKind.FollowLatest -> isRouteReturnSuppressed || isClarificationFlightActive
+        TimelineScrollIntentKind.FollowReadableTurn -> isRouteReturnSuppressed || isClarificationFlightActive
     }
 
 internal fun shouldFreezeTimelineViewport(

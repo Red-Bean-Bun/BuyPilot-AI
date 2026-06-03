@@ -2,7 +2,11 @@ package com.buypilot.feature.chat.ui
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
@@ -10,6 +14,7 @@ import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.presentation.revealTextKey
 
 private const val TextRevealProgressReportStep = 24
+private const val SnapshotProgressSeparator = "\u001F"
 
 @Immutable
 internal data class TextRevealProgress(
@@ -26,8 +31,60 @@ internal data class TurnNodeVisibilityState(
     val structuredHandoffKeys: Set<String>,
 )
 
+@Immutable
+internal data class TimelineRevealSnapshot(
+    val enteredTimelineItemKeys: Set<String> = emptySet(),
+    val startedStructuredNodeKeys: Set<String> = emptySet(),
+    val enteredStructuredNodeKeys: Set<String> = emptySet(),
+    val completedTextKeys: Set<String> = emptySet(),
+    val liveRevealedTextKeys: Set<String> = emptySet(),
+    val textRevealProgressByKey: Map<String, TextRevealProgress> = emptyMap(),
+    val latestTextRevealProgressByKey: Map<String, TextRevealProgress> = emptyMap(),
+    val lastSnapshotTextRevealProgressByKey: Map<String, TextRevealProgress> = emptyMap(),
+)
+
 @Stable
-internal class TimelineRevealStore {
+internal class TimelineRevealSnapshotHolder(
+    snapshot: TimelineRevealSnapshot = TimelineRevealSnapshot(),
+) {
+    var snapshot by mutableStateOf(snapshot)
+}
+
+internal val TimelineRevealSnapshotHolderSaver = Saver<TimelineRevealSnapshotHolder, ArrayList<Any>>(
+    save = { holder ->
+        val snapshot = holder.snapshot
+        arrayListOf(
+            ArrayList(snapshot.enteredTimelineItemKeys),
+            ArrayList(snapshot.startedStructuredNodeKeys),
+            ArrayList(snapshot.enteredStructuredNodeKeys),
+            ArrayList(snapshot.completedTextKeys),
+            ArrayList(snapshot.liveRevealedTextKeys),
+            encodeProgressMap(snapshot.textRevealProgressByKey),
+            encodeProgressMap(snapshot.latestTextRevealProgressByKey),
+            encodeProgressMap(snapshot.lastSnapshotTextRevealProgressByKey),
+        )
+    },
+    restore = { saved ->
+        TimelineRevealSnapshotHolder(
+            TimelineRevealSnapshot(
+                enteredTimelineItemKeys = saved.stringSetAt(0),
+                startedStructuredNodeKeys = saved.stringSetAt(1),
+                enteredStructuredNodeKeys = saved.stringSetAt(2),
+                completedTextKeys = saved.stringSetAt(3),
+                liveRevealedTextKeys = saved.stringSetAt(4),
+                textRevealProgressByKey = saved.progressMapAt(5),
+                latestTextRevealProgressByKey = saved.progressMapAt(6),
+                lastSnapshotTextRevealProgressByKey = saved.progressMapAt(7),
+            ),
+        )
+    },
+)
+
+@Stable
+internal class TimelineRevealStore(
+    initialSnapshot: TimelineRevealSnapshot = TimelineRevealSnapshot(),
+    private val onSnapshotChanged: (TimelineRevealSnapshot) -> Unit = {},
+) {
     private val enteredTimelineItemKeys = mutableMapOf<String, Boolean>()
     private val startedStructuredNodeKeys = mutableMapOf<String, Boolean>()
     val enteredStructuredNodeKeys = mutableStateMapOf<String, Boolean>()
@@ -37,34 +94,63 @@ internal class TimelineRevealStore {
     private val latestTextRevealProgressByKey = mutableMapOf<String, TextRevealProgress>()
     private val lastSnapshotTextRevealProgressByKey = mutableMapOf<String, TextRevealProgress>()
 
+    init {
+        initialSnapshot.enteredTimelineItemKeys.forEach { enteredTimelineItemKeys[it] = true }
+        initialSnapshot.startedStructuredNodeKeys.forEach { startedStructuredNodeKeys[it] = true }
+        initialSnapshot.enteredStructuredNodeKeys.forEach { enteredStructuredNodeKeys[it] = true }
+        initialSnapshot.completedTextKeys.forEach { completedTextKeys[it] = true }
+        initialSnapshot.liveRevealedTextKeys.forEach { liveRevealedTextKeys[it] = true }
+        textRevealProgressByKey.putAll(initialSnapshot.textRevealProgressByKey)
+        latestTextRevealProgressByKey.putAll(initialSnapshot.latestTextRevealProgressByKey)
+        lastSnapshotTextRevealProgressByKey.putAll(initialSnapshot.lastSnapshotTextRevealProgressByKey)
+    }
+
     fun hasEnteredTimelineItem(key: String): Boolean = enteredTimelineItemKeys[key] == true
     fun markTimelineItemEntered(key: String) {
+        if (enteredTimelineItemKeys[key] == true) return
         enteredTimelineItemKeys[key] = true
+        notifySnapshotChanged()
     }
 
     fun hasStartedStructuredNode(key: String): Boolean = startedStructuredNodeKeys[key] == true
     fun markStructuredNodeStarted(key: String) {
+        if (startedStructuredNodeKeys[key] == true) return
         startedStructuredNodeKeys[key] = true
+        notifySnapshotChanged()
     }
 
     fun hasEnteredStructuredNode(key: String): Boolean = enteredStructuredNodeKeys[key] == true
     fun markStructuredNodeEntered(key: String) {
+        if (enteredStructuredNodeKeys[key] == true) return
         enteredStructuredNodeKeys[key] = true
+        notifySnapshotChanged()
     }
 
     fun hasCompletedText(key: String): Boolean = completedTextKeys[key] == true
     fun markTextCompleted(key: String) {
+        if (completedTextKeys[key] == true) return
         completedTextKeys[key] = true
+        notifySnapshotChanged()
     }
 
     fun hasLiveRevealedText(key: String): Boolean = liveRevealedTextKeys[key] == true
+    fun markTextLiveRevealed(key: String) {
+        if (liveRevealedTextKeys[key] == true) return
+        liveRevealedTextKeys[key] = true
+        notifySnapshotChanged()
+    }
+
+    fun completedTextKeySet(): Set<String> = completedTextKeys.keys.toSet()
+    fun liveRevealedTextKeySet(): Set<String> = liveRevealedTextKeys.keys.toSet()
 
     fun updateTextProgress(key: String, visible: Int, total: Int) {
         val previous = lastSnapshotTextRevealProgressByKey[key]
         val next = TextRevealProgress(visibleLength = visible, totalLength = total)
         latestTextRevealProgressByKey[key] = next
+        var snapshotDirty = false
         if (total > 0 && visible > 0 && visible < total && liveRevealedTextKeys[key] != true) {
             liveRevealedTextKeys[key] = true
+            snapshotDirty = true
         }
         val completed = total > 0 && visible >= total
         val shouldSnapshot = previous == null ||
@@ -74,6 +160,10 @@ internal class TimelineRevealStore {
         if (shouldSnapshot && textRevealProgressByKey[key] != next) {
             lastSnapshotTextRevealProgressByKey[key] = next
             textRevealProgressByKey[key] = next
+            snapshotDirty = true
+        }
+        if (snapshotDirty) {
+            notifySnapshotChanged()
         }
     }
 
@@ -81,6 +171,7 @@ internal class TimelineRevealStore {
         latestTextRevealProgressByKey[key] ?: textRevealProgressByKey[key]
 
     fun pruneToKeys(timelineItemKeys: Set<String>, nodeKeys: Set<String>) {
+        val before = snapshot()
         enteredTimelineItemKeys.keys.retainAll(timelineItemKeys)
         startedStructuredNodeKeys.keys.retainAll(nodeKeys)
         enteredStructuredNodeKeys.keys.retainAll(nodeKeys)
@@ -89,8 +180,55 @@ internal class TimelineRevealStore {
         liveRevealedTextKeys.keys.retainAll(nodeKeys)
         latestTextRevealProgressByKey.keys.retainAll(nodeKeys)
         lastSnapshotTextRevealProgressByKey.keys.retainAll(nodeKeys)
+        val after = snapshot()
+        if (after != before) {
+            onSnapshotChanged(after)
+        }
+    }
+
+    fun snapshot(): TimelineRevealSnapshot =
+        TimelineRevealSnapshot(
+            enteredTimelineItemKeys = enteredTimelineItemKeys.keys.toSet(),
+            startedStructuredNodeKeys = startedStructuredNodeKeys.keys.toSet(),
+            enteredStructuredNodeKeys = enteredStructuredNodeKeys.keys.toSet(),
+            completedTextKeys = completedTextKeys.keys.toSet(),
+            liveRevealedTextKeys = liveRevealedTextKeys.keys.toSet(),
+            textRevealProgressByKey = textRevealProgressByKey.toMap(),
+            latestTextRevealProgressByKey = latestTextRevealProgressByKey.toMap(),
+            lastSnapshotTextRevealProgressByKey = lastSnapshotTextRevealProgressByKey.toMap(),
+        )
+
+    private fun notifySnapshotChanged() {
+        onSnapshotChanged(snapshot())
     }
 }
+
+private fun encodeProgressMap(map: Map<String, TextRevealProgress>): ArrayList<String> =
+    ArrayList(
+        map.map { (key, progress) ->
+            listOf(key, progress.visibleLength.toString(), progress.totalLength.toString())
+                .joinToString(SnapshotProgressSeparator)
+        },
+    )
+
+private fun ArrayList<Any>.stringSetAt(index: Int): Set<String> =
+    (getOrNull(index) as? List<*>)
+        ?.filterIsInstance<String>()
+        ?.toSet()
+        ?: emptySet()
+
+private fun ArrayList<Any>.progressMapAt(index: Int): Map<String, TextRevealProgress> =
+    (getOrNull(index) as? List<*>)
+        ?.filterIsInstance<String>()
+        ?.mapNotNull { encoded ->
+            val parts = encoded.split(SnapshotProgressSeparator)
+            val key = parts.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val visible = parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+            val total = parts.getOrNull(2)?.toIntOrNull() ?: return@mapNotNull null
+            key to TextRevealProgress(visibleLength = visible, totalLength = total)
+        }
+        ?.toMap()
+        ?: emptyMap()
 
 internal fun shouldAnimateTurnNode(
     motionEnabled: Boolean,

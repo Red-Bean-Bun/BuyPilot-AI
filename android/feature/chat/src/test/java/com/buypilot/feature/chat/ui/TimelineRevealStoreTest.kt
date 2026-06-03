@@ -1,5 +1,6 @@
 package com.buypilot.feature.chat.ui
 
+import androidx.compose.runtime.saveable.SaverScope
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
@@ -36,11 +37,11 @@ class TimelineRevealStoreTest {
 
         assertTrue(
             coordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
                 autoFocusSuppressed = false,
             ),
         )
-        assertEquals(TimelineScrollIntentKind.FollowLatest, coordinator.pendingIntent?.intent?.kind)
+        assertEquals(TimelineScrollIntentKind.FollowReadableTurn, coordinator.pendingIntent?.intent?.kind)
         assertEquals(1, coordinator.pendingIntentCount)
 
         assertTrue(
@@ -54,7 +55,7 @@ class TimelineRevealStoreTest {
 
         assertFalse(
             coordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
                 autoFocusSuppressed = false,
             ),
         )
@@ -108,6 +109,42 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun preserveUserBubbleAnchorOnlyForMatchingAssistantTurn() {
+        assertTrue(
+            shouldPreserveUserBubbleAnchorForAssistantStart(
+                pendingUserBubbleAnchorKey = "user_1",
+                latestUserMessageKey = "user_1",
+                userItemIndex = 2,
+                assistantItemIndex = 3,
+            ),
+        )
+        assertFalse(
+            shouldPreserveUserBubbleAnchorForAssistantStart(
+                pendingUserBubbleAnchorKey = null,
+                latestUserMessageKey = "user_1",
+                userItemIndex = 2,
+                assistantItemIndex = 3,
+            ),
+        )
+        assertFalse(
+            shouldPreserveUserBubbleAnchorForAssistantStart(
+                pendingUserBubbleAnchorKey = "old_user",
+                latestUserMessageKey = "user_1",
+                userItemIndex = 2,
+                assistantItemIndex = 3,
+            ),
+        )
+        assertFalse(
+            shouldPreserveUserBubbleAnchorForAssistantStart(
+                pendingUserBubbleAnchorKey = "user_1",
+                latestUserMessageKey = "user_1",
+                userItemIndex = -1,
+                assistantItemIndex = 3,
+            ),
+        )
+    }
+
+    @Test
     fun scrollCoordinatorReadableAnchorSupersedesViewportFreeze() {
         val coordinator = TimelineScrollCoordinator()
 
@@ -154,12 +191,12 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun scrollCoordinatorKeyboardCorrectionSupersedesQueuedFollowLatest() {
+    fun scrollCoordinatorKeyboardCorrectionSupersedesQueuedFollowReadableTurn() {
         val coordinator = TimelineScrollCoordinator()
 
         assertTrue(
             coordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
                 autoFocusSuppressed = false,
             ),
         )
@@ -174,6 +211,94 @@ class TimelineRevealStoreTest {
             listOf(TimelineScrollIntentKind.KeyboardChanged),
             coordinator.queuedIntentKinds,
         )
+    }
+
+    @Test
+    fun keyboardCollapseReanchorsOnlyWhileFollowingCurrentTurn() {
+        assertTrue(
+            shouldReanchorReadableTurnAfterKeyboardCollapse(
+                deltaPx = -360,
+                currentTurnFollowActive = true,
+                isUserDragging = false,
+            ),
+        )
+        assertFalse(
+            shouldReanchorReadableTurnAfterKeyboardCollapse(
+                deltaPx = -360,
+                currentTurnFollowActive = false,
+                isUserDragging = false,
+            ),
+        )
+        assertFalse(
+            shouldReanchorReadableTurnAfterKeyboardCollapse(
+                deltaPx = 360,
+                currentTurnFollowActive = true,
+                isUserDragging = false,
+            ),
+        )
+        assertFalse(
+            shouldReanchorReadableTurnAfterKeyboardCollapse(
+                deltaPx = -360,
+                currentTurnFollowActive = true,
+                isUserDragging = true,
+            ),
+        )
+    }
+
+    @Test
+    fun viewportControllerKeepsAssistantAnchorDuringClarificationFlight() {
+        val controller = TimelineViewportController()
+
+        assertTrue(
+            controller.requestAssistantStarted(
+                turnId = "turn_1",
+                index = 1,
+                isRouteReturnSuppressed = false,
+                isClarificationFlightActive = true,
+            ),
+        )
+        assertEquals(
+            listOf(TimelineScrollIntentKind.AssistantStarted),
+            controller.queuedIntentKinds,
+        )
+    }
+
+    @Test
+    fun viewportControllerBlocksFollowReadableTurnDuringClarificationFlight() {
+        val controller = TimelineViewportController()
+
+        assertFalse(
+            controller.requestReadableTurnFollow(
+                allowOffscreenAnchor = false,
+                isRouteReturnSuppressed = false,
+                isClarificationFlightActive = true,
+            ),
+        )
+        assertEquals(0, controller.pendingIntentCount)
+    }
+
+    @Test
+    fun scrollCoordinatorKeepsUserInitiatedFollowFromBeingDedupedByPassiveFollow() {
+        val coordinator = TimelineScrollCoordinator()
+
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
+                autoFocusSuppressed = false,
+            ),
+        )
+        assertTrue(
+            coordinator.request(
+                intent = TimelineScrollIntent(
+                    kind = TimelineScrollIntentKind.FollowReadableTurn,
+                    allowOffscreenAnchor = true,
+                ),
+                autoFocusSuppressed = false,
+            ),
+        )
+
+        assertEquals(1, coordinator.pendingIntentCount)
+        assertTrue(coordinator.pendingIntent?.intent?.allowOffscreenAnchor == true)
     }
 
     @Test
@@ -200,7 +325,7 @@ class TimelineRevealStoreTest {
         )
         assertFalse(
             coordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
                 autoFocusSuppressed = false,
             ),
         )
@@ -223,7 +348,7 @@ class TimelineRevealStoreTest {
 
         assertTrue(
             coordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
                 autoFocusSuppressed = false,
             ),
         )
@@ -231,7 +356,7 @@ class TimelineRevealStoreTest {
 
         assertFalse(
             coordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
+                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowReadableTurn),
                 autoFocusSuppressed = false,
             ),
         )
@@ -501,59 +626,59 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun followLatestBubbleRequiresUserDetachedFromLatestContent() {
+    fun followReadableTurnBubbleRequiresUserDetachedFromLatestContent() {
         assertTrue(
-            shouldShowTimelineFollowLatestBubble(
+            shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = false,
                 keyboardVisible = false,
                 isNearTimelineEnd = false,
                 userDetachedFromLatest = true,
-                followLatestActive = false,
+                currentTurnFollowActive = false,
             ),
         )
         assertFalse(
-            shouldShowTimelineFollowLatestBubble(
+            shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = false,
                 keyboardVisible = false,
                 isNearTimelineEnd = true,
                 userDetachedFromLatest = true,
-                followLatestActive = false,
+                currentTurnFollowActive = false,
             ),
         )
         assertFalse(
-            shouldShowTimelineFollowLatestBubble(
+            shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = false,
                 keyboardVisible = false,
                 isNearTimelineEnd = false,
                 userDetachedFromLatest = false,
-                followLatestActive = false,
+                currentTurnFollowActive = false,
             ),
         )
         assertFalse(
-            shouldShowTimelineFollowLatestBubble(
+            shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = true,
                 keyboardVisible = false,
                 isNearTimelineEnd = false,
                 userDetachedFromLatest = true,
-                followLatestActive = false,
+                currentTurnFollowActive = false,
             ),
         )
         assertFalse(
-            shouldShowTimelineFollowLatestBubble(
+            shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = false,
                 keyboardVisible = true,
                 isNearTimelineEnd = false,
                 userDetachedFromLatest = true,
-                followLatestActive = false,
+                currentTurnFollowActive = false,
             ),
         )
         assertFalse(
-            shouldShowTimelineFollowLatestBubble(
+            shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = false,
                 keyboardVisible = false,
                 isNearTimelineEnd = false,
                 userDetachedFromLatest = true,
-                followLatestActive = true,
+                currentTurnFollowActive = true,
             ),
         )
     }
@@ -668,7 +793,7 @@ class TimelineRevealStoreTest {
         )
         assertTrue(
             shouldBlockTimelineAutoFocusForManualScroll(
-                intentKind = TimelineScrollIntentKind.FollowLatest,
+                intentKind = TimelineScrollIntentKind.FollowReadableTurn,
                 isManualScrollActive = true,
             ),
         )
@@ -698,7 +823,7 @@ class TimelineRevealStoreTest {
         )
         assertTrue(
             isTimelineAutoFocusSuppressedForIntent(
-                intentKind = TimelineScrollIntentKind.FollowLatest,
+                intentKind = TimelineScrollIntentKind.FollowReadableTurn,
                 isRouteReturnSuppressed = false,
                 isClarificationFlightActive = true,
             ),
@@ -1630,7 +1755,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckHistoryKeepsOldTurnShapeWhileNewTurnIsStreaming() {
+    fun productDeckHistoryKeepsDeckShapeWhileNewTurnIsStreaming() {
         val previousDeck = deck("deck_previous", turnId = "turn_1")
         val currentDeck = deck("deck_current", turnId = "turn_2")
 
@@ -1655,11 +1780,11 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckHistoryKeepsDeckShapeAfterStreamingSettles() {
+    fun productDeckHistoryCompactsOldDeckAfterStreamingSettles() {
         val previousDeck = deck("deck_previous", turnId = "turn_1")
         val latestDeck = deck("deck_latest", turnId = "turn_2")
 
-        assertFalse(
+        assertTrue(
             shouldCompactProductDeckHistory(
                 node = previousDeck,
                 deckConverged = false,
@@ -1680,10 +1805,10 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun productDeckHistoryKeepsLatestDeckShapeAfterDecisionAppears() {
+    fun productDeckHistoryCompactsLatestDeckAfterDecisionSettles() {
         val latestDeck = deck("deck_latest", turnId = "turn_1")
 
-        assertFalse(
+        assertTrue(
             shouldCompactProductDeckHistory(
                 node = latestDeck,
                 deckConverged = true,
@@ -1954,6 +2079,236 @@ class TimelineRevealStoreTest {
         assertFalse(shouldRenderProductArrivalSeedBubble(0f))
         assertTrue(shouldRenderProductArrivalSeedBubble(0.5f))
         assertTrue(shouldRenderProductArrivalSeedBubble(1f))
+    }
+
+    @Test
+    fun followReadableTurnTargetsCurrentAssistantTurnInsteadOfLastTimelineItem() {
+        val items = listOf(
+            UserMessageNode(key = "user_1", content = "推荐一款手机"),
+            AiStreamNode(
+                key = "text_1",
+                messageId = "text_1",
+                content = "第一轮回复",
+                done = true,
+                turnId = "turn_1",
+            ),
+            UserMessageNode(key = "user_2", content = "帮我选"),
+            AiStreamNode(
+                key = "text_2",
+                messageId = "text_2",
+                content = "第二轮回复",
+                done = false,
+                turnId = "turn_2",
+            ),
+        ).toTimelineRenderItems()
+
+        assertEquals(1, currentAssistantTurnIndexForReadableFollow(items, "turn_1"))
+        assertEquals(3, currentAssistantTurnIndexForReadableFollow(items, "turn_2"))
+    }
+
+    @Test
+    fun followReadableTurnKeepsLatestUserBubbleAsAnchorDuringAssistantReveal() {
+        val items = listOf(
+            UserMessageNode(key = "user_1", content = "推荐一款手机"),
+            AiStreamNode(
+                key = "text_1",
+                messageId = "text_1",
+                content = "第一轮回复",
+                done = true,
+                turnId = "turn_1",
+            ),
+            UserMessageNode(key = "user_2", content = "预算降低一点"),
+            AiStreamNode(
+                key = "text_2",
+                messageId = "text_2",
+                content = "第二轮回复",
+                done = false,
+                turnId = "turn_2",
+            ),
+        ).toTimelineRenderItems()
+
+        assertEquals(
+            2,
+            readableTurnAnchorIndexForFollow(
+                timelineItems = items,
+                currentTurnId = "turn_2",
+                activeUserBubbleAnchorKey = "user_2",
+            ),
+        )
+    }
+
+    @Test
+    fun followReadableTurnFallsBackToAssistantWhenUserAnchorIsMissingOrAfterTurn() {
+        val items = listOf(
+            UserMessageNode(key = "user_1", content = "推荐一款手机"),
+            AiStreamNode(
+                key = "text_1",
+                messageId = "text_1",
+                content = "第一轮回复",
+                done = true,
+                turnId = "turn_1",
+            ),
+            UserMessageNode(key = "user_2", content = "预算降低一点"),
+            AiStreamNode(
+                key = "text_2",
+                messageId = "text_2",
+                content = "第二轮回复",
+                done = false,
+                turnId = "turn_2",
+            ),
+        ).toTimelineRenderItems()
+
+        assertEquals(
+            3,
+            readableTurnAnchorIndexForFollow(
+                timelineItems = items,
+                currentTurnId = "turn_2",
+                activeUserBubbleAnchorKey = null,
+            ),
+        )
+        assertEquals(
+            3,
+            readableTurnAnchorIndexForFollow(
+                timelineItems = items,
+                currentTurnId = "turn_2",
+                activeUserBubbleAnchorKey = "missing_user",
+            ),
+        )
+    }
+
+    @Test
+    fun followReadableTurnRefusesToFallbackToLastItemWhenCurrentTurnIsMissing() {
+        val items = listOf(
+            UserMessageNode(key = "user_1", content = "推荐一款手机"),
+            AiStreamNode(
+                key = "text_1",
+                messageId = "text_1",
+                content = "第一轮回复",
+                done = true,
+                turnId = "turn_1",
+            ),
+        ).toTimelineRenderItems()
+
+        assertEquals(-1, currentAssistantTurnIndexForReadableFollow(items, null))
+        assertEquals(-1, currentAssistantTurnIndexForReadableFollow(items, ""))
+        assertEquals(-1, currentAssistantTurnIndexForReadableFollow(items, "turn_missing"))
+    }
+
+    @Test
+    fun thinkingHandoffDoesNotReplayWhenTextArrivesBeforeVisibilityDelay() {
+        val remaining = remainingThinkingVisibilityDelayMs(
+            firstSeenAtMs = 1_000L,
+            nowMs = 1_240L,
+            visibilityDelayMs = 400L,
+        )
+
+        assertEquals(160L, remaining)
+        assertFalse(
+            shouldRunThinkingTextHandoff(
+                requested = true,
+                remainingVisibilityDelayMs = remaining,
+            ),
+        )
+    }
+
+    @Test
+    fun thinkingHandoffRunsOnlyAfterThinkingWasVisible() {
+        val remaining = remainingThinkingVisibilityDelayMs(
+            firstSeenAtMs = 1_000L,
+            nowMs = 1_420L,
+            visibilityDelayMs = 400L,
+        )
+
+        assertEquals(0L, remaining)
+        assertTrue(
+            shouldRunThinkingTextHandoff(
+                requested = true,
+                remainingVisibilityDelayMs = remaining,
+            ),
+        )
+        assertFalse(
+            shouldRunThinkingTextHandoff(
+                requested = false,
+                remainingVisibilityDelayMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun revealSnapshotRestoresLatestTextProgressWithoutReplay() {
+        val store = TimelineRevealStore()
+
+        store.updateTextProgress(key = "text_1", visible = 37, total = 120)
+
+        val restored = TimelineRevealStore(initialSnapshot = store.snapshot())
+
+        assertEquals(
+            TextRevealProgress(visibleLength = 37, totalLength = 120),
+            restored.textRevealProgress("text_1"),
+        )
+        assertTrue(restored.hasLiveRevealedText("text_1"))
+        assertFalse(restored.hasCompletedText("text_1"))
+    }
+
+    @Test
+    fun revealSnapshotRestoresExternallyMarkedLiveText() {
+        val store = TimelineRevealStore()
+
+        store.markTextLiveRevealed("text_1")
+
+        val restored = TimelineRevealStore(initialSnapshot = store.snapshot())
+
+        assertTrue(restored.hasLiveRevealedText("text_1"))
+        assertEquals(setOf("text_1"), restored.liveRevealedTextKeySet())
+        assertTrue(restored.completedTextKeySet().isEmpty())
+    }
+
+    @Test
+    fun revealSnapshotRestoresStructuredNodeLedger() {
+        val store = TimelineRevealStore()
+
+        store.markTimelineItemEntered("assistant_turn_1")
+        store.markStructuredNodeStarted("deck_1")
+        store.markStructuredNodeEntered("deck_1")
+        store.markTextCompleted("text_1")
+
+        val restored = TimelineRevealStore(initialSnapshot = store.snapshot())
+
+        assertTrue(restored.hasEnteredTimelineItem("assistant_turn_1"))
+        assertTrue(restored.hasStartedStructuredNode("deck_1"))
+        assertTrue(restored.hasEnteredStructuredNode("deck_1"))
+        assertTrue(restored.hasCompletedText("text_1"))
+    }
+
+    @Test
+    fun revealSnapshotHolderSaverRoundTripsLedgerState() {
+        val holder = TimelineRevealSnapshotHolder(
+            TimelineRevealSnapshot(
+                enteredTimelineItemKeys = setOf("assistant_turn_1"),
+                startedStructuredNodeKeys = setOf("deck_1"),
+                enteredStructuredNodeKeys = setOf("deck_1"),
+                completedTextKeys = setOf("text_done"),
+                liveRevealedTextKeys = setOf("text_live"),
+                textRevealProgressByKey = mapOf(
+                    "text_live" to TextRevealProgress(visibleLength = 37, totalLength = 120),
+                ),
+                latestTextRevealProgressByKey = mapOf(
+                    "text_live" to TextRevealProgress(visibleLength = 41, totalLength = 120),
+                ),
+                lastSnapshotTextRevealProgressByKey = mapOf(
+                    "text_live" to TextRevealProgress(visibleLength = 37, totalLength = 120),
+                ),
+            ),
+        )
+        val scope = object : SaverScope {
+            override fun canBeSaved(value: Any): Boolean = true
+        }
+
+        val saved = with(TimelineRevealSnapshotHolderSaver) { scope.save(holder) }
+        val restored = saved?.let { TimelineRevealSnapshotHolderSaver.restore(it) }
+            ?: error("snapshot holder did not restore")
+
+        assertEquals(holder.snapshot, restored.snapshot)
     }
 
     private fun thinking(

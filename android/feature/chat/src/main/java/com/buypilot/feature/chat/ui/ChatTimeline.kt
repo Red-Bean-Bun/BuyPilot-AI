@@ -4,6 +4,7 @@ import androidx.annotation.DrawableRes
 import android.graphics.Bitmap
 import android.net.Uri
 import android.content.Context
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.PathInterpolator
@@ -218,7 +219,7 @@ import com.buypilot.feature.chat.presentation.TimelineRenderContext
 import com.buypilot.feature.chat.presentation.UserTimelineItem
 import com.buypilot.feature.chat.presentation.clarificationQuestionRevealKey
 import com.buypilot.feature.chat.presentation.containsNodeKey
-import com.buypilot.feature.chat.presentation.lastContentIndex
+import com.buypilot.feature.chat.presentation.lastContentIndex as timelineLastContentIndex
 import com.buypilot.feature.chat.presentation.revealTextKey
 import com.buypilot.feature.chat.presentation.timelineContentType
 import com.buypilot.feature.chat.state.ChatInputState
@@ -271,11 +272,13 @@ private const val ThinkingShimmerDurationMs = 2_600
 private const val TurnStructuredEnterMs = 320
 private const val TurnStructuredEnterDelayMs = 90
 private const val ThinkingToTextHandoffMs = 0L
+private const val FinalDecisionAnchorWaitFrames = 12
+private const val UserBubbleAnchorWaitFrames = 2
+private const val UserBubbleAnchorSettleFrames = 8
 private const val TimelineRevealScrollThrottleMs = 40L
 private const val ManualScrollSettleMs = 520L
 
 private enum class ThinkingTextHandoffPhase {
-    Waiting,
     Thinking,
     Exiting,
     Content,
@@ -344,12 +347,14 @@ internal fun ChatTimeline(
     var manualScrollSettling by remember { mutableStateOf(false) }
     val manualScrollActive = isUserDragging || manualScrollSettling
     val timelineMotionEnabled = !manualScrollActive
-    var followStreamingText by remember { mutableStateOf(false) }
+    var followCurrentTurnDuringReveal by remember { mutableStateOf(false) }
     var userDetachedFromLatest by rememberSaveable { mutableStateOf(false) }
     var lastHandledUserMessageKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingUserBubbleAnchorKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeUserBubbleFollowAnchorKey by rememberSaveable { mutableStateOf<String?>(null) }
     var lastAnchoredAssistantTurnId by rememberSaveable { mutableStateOf<String?>(null) }
     var lastRevealScrollAtMs by remember { mutableStateOf(0L) }
-    val scrollCoordinator = remember { TimelineScrollCoordinator() }
+    val viewportController = remember { TimelineViewportController() }
     val measuredNodeTopByKey = remember { mutableMapOf<String, Int>() }
     var timelineRootTopPx by remember { mutableIntStateOf(0) }
     var suppressReturnAutoFocus by rememberSaveable { mutableStateOf(false) }
@@ -370,8 +375,16 @@ internal fun ChatTimeline(
     var clarificationFreezeItemIndex by remember { mutableStateOf(0) }
     var clarificationFreezeScrollOffset by remember { mutableStateOf(0) }
     val suppressTimelineAutoFocus = suppressReturnAutoFocus || isClarificationFlightActive
+    val revealSnapshotHolder = rememberSaveable(saver = TimelineRevealSnapshotHolderSaver) {
+        TimelineRevealSnapshotHolder()
+    }
     val revealStore = remember {
-        TimelineRevealStore().also { store ->
+        TimelineRevealStore(
+            initialSnapshot = revealSnapshotHolder.snapshot,
+            onSnapshotChanged = { snapshot ->
+                revealSnapshotHolder.snapshot = snapshot
+            },
+        ).also { store ->
             revealedMessageKeys.forEach { key -> store.markTextCompleted(key) }
             timelinePresentation.items.forEach { item ->
                 if (item is AssistantTurnTimelineItem) {
@@ -386,13 +399,20 @@ internal fun ChatTimeline(
             }
         }
     }
-    LaunchedEffect(revealedMessageKeys) {
+    LaunchedEffect(revealedMessageKeys, liveRevealedMessageKeys) {
         revealedMessageKeys.forEach { key ->
             if (!revealStore.hasCompletedText(key)) {
                 revealStore.markTextCompleted(key)
             }
         }
+        liveRevealedMessageKeys.forEach { key ->
+            if (!revealStore.hasLiveRevealedText(key)) {
+                revealStore.markTextLiveRevealed(key)
+            }
+        }
     }
+    val timelineRevealedMessageKeys = revealStore.completedTextKeySet()
+    val timelineLiveRevealedMessageKeys = revealStore.liveRevealedTextKeySet()
     val hasTimelineError = timelinePresentation.hasTimelineError
     val timelineItems = timelinePresentation.items
     val timelineScrollAnchorSignature = remember(timelineItems) {
@@ -485,22 +505,22 @@ internal fun ChatTimeline(
             .forEach { measuredNodeTopByKey.remove(it) }
     }
     val renderContext = timelinePresentation.renderContext
-    fun lastContentIndex(): Int = timelineItems.lastContentIndex(state, hasTimelineError)
-    fun requestRevealFollowScroll() {
+    fun nearEndReferenceIndex(): Int = timelineItems.timelineLastContentIndex(state, hasTimelineError)
+    fun requestCurrentTurnRevealFollowScroll() {
         if (suppressTimelineAutoFocus) return
-        if (!followStreamingText) return
+        if (!followCurrentTurnDuringReveal) return
         val now = System.currentTimeMillis()
         if (now - lastRevealScrollAtMs >= TimelineRevealScrollThrottleMs) {
             lastRevealScrollAtMs = now
-            scrollCoordinator.request(
-                intent = TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest),
-                autoFocusSuppressed = suppressTimelineAutoFocus,
+            viewportController.requestReadableTurnFollow(
+                allowOffscreenAnchor = false,
+                isRouteReturnSuppressed = suppressReturnAutoFocus,
+                isClarificationFlightActive = isClarificationFlightActive,
             )
         }
     }
-    fun markStructuredEnteredAndFollow(key: String) {
+    fun markStructuredEntered(key: String) {
         revealStore.markStructuredNodeEntered(key)
-        requestRevealFollowScroll()
     }
     val timelineViewportBottomInset = calculateTimelineViewportBottomInset(
         density = density,
@@ -525,18 +545,9 @@ internal fun ChatTimeline(
     val anchorTopOffsetPx = with(density) { TimelineAnchorTopGap.toPx().roundToInt() }
     val latestTimelineItems by rememberUpdatedState(timelineItems)
     val latestState by rememberUpdatedState(state)
-    val latestHasTimelineError by rememberUpdatedState(hasTimelineError)
     val latestLatestFinalDecisionKey by rememberUpdatedState(latestFinalDecisionKey)
-    val latestLatestContentBottomPaddingPx by rememberUpdatedState(latestContentBottomPaddingPx)
-    fun requestTimelineScroll(intent: TimelineScrollIntent): Boolean =
-        scrollCoordinator.request(
-            intent = intent,
-            autoFocusSuppressed = isTimelineAutoFocusSuppressedForIntent(
-                intentKind = intent.kind,
-                isRouteReturnSuppressed = suppressReturnAutoFocus,
-                isClarificationFlightActive = isClarificationFlightActive,
-            ),
-        )
+    val latestCurrentTurnId by rememberUpdatedState(state.currentTurnId)
+    val latestActiveUserBubbleFollowAnchorKey by rememberUpdatedState(activeUserBubbleFollowAnchorKey)
     suspend fun restoreRouteReturnNodeAnchorIfNeeded() {
         val nodeKey = routeReturnNodeKey ?: return
         val originalTopPx = routeReturnNodeTopPx ?: return
@@ -598,13 +609,13 @@ internal fun ChatTimeline(
         derivedStateOf {
             isTimelineNearEnd(
                 listState = listState,
-                lastContentIndex = lastContentIndex(),
+                nearEndReferenceIndex = nearEndReferenceIndex(),
                 bottomPaddingPx = latestContentBottomPaddingPx,
                 thresholdPx = nearEndThresholdPx,
             )
         }
     }
-    val followLatestActive = followStreamingText && (state.isStreaming || isAssistantVisualActive)
+    val currentTurnFollowActive = followCurrentTurnDuringReveal && (state.isStreaming || isAssistantVisualActive)
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -638,7 +649,7 @@ internal fun ChatTimeline(
 
     LaunchedEffect(suppressReturnAutoFocus, routeReturnRestorePending) {
         if (!suppressReturnAutoFocus) return@LaunchedEffect
-        followStreamingText = false
+        followCurrentTurnDuringReveal = false
         if (routeReturnRestorePending) return@LaunchedEffect
         kotlinx.coroutines.delay(420L)
         suppressReturnAutoFocus = false
@@ -653,14 +664,13 @@ internal fun ChatTimeline(
     ) {
         if (!routeReturnRestorePending || timelineItems.isEmpty()) return@LaunchedEffect
         suppressReturnAutoFocus = true
-        followStreamingText = false
-        requestTimelineScroll(
-            TimelineScrollIntent(
-                kind = TimelineScrollIntentKind.RouteReturn,
-                key = routeReturnItemKey,
-                index = routeReturnItemIndex,
-                scrollOffset = routeReturnScrollOffset,
-            ),
+        followCurrentTurnDuringReveal = false
+        viewportController.requestRouteReturn(
+            key = routeReturnItemKey,
+            index = routeReturnItemIndex,
+            scrollOffset = routeReturnScrollOffset,
+            isRouteReturnSuppressed = suppressReturnAutoFocus,
+            isClarificationFlightActive = isClarificationFlightActive,
         )
     }
 
@@ -700,13 +710,12 @@ internal fun ChatTimeline(
         ) {
             return@LaunchedEffect
         }
-        requestTimelineScroll(
-            TimelineScrollIntent(
-                kind = TimelineScrollIntentKind.ViewportFreeze,
-                key = clarificationFreezeItemKey,
-                index = clarificationFreezeItemIndex,
-                scrollOffset = clarificationFreezeScrollOffset,
-            ),
+        viewportController.requestViewportFreeze(
+            key = clarificationFreezeItemKey,
+            index = clarificationFreezeItemIndex,
+            scrollOffset = clarificationFreezeScrollOffset,
+            isRouteReturnSuppressed = suppressReturnAutoFocus,
+            isClarificationFlightActive = isClarificationFlightActive,
         )
     }
 
@@ -721,14 +730,14 @@ internal fun ChatTimeline(
             routeReturnSettledTurnId = null
             routeReturnSettledFinalDecisionKey = null
             lastAnchoredAssistantTurnId = null
-            followStreamingText = false
+            followCurrentTurnDuringReveal = false
+            activeUserBubbleFollowAnchorKey = null
             userDetachedFromLatest = false
-            requestTimelineScroll(
-                TimelineScrollIntent(
-                    kind = TimelineScrollIntentKind.UserSent,
-                    key = key,
-                    index = index,
-                ),
+            viewportController.requestUserSent(
+                key = key,
+                index = index,
+                isRouteReturnSuppressed = suppressReturnAutoFocus,
+                isClarificationFlightActive = isClarificationFlightActive,
             )
         }
     }
@@ -754,14 +763,13 @@ internal fun ChatTimeline(
         }
         if (assistantTurnIndex < 0) return@LaunchedEffect
 
-        followStreamingText = false
+        followCurrentTurnDuringReveal = false
         userDetachedFromLatest = false
-        requestTimelineScroll(
-            TimelineScrollIntent(
-                kind = TimelineScrollIntentKind.AssistantStarted,
-                turnId = turnId,
-                index = assistantTurnIndex,
-            ),
+        viewportController.requestAssistantStarted(
+            turnId = turnId,
+            index = assistantTurnIndex,
+            isRouteReturnSuppressed = suppressReturnAutoFocus,
+            isClarificationFlightActive = isClarificationFlightActive,
         )
     }
 
@@ -777,11 +785,23 @@ internal fun ChatTimeline(
                 wasNearEndBeforeKeyboard = wasNearEndBeforeKeyboard,
             )
         ) {
-            requestTimelineScroll(
-                TimelineScrollIntent(
-                    kind = TimelineScrollIntentKind.KeyboardChanged,
-                    deltaPx = delta,
-                ),
+            viewportController.requestKeyboardChanged(
+                deltaPx = delta,
+                isRouteReturnSuppressed = suppressReturnAutoFocus,
+                isClarificationFlightActive = isClarificationFlightActive,
+            )
+        }
+        if (
+            shouldReanchorReadableTurnAfterKeyboardCollapse(
+                deltaPx = delta,
+                currentTurnFollowActive = currentTurnFollowActive,
+                isUserDragging = manualScrollActive,
+            )
+        ) {
+            viewportController.requestReadableTurnFollow(
+                allowOffscreenAnchor = true,
+                isRouteReturnSuppressed = suppressReturnAutoFocus,
+                isClarificationFlightActive = isClarificationFlightActive,
             )
         }
         if (stableImeBottomPx == 0) {
@@ -801,7 +821,7 @@ internal fun ChatTimeline(
             userDetachedFromLatest = !isNearTimelineEnd
         }
         if (shouldPauseTimelineFollowForUserDrag(isUserDragging, isNearTimelineEnd)) {
-            followStreamingText = false
+            followCurrentTurnDuringReveal = false
         }
     }
 
@@ -814,7 +834,9 @@ internal fun ChatTimeline(
     LaunchedEffect(isUserDragging) {
         if (isUserDragging) {
             manualScrollSettling = true
-            scrollCoordinator.interruptWithUserDrag()
+            pendingUserBubbleAnchorKey = null
+            activeUserBubbleFollowAnchorKey = null
+            viewportController.interruptWithUserDrag()
             onTimelineDrag()
         } else if (manualScrollSettling) {
             kotlinx.coroutines.delay(ManualScrollSettleMs)
@@ -827,7 +849,8 @@ internal fun ChatTimeline(
         isAssistantVisualActive,
     ) {
         if (!state.isStreaming && !isAssistantVisualActive) {
-            followStreamingText = false
+            followCurrentTurnDuringReveal = false
+            activeUserBubbleFollowAnchorKey = null
         }
     }
 
@@ -859,43 +882,44 @@ internal fun ChatTimeline(
         }
         val decisionItemIndex = timelineItems.indexOfFirst { it.containsNodeKey(decisionKey) }
         if (decisionItemIndex < 0) return@LaunchedEffect
-        followStreamingText = false
+        followCurrentTurnDuringReveal = false
+        activeUserBubbleFollowAnchorKey = null
         userDetachedFromLatest = false
-        requestTimelineScroll(
-            TimelineScrollIntent(
-                kind = TimelineScrollIntentKind.FinalDecision,
-                key = decisionKey,
-                turnId = latestFinalDecisionTurnId,
-                index = decisionItemIndex,
-            ),
+        viewportController.requestFinalDecision(
+            key = decisionKey,
+            turnId = latestFinalDecisionTurnId,
+            index = decisionItemIndex,
+            isRouteReturnSuppressed = suppressReturnAutoFocus,
+            isClarificationFlightActive = isClarificationFlightActive,
         )
     }
 
     LaunchedEffect(
-        followLatestActive,
+        currentTurnFollowActive,
         timelineItems.size,
         state.streamingTextKey,
-        latestContentBottomPaddingPx,
         suppressTimelineAutoFocus,
         manualScrollActive,
     ) {
-        if (!followLatestActive || suppressTimelineAutoFocus || manualScrollActive) return@LaunchedEffect
-        requestTimelineScroll(TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest))
+        if (!currentTurnFollowActive || suppressTimelineAutoFocus || manualScrollActive) return@LaunchedEffect
+        viewportController.requestReadableTurnFollow(
+            allowOffscreenAnchor = false,
+            isRouteReturnSuppressed = suppressReturnAutoFocus,
+            isClarificationFlightActive = isClarificationFlightActive,
+        )
     }
 
     LaunchedEffect(
-        scrollCoordinator.pendingIntent?.serial,
+        viewportController.pendingIntent?.serial,
         suppressTimelineAutoFocus,
         manualScrollActive,
     ) {
-        val pending = scrollCoordinator.pendingIntent ?: return@LaunchedEffect
+        val pending = viewportController.pendingIntent ?: return@LaunchedEffect
         val intent = pending.intent
         fun clearPending() {
-            scrollCoordinator.clear(pending.serial)
+            viewportController.clear(pending.serial)
         }
         fun currentItems(): List<TimelineRenderItem> = latestTimelineItems
-        fun currentLastContentIndex(): Int =
-            latestTimelineItems.lastContentIndex(latestState, latestHasTimelineError)
 
         if (intent.kind == TimelineScrollIntentKind.UserDrag) {
             clearPending()
@@ -991,13 +1015,42 @@ internal fun ChatTimeline(
                         clearPending()
                         return@LaunchedEffect
                     }
+                repeat(UserBubbleAnchorWaitFrames) {
+                    withFrameNanos { }
+                }
                 animateTimelineItemToAnchor(
                     listState = listState,
                     itemIndex = targetIndex,
                     anchorTopPx = anchorTopOffsetPx,
                     tolerancePx = followCorrectionTolerancePx,
                 )
-                intent.key?.let { key -> lastHandledUserMessageKey = key }
+                scrollTimelineItemToAnchorIfNeeded(
+                    listState = listState,
+                    itemIndex = targetIndex,
+                    anchorTopPx = anchorTopOffsetPx,
+                    tolerancePx = followCorrectionTolerancePx,
+                    settleFrames = UserBubbleAnchorSettleFrames,
+                )
+                intent.key?.let { key ->
+                    lastHandledUserMessageKey = key
+                    pendingUserBubbleAnchorKey = key
+                    activeUserBubbleFollowAnchorKey = key
+                }
+                latestCurrentTurnId
+                    ?.takeIf { it.isNotBlank() && it != lastAnchoredAssistantTurnId }
+                    ?.let { currentTurnId ->
+                        val assistantIndex = items.indexOfFirst {
+                            it is AssistantTurnTimelineItem && it.turnId == currentTurnId
+                        }
+                        if (assistantIndex >= 0) {
+                            viewportController.requestAssistantStarted(
+                                turnId = currentTurnId,
+                                index = assistantIndex,
+                                isRouteReturnSuppressed = suppressReturnAutoFocus,
+                                isClarificationFlightActive = isClarificationFlightActive,
+                            )
+                        }
+                    }
                 clearPending()
             }
             TimelineScrollIntentKind.AssistantStarted -> {
@@ -1012,6 +1065,41 @@ internal fun ChatTimeline(
                     clearPending()
                     return@LaunchedEffect
                 }
+                val latestUserKey = latestState.lastUserMessageKey
+                val latestUserIndex = latestUserKey
+                    ?.let { key -> items.indexOfFirst { it is UserTimelineItem && it.node.key == key } }
+                    ?: -1
+                val shouldPreserveUserBubbleAnchor = shouldPreserveUserBubbleAnchorForAssistantStart(
+                    pendingUserBubbleAnchorKey = pendingUserBubbleAnchorKey,
+                    latestUserMessageKey = latestUserKey,
+                    userItemIndex = latestUserIndex,
+                    assistantItemIndex = targetIndex,
+                )
+                if (shouldPreserveUserBubbleAnchor) {
+                    animateTimelineItemToAnchor(
+                        listState = listState,
+                        itemIndex = latestUserIndex,
+                        anchorTopPx = anchorTopOffsetPx,
+                        tolerancePx = followCorrectionTolerancePx,
+                    )
+                    scrollTimelineItemToAnchorIfNeeded(
+                        listState = listState,
+                        itemIndex = latestUserIndex,
+                        anchorTopPx = anchorTopOffsetPx,
+                        tolerancePx = followCorrectionTolerancePx,
+                        settleFrames = UserBubbleAnchorSettleFrames,
+                    )
+                    pendingUserBubbleAnchorKey = null
+                    activeUserBubbleFollowAnchorKey = latestUserKey
+                    followCurrentTurnDuringReveal = true
+                    userDetachedFromLatest = false
+                    lastRevealScrollAtMs = 0L
+                    lastAnchoredAssistantTurnId = turnId
+                    clearPending()
+                    return@LaunchedEffect
+                }
+                pendingUserBubbleAnchorKey = null
+                activeUserBubbleFollowAnchorKey = null
                 animateTimelineItemToAnchor(
                     listState = listState,
                     itemIndex = targetIndex,
@@ -1027,7 +1115,7 @@ internal fun ChatTimeline(
                         settleFrames = 4,
                     )
                 }
-                followStreamingText = true
+                followCurrentTurnDuringReveal = true
                 userDetachedFromLatest = false
                 lastRevealScrollAtMs = 0L
                 lastAnchoredAssistantTurnId = turnId
@@ -1039,7 +1127,7 @@ internal fun ChatTimeline(
                     measuredNodeKey != null &&
                     scrollMeasuredNodeToAnchorIfNeeded(
                         nodeKey = measuredNodeKey,
-                        waitFrames = 3,
+                        waitFrames = FinalDecisionAnchorWaitFrames,
                         settleFrames = 4,
                     )
                 ) {
@@ -1079,7 +1167,7 @@ internal fun ChatTimeline(
                     if (
                         scrollMeasuredNodeToAnchorIfNeeded(
                             nodeKey = intent.key,
-                            waitFrames = 10,
+                            waitFrames = FinalDecisionAnchorWaitFrames,
                             settleFrames = 4,
                         )
                     ) {
@@ -1093,31 +1181,32 @@ internal fun ChatTimeline(
             }
             TimelineScrollIntentKind.KeyboardChanged -> {
                 if (intent.deltaPx > 0) {
-                    val targetIndex = currentLastContentIndex()
-                    if (targetIndex >= 0) {
-                        withFrameNanos { }
-                        scrollLatestContentIntoView(
-                            listState = listState,
-                            lastContentIndex = targetIndex,
-                            bottomPaddingPx = latestLatestContentBottomPaddingPx,
-                            tolerancePx = followCorrectionTolerancePx,
-                        )
-                    }
+                    withFrameNanos { }
+                    scrollReadableTurnAnchorIfNeeded(
+                        listState = listState,
+                        timelineItems = currentItems(),
+                        currentTurnId = latestCurrentTurnId,
+                        activeUserBubbleAnchorKey = latestActiveUserBubbleFollowAnchorKey,
+                        anchorTopPx = anchorTopOffsetPx,
+                        tolerancePx = followCorrectionTolerancePx,
+                    )
                 }
                 clearPending()
             }
-            TimelineScrollIntentKind.FollowLatest -> {
-                val targetIndex = currentLastContentIndex()
-                if (targetIndex < 0) {
+            TimelineScrollIntentKind.FollowReadableTurn -> {
+                val anchored = scrollReadableTurnAnchorIfNeeded(
+                    listState = listState,
+                    timelineItems = currentItems(),
+                    currentTurnId = latestCurrentTurnId,
+                    activeUserBubbleAnchorKey = latestActiveUserBubbleFollowAnchorKey,
+                    anchorTopPx = anchorTopOffsetPx,
+                    tolerancePx = followCorrectionTolerancePx,
+                    allowOffscreenAnchor = intent.allowOffscreenAnchor,
+                )
+                if (!anchored) {
                     clearPending()
                     return@LaunchedEffect
                 }
-                scrollLatestContentIntoView(
-                    listState = listState,
-                    lastContentIndex = targetIndex,
-                    bottomPaddingPx = latestLatestContentBottomPaddingPx,
-                    tolerancePx = followCorrectionTolerancePx,
-                )
                 clearPending()
             }
         }
@@ -1163,8 +1252,8 @@ internal fun ChatTimeline(
                                 timelineMotionEnabled = timelineMotionEnabled,
                                 hiddenUserMessage = hiddenUserMessage,
                                 activeFlightMessageKey = activeFlightMessageKey,
-                                revealedMessageKeys = revealedMessageKeys,
-                                liveRevealedMessageKeys = liveRevealedMessageKeys,
+                                revealedMessageKeys = timelineRevealedMessageKeys,
+                                liveRevealedMessageKeys = timelineLiveRevealedMessageKeys,
                                 textRevealProgress = null,
                                 textCompleted = false,
                                 dismissingClarificationKey = dismissingClarificationKey,
@@ -1186,7 +1275,7 @@ internal fun ChatTimeline(
                                 onMessageRevealActiveChange = onMessageRevealActiveChange,
                                 onStreamingTextProgress = {},
                                 onTextRevealProgress = { _, _, _ -> },
-                                onStructuredEntered = ::markStructuredEnteredAndFollow,
+                                onStructuredEntered = ::markStructuredEntered,
                                 onNodePositioned = ::recordMeasuredNodeTop,
                                 onUserBubblePositioned = onUserBubblePositioned,
                                 onClarificationCardDismissed = onClarificationCardDismissed,
@@ -1204,8 +1293,8 @@ internal fun ChatTimeline(
                             timelineMotionEnabled = timelineMotionEnabled,
                             revealStore = revealStore,
                             activeFlightMessageKey = activeFlightMessageKey,
-                            revealedMessageKeys = revealedMessageKeys,
-                            liveRevealedMessageKeys = liveRevealedMessageKeys,
+                            revealedMessageKeys = timelineRevealedMessageKeys,
+                            liveRevealedMessageKeys = timelineLiveRevealedMessageKeys,
                             dismissingClarificationKey = dismissingClarificationKey,
                             dismissedClarificationKeys = dismissedClarificationKeys,
                             selectedClarificationOption = selectedClarificationOption,
@@ -1224,11 +1313,11 @@ internal fun ChatTimeline(
                             onMessageRevealComplete = onMessageRevealComplete,
                             onMessageRevealActiveChange = onMessageRevealActiveChange,
                             onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
-                            onStreamingTextProgress = { requestRevealFollowScroll() },
+                            onStreamingTextProgress = { requestCurrentTurnRevealFollowScroll() },
                             onTextCompleted = revealStore::markTextCompleted,
                             onTextRevealProgress = revealStore::updateTextProgress,
                             onStructuredStarted = revealStore::markStructuredNodeStarted,
-                            onStructuredEntered = ::markStructuredEnteredAndFollow,
+                            onStructuredEntered = ::markStructuredEntered,
                             onNodePositioned = ::recordMeasuredNodeTop,
                             onUserBubblePositioned = onUserBubblePositioned,
                             onClarificationCardDismissed = onClarificationCardDismissed,
@@ -1248,14 +1337,16 @@ internal fun ChatTimeline(
                             structuredAlreadyEntered = revealStore.hasEnteredStructuredNode(item.node.key),
                             hiddenUserMessage = false,
                             activeFlightMessageKey = activeFlightMessageKey,
-                            revealedMessageKeys = revealedMessageKeys,
-                            liveRevealedMessageKeys = liveRevealedMessageKeys,
+                            revealedMessageKeys = timelineRevealedMessageKeys,
+                            liveRevealedMessageKeys = timelineLiveRevealedMessageKeys,
                             textRevealProgress = item.node.revealTextKey()?.let { revealStore.textRevealProgress(it) },
                             textCompleted = item.node.revealTextKey()?.let {
-                                revealStore.hasCompletedText(it) || it in revealedMessageKeys
+                                revealStore.hasCompletedText(it) || it in timelineRevealedMessageKeys
                             } == true,
                             textLiveRevealed = item.node.revealTextKey()?.let {
-                                revealStore.hasLiveRevealedText(it) || it in liveRevealedMessageKeys || it in revealedMessageKeys
+                                revealStore.hasLiveRevealedText(it) ||
+                                    it in timelineLiveRevealedMessageKeys ||
+                                    it in timelineRevealedMessageKeys
                             } == true,
                             dismissingClarificationKey = dismissingClarificationKey,
                             dismissedClarificationKeys = dismissedClarificationKeys,
@@ -1277,11 +1368,11 @@ internal fun ChatTimeline(
                                 onMessageRevealComplete(key)
                             },
                             onMessageRevealActiveChange = onMessageRevealActiveChange,
-                            onStreamingTextProgress = { requestRevealFollowScroll() },
+                            onStreamingTextProgress = { requestCurrentTurnRevealFollowScroll() },
                             onTextRevealProgress = { key, visible, total ->
                                 revealStore.updateTextProgress(key, visible, total)
                             },
-                            onStructuredEntered = ::markStructuredEnteredAndFollow,
+                            onStructuredEntered = ::markStructuredEntered,
                             onNodePositioned = ::recordMeasuredNodeTop,
                             onUserBubblePositioned = onUserBubblePositioned,
                             onClarificationCardDismissed = onClarificationCardDismissed,
@@ -1306,12 +1397,12 @@ internal fun ChatTimeline(
         }
 
         AnimatedVisibility(
-            visible = shouldShowTimelineFollowLatestBubble(
+            visible = shouldShowTimelineReadableTurnBubble(
                 isComposerFocused = isComposerFocused,
                 keyboardVisible = stableImeBottomPx > 0,
                 isNearTimelineEnd = isNearTimelineEnd,
                 userDetachedFromLatest = userDetachedFromLatest,
-                followLatestActive = followLatestActive,
+                currentTurnFollowActive = currentTurnFollowActive,
             ),
             enter = fadeIn(animationSpec = tween(durationMillis = 160, easing = MenuEaseOut)) +
                 slideInVertically(
@@ -1328,13 +1419,17 @@ internal fun ChatTimeline(
                 .padding(bottom = jumpButtonBottomPadding)
                 .zIndex(2f),
         ) {
-            FollowLatestBubble(
+            FollowReadableTurnBubble(
                 onClick = {
                     manualScrollSettling = false
                     userDetachedFromLatest = false
-                    followStreamingText = state.isStreaming || isAssistantVisualActive
+                    followCurrentTurnDuringReveal = state.isStreaming || isAssistantVisualActive
                     lastRevealScrollAtMs = 0L
-                    requestTimelineScroll(TimelineScrollIntent(kind = TimelineScrollIntentKind.FollowLatest))
+                    viewportController.requestReadableTurnFollow(
+                        allowOffscreenAnchor = true,
+                        isRouteReturnSuppressed = suppressReturnAutoFocus,
+                        isClarificationFlightActive = isClarificationFlightActive,
+                    )
                 },
             )
         }
@@ -1402,7 +1497,7 @@ private fun AssistantTurnBlock(
             .filterIsInstance<ThinkingNode>()
             .mapTo(mutableSetOf()) { it.key }
     }
-    val nowMs = System.currentTimeMillis()
+    val nowMs = SystemClock.uptimeMillis()
     currentThinkingKeys.forEach { key ->
         thinkingFirstSeenAtMs.putIfAbsent(key, nowMs)
     }
@@ -1433,6 +1528,7 @@ private fun AssistantTurnBlock(
                             AssistantInlineStatus(
                                 message = (node as ThinkingNode).payload.userFacingThinkingMessage(),
                                 motionEnabled = renderContext.currentTurnId == node.turnId,
+                                animationStartedAtMs = thinkingFirstSeenAtMs[node.key],
                             )
                         }
                     }
@@ -1446,33 +1542,32 @@ private fun AssistantTurnBlock(
                 ?.userFacingThinkingMessage()
                 .orEmpty()
             val revealTextKey = node.revealTextKey()
-            val shouldRunThinkingHandoff = !turnSettled &&
+            val rawShouldRunThinkingHandoff = !turnSettled &&
                 precedingThinking != null &&
                 precedingThinkingMessage.isNotBlank() &&
                 (
                     revealTextKey?.let { it in coordinator.textHandoffKeys } == true ||
                         node.key in coordinator.structuredHandoffKeys
                     )
-            val handoffInitialDelayMs = remember(shouldRunThinkingHandoff, node.key, precedingThinking?.key) {
-                if (!shouldRunThinkingHandoff) {
-                    0L
-                } else {
-                    val firstSeenAt = precedingThinking
-                        ?.key
-                        ?.let { thinkingFirstSeenAtMs[it] }
-                        ?: System.currentTimeMillis()
-                    val elapsedMs = (System.currentTimeMillis() - firstSeenAt).coerceAtLeast(0L)
-                    (ThinkingVisibilityDelayMs - elapsedMs).coerceAtLeast(0L)
-                }
+            val handoffInitialDelayMs = remember(rawShouldRunThinkingHandoff, node.key, precedingThinking?.key) {
+                if (!rawShouldRunThinkingHandoff) return@remember 0L
+                val firstSeenAt = precedingThinking
+                    ?.key
+                    ?.let { thinkingFirstSeenAtMs[it] }
+                    ?: SystemClock.uptimeMillis()
+                remainingThinkingVisibilityDelayMs(
+                    firstSeenAtMs = firstSeenAt,
+                    nowMs = SystemClock.uptimeMillis(),
+                )
             }
+            val shouldRunThinkingHandoff = shouldRunThinkingTextHandoff(
+                requested = rawShouldRunThinkingHandoff,
+                remainingVisibilityDelayMs = handoffInitialDelayMs,
+            )
             var handoffPhase by remember(node.key, revealTextKey, precedingThinking?.key) {
                 mutableStateOf(
                     if (shouldRunThinkingHandoff) {
-                        if (handoffInitialDelayMs > 0L) {
-                            ThinkingTextHandoffPhase.Waiting
-                        } else {
-                            ThinkingTextHandoffPhase.Thinking
-                        }
+                        ThinkingTextHandoffPhase.Thinking
                     } else {
                         ThinkingTextHandoffPhase.Content
                     },
@@ -1480,10 +1575,6 @@ private fun AssistantTurnBlock(
             }
             LaunchedEffect(shouldRunThinkingHandoff, node.key, revealTextKey, precedingThinking?.key) {
                 if (shouldRunThinkingHandoff) {
-                    if (handoffInitialDelayMs > 0L) {
-                        handoffPhase = ThinkingTextHandoffPhase.Waiting
-                        kotlinx.coroutines.delay(handoffInitialDelayMs)
-                    }
                     handoffPhase = ThinkingTextHandoffPhase.Thinking
                     kotlinx.coroutines.delay(ThinkingTextHandoffHoldMs)
                     handoffPhase = ThinkingTextHandoffPhase.Exiting
@@ -1493,7 +1584,11 @@ private fun AssistantTurnBlock(
                     handoffPhase = ThinkingTextHandoffPhase.Content
                 }
             }
-            key(node.key) {
+            val nodeSlotKey = precedingThinking
+                ?.key
+                ?.takeIf { precedingThinkingMessage.isNotBlank() }
+                ?: node.key
+            key(nodeSlotKey) {
                 TurnNodeMotion(
                     node = node,
                     orderIndex = index,
@@ -1524,7 +1619,7 @@ private fun AssistantTurnBlock(
                                 visible = handoffPhase == ThinkingTextHandoffPhase.Thinking,
                                 enter = fadeIn(
                                     animationSpec = tween(
-                                        durationMillis = ThinkingTextHandoffEnterMs,
+                                        durationMillis = 0,
                                         easing = MenuEaseOut,
                                     ),
                                 ),
@@ -1538,6 +1633,9 @@ private fun AssistantTurnBlock(
                                 AssistantInlineStatus(
                                     message = precedingThinkingMessage,
                                     motionEnabled = renderContext.currentTurnId == precedingThinking?.turnId,
+                                    animationStartedAtMs = precedingThinking
+                                        ?.key
+                                        ?.let { thinkingFirstSeenAtMs[it] },
                                 )
                             }
                         } else {
@@ -1697,7 +1795,6 @@ private fun rememberTurnStreamingCoordinator(
     )
 }
 
-@Suppress("UNUSED_PARAMETER")
 internal fun shouldCompactProductDeckHistory(
     node: ProductDeckNode,
     deckConverged: Boolean,
@@ -1705,10 +1802,11 @@ internal fun shouldCompactProductDeckHistory(
     currentTurnId: String?,
     latestProductDeckKey: String?,
 ): Boolean {
-    // Historical product decks keep their original timeline shape. Changing a
-    // rendered LazyColumn item from carousel to list after a new turn arrives
-    // changes its height and is the main source of return/summary scroll drift.
-    return false
+    // Keep deck height stable while a new reply is still laying out. Once the
+    // turn settles, old or converged decks can return to the compact history
+    // thumbnail design without reintroducing timeline drift.
+    if (isStreaming && currentTurnId != null) return false
+    return deckConverged || (latestProductDeckKey != null && latestProductDeckKey != node.key)
 }
 
 internal fun TimelineRenderItem.structureSignature(): String =
@@ -2067,7 +2165,7 @@ private fun TimelineNodeContent(
 }
 
 @Composable
-private fun FollowLatestBubble(
+private fun FollowReadableTurnBubble(
     onClick: () -> Unit,
 ) {
     Box(
@@ -2216,6 +2314,7 @@ private fun UserBubble(
 private fun AssistantInlineStatus(
     message: String,
     motionEnabled: Boolean,
+    animationStartedAtMs: Long? = null,
 ) {
     val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() } ?: return
     Row(
@@ -2227,6 +2326,7 @@ private fun AssistantInlineStatus(
         ThinkingMascotAnimation(
             modifier = Modifier.size(28.dp),
             motionEnabled = motionEnabled,
+            animationStartedAtMs = animationStartedAtMs,
         )
         Spacer(Modifier.width(8.dp))
         ThinkingShimmerText(
@@ -2240,6 +2340,7 @@ private fun AssistantInlineStatus(
 private fun ThinkingBubble(
     message: String,
     motionEnabled: Boolean = true,
+    animationStartedAtMs: Long? = null,
 ) {
     val displayMessage = message.withoutTrailingDots().takeIf { it.isNotBlank() } ?: return
 
@@ -2247,7 +2348,10 @@ private fun ThinkingBubble(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ThinkingMascotAnimation(motionEnabled = motionEnabled)
+        ThinkingMascotAnimation(
+            motionEnabled = motionEnabled,
+            animationStartedAtMs = animationStartedAtMs,
+        )
         Spacer(Modifier.width(10.dp))
         ThinkingShimmerText(
             text = displayMessage,
@@ -2260,6 +2364,7 @@ private fun ThinkingBubble(
 private fun ThinkingMascotAnimation(
     modifier: Modifier = Modifier.size(32.dp),
     motionEnabled: Boolean = true,
+    animationStartedAtMs: Long? = null,
 ) {
     val mascotModifier = modifier
 
@@ -2274,9 +2379,10 @@ private fun ThinkingMascotAnimation(
     }
 
     val composition = LocalThinkingMascotComposition.current
-    val progress = rememberWallClockLoopProgress(
+    val progress = rememberRestartingLoopProgress(
         durationMs = ThinkingMascotLoopDurationMs,
         enabled = true,
+        startedAtMs = animationStartedAtMs,
     )
 
     if (composition == null) {
@@ -2297,32 +2403,29 @@ private fun ThinkingMascotAnimation(
 }
 
 @Composable
-private fun rememberWallClockLoopProgress(
+private fun rememberRestartingLoopProgress(
     durationMs: Long,
     enabled: Boolean,
+    startedAtMs: Long? = null,
 ): Float {
-    var progress by remember(durationMs) {
-        mutableFloatStateOf(wallClockLoopProgress(durationMs))
-    }
-    LaunchedEffect(durationMs, enabled) {
+    var progress by remember(startedAtMs) { mutableFloatStateOf(0f) }
+    var localStartedAtMs by remember(startedAtMs) { mutableStateOf(startedAtMs) }
+    LaunchedEffect(durationMs, enabled, startedAtMs) {
         if (!enabled || durationMs <= 0L) {
             progress = 0f
             return@LaunchedEffect
         }
+        localStartedAtMs = startedAtMs
         while (true) {
             withFrameNanos {
-                progress = wallClockLoopProgress(durationMs)
+                val nowMs = SystemClock.uptimeMillis()
+                val startedAt = localStartedAtMs ?: nowMs.also { localStartedAtMs = it }
+                val elapsedMs = (nowMs - startedAt).coerceAtLeast(0L)
+                progress = (elapsedMs % durationMs).toFloat() / durationMs.toFloat()
             }
         }
     }
     return progress
-}
-
-private fun wallClockLoopProgress(durationMs: Long): Float {
-    if (durationMs <= 0L) return 0f
-    val durationNanos = durationMs * 1_000_000L
-    return ((System.nanoTime() % durationNanos).toFloat() / durationNanos.toFloat())
-        .coerceIn(0f, 1f)
 }
 
 @Composable
@@ -2427,15 +2530,15 @@ internal fun calculateFloatingPanelBottomPadding(
 
 private fun isTimelineNearEnd(
     listState: LazyListState,
-    lastContentIndex: Int,
+    nearEndReferenceIndex: Int,
     bottomPaddingPx: Float,
     thresholdPx: Float,
 ): Boolean {
-    if (lastContentIndex < 0) return true
+    if (nearEndReferenceIndex < 0) return true
 
     val layoutInfo = listState.layoutInfo
     val viewportBottom = layoutInfo.viewportEndOffset - bottomPaddingPx.roundToInt()
-    val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull { it.index == lastContentIndex }
+    val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull { it.index == nearEndReferenceIndex }
         ?: return false
     val distanceToBottom = viewportBottom - (lastVisibleItem.offset + lastVisibleItem.size)
     return distanceToBottom >= -thresholdPx
@@ -2487,64 +2590,95 @@ private suspend fun animateTimelineItemToAnchor(
     }
 }
 
-private suspend fun scrollLatestContentIntoView(
+private suspend fun scrollReadableTurnAnchorIfNeeded(
     listState: LazyListState,
-    lastContentIndex: Int,
-    bottomPaddingPx: Float,
+    timelineItems: List<TimelineRenderItem>,
+    currentTurnId: String?,
+    activeUserBubbleAnchorKey: String?,
+    anchorTopPx: Int,
     tolerancePx: Float,
-) {
-    if (lastContentIndex < 0) return
-    if (
-        isTimelineNearEnd(
-            listState = listState,
-            lastContentIndex = lastContentIndex,
-            bottomPaddingPx = bottomPaddingPx,
-            thresholdPx = tolerancePx,
-        )
-    ) {
-        return
-    }
-    val lastItemVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == lastContentIndex }
-    if (!lastItemVisible) {
-        listState.scrollToItem(index = lastContentIndex)
-        withFrameNanos { }
-    }
-    correctActiveTurnIntoView(
-        listState = listState,
-        lastContentIndex = lastContentIndex,
-        bottomPaddingPx = bottomPaddingPx,
-        tolerancePx = tolerancePx,
-        settleFrames = 2,
-    )
-}
+    allowOffscreenAnchor: Boolean = false,
+): Boolean {
+    val targetIndex = readableTurnAnchorIndexForFollow(
+        timelineItems = timelineItems,
+        currentTurnId = currentTurnId,
+        activeUserBubbleAnchorKey = activeUserBubbleAnchorKey,
+    ).takeIf { it >= 0 } ?: return false
 
-private suspend fun correctActiveTurnIntoView(
-    listState: LazyListState,
-    lastContentIndex: Int,
-    bottomPaddingPx: Float,
-    tolerancePx: Float,
-    settleFrames: Int = 1,
-) {
-    if (lastContentIndex < 0) return
-
-    repeat(settleFrames.coerceAtLeast(1)) {
+    var visible = false
+    repeat(2) {
         val layoutInfo = listState.layoutInfo
-        val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull { it.index == lastContentIndex }
-        if (lastVisibleItem == null) {
-            val visibleHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset - bottomPaddingPx)
-                .coerceAtLeast(tolerancePx)
-            val delta = visibleHeight * 0.72f
-            listState.scrollBy(delta)
-        } else {
-            val viewportBottom = layoutInfo.viewportEndOffset - bottomPaddingPx.roundToInt()
-            val overflow = (lastVisibleItem.offset + lastVisibleItem.size) - viewportBottom
-            if (overflow > tolerancePx) {
-                listState.scrollBy(overflow.toFloat())
+        val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+        if (item == null) {
+            if (allowOffscreenAnchor) {
+                animateTimelineItemToAnchor(
+                    listState = listState,
+                    itemIndex = targetIndex,
+                    anchorTopPx = anchorTopPx,
+                    tolerancePx = tolerancePx,
+                )
+                return true
             }
+            return false
+        }
+        visible = true
+        val desiredTop = layoutInfo.viewportStartOffset + anchorTopPx
+        val correction = (item.offset - desiredTop).toFloat()
+        if (abs(correction) > tolerancePx) {
+            listState.scrollBy(correction)
         }
         kotlinx.coroutines.delay(16L)
     }
+    return visible
 }
+
+internal fun currentAssistantTurnIndexForReadableFollow(
+    timelineItems: List<TimelineRenderItem>,
+    currentTurnId: String?,
+): Int {
+    val turnId = currentTurnId?.takeIf { it.isNotBlank() } ?: return -1
+    return timelineItems.indexOfFirst { item ->
+        item is AssistantTurnTimelineItem && item.turnId == turnId
+    }
+}
+
+internal fun readableTurnAnchorIndexForFollow(
+    timelineItems: List<TimelineRenderItem>,
+    currentTurnId: String?,
+    activeUserBubbleAnchorKey: String?,
+): Int {
+    val assistantIndex = currentAssistantTurnIndexForReadableFollow(
+        timelineItems = timelineItems,
+        currentTurnId = currentTurnId,
+    ).takeIf { it >= 0 } ?: return -1
+    val userAnchorIndex = activeUserBubbleAnchorKey
+        ?.takeIf { it.isNotBlank() }
+        ?.let { key ->
+            timelineItems.indexOfFirst { item ->
+                item is UserTimelineItem && item.node.key == key
+            }
+        }
+        ?: -1
+    return if (userAnchorIndex >= 0 && assistantIndex > userAnchorIndex) {
+        userAnchorIndex
+    } else {
+        assistantIndex
+    }
+}
+
+internal fun remainingThinkingVisibilityDelayMs(
+    firstSeenAtMs: Long,
+    nowMs: Long,
+    visibilityDelayMs: Long = ThinkingVisibilityDelayMs,
+): Long {
+    val elapsedMs = (nowMs - firstSeenAtMs).coerceAtLeast(0L)
+    return (visibilityDelayMs - elapsedMs).coerceAtLeast(0L)
+}
+
+internal fun shouldRunThinkingTextHandoff(
+    requested: Boolean,
+    remainingVisibilityDelayMs: Long,
+): Boolean = requested && remainingVisibilityDelayMs <= 0L
 
 @Composable
 private fun ClarificationBlock(
