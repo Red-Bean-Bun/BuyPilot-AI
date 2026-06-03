@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.cloudflare.yml --env-file .env
 
-.PHONY: help up down rebuild restart logs logs-all ps wipe-db reset seed-image seed-text smoke health db-stats shell db-shell test test-local lint
+.PHONY: help up down rebuild restart logs logs-all ps wipe-db reset seed-image seed-text smoke health db-stats shell db-shell test test-local lint cd-setup cd-status cd-run cd-logs
 
 help: ## 显示帮助
 	@echo "BuyPilot-AI 运维命令"
@@ -105,3 +105,29 @@ test-local: ## 在本地 venv 运行测试
 
 lint: ## 本地 ruff 检查
 	cd backend && uv run ruff check src tests
+
+# ── 自动部署（CD）───────────────────────────────────
+
+cd-setup: ## 安装 cron 定时任务（每 3 分钟检测 origin/main 变更）
+	@chmod +x scripts/auto-deploy.sh
+	@(crontab -l 2>/dev/null | grep -v 'auto-deploy.sh'; echo "*/3 * * * * $(CURDIR)/scripts/auto-deploy.sh") | crontab -
+	@echo "✅ cron 已安装：每 3 分钟检测一次"
+	@echo "   查看: crontab -l"
+	@echo "   卸载: make cd-uninstall"
+
+cd-status: ## 查看 CD 状态（cron 任务 + 最近日志）
+	@echo "── cron 任务 ──"
+	@crontab -l 2>/dev/null | grep auto-deploy || echo "  未安装（运行 make cd-setup）"
+	@echo ""
+	@echo "── 最近 10 条日志 ──"
+	@tail -10 deploy/auto-deploy.log 2>/dev/null || echo "  暂无日志"
+
+cd-run: ## 手动触发一次检测（调试用）
+	scripts/auto-deploy.sh
+
+cd-logs: ## 查看 CD 完整日志
+	tail -50 deploy/auto-deploy.log
+
+cd-uninstall: ## 卸载 cron 定时任务
+	@(crontab -l 2>/dev/null | grep -v 'auto-deploy.sh') | crontab -
+	@echo "✅ cron 已卸载"
