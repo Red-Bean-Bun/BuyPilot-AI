@@ -130,7 +130,7 @@ async def test_issue2_clarification_answer_merges_previous_context_without_repea
 @pytest.mark.asyncio
 # 问题 3/6 验收（更新为 product-first）：
 # - product-first: "为我推荐一双运动鞋" 直接出现候选商品 + criteria_card。
-# - 用户回复"继续"后，出现 final_decision。
+# - 用户回复"帮我选"(converge=True)后，出现 final_decision。
 async def test_issue3_and_6_explicit_continue_is_required_before_candidate_deck():
     session_id = _session_id()
 
@@ -138,7 +138,7 @@ async def test_issue3_and_6_explicit_continue_is_required_before_candidate_deck(
     assert _products(first)  # product-first: products in first round
     assert _done(first).finish_reason in ("awaiting_product_feedback", "completed")
 
-    second = await _chat("继续", session_id=session_id)
+    second = await _chat("帮我选", session_id=session_id, converge=True)
     assert _done(second).finish_reason == "completed"
 
 
@@ -271,7 +271,7 @@ async def test_regression_backend_does_not_emit_early_final_decision_before_conv
     assert "final_decision" not in _tags(first)
     assert _done(first).finish_reason == "awaiting_product_feedback"
 
-    second = await _chat("继续", session_id=session_id)
+    second = await _chat("帮我选", session_id=session_id, converge=True)
     assert "final_decision" in _tags(second)
     assert _done(second).finish_reason == "completed"
 
@@ -307,12 +307,13 @@ async def _chat(
     message: str,
     *,
     session_id: str | None = None,
+    converge: bool = False,
 ) -> list[SSEEventBase]:
     return [
         event
         async for event in chat_stream(
             session_id or _session_id(),
-            ChatStreamRequest(message=message),
+            ChatStreamRequest(message=message, converge=converge),
         )
     ]
 

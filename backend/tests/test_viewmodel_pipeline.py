@@ -406,8 +406,8 @@ async def test_viewmodel_final_decision_contract_multi_candidate_two_turns(vm_st
     pc_deck_ids = {pc.deck_id for pc in _product_cards(events1)}
     assert len(pc_deck_ids) == 1, "All product cards in same turn share one deck_id"
 
-    # Turn 2: continue → convergence
-    events2 = await _run_turn("s_vm_1", "继续")
+    # Turn 2: converge=true → convergence
+    events2 = await _run_turn("s_vm_1", "帮我选", converge=True)
     tags2 = _event_tags(events2)
 
     # Second turn assertions

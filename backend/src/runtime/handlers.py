@@ -440,9 +440,18 @@ async def handle_continue(
 
     product_ids = await get_previous_product_ids(ctx.session_id)
     if product_ids:
-        async for event in continue_decision_from_current_deck(ctx, body, criteria, product_ids):
-            yield event
-        return
+        feedback = await get_feedback_context(ctx.session_id)
+        has_actionable_feedback = bool(
+            body.converge
+            or feedback.get("avoid_products")
+            or feedback.get("avoid_traits")
+            or feedback.get("prefer_traits")
+            or feedback.get("liked_products")
+        )
+        if has_actionable_feedback:
+            async for event in continue_decision_from_current_deck(ctx, body, criteria, product_ids):
+                yield event
+            return
 
     async for event in continue_recommendation_from_criteria(ctx, body, criteria):
         yield event

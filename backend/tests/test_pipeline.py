@@ -261,10 +261,9 @@ async def test_pipeline_continue_after_deck_emits_final_decision():
     ]
     events = [event async for event in chat_stream("s_decision", ChatStreamRequest(message="继续"))]
     tags = [event.event for event in events]
-    assert "criteria_card" not in tags
-    assert "product_card" not in tags
-    assert "final_decision" in tags
-    assert events[-1].finish_reason == "completed"
+    # "继续" without feedback should trigger new retrieval (product_card), not re-decision
+    assert "product_card" in tags
+    assert "criteria_card" in tags
 
 
 @pytest.mark.asyncio
@@ -303,7 +302,7 @@ async def test_pipeline_locks_scored_winner_before_decision_explanation(monkeypa
     )
 
     _ = [event async for event in chat_stream("s_locked_decision", ChatStreamRequest(message="推荐适合油皮的洗面奶"))]
-    events = [event async for event in chat_stream("s_locked_decision", ChatStreamRequest(message="继续"))]
+    events = [event async for event in chat_stream("s_locked_decision", ChatStreamRequest(message="帮我选", converge=True))]
     decision = next(event for event in events if event.event == "final_decision")
 
     assert captured["locked_winner_product_id"] == product_a.product_id
