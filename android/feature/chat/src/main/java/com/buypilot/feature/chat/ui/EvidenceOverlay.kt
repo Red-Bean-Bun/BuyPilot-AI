@@ -49,10 +49,11 @@ fun ProductEvidenceOverlayScreen(
     state: ChatUiState,
     deckId: String,
     productId: String,
+    deckNodeKey: String? = null,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
 ) {
-    val payload = state.findProduct(deckId, productId)
+    val payload = state.findProduct(deckId, productId, deckNodeKey)
 
     if (payload == null) {
         Surface(color = BuyPilotColors.EvidenceBackdropTop, modifier = Modifier.fillMaxSize()) {
@@ -68,7 +69,7 @@ fun ProductEvidenceOverlayScreen(
     val evidenceItems = payload.evidence
     val highlightTags = payload.displayTags()
     val routeProgressState = rememberRouteEnterProgress(
-        key = "evidence_${deckId}_${productId}",
+        key = "evidence_${deckId}_${deckNodeKey.orEmpty()}_${productId}",
         durationMillis = ProductEvidenceEnterMs,
     )
     Box(

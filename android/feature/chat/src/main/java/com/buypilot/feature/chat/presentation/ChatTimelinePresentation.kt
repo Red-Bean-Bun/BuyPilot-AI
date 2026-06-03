@@ -25,6 +25,8 @@ internal data class TimelinePresentationState(
     val productDeckNodes: List<ProductDeckNode> = emptyList(),
     val productsById: Map<String, ProductCardPayload> = emptyMap(),
     val productDeckIdByProductId: Map<String, String> = emptyMap(),
+    val productDeckNodeByKey: Map<String, ProductDeckNode> = emptyMap(),
+    val finalDecisionSourceDeckKeyByDecisionKey: Map<String, String> = emptyMap(),
     val latestProductDeckKey: String? = null,
     val latestFinalDecisionKey: String? = null,
     val latestFinalDecisionTurnId: String? = null,
@@ -32,6 +34,7 @@ internal data class TimelinePresentationState(
     val finalDecisionKeys: Set<String> = emptySet(),
     val clarificationKeys: List<String> = emptyList(),
     val convergedDeckIds: Set<String> = emptySet(),
+    val convergedProductDeckKeys: Set<String> = emptySet(),
     val revealKeys: Set<String> = emptySet(),
     val hasTimelineError: Boolean = false,
     val hasStructuredContent: Boolean = false,
@@ -47,12 +50,15 @@ internal data class TimelineRenderContext(
     val cartState: ChatCartUiState = ChatCartUiState(),
     val productsById: Map<String, ProductCardPayload> = emptyMap(),
     val productDeckIdByProductId: Map<String, String> = emptyMap(),
+    val productDeckNodeByKey: Map<String, ProductDeckNode> = emptyMap(),
+    val finalDecisionSourceDeckKeyByDecisionKey: Map<String, String> = emptyMap(),
     val latestProductDeckKey: String? = null,
     val productSwipeStates: Map<String, ProductSwipeState> = emptyMap(),
     val awaitingConvergenceDeckIds: Set<String> = emptySet(),
     val latestConvergeableDeckId: String? = null,
     val pendingDecisions: Map<String, PendingDecision> = emptyMap(),
     val convergedDeckIds: Set<String> = emptySet(),
+    val convergedProductDeckKeys: Set<String> = emptySet(),
     val lastUserMessage: String? = null,
 )
 
@@ -114,9 +120,13 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
     val productDeckNodes = mutableListOf<ProductDeckNode>()
     val productsById = linkedMapOf<String, ProductCardPayload>()
     val productDeckIdByProductId = linkedMapOf<String, String>()
+    val productDeckNodeByKey = linkedMapOf<String, ProductDeckNode>()
+    val finalDecisionSourceDeckKeyByDecisionKey = linkedMapOf<String, String>()
     val finalDecisionKeys = linkedSetOf<String>()
     val clarificationKeys = mutableListOf<String>()
     val convergedDeckIds = linkedSetOf<String>()
+    val convergedProductDeckKeys = linkedSetOf<String>()
+    val latestDeckKeyByDeckId = linkedMapOf<String, String>()
     val revealKeys = linkedSetOf<String>()
     var assistantTurnId: String? = null
     val assistantNodes = mutableListOf<ChatUiNode>()
@@ -152,7 +162,9 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
             is ProductDeckNode -> {
                 hasStructuredContent = true
                 productDeckNodes += node
+                productDeckNodeByKey[node.key] = node
                 latestProductDeckKey = node.key
+                latestDeckKeyByDeckId[node.deckId] = node.key
                 node.products.forEach { payload ->
                     val productId = payload.product.productId.takeIf { it.isNotBlank() }
                     if (productId != null) {
@@ -168,7 +180,13 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
                 latestFinalDecisionDeckId = node.deckId
                 latestFinalDecisionPayload = node.payload
                 finalDecisionKeys += node.key
-                node.deckId?.takeIf { it.isNotBlank() }?.let { convergedDeckIds += it }
+                node.deckId?.takeIf { it.isNotBlank() }?.let { deckId ->
+                    convergedDeckIds += deckId
+                    latestDeckKeyByDeckId[deckId]?.let { deckKey ->
+                        convergedProductDeckKeys += deckKey
+                        finalDecisionSourceDeckKeyByDecisionKey[node.key] = deckKey
+                    }
+                }
             }
             is CriteriaNode -> {
                 hasStructuredContent = true
@@ -208,17 +226,22 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
             cartState = cartState,
             productsById = productsById,
             productDeckIdByProductId = productDeckIdByProductId,
+            productDeckNodeByKey = productDeckNodeByKey,
+            finalDecisionSourceDeckKeyByDecisionKey = finalDecisionSourceDeckKeyByDecisionKey,
             latestProductDeckKey = latestProductDeckKey,
             productSwipeStates = productSwipeStates,
             awaitingConvergenceDeckIds = awaitingConvergenceDeckIds,
             latestConvergeableDeckId = latestConvergeableDeckId,
             pendingDecisions = pendingDecisions,
             convergedDeckIds = convergedDeckIds,
+            convergedProductDeckKeys = convergedProductDeckKeys,
             lastUserMessage = lastUserMessage,
         ),
         productDeckNodes = productDeckNodes,
         productsById = productsById,
         productDeckIdByProductId = productDeckIdByProductId,
+        productDeckNodeByKey = productDeckNodeByKey,
+        finalDecisionSourceDeckKeyByDecisionKey = finalDecisionSourceDeckKeyByDecisionKey,
         latestProductDeckKey = latestProductDeckKey,
         latestFinalDecisionKey = latestFinalDecisionKey,
         latestFinalDecisionTurnId = latestFinalDecisionTurnId,
@@ -226,6 +249,7 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
         finalDecisionKeys = finalDecisionKeys,
         clarificationKeys = clarificationKeys,
         convergedDeckIds = convergedDeckIds,
+        convergedProductDeckKeys = convergedProductDeckKeys,
         revealKeys = revealKeys,
         hasTimelineError = hasTimelineError,
         hasStructuredContent = hasStructuredContent,

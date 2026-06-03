@@ -77,15 +77,15 @@ private const val ProductSwipeAnimationMs = 430
 fun ProductSwipeModeScreen(
     state: ChatUiState,
     deckId: String,
+    deckNodeKey: String? = null,
     initialProductId: String?,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onDeckCompleted: (String) -> Unit,
     onOpenDetail: (String, String) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
     onUndo: (String) -> Unit,
 ) {
-    val deck = state.findProductDeck(deckId)
+    val deck = state.findProductDeck(deckId, deckNodeKey)
     val products = deck?.products.orEmpty()
     val swipeState = state.productSwipeStates[deckId] ?: ProductSwipeState()
     val remainingProducts = products.filterNot { it.product.productId in swipeState.swipedProductIds }
@@ -107,12 +107,10 @@ fun ProductSwipeModeScreen(
     )
     var autoClosed by rememberSaveable(deckId) { mutableStateOf(false) }
     val latestOnBack by rememberUpdatedState(onBack)
-    val latestOnDeckCompleted by rememberUpdatedState(onDeckCompleted)
 
     LaunchedEffect(deckId, deckFullyHandled) {
         if (!deckFullyHandled || autoClosed) return@LaunchedEffect
         autoClosed = true
-        latestOnDeckCompleted(deckId)
         kotlinx.coroutines.delay(ProductDeckAutoCloseDelayMs)
         latestOnBack()
     }

@@ -78,6 +78,7 @@ data class FinalDecisionNode(
 data class CartActionNode(
     override val key: String,
     val payload: CartActionPayload,
+    val turnId: String = "",
 ) : ChatUiNode
 
 @Immutable
@@ -86,6 +87,7 @@ data class ErrorNode(
     val code: String,
     val message: String,
     val retryable: Boolean,
+    val turnId: String = "",
 ) : ChatUiNode
 
 @Immutable

@@ -36,7 +36,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 
-private const val ProductDeckArrivalMs = 1480
+private const val ProductDeckArrivalMs = 680
+private const val ProductImageSeedVisibleUntilProgress = 0.985f
+private const val ProductArrivalSeedMinVisibleProgress = 0.01f
 
 internal fun lerp(start: Float, stop: Float, fraction: Float): Float =
     start + (stop - start) * fraction
@@ -135,7 +137,7 @@ internal fun rememberProductDeckArrivalProgressProvider(
 ): () -> Float {
     val progress = remember(key) { Animatable(if (!motionEnabled || alreadyEntered) 1f else 0f) }
     val latestOnEntered by rememberUpdatedState(onEntered)
-    val progressProvider = remember { { progress.value } }
+    val progressProvider = remember(progress) { { progress.value } }
 
     LaunchedEffect(key, motionEnabled, alreadyEntered) {
         if (!motionEnabled || alreadyEntered) {
@@ -228,6 +230,9 @@ private fun ProductArrivalSeedBubble(
     progress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
+    val progressValue = progress().coerceIn(0f, 1f)
+    if (!shouldRenderProductArrivalSeedBubble(progressValue)) return
+
     val pulse = rememberInfiniteTransition(label = "product_seed_pulse")
     val shimmer by pulse.animateFloat(
         initialValue = 0.18f,
@@ -241,10 +246,9 @@ private fun ProductArrivalSeedBubble(
     Box(
         modifier = modifier
             .graphicsLayer {
-                val t = progress()
-                alpha = t
-                scaleX = 0.88f + t * 0.12f
-                scaleY = 0.88f + t * 0.12f
+                alpha = progressValue
+                scaleX = 0.88f + progressValue * 0.12f
+                scaleY = 0.88f + progressValue * 0.12f
             }
             .size(width = 74.dp, height = 48.dp)
             .shadow(
@@ -271,6 +275,9 @@ internal fun ProductImageLoadingSeed(
     progress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
+    val progressValue = progress().coerceIn(0f, 1f)
+    if (!shouldRenderProductImageLoadingSeed(progressValue)) return
+
     val pulse = rememberInfiniteTransition(label = "product_image_seed_pulse")
     val shimmer by pulse.animateFloat(
         initialValue = 0.16f,
@@ -284,8 +291,7 @@ internal fun ProductImageLoadingSeed(
     Box(
         modifier = modifier
             .graphicsLayer {
-                val t = progress()
-                alpha = (1f - t * 0.78f).coerceIn(0f, 1f)
+                alpha = (1f - progressValue * 0.78f).coerceIn(0f, 1f)
             }
             .clip(RoundedCornerShape(12.dp))
             .background(
@@ -299,3 +305,9 @@ internal fun ProductImageLoadingSeed(
             ),
     )
 }
+
+internal fun shouldRenderProductImageLoadingSeed(progress: Float): Boolean =
+    progress < ProductImageSeedVisibleUntilProgress
+
+internal fun shouldRenderProductArrivalSeedBubble(progress: Float): Boolean =
+    progress > ProductArrivalSeedMinVisibleProgress

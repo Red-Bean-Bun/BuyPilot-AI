@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -501,7 +502,12 @@ internal fun StreamingAssistantText(
 
     var localVisibleLength by remember(nodeKey) {
         mutableIntStateOf(
-            revealState?.visibleLength?.coerceAtMost(content.length) ?: 0,
+            initialStreamingVisibleLength(
+                contentLength = content.length,
+                revealVisibleLength = revealState?.visibleLength,
+                alreadyCompleted = alreadyCompleted,
+                stablePlainAfterLiveReveal = stablePlainAfterLiveReveal,
+            ),
         )
     }
     val latestOnRevealComplete by rememberUpdatedState(onRevealComplete)
@@ -509,6 +515,12 @@ internal fun StreamingAssistantText(
     val latestOnRevealProgress by rememberUpdatedState(onRevealProgress)
     var completionReported by remember(nodeKey) { mutableStateOf(false) }
     val visibleLength = maxOf(localVisibleLength, revealState?.visibleLength ?: 0).coerceAtMost(content.length)
+
+    DisposableEffect(nodeKey) {
+        onDispose {
+            latestOnRevealActiveChange?.invoke(false)
+        }
+    }
 
     LaunchedEffect(nodeKey, revealState?.visibleLength) {
         val target = maxOf(localVisibleLength, revealState?.visibleLength ?: 0).coerceAtMost(content.length)
@@ -577,6 +589,21 @@ internal fun shouldKeepPlainTextRendererAfterStreaming(
     hasSeenLiveStream: Boolean,
     animateInitialCompleted: Boolean,
 ): Boolean = stablePlainAfterLiveReveal || hasSeenLiveStream || animateInitialCompleted
+
+internal fun initialStreamingVisibleLength(
+    contentLength: Int,
+    revealVisibleLength: Int?,
+    alreadyCompleted: Boolean,
+    stablePlainAfterLiveReveal: Boolean,
+): Int {
+    val boundedContentLength = contentLength.coerceAtLeast(0)
+    return when {
+        alreadyCompleted || stablePlainAfterLiveReveal -> boundedContentLength
+        else -> revealVisibleLength.orZero().coerceIn(0, boundedContentLength)
+    }
+}
+
+private fun Int?.orZero(): Int = this ?: 0
 
 @Composable
 internal fun StreamingAssistantText(

@@ -109,6 +109,38 @@ class ChatViewModelCartCommandTest {
     }
 
     @Test
+    fun addToCartIntentKeepsLatestCandidateWhenProductRepeatsAcrossDecks() {
+        val target = resolveAddToCartTarget(
+            message = "把第一个加入购物车",
+            candidates = listOf(
+                ProductCartCandidate(
+                    deckId = "deck_old",
+                    productId = "p_iphone",
+                    rank = 2,
+                    productName = "Apple iPhone 16 Pro",
+                    brand = "Apple",
+                    subCategory = "手机",
+                    category = "数码电子",
+                    recency = 0,
+                ),
+                ProductCartCandidate(
+                    deckId = "deck_new",
+                    productId = "p_iphone",
+                    rank = 1,
+                    productName = "Apple iPhone 16 Pro",
+                    brand = "Apple",
+                    subCategory = "手机",
+                    category = "数码电子",
+                    recency = 1,
+                ),
+            ),
+        )
+
+        assertEquals("deck_new", target?.deckId)
+        assertEquals(1, target?.rank)
+    }
+
+    @Test
     fun addToCartIntentUsesFallbackForDeicticReferenceOnly() {
         val fallback = ProductCartCandidate(
             deckId = "deck_1",

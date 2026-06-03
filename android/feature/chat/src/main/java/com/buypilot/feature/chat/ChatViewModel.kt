@@ -147,7 +147,12 @@ internal fun resolveAddToCartTarget(
 ): ProductCartCandidate? {
     if (!message.looksLikeAddToCartIntent()) return null
     val safeFallback = fallbackCandidate.takeIf { message.cartReferenceStyle() == CartReferenceStyle.Deictic }
-    val uniqueCandidates = candidates.distinctBy { it.productId }.filter { it.productId.isNotBlank() }
+    val uniqueCandidates = candidates
+        .asSequence()
+        .filter { it.productId.isNotBlank() }
+        .sortedByDescending { it.recency }
+        .distinctBy { it.productId }
+        .toList()
     if (uniqueCandidates.isEmpty()) return safeFallback
 
     val ordinal = message.extractRequestedOrdinal()
@@ -574,12 +579,6 @@ class ChatViewModel @Inject constructor(
 
     fun sendCriteriaPatch(criteriaPatch: JsonObject) {
         val patchMessage = "应用并重新推荐"
-        _uiState.update { state ->
-            val staleCriteriaKeys = state.nodes
-                .filterIsInstance<CriteriaNode>()
-                .mapTo(mutableSetOf()) { it.key }
-            state.copy(staleCriteriaNodeKeys = state.staleCriteriaNodeKeys + staleCriteriaKeys)
-        }
         if (BuildConfig.USE_MOCK_CHAT) {
             sendMockMessage(patchMessage, imageUrl = null)
             return
@@ -1487,7 +1486,7 @@ class ChatViewModel @Inject constructor(
         deckId: String,
         allowFullyHandled: Boolean = false,
     ): Boolean {
-        val deck = nodes.filterIsInstance<ProductDeckNode>().firstOrNull { it.deckId == deckId }
+        val deck = latestProductDeck(deckId)
             ?: return false
         if (deck.products.size < 2 || hasConvergedDecisionForDeck(deckId)) return false
         val isAwaitingDeck = deckId in awaitingConvergenceDeckIds
@@ -1504,12 +1503,18 @@ class ChatViewModel @Inject constructor(
             !isDeckFullyHandled(deckId) &&
             !hasConvergedDecisionForDeck(deckId)
 
-    private fun ChatUiState.hasConvergedDecisionForDeck(deckId: String): Boolean =
-        nodes.any { it is FinalDecisionNode && it.deckId == deckId }
+    private fun ChatUiState.hasConvergedDecisionForDeck(deckId: String): Boolean {
+        val latestDeckIndex = nodes.indexOfLast { it is ProductDeckNode && it.deckId == deckId }
+        if (latestDeckIndex < 0) {
+            return nodes.any { it is FinalDecisionNode && it.deckId == deckId }
+        }
+        return nodes
+            .drop(latestDeckIndex + 1)
+            .any { it is FinalDecisionNode && it.deckId == deckId }
+    }
 
     private fun ChatUiState.isDeckFullyHandled(deckId: String): Boolean {
-        val products = nodes.filterIsInstance<ProductDeckNode>()
-            .firstOrNull { it.deckId == deckId }
+        val products = latestProductDeck(deckId)
             ?.products
             .orEmpty()
             .mapNotNull { it.product.productId.takeIf(String::isNotBlank) }
@@ -1517,6 +1522,9 @@ class ChatViewModel @Inject constructor(
         val handledProductIds = productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
         return products.all { it in handledProductIds }
     }
+
+    private fun ChatUiState.latestProductDeck(deckId: String): ProductDeckNode? =
+        nodes.filterIsInstance<ProductDeckNode>().lastOrNull { it.deckId == deckId }
 
     private fun addConvergenceUserMessage(deckId: String, message: String): Pair<String, String> {
         val nowMs = System.currentTimeMillis()
