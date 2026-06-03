@@ -546,6 +546,7 @@ internal fun ChatTimeline(
     val latestTimelineItems by rememberUpdatedState(timelineItems)
     val latestState by rememberUpdatedState(state)
     val latestLatestFinalDecisionKey by rememberUpdatedState(latestFinalDecisionKey)
+    val latestLatestContentBottomPaddingPx by rememberUpdatedState(latestContentBottomPaddingPx)
     val latestCurrentTurnId by rememberUpdatedState(state.currentTurnId)
     val latestActiveUserBubbleFollowAnchorKey by rememberUpdatedState(activeUserBubbleFollowAnchorKey)
     suspend fun restoreRouteReturnNodeAnchorIfNeeded() {
@@ -1181,15 +1182,16 @@ internal fun ChatTimeline(
             }
             TimelineScrollIntentKind.KeyboardChanged -> {
                 if (intent.deltaPx > 0) {
-                    withFrameNanos { }
-                    scrollReadableTurnAnchorIfNeeded(
-                        listState = listState,
-                        timelineItems = currentItems(),
-                        currentTurnId = latestCurrentTurnId,
-                        activeUserBubbleAnchorKey = latestActiveUserBubbleFollowAnchorKey,
-                        anchorTopPx = anchorTopOffsetPx,
-                        tolerancePx = followCorrectionTolerancePx,
-                    )
+                    val targetIndex = nearEndReferenceIndex()
+                    if (targetIndex >= 0) {
+                        withFrameNanos { }
+                        scrollLatestContentIntoView(
+                            listState = listState,
+                            lastContentIndex = targetIndex,
+                            bottomPaddingPx = latestLatestContentBottomPaddingPx,
+                            tolerancePx = followCorrectionTolerancePx,
+                        )
+                    }
                 }
                 clearPending()
             }
@@ -2542,6 +2544,49 @@ private fun isTimelineNearEnd(
         ?: return false
     val distanceToBottom = viewportBottom - (lastVisibleItem.offset + lastVisibleItem.size)
     return distanceToBottom >= -thresholdPx
+}
+
+private suspend fun scrollLatestContentIntoView(
+    listState: LazyListState,
+    lastContentIndex: Int,
+    bottomPaddingPx: Float,
+    tolerancePx: Float,
+    settleFrames: Int = 2,
+) {
+    if (lastContentIndex < 0) return
+
+    repeat(settleFrames.coerceAtLeast(1)) {
+        val layoutInfo = listState.layoutInfo
+        val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull { it.index == lastContentIndex }
+        if (lastVisibleItem == null) {
+            val visibleHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset - bottomPaddingPx)
+                .coerceAtLeast(tolerancePx)
+            val delta = visibleHeight * 0.72f
+            if (delta > 96f) {
+                listState.animateScrollBy(
+                    value = delta,
+                    animationSpec = tween(durationMillis = 170, easing = MenuEaseOut),
+                )
+            } else {
+                listState.scrollBy(delta)
+            }
+        } else {
+            val viewportBottom = layoutInfo.viewportEndOffset - bottomPaddingPx.roundToInt()
+            val overflow = (lastVisibleItem.offset + lastVisibleItem.size) - viewportBottom
+            if (overflow > tolerancePx) {
+                val delta = overflow.toFloat()
+                if (delta > 96f) {
+                    listState.animateScrollBy(
+                        value = delta,
+                        animationSpec = tween(durationMillis = 170, easing = MenuEaseOut),
+                    )
+                } else {
+                    listState.scrollBy(delta)
+                }
+            }
+        }
+        kotlinx.coroutines.delay(16L)
+    }
 }
 
 private suspend fun scrollTimelineItemToAnchorIfNeeded(

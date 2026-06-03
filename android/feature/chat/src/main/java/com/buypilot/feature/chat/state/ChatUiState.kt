@@ -2,6 +2,7 @@ package com.buypilot.feature.chat.state
 
 import androidx.compose.runtime.Immutable
 import com.buypilot.core.model.CartItemPayload
+import com.buypilot.core.model.responses.ProductDetailResponse
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ProductSwipeState
 import com.buypilot.feature.chat.model.PendingDecision
@@ -69,6 +70,7 @@ data class ChatUiState(
     val imageAttachment: ChatImageAttachmentState = ChatImageAttachmentState(),
     val cartState: ChatCartUiState = ChatCartUiState(),
     val cartSheetRequestId: Long = 0L,
+    val productDetails: Map<String, ProductDetailResponse> = emptyMap(),
     val backendBaseUrl: String = "",
     val useMockChat: Boolean = false,
 )

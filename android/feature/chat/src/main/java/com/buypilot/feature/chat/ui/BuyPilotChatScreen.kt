@@ -16,6 +16,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -213,6 +214,9 @@ import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.QuickActionPayload
 import com.buypilot.core.model.ThinkingPayload
+import com.buypilot.core.model.responses.FaqItem
+import com.buypilot.core.model.responses.ProductDetailResponse
+import com.buypilot.core.model.responses.ReviewItem
 import com.buypilot.feature.chat.R
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
@@ -248,6 +252,10 @@ import com.yuyakaido.android.cardstackview.StackFrom
 import com.yuyakaido.android.cardstackview.SwipeAnimationSetting
 import com.yuyakaido.android.cardstackview.SwipeableMethod
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -3135,6 +3143,7 @@ fun ProductHeroDetailScreen(
     onOpenEvidence: (String, String, String?) -> Unit,
     onSwipe: (String, String, String, String, String?) -> Unit,
     onAddToCart: (String) -> Unit = {},
+    onRequestProductDetail: (String) -> Unit = {},
 ) {
     var activeProductId by rememberSaveable(deckId, deckNodeKey, productId) { mutableStateOf(productId) }
     val payload = state.findProduct(deckId, activeProductId, deckNodeKey)
@@ -3191,7 +3200,8 @@ fun ProductHeroDetailScreen(
         return
     }
 
-    val product = payload.product
+    val productDetail = state.productDetails[activeProductId]
+    val product = productDetail.productOrFallback(payload.product)
     val productAlreadyInCart = state.cartState.items.any { it.productId == activeProductId }
     val productAddPending = activeProductId in state.cartState.pendingAddProductIds
     val detailListState = rememberLazyListState()
@@ -3204,8 +3214,9 @@ fun ProductHeroDetailScreen(
         }
     }
     val choiceActionsActive = choiceActionsAvailable && submittedFeedback == null
+    val showCommerceControls = !choiceActionsAvailable
     val showInlineCartAction = activeProductId.isNotBlank() &&
-        !choiceActionsAvailable &&
+        showCommerceControls &&
         readOnlyByState
     val actionAlpha by animateFloatAsState(
         targetValue = if (choiceActionsActive && scrollProgress < 0.38f) 1f else 0f,
@@ -3255,6 +3266,10 @@ fun ProductHeroDetailScreen(
         key = "detail_${deckId}_${deckNodeKey.orEmpty()}_${activeProductId}",
         durationMillis = ProductDetailEnterMs,
     )
+
+    LaunchedEffect(product.productId) {
+        onRequestProductDetail(product.productId)
+    }
 
     LaunchedEffect(product.productId) {
         snapshotFlow { detailListState.isScrollInProgress }
@@ -3393,7 +3408,9 @@ fun ProductHeroDetailScreen(
             item("detail_panel") {
                 CinematicProductDetailPanel(
                     payload = payload,
+                    detail = productDetail,
                     progress = scrollProgress,
+                    showCommerceControls = showCommerceControls,
                     cartAction = if (showInlineCartAction) {
                         {
                             ProductDetailInlineCartAction(
@@ -3594,11 +3611,38 @@ private fun ImmersiveCircleButton(
 @Composable
 private fun CinematicProductDetailPanel(
     payload: ProductCardPayload,
+    detail: ProductDetailResponse?,
     progress: Float,
+    showCommerceControls: Boolean = true,
     cartAction: (@Composable () -> Unit)? = null,
 ) {
-    val product = payload.product
-    val tags = payload.displayTags().take(4)
+    val product = detail.productOrFallback(payload.product)
+    val tags = product.detailTags().take(4)
+    val highlights = detail
+        ?.highlights
+        ?.map(String::trim)
+        ?.filter(String::isNotBlank)
+        .orEmpty()
+    val attributeRows = product.detailAttributeRows(includeSkuSummary = showCommerceControls)
+    val description = detail?.marketingDescription?.trim()?.takeIf(String::isNotBlank)
+    val faqs = detail
+        ?.faqs
+        ?.filter { it.question.isNotBlank() && it.answer.isNotBlank() }
+        ?.takeIf { it.isNotEmpty() }
+    val reviews = detail
+        ?.reviews
+        ?.filter { it.nickname.isNotBlank() || it.content.isNotBlank() }
+        ?.takeIf { it.isNotEmpty() }
+    val hasBelowDividerContent = cartAction != null ||
+        attributeRows.isNotEmpty() ||
+        payload.riskNotes.isNotEmpty() ||
+        description != null ||
+        faqs != null ||
+        reviews != null
+    val skuOptions = remember(product.skuOptions) { product.skuOptions.toSkuUiOptions() }
+    var selectedSkuIndex by rememberSaveable(product.productId, skuOptions.size) { mutableIntStateOf(0) }
+    val selectedSku = skuOptions.getOrNull(selectedSkuIndex)
+    val priceLabel = selectedSku?.price?.let { "¥${it.clean()}" } ?: product.priceLabel()
     val shape = RoundedCornerShape(
         topStart = lerp(30f, 22f, progress).dp,
         topEnd = lerp(30f, 22f, progress).dp,
@@ -3621,21 +3665,18 @@ private fun CinematicProductDetailPanel(
             .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = if ((payload.rank.takeIf { it > 0 } ?: 1) == 1) "核心匹配" else "#${payload.rank} 匹配",
-                color = BuyPilotColors.Primary,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+        DetailEyebrowRow(
+            label = product.subCategory?.takeIf(String::isNotBlank)
+                ?: product.category.takeIf(String::isNotBlank)
+                ?: "商品详情",
+            rank = payload.rank,
+        )
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = product.displayName(),
                 color = BuyPilotColors.TextPrimary,
-                fontSize = 28.sp,
-                lineHeight = 35.sp,
+                fontSize = 27.sp,
+                lineHeight = 34.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
@@ -3644,12 +3685,13 @@ private fun CinematicProductDetailPanel(
             Spacer(Modifier.width(16.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = product.priceLabel(),
+                    text = priceLabel,
                     color = BuyPilotColors.Primary,
                     fontSize = 28.sp,
                     lineHeight = 34.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
+                    modifier = Modifier.animateContentSize(tween(durationMillis = 200, easing = PremiumRevealEase)),
                 )
                 Text(
                     text = product.subCategory ?: product.category,
@@ -3663,13 +3705,6 @@ private fun CinematicProductDetailPanel(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "⌖",
-                color = BuyPilotColors.TextMuted,
-                fontSize = 20.sp,
-                lineHeight = 20.sp,
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
                 text = product.brandLabel(),
                 color = BuyPilotColors.TextSecondary,
                 fontSize = BuyPilotType.Body,
@@ -3679,36 +3714,342 @@ private fun CinematicProductDetailPanel(
             )
         }
         if (tags.isNotEmpty()) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(tags, key = { it }) { tag ->
                     ImmersiveTag(label = tag)
                 }
             }
         }
-        payload.reason
-            .withoutInternalDebugTokens()
-            .trim()
-            .takeIf { it.isNotBlank() }
-            ?.let { reason ->
-                ImmersiveSectionTitle("BuyPilot AI 核心推荐")
-                MarkdownTextBlock(
-                    content = reason,
-                    style = TextStyle(
-                        color = BuyPilotColors.TextSecondary,
-                        fontSize = BuyPilotType.Body,
-                        lineHeight = 23.sp,
-                    ),
-                )
+        if (showCommerceControls && skuOptions.isNotEmpty()) {
+            ProductSkuSelector(
+                options = skuOptions,
+                selectedIndex = selectedSkuIndex.coerceIn(0, skuOptions.lastIndex),
+                onSelected = { selectedSkuIndex = it },
+            )
         }
-        Spacer(Modifier.height(20.dp))
-        cartAction?.invoke()
-        CinematicDetailDivider(progress)
-        ImmersiveSectionTitle("详细信息")
+        if (highlights.isNotEmpty()) {
+            ProductHighlightsSection(highlights = highlights)
+        }
+        if (hasBelowDividerContent) {
+            Spacer(Modifier.height(20.dp))
+            CinematicDetailDivider(progress)
+            cartAction?.invoke()
+        }
+        if (attributeRows.isNotEmpty()) {
+            ImmersiveSectionTitle("商品信息")
+            ProductAttributeRowsDark(rows = attributeRows)
+        }
         if (payload.riskNotes.isNotEmpty()) {
             ImmersiveWarningBox(payload.riskNotes.joinToString("；"))
         }
-        ProductAttributeRowsDark(product = product)
+        description?.let { ProductDescriptionSection(description = it) }
+        faqs?.let { ProductFaqSection(faqs = it) }
+        reviews?.let { ProductReviewsSection(reviews = it) }
         Spacer(Modifier.height(14.dp))
+    }
+}
+
+@Immutable
+internal data class ProductSkuUiOption(
+    val label: String,
+    val price: Double?,
+)
+
+@Composable
+private fun DetailEyebrowRow(label: String, rank: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label.withoutMarkdownMarkup(),
+            color = BuyPilotColors.Primary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (rank > 0) {
+            Text(
+                text = "#$rank",
+                color = BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Tiny,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.7f), CircleShape)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductSkuSelector(
+    options: List<ProductSkuUiOption>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ImmersiveSectionTitle("规格")
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            itemsIndexed(options, key = { index, option -> "${option.label}_$index" }) { index, option ->
+                val selected = index == selectedIndex
+                Surface(
+                    onClick = { onSelected(index) },
+                    color = if (selected) BuyPilotColors.Primary.copy(alpha = 0.08f) else BuyPilotColors.SurfaceCard,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        if (selected) 1.5.dp else 1.dp,
+                        if (selected) BuyPilotColors.Primary.copy(alpha = 0.72f) else BuyPilotColors.Border,
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = option.label,
+                            color = if (selected) BuyPilotColors.TextPrimary else BuyPilotColors.TextSecondary,
+                            fontSize = BuyPilotType.Label,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        option.price?.let { price ->
+                            Text(
+                                text = "¥${price.clean()}",
+                                color = if (selected) BuyPilotColors.Primary else BuyPilotColors.TextSecondary,
+                                fontSize = BuyPilotType.Label,
+                                lineHeight = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductHighlightsSection(highlights: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ImmersiveSectionTitle("商品亮点")
+        highlights.take(4).forEach { highlight ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .size(6.dp)
+                        .background(BuyPilotColors.Primary.copy(alpha = 0.74f), CircleShape),
+                )
+                Text(
+                    text = highlight,
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 21.sp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductDescriptionSection(description: String) {
+    var expanded by rememberSaveable(description) { mutableStateOf(false) }
+    var hasOverflow by remember(description) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ImmersiveSectionTitle("商品描述")
+        Column(Modifier.animateContentSize(tween(durationMillis = 260, easing = PremiumRevealEase))) {
+            Text(
+                text = description,
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 23.sp,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { result ->
+                    if (!expanded) {
+                        hasOverflow = result.hasVisualOverflow
+                    }
+                },
+            )
+            if (hasOverflow) {
+                TextButton(
+                    onClick = { expanded = !expanded },
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = if (expanded) "收起" else "展开全文",
+                        color = BuyPilotColors.PrimaryDark,
+                        fontSize = BuyPilotType.Label,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductFaqSection(faqs: List<FaqItem>) {
+    var expandedIndex by rememberSaveable(faqs.size) { mutableIntStateOf(-1) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ImmersiveSectionTitle("官方问答")
+        faqs.forEachIndexed { index, faq ->
+            val expanded = expandedIndex == index
+            Surface(
+                color = BuyPilotColors.SurfaceCard,
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.76f)),
+                modifier = Modifier.animateContentSize(tween(durationMillis = 210, easing = PremiumRevealEase)),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .clickable(
+                            role = Role.Button,
+                            onClick = { expandedIndex = if (expanded) -1 else index },
+                        )
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (expanded) 8.dp else 0.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = faq.question,
+                            color = BuyPilotColors.TextPrimary,
+                            fontSize = BuyPilotType.Label,
+                            lineHeight = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = if (expanded) "收起" else "展开",
+                            color = BuyPilotColors.TextMuted,
+                            fontSize = BuyPilotType.Tiny,
+                            lineHeight = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = fadeIn(tween(durationMillis = 160, easing = MenuEaseOut)) +
+                            expandVertically(tween(durationMillis = 190, easing = PremiumRevealEase)),
+                        exit = fadeOut(tween(durationMillis = 120, easing = MenuEaseOut)) +
+                            shrinkVertically(tween(durationMillis = 150, easing = MenuEaseOut)),
+                    ) {
+                        Text(
+                            text = faq.answer,
+                            color = BuyPilotColors.TextSecondary,
+                            fontSize = BuyPilotType.Body,
+                            lineHeight = 23.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductReviewsSection(reviews: List<ReviewItem>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ImmersiveSectionTitle("用户评价 (${reviews.size})")
+        RatingDistributionBar(reviews)
+        reviews.forEach { review ->
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = review.nickname.ifBlank { "用户评价" },
+                        color = BuyPilotColors.TextMuted,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    RatingStars(rating = review.rating)
+                }
+                Text(
+                    text = review.content,
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 22.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RatingDistributionBar(reviews: List<ReviewItem>) {
+    val total = reviews.size.coerceAtLeast(1)
+    val counts = remember(reviews) {
+        (5 downTo 1).associateWith { rating ->
+            reviews.count { it.rating.coerceIn(1, 5) == rating }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        counts.forEach { (rating, count) ->
+            val fraction = count.toFloat() / total.toFloat()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${rating}星",
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                    modifier = Modifier.width(32.dp),
+                )
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(CircleShape)
+                        .background(BuyPilotColors.SurfaceMuted),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(maxWidth * fraction)
+                            .background(BuyPilotColors.Primary.copy(alpha = 0.68f), CircleShape),
+                    )
+                }
+                Text(
+                    text = count.toString(),
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(24.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RatingStars(rating: Int) {
+    val safeRating = rating.coerceIn(0, 5)
+    Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+        repeat(5) { index ->
+            Text(
+                text = if (index < safeRating) "★" else "☆",
+                color = if (index < safeRating) BuyPilotColors.Warning else BuyPilotColors.TextMuted.copy(alpha = 0.52f),
+                fontSize = 13.sp,
+                lineHeight = 14.sp,
+            )
+        }
     }
 }
 
@@ -3902,12 +4243,9 @@ private fun ImmersiveWarningBox(text: String) {
 }
 
 @Composable
-private fun ProductAttributeRowsDark(product: ProductPayload) {
-    val rows = listOf(
-        "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback(),
-        "成分标签" to product.ingredientTags.userFacingJoinedOrFallback(),
-        "使用场景" to product.useScenario.userFacingJoinedOrFallback(),
-    )
+private fun ProductAttributeRowsDark(rows: List<Pair<String, String>>) {
+    if (rows.isEmpty()) return
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEach { (label, value) ->
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -3928,6 +4266,97 @@ private fun ProductAttributeRowsDark(product: ProductPayload) {
             }
         }
     }
+}
+
+private fun ProductPayload.detailTags(): List<String> =
+    listOfNotNull(
+        subCategory?.withoutMarkdownMarkup()?.withoutInternalDebugTokens()?.trim()?.takeIf(String::isNotBlank),
+        category.withoutMarkdownMarkup().withoutInternalDebugTokens().trim().takeIf(String::isNotBlank),
+    )
+        .plus(useScenario)
+        .plus(skinTypeMatch)
+        .plus(ingredientTags)
+        .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(6)
+
+private fun ProductPayload.detailAttributeRows(includeSkuSummary: Boolean = true): List<Pair<String, String>> {
+    val rows = mutableListOf<Pair<String, String>>()
+    brand
+        ?.withoutMarkdownMarkup()
+        ?.withoutInternalDebugTokens()
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { rows += "品牌" to it }
+
+    listOfNotNull(
+        category.withoutMarkdownMarkup().withoutInternalDebugTokens().trim().takeIf(String::isNotBlank),
+        subCategory?.withoutMarkdownMarkup()?.withoutInternalDebugTokens()?.trim()?.takeIf(String::isNotBlank),
+    )
+        .distinct()
+        .joinToString(" / ")
+        .takeIf(String::isNotBlank)
+        ?.let { rows += "品类" to it }
+
+    useScenario.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "使用场景" to it }
+    skinTypeMatch.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "适用肤质" to it }
+    ingredientTags.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "成分标签" to it }
+    ingredientAvoid.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "避开成分" to it }
+    if (includeSkuSummary) {
+        skuOptions.skuPropertySummary().takeIf(String::isNotBlank)?.let { rows += "可选规格" to it }
+    }
+
+    return rows.distinctBy { (label, value) -> label to value }.take(7)
+}
+
+private fun List<JsonObject>?.skuPropertySummary(): String =
+    this
+        ?.asSequence()
+        ?.mapNotNull { option ->
+            option["properties"]
+                ?.let { element -> runCatching { element.jsonObject }.getOrNull() }
+                ?.values
+                ?.mapNotNull { element ->
+                    runCatching { element.jsonPrimitive.contentOrNull }.getOrNull()?.trim()?.takeIf(String::isNotBlank)
+                }
+                ?.joinToString(" / ")
+                ?.takeIf(String::isNotBlank)
+        }
+        ?.distinct()
+        ?.take(3)
+        ?.joinToString("、")
+        .orEmpty()
+
+internal fun List<JsonObject>?.toSkuUiOptions(): List<ProductSkuUiOption> =
+    this
+        ?.mapNotNull { option ->
+            val label = option.skuLabel()
+            if (label.isBlank()) return@mapNotNull null
+            ProductSkuUiOption(
+                label = label,
+                price = option["price"]?.let { element ->
+                    runCatching { element.jsonPrimitive.doubleOrNull }.getOrNull()
+                },
+            )
+        }
+        .orEmpty()
+
+private fun ProductDetailResponse?.productOrFallback(fallback: ProductPayload): ProductPayload =
+    this
+        ?.product
+        ?.takeIf { it.productId.isNotBlank() }
+        ?: fallback
+
+internal fun JsonObject.skuLabel(): String {
+    val properties = this["properties"]?.let { element ->
+        runCatching { element.jsonObject }.getOrNull()
+    } ?: return "默认规格"
+    val values = properties.values
+        .mapNotNull { element ->
+            runCatching { element.jsonPrimitive.contentOrNull }.getOrNull()?.trim()?.takeIf(String::isNotBlank)
+        }
+    return values.joinToString(" · ").ifBlank { "默认规格" }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

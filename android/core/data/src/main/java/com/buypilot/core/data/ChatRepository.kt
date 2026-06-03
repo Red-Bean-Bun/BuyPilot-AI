@@ -13,12 +13,15 @@ import com.buypilot.core.model.requests.FeedbackRequest
 import com.buypilot.core.model.responses.CartResponse
 import com.buypilot.core.model.responses.ChatCancelResponse
 import com.buypilot.core.model.responses.ImageUploadResponse
+import com.buypilot.core.model.responses.ProductDetailResponse
 import com.buypilot.core.network.BaseUrlProvider
 import com.buypilot.core.network.CartApi
 import com.buypilot.core.network.ChatApi
 import com.buypilot.core.network.ChatCancelApi
 import com.buypilot.core.network.FeedbackApi
 import com.buypilot.core.network.ImageUploadApi
+import com.buypilot.core.network.ProductDetailApi
+import java.util.LinkedHashMap
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 
@@ -28,10 +31,21 @@ class ChatRepository @Inject constructor(
     private val feedbackApi: FeedbackApi,
     private val imageUploadApi: ImageUploadApi,
     private val cartApi: CartApi,
+    private val productDetailApi: ProductDetailApi,
     private val baseUrlProvider: BaseUrlProvider,
     private val sessionDao: SessionDao,
     private val messageDao: MessageDao,
 ) {
+    private val productDetailCacheLock = Any()
+    private val productDetailCache = object : LinkedHashMap<String, ProductDetailResponse>(
+        PRODUCT_DETAIL_CACHE_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ProductDetailResponse>?): Boolean =
+            size > PRODUCT_DETAIL_CACHE_SIZE
+    }
+
     val backendBaseUrl: String
         get() = baseUrlProvider.baseUrl
 
@@ -56,6 +70,20 @@ class ChatRepository @Inject constructor(
 
     suspend fun getCart(sessionId: String): CartResponse =
         cartApi.getCart(sessionId)
+
+    fun getCachedProductDetail(productId: String): ProductDetailResponse? =
+        synchronized(productDetailCacheLock) {
+            productDetailCache[productId.takeIf { it.isNotBlank() } ?: return@synchronized null]
+        }
+
+    suspend fun fetchProductDetail(productId: String): ProductDetailResponse {
+        getCachedProductDetail(productId)?.let { return it }
+        val detail = productDetailApi.getProductDetail(productId)
+        synchronized(productDetailCacheLock) {
+            productDetailCache[productId] = detail
+        }
+        return detail
+    }
 
     suspend fun updateCartQuantity(sessionId: String, productId: String, quantity: Int): CartResponse {
         cartApi.updateQuantity(sessionId, productId, quantity)
@@ -110,5 +138,9 @@ class ChatRepository @Inject constructor(
                 updatedAtMs = nowMs,
             ),
         )
+    }
+
+    private companion object {
+        const val PRODUCT_DETAIL_CACHE_SIZE = 20
     }
 }

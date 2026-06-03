@@ -319,6 +319,7 @@ class ChatViewModel @Inject constructor(
     private val convergenceJobsByDeck = mutableMapOf<String, Job>()
     private val pendingConvergenceRequestsByDeck = mutableMapOf<String, PendingConvergenceRequest>()
     private val backendReadyDeckIds = mutableSetOf<String>()
+    private val pendingProductDetailIds = mutableSetOf<String>()
     private var nextSendFromEditResubmit = false
 
     fun sendMessage(message: String, imageUrl: String? = null) {
@@ -366,6 +367,10 @@ class ChatViewModel @Inject constructor(
         if (imageUrl != null) {
             clearImageAttachment()
         }
+    }
+
+    fun requestProductDetail(productId: String) {
+        prefetchProductDetail(productId)
     }
 
     fun selectImage(uri: Uri) {
@@ -1850,6 +1855,7 @@ class ChatViewModel @Inject constructor(
     private suspend fun applyEnvelopeWithFallbackDelay(envelope: AgentUiEnvelope<AgentPayload>) {
         if (envelope.event == AgentEventType.ProductCard) {
             prefetchProductImage(envelope)
+            prefetchProductDetail(envelope)
         }
 
         applyEnvelope(envelope)
@@ -1930,6 +1936,43 @@ class ChatViewModel @Inject constructor(
             imageLoader.execute(
                 ImageRequest.Builder(appContext).data(imageUrl).build(),
             )
+        }
+    }
+
+    private fun prefetchProductDetail(envelope: AgentUiEnvelope<AgentPayload>) {
+        val payload = envelope.payload as? ProductCardPayload ?: return
+        prefetchProductDetail(payload.product.productId)
+    }
+
+    private fun prefetchProductDetail(productId: String) {
+        val targetProductId = productId.trim().takeIf { it.isNotBlank() } ?: return
+        chatRepository.getCachedProductDetail(targetProductId)?.let { cached ->
+            _uiState.update { state ->
+                if (state.productDetails[targetProductId] == cached) {
+                    state
+                } else {
+                    state.copy(productDetails = state.productDetails + (targetProductId to cached))
+                }
+            }
+            return
+        }
+        if (!pendingProductDetailIds.add(targetProductId)) return
+
+        viewModelScope.launch {
+            try {
+                val detail = withContext(dispatchers.io) {
+                    chatRepository.fetchProductDetail(targetProductId)
+                }
+                _uiState.update { state ->
+                    state.copy(productDetails = state.productDetails + (targetProductId to detail))
+                }
+            } catch (throwable: Throwable) {
+                if (BuildConfig.DEBUG) {
+                    Log.d("BuyPilotProductDetail", "prefetch failed product=$targetProductId error=${throwable.message}")
+                }
+            } finally {
+                pendingProductDetailIds.remove(targetProductId)
+            }
         }
     }
 
