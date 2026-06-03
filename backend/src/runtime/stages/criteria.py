@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from src.config import user_messages as msg
+from src.config.domain_terms import normalize_product_type
 from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, DEFAULT_CRITERIA_ID
 from src.services.audit import record_audit_event
 from src.services.criteria_sanitizer import sanitize_criteria_product_type, sanitize_product_type_constraint
@@ -37,6 +38,18 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
         body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
     )
     final = annotate_criteria_sources(criteria, intent, existing)
+    # When the user explicitly specifies a product_type (via lookup hints or
+    # deterministic extraction) that differs from what the LLM produced, use
+    # the intent's value. The LLM prompt Rule 7 ("在它的基础上修改") causes
+    # it to retain the previous turn's product_type even when the user clearly
+    # switched topics (e.g. "有苹果手机吗" → "有电脑吗").
+    intent_pt = (intent.extracted_constraints or {}).get("product_type")
+    if intent_pt and normalize_product_type(intent_pt) != normalize_product_type(final.constraints.product_type):
+        updated = final.constraints.model_copy(update={"product_type": intent_pt})
+        chips = [c for c in final.chips if normalize_product_type(c) != normalize_product_type(final.constraints.product_type)]
+        if intent_pt not in chips:
+            chips.append(intent_pt)
+        final = final.model_copy(update={"constraints": updated, "chips": chips})
     await diagnose_criteria_context(existing, final, intent)
     return final
 

@@ -297,19 +297,36 @@ def _post_filter_retrieval(
     result: RetrievalResult,
     criteria: CriteriaPayload,
     feedback: dict,
-    max_products: int = 5,
+    max_products: int = 12,
 ) -> RetrievalResult:
     """Re-screen speculative retrieval results against full criteria hard filters.
 
     Does NOT re-run embedding or Rerank — just applies the hard-filter checks (O(n)).
+    Then elevates brand_prefer products to the front of the list.
     """
     kept = filter_products(result.products, criteria, feedback, max_products=max_products)
+    # Guarantee brand_prefer products are present and first. The speculative
+    # retrieval used spec_criteria (built from intent) which may lack
+    # brand_prefer if _merge_followup_context was skipped. This is the final
+    # safety net that both injects missing brand products and reorders.
+    kept = _ensure_brand_products(kept, criteria, feedback)
     kept_ids = {p.product_id for p in kept}
     return RetrievalResult(
         products=kept,
         evidence_by_product={pid: ev for pid, ev in result.evidence_by_product.items() if pid in kept_ids},
         trace_details={**result.trace_details, "speculative_post_filtered": True},
     )
+
+
+def _ensure_brand_products(
+    products: list[ProductPayload],
+    criteria: CriteriaPayload,
+    feedback: dict,
+) -> list[ProductPayload]:
+    """Inject missing brand_prefer products and move them to the front."""
+    from src.services.retriever import inject_brand_preference_products
+
+    return inject_brand_preference_products(products, criteria, feedback)
 
 
 async def handle_recommendation(
@@ -356,7 +373,7 @@ async def handle_recommendation(
     image_embedding = await image_embedding_task if image_embedding_task else None
     retrieval_task = start_stage_task(
         ctx,
-        ctx.stages.run_retrieval(spec_criteria, top_n=8, feedback=feedback, image_embedding=image_embedding),
+        ctx.stages.run_retrieval(spec_criteria, top_n=12, feedback=feedback, image_embedding=image_embedding),
         timing_key="retrieve",
         background=True,
     )

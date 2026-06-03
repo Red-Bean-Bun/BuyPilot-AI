@@ -7,13 +7,18 @@ from typing import Any
 
 from src.config import user_messages as msg
 from src.config.domain_terms import (
+    BRAND_SYNONYMS,
     PRODUCT_TYPE_ALIASES,
     PRODUCT_TYPE_HIERARCHY,
     category_from_text,
     extract_skin_types,
+    get_brand_case,
     get_known_brands,
+    has_negation_prefix,
+    is_known_brand_or_synonym,
     normalize_category,
     normalize_product_type,
+    resolve_brand_prefer,
 )
 from src.config.tuning import CHEAPER_BUDGET_DEFAULT_MAX, CHEAPER_BUDGET_MIN_MAX, CHEAPER_BUDGET_RATIO
 from src.services.conversation_state import get_previous_criteria
@@ -75,6 +80,9 @@ _BUDGET_CAP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(\d+(?:\.\d+)?)\s*(?:元)?\s*(?:以内|以下|内|之内)"),
     re.compile(r"(?:预算|价格).*?(\d+(?:\.\d+)?)"),
 )
+
+# "4000元以上", "5000元以上", "1万以上" → budget_min
+_BUDGET_MIN_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(?:元|块)?\s*以上")
 
 # Budget range: "1000-1500元", "2000到3000"
 _BUDGET_RANGE_PATTERN = re.compile(r"(\d+)\s*[-~到至]\s*(\d+)\s*(?:元)?")
@@ -270,6 +278,17 @@ def extract_adjustment_hints(message: str) -> dict[str, Any]:
         except ValueError:
             pass
 
+    # Deterministic budget_min extraction: "4000元以上" → budget_min=4000.
+    # The LLM sometimes misinterprets "以上" as a cap ("以内") — override it.
+    budget_min = extract_budget_min_from_message(text)
+    if budget_min is not None:
+        hints["budget_min"] = budget_min
+        # If the message is clearly a floor ("以上"), clear any budget_max
+        # the LLM may have hallucinated. Otherwise budget_min==budget_max
+        # would filter to exact-price-only products.
+        hints["budget_max"] = None
+        hints["budget_direction"] = "higher"
+
     return hints
 
 
@@ -313,6 +332,22 @@ def _parse_budget_from_message(message: str, current_budget_max: float | None) -
         if current_budget_max is not None:
             return max(CHEAPER_BUDGET_MIN_MAX, round(current_budget_max * CHEAPER_BUDGET_RATIO, 2))
         return CHEAPER_BUDGET_DEFAULT_MAX
+    return None
+
+
+def extract_budget_min_from_message(message: str) -> float | None:
+    """Deterministic extraction of budget_min from patterns like '4000元以上'.
+
+    The LLM (qwen-turbo) sometimes misinterprets '4000元以上' as a budget
+    cap instead of a floor. This deterministic extractor provides a reliable
+    fallback that the pipeline can use to override the LLM.
+    """
+    m = _BUDGET_MIN_PATTERN.search(message)
+    if m:
+        try:
+            return float(m.group(1))
+        except (ValueError, TypeError):
+            return None
     return None
 
 
@@ -384,19 +419,46 @@ def has_shopping_signal(message: str) -> bool:
 
 
 def extract_brand_prefer_from_message(message: str) -> list[str]:
-    """Extract brand preference by matching known brands from product data.
+    """Extract brand preference by matching known brands and synonyms.
 
-    Returns brands from the product catalog that appear in the user's message.
-    Longer brand names are checked first to avoid partial matches
-    (e.g. "华为" matches before "华").
+    Returns catalog brand names (original case) found in the user's message.
+    Checks both the product catalog brand list and BRAND_SYNONYMS for user
+    expressions that map to catalog brands (e.g. "Mac" → "Apple 苹果").
+
+    Longer brand names / synonym keys are checked first to avoid partial matches.
     """
     brands = get_known_brands()
-    results: list[str] = []
     text_lower = message.strip().lower()
-    for brand in sorted(brands, key=len, reverse=True):
-        if len(brand) >= 2 and brand.lower() in text_lower:
-            results.append(brand)
-    return results
+    text_original = message.strip()
+    seen_brands: set[str] = set()
+
+    # 1. Direct catalog brand matches — use case-preserved catalog name
+    for brand_lower in sorted(brands, key=len, reverse=True):
+        if len(brand_lower) < 2:
+            continue
+        if brand_lower not in text_lower:
+            # Multi-word brand (e.g. "apple 苹果"): also try matching any
+            # individual token so "Apple" alone triggers the match.
+            if " " in brand_lower:
+                tokens = [t for t in brand_lower.split() if len(t) >= 3]
+                if not any(t in text_lower for t in tokens):
+                    continue
+            else:
+                continue
+        original_case = get_brand_case(brand_lower)
+        if has_negation_prefix(text_original, original_case) or has_negation_prefix(text_lower, brand_lower):
+            continue
+        seen_brands.add(original_case)
+
+    # 2. User synonym matches (e.g. "Mac" → "Apple 苹果")
+    for synonym in sorted(BRAND_SYNONYMS, key=len, reverse=True):
+        if len(synonym) >= 2 and synonym in text_lower:
+            # Check negation with both forms — the text may use different case
+            if has_negation_prefix(text_original, synonym) or has_negation_prefix(text_lower, synonym):
+                continue
+            seen_brands.add(BRAND_SYNONYMS[synonym])
+
+    return list(seen_brands)
 
 
 # ── Product-lookup extraction ────────────────────────────────────────
@@ -411,19 +473,74 @@ _PRODUCT_LOOKUP_PATTERNS: tuple[re.Pattern[str], ...] = (
 def extract_product_lookup_hints(message: str) -> dict[str, Any] | None:
     """Detect product-existence queries like '有鼠标吗' or '有没有咖啡'.
 
-    Returns a dict with product_type to inject into intent constraints,
-    or None if no product-lookup pattern is detected.
+    When the extracted entity is a known brand or brand synonym, returns
+    brand_prefer instead of product_type (e.g. "有阿迪达斯吗" → brand_prefer).
+    When the entity is a compound like "苹果手机", splits into brand_prefer
+    + product_type.
+
+    Returns a dict with 'product_type' and/or 'brand_prefer', or None when no
+    product-lookup pattern is detected.
     """
     text = message.strip()
     for pat in _PRODUCT_LOOKUP_PATTERNS:
         m = pat.search(text)
         if m:
             product = m.group(1).strip()
-            if len(product) >= 2 and product not in {
+            if len(product) < 2:
+                return None
+            if product in {
                 "什么", "哪些", "哪个", "那种", "好的", "便宜",
                 "贵的", "新的", "旧的", "大的", "小的",
             }:
-                return {"product_type": product}
+                return None
+            # Pure brand query: "有阿迪达斯吗" → brand_prefer
+            if is_known_brand_or_synonym(product):
+                resolved = resolve_brand_prefer(product)
+                if resolved:
+                    return {"brand_prefer": [resolved]}
+            # Compound entity: "苹果手机" → brand_prefer + product_type
+            compound = _try_split_compound_entity(product)
+            if compound:
+                return compound
+            return {"product_type": product}
+    return None
+
+
+def _try_split_compound_entity(entity: str) -> dict[str, Any] | None:
+    """Split a compound entity like "苹果手机" into brand + product_type.
+
+    Checks if any known brand or synonym appears as a prefix/suffix of the
+    entity, and the remainder is a recognizable product type.
+    """
+    entity_lower = entity.strip().lower()
+    if len(entity_lower) < 3:
+        return None
+
+    # Collect all known brand/synonym strings (lowercased)
+    candidates: list[tuple[str, str]] = []  # (match_key_lower, catalog_brand)
+    for brand_lower in get_known_brands():
+        if len(brand_lower) >= 2:
+            candidates.append((brand_lower, get_brand_case(brand_lower)))
+    for syn_key, syn_value in BRAND_SYNONYMS.items():
+        if len(syn_key) >= 2:
+            candidates.append((syn_key, syn_value))
+    candidates.sort(key=lambda x: len(x[0]), reverse=True)
+
+    for match_key, catalog_brand in candidates:
+        if len(match_key) >= len(entity_lower):
+            continue
+        if entity_lower.startswith(match_key):
+            remainder = entity[len(match_key):].strip()
+            if len(remainder) >= 1:
+                normalized = normalize_product_type(remainder)
+                if normalized:
+                    return {"brand_prefer": [catalog_brand], "product_type": normalized}
+        if entity_lower.endswith(match_key):
+            remainder = entity[:len(entity) - len(match_key)].strip()
+            if len(remainder) >= 1:
+                normalized = normalize_product_type(remainder)
+                if normalized:
+                    return {"brand_prefer": [catalog_brand], "product_type": normalized}
     return None
 
 

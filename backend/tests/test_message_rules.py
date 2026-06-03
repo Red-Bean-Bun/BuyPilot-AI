@@ -64,11 +64,13 @@ class TestExtractBrandPrefer:
     def test_multiple_brands(self):
         result = extract_brand_prefer_from_message("华为和oppo哪个好")
         assert "华为" in result
-        assert "oppo" in result
+        # Returned brand uses original case from catalog (via get_brand_case)
+        assert any(b.lower() == "oppo" for b in result)
 
     def test_case_insensitive(self):
         result = extract_brand_prefer_from_message("我要huawei")
-        assert "huawei" in result
+        # Case-insensitive matching, but returns original catalog case
+        assert any(b.lower() == "huawei" for b in result)
 
     def test_longer_brand_matches_first(self):
         """'小米' should match even in short messages."""

@@ -480,11 +480,12 @@ def avoid_trait_aliases(token: str) -> tuple[str, ...]:
 # ── Data-driven product indices (lazy, built from actual product data) ──────
 
 _brand_set: frozenset[str] | None = None
+_brand_case_map: dict[str, str] = {}  # lowercased → original-case catalog brand name
 _sub_category_set: frozenset[str] | None = None
 
 
 def _ensure_data_indices() -> None:
-    global _brand_set, _sub_category_set
+    global _brand_set, _brand_case_map, _sub_category_set
     if _brand_set is not None:
         return
     from src.repos.products import load_raw_products  # lazy to avoid circular import
@@ -495,6 +496,11 @@ def _ensure_data_indices() -> None:
         for p in raw
         if p.get("brand") and p.get("brand", "").strip()
     )
+    _brand_case_map = {
+        p.get("brand", "").strip().lower(): p.get("brand", "").strip()
+        for p in raw
+        if p.get("brand") and p.get("brand", "").strip()
+    }
     _sub_category_set = frozenset(
         p.get("sub_category", "").strip()
         for p in raw
@@ -507,6 +513,72 @@ def get_known_brands() -> frozenset[str]:
     return _brand_set  # type: ignore[return-value]
 
 
+def get_brand_case(lowered: str) -> str:
+    """Return the original-case catalog brand name for a lowercased brand."""
+    _ensure_data_indices()
+    return _brand_case_map.get(lowered, lowered)
+
+
 def get_known_sub_categories() -> frozenset[str]:
     _ensure_data_indices()
     return _sub_category_set  # type: ignore[return-value]
+
+
+# ── Brand synonym mapping ──────────────────────────────────────────────
+# Maps user expressions (lowercased) → catalog brand name (original case).
+# Catalog-internal brand aliases can be extracted from product RAG knowledge
+# chunks; manual entries fill gaps for common expressions not in the catalog.
+
+BRAND_SYNONYMS: dict[str, str] = {
+    # Apple products — users say "Mac"/"iPhone" but catalog uses "Apple 苹果"
+    "mac": "Apple 苹果",
+    "macbook": "Apple 苹果",
+    "iphone": "Apple 苹果",
+    "airpods": "Apple 苹果",
+    "ipad": "Apple 苹果",
+    "apple": "Apple 苹果",
+    "苹果": "Apple 苹果",
+    # Common English→Chinese brand mappings
+    "huawei": "华为",
+    "nike": "Nike",
+    "adidas": "阿迪达斯",
+    "arc'teryx": "始祖鸟",
+}
+# catalog name → self (allows is_known_brand_or_synonym to unify both paths)
+_SELF_SYNONYMS: dict[str, str] = {}
+
+
+def _ensure_synonym_indices() -> None:
+    """Build self-mapping for every catalog brand so is_known_brand_or_synonym
+    works uniformly for both catalog brands and user synonyms."""
+    if _SELF_SYNONYMS:
+        return
+    _ensure_data_indices()
+    for brand_lower in _brand_set:  # type: ignore[union-attr]
+        original = _brand_case_map.get(brand_lower, brand_lower)
+        _SELF_SYNONYMS[brand_lower] = original
+
+
+def is_known_brand_or_synonym(value: str) -> bool:
+    """Check if `value` is a known brand (catalog or user synonym)."""
+    _ensure_synonym_indices()
+    key = value.strip().lower()
+    if not key or len(key) < 2:
+        return False
+    return key in _SELF_SYNONYMS or key in BRAND_SYNONYMS
+
+
+def resolve_brand_prefer(value: str) -> str | None:
+    """Resolve a user-supplied term to a catalog brand name (original case).
+
+    Returns the catalog brand name or None when the term is not a known brand.
+    """
+    _ensure_synonym_indices()
+    key = value.strip().lower()
+    if not key or len(key) < 2:
+        return None
+    if key in BRAND_SYNONYMS:
+        return BRAND_SYNONYMS[key]
+    if key in _SELF_SYNONYMS:
+        return _SELF_SYNONYMS[key]
+    return None

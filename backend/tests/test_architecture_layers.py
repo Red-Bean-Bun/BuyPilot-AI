@@ -120,6 +120,10 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/test_image_embedding.py::test_vl_embedding_request_omits_parameters_when_no_dimensions -> client.post",
     "tests/test_image_embedding.py::test_vl_embedding_raises_on_empty_response -> src.services.embedding._vl_embedding_request",
     "tests/test_image_embedding.py::test_vl_embedding_raises_on_malformed_embedding -> src.services.embedding._vl_embedding_request",
+    # message_rules tests seed known brands for deterministic brand extraction testing
+    "tests/test_message_rules.py::_seed_test_brands -> mr.get_known_brands",
+    # Pipeline test: add_to_cart reclassification mock
+    "tests/test_pipeline.py::test_add_to_cart_no_product_reference_reclassified_to_recommend -> src.runtime.pipeline.get_previous_product_ids",
 }
 
 

@@ -31,7 +31,7 @@ from src.runtime.stages.multimodal import run_image_embedding, run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.config import user_messages as msg
-from src.config.domain_terms import KNOWN_CATEGORIES, category_from_text, infer_category_from_product_type, is_supported_product_type, normalize_category
+from src.config.domain_terms import KNOWN_CATEGORIES, category_from_text, infer_category_from_product_type, is_known_brand_or_synonym, is_supported_product_type, normalize_category
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
@@ -53,6 +53,10 @@ from src.types.sse_events import (
 
 HEARTBEAT_INTERVAL_SECONDS = 0.8
 PUBLIC_PIPELINE_ERROR_MESSAGE = msg.PIPELINE_ERROR
+
+# Constraint fields that hold list values — must be merged (appended) rather
+# than overwritten when multiple extraction sources contribute values.
+_MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "brand_prefer", "origin_avoid", "dietary"}
 
 logger = logging.getLogger(__name__)
 
@@ -205,19 +209,23 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
         # Not a hard stop: strip unsupported product_type and fall through
         # so the handler can recommend related same-category products.
         _pt = (resolved.intent.extracted_constraints or {}).get("product_type")
-        yield TextDeltaEvent(
-            session_id=ctx.session_id,
-            turn_id=ctx.turn_id,
-            seq=ctx.seq.next(),
-            event_id=ctx.seq.event_id(),
-            node_id=f"unsupported_{ctx.turn_id}",
-            created_at_ms=now_ms(),
-            message_id=f"unsupported_{ctx.turn_id}",
-            delta=msg.UNSUPPORTED_PRODUCT_TYPE_TEMPLATE.format(
-                product_type=_pt or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
-            ),
-            done=True,
-        )
+        # When the "unsupported" product_type is actually a brand, skip the
+        # misleading "not covered" text — the brand matcher will pick it up
+        # and retrieval will find matching products.
+        if not (_pt and is_known_brand_or_synonym(str(_pt))):
+            yield TextDeltaEvent(
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
+                seq=ctx.seq.next(),
+                event_id=ctx.seq.event_id(),
+                node_id=f"unsupported_{ctx.turn_id}",
+                created_at_ms=now_ms(),
+                message_id=f"unsupported_{ctx.turn_id}",
+                delta=msg.UNSUPPORTED_PRODUCT_TYPE_TEMPLATE.format(
+                    product_type=_pt or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
+                ),
+                done=True,
+            )
         constraints = dict(resolved.intent.extracted_constraints or {})
         constraints["product_type"] = None
         resolved = _ResolvedIntent(
@@ -361,10 +369,16 @@ async def _resolve_intent(
 
     # Product-lookup extraction: "有鼠标吗" → product_type="鼠标"
     # Runs for all shopping intents to catch queries the LLM may miss.
+    # When the extracted entity is a brand, lookup returns brand_prefer instead.
     lookup = extract_product_lookup_hints(pipeline_body.message)
     if lookup and intent.intent in {"recommend", "clarify", "feedback"}:
         merged = dict(intent.extracted_constraints or {})
-        merged.update(lookup)
+        for key, value in lookup.items():
+            if key in _MERGE_LIST_FIELDS and isinstance(value, list):
+                existing = merged.get(key, []) or []
+                merged[key] = list(dict.fromkeys([*existing, *value]))
+            else:
+                merged[key] = value
         intent = intent.model_copy(update={"extracted_constraints": merged})
 
     # Deterministic product_type extraction: fills LLM gaps for "手机"/"裤子"/"鞋"
@@ -432,14 +446,43 @@ async def _merge_followup_context(session_id: str, resolved: _ResolvedIntent) ->
     if previous is None:
         return resolved
     constraints = dict(intent.extracted_constraints or {})
+
+    # Detect topic switch: when the user explicitly changes product_type, don't
+    # carry brand_prefer from the previous turn. Otherwise "有苹果手机吗" leaks
+    # brand_prefer into "有电脑吗" or "Mac", forcing the wrong products.
+    topic_switched = _is_topic_switch(intent, previous)
+
     for key, value in previous.constraints.model_dump().items():
         if key not in constraints and _has_context_value(value):
+            if topic_switched and key in ("brand_prefer", "brand_avoid", "product_type"):
+                continue
             constraints[key] = value
     category = intent.category or previous.category or None
     return _ResolvedIntent(
         body=resolved.body,
         intent=intent.model_copy(update={"category": category, "extracted_constraints": constraints}),
     )
+
+
+def _is_topic_switch(intent: IntentResult, previous: CriteriaPayload) -> bool:
+    """True when the user switches away from the previous turn's topic.
+
+    Detected when:
+    - The current turn has a different product_type (e.g. 手机→电脑)
+    - The current turn explicitly names a brand but no product_type,
+      suggesting a new search direction (e.g. "Mac" after phone discussion)
+    """
+    current_pt = (intent.extracted_constraints or {}).get("product_type")
+    previous_pt = previous.constraints.product_type
+    if current_pt and previous_pt:
+        from src.config.domain_terms import normalize_product_type
+
+        return normalize_product_type(current_pt) != normalize_product_type(previous_pt)
+    # Current turn names a brand but no product_type — treat as fresh search
+    current_bp = (intent.extracted_constraints or {}).get("brand_prefer")
+    if current_bp and not current_pt and previous_pt:
+        return True
+    return False
 
 
 def _should_merge_previous_context(intent: IntentResult) -> bool:

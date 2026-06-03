@@ -33,7 +33,7 @@ from src.repos.documents import (
     list_products_by_image_similarity,
     list_vector_chunks_by_similarity,
 )
-from src.repos.products import get_product
+from src.repos.products import get_product, list_products
 from src.services.embedding import embed_text
 from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
 from src.services.reranker import rerank_texts
@@ -143,11 +143,24 @@ async def retrieve_with_evidence(
     # Merge text and visual hits
     merged_hits = _merge_text_and_visual(chunk_hits, visual_hits)
 
+    # Brand-preference direct fetch: when brand_prefer is set, explicitly
+    # fetch matching products from the catalog and merge into candidates.
+    # Vector similarity alone cannot guarantee brand-preferred products
+    # appear — this is a hard recall safety net.
+    brand_hits = _fetch_brand_preference_products(criteria, filters)
+    if brand_hits:
+        merged_hits = _merge_text_and_visual(merged_hits, brand_hits)
+
     if not merged_hits:
         return RetrievalOutput(products=[], evidence_by_product={}, trace_details=_visual_trace(visual_recall_stats))
 
     candidate_hits = _rank_hits(criteria, merged_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
     ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
+
+    # Hard guarantee: brand_prefer products always appear first in results,
+    # regardless of how the reranker scored them. Without this, preferred
+    # brands can be buried by vector similarity or reranker preference.
+    ranked_hits = _elevate_brand_preference(criteria, ranked_hits, all_reranked_hits)
 
     # Supplement evidence for visual-only hits (no chunk)
     evidence_map = _evidence_by_product(ranked_hits, all_reranked_hits)
@@ -413,11 +426,14 @@ def _passes_category_filter(criteria: CriteriaPayload, product: ProductPayload, 
 
 def _passes_budget_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
     del filters
-    return not (
-        criteria.constraints.budget_max is not None
-        and product.price is not None
-        and product.price > criteria.constraints.budget_max
-    )
+    if product.price is None:
+        return True
+    constraints = criteria.constraints
+    if constraints.budget_max is not None and product.price > constraints.budget_max:
+        return False
+    if constraints.budget_min is not None and product.price < constraints.budget_min:
+        return False
+    return True
 
 
 def _passes_brand_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
@@ -567,6 +583,45 @@ def _distance_to_score(distance: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _fetch_brand_preference_products(
+    criteria: CriteriaPayload,
+    filters: RetrievalFilters,
+) -> list[ProductHit]:
+    """Direct catalog lookup for brand_prefer products.
+
+    When the user expresses a brand preference (brand_prefer is non-empty),
+    vector similarity alone cannot guarantee those brands' products appear
+    in the candidate pool. This function fetches matching products directly
+    from the catalog and scores them, ensuring preferred brands are always
+    represented regardless of embedding/reranker behavior.
+    """
+    brand_prefer = criteria.constraints.brand_prefer
+    if not brand_prefer:
+        return []
+
+    brand_lower = {b.strip().lower() for b in brand_prefer}
+    hits: list[ProductHit] = []
+    seen: set[str] = set()
+    for product in list_products():
+        if product.product_id in seen:
+            continue
+        product_brand_lower = (product.brand or "").strip().lower()
+        if product_brand_lower not in brand_lower:
+            continue
+        if not _passes_hard_filters(criteria, product, filters):
+            continue
+        seen.add(product.product_id)
+        hits.append(
+            ProductHit(
+                product=product,
+                vector_score=0.0,
+                filter_score=_filter_score(criteria, product),
+                chunk=None,
+            )
+        )
+    return hits
+
+
 def _build_visual_hits(
     image_hits: list[ImageSimilarityHit],
     criteria: CriteriaPayload,
@@ -591,6 +646,69 @@ def _build_visual_hits(
         "post_filter_count": len(hits),
     }
     return hits, stats
+
+
+def _elevate_brand_preference(
+    criteria: CriteriaPayload,
+    ranked: list[ProductHit],
+    all_reranked: list[ProductHit],
+) -> list[ProductHit]:
+    """Guarantee brand_prefer products appear first in results.
+
+    After reranking, preferred-brand products may be entirely excluded
+    from the top-N if the reranker scored them below other products.
+    This function:
+    1. Injects any missing brand_prefer products from the full reranked list
+    2. Moves all brand_prefer products to the front
+    """
+    brand_prefer = criteria.constraints.brand_prefer
+    if not brand_prefer:
+        return ranked
+    brand_set = {b.strip().lower() for b in brand_prefer}
+
+    seen_ids = {h.product.product_id for h in ranked}
+    # Inject brand_prefer products that were excluded from top-N
+    for h in all_reranked:
+        if (h.product.brand or "").strip().lower() not in brand_set:
+            continue
+        if h.product.product_id in seen_ids:
+            continue
+        seen_ids.add(h.product.product_id)
+        ranked.append(h)
+
+    preferred = [h for h in ranked if (h.product.brand or "").strip().lower() in brand_set]
+    rest = [h for h in ranked if (h.product.brand or "").strip().lower() not in brand_set]
+    return preferred + rest
+
+
+def inject_brand_preference_products(
+    products: list[ProductPayload],
+    criteria: CriteriaPayload,
+    feedback: Mapping[str, list[str]] | None = None,
+) -> list[ProductPayload]:
+    """Inject missing brand_prefer products and move them to the front.
+
+    Public API for runtime handlers — call after retrieval to guarantee
+    brand_prefer products appear regardless of vector search / reranker behavior.
+    """
+    brand_prefer = criteria.constraints.brand_prefer
+    if not brand_prefer:
+        return products
+    brand_set = {b.strip().lower() for b in brand_prefer}
+    filters = _retrieval_filters(feedback)
+    present_ids = {p.product_id for p in products}
+    for p in list_products():
+        if p.product_id in present_ids:
+            continue
+        if (p.brand or "").strip().lower() not in brand_set:
+            continue
+        if not _passes_hard_filters(criteria, p, filters):
+            continue
+        products.append(p)
+        present_ids.add(p.product_id)
+    preferred = [p for p in products if (p.brand or "").strip().lower() in brand_set]
+    rest = [p for p in products if (p.brand or "").strip().lower() not in brand_set]
+    return preferred + rest
 
 
 def _merge_text_and_visual(text_hits: list[ProductHit], visual_hits: list[ProductHit]) -> list[ProductHit]:

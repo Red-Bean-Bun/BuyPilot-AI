@@ -23,8 +23,20 @@ def criteria_query_text(criteria: CriteriaPayload) -> str:
         " ".join(constraints.brand_prefer),
         " ".join(f"不要{item}" for item in constraints.ingredient_avoid),
         f"{constraints.budget_max:g}元内" if constraints.budget_max is not None else "",
+        f"{constraints.budget_min:g}元以上" if constraints.budget_min is not None else "",
     ]
-    return " ".join(part for part in parts if part)
+    base = " ".join(part for part in parts if part)
+
+    # When brand_prefer is set, prepend a priority directive so the embedding
+    # and reranker models give explicit weight to brand constraints. Without
+    # this, brand names are just generic tokens in the query and can be
+    # overwhelmed by vector similarity to non-preferred products.
+    brand_prefer = constraints.brand_prefer
+    if brand_prefer:
+        brand_list = "、".join(brand_prefer)
+        base = f"必须优先推荐以下品牌：{brand_list}。{base}"
+
+    return base
 
 
 def product_document_text(product: ProductPayload, extra_text: str = "") -> str:
@@ -71,6 +83,12 @@ def product_match_score(
         criteria.constraints.budget_max is not None
         and product.price is not None
         and product.price <= criteria.constraints.budget_max
+    ):
+        score += budget_weight
+    if (
+        criteria.constraints.budget_min is not None
+        and product.price is not None
+        and product.price >= criteria.constraints.budget_min
     ):
         score += budget_weight
     if (
