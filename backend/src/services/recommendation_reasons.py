@@ -8,7 +8,11 @@ long-form recommendation text.
 from __future__ import annotations
 
 from src.config.domain_terms import normalize_product_type
+from src.repos.documents import ChunkDocument, risk_chunks_for_products
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload, ReasonAtomPayload
+
+_RISK_NOTE_LIMIT = 3
+_RISK_NOTE_MAX_CHARS = 80
 
 _REASON_ATOM_LIMIT = 4
 
@@ -254,3 +258,45 @@ def _fact_haystack(product: ProductPayload, evidence: list[EvidencePayload]) -> 
 
 def _unique(items: list[str]) -> list[str]:
     return list(dict.fromkeys(item for item in items if item))
+
+
+async def fetch_risk_notes_for_products(product_ids: list[str]) -> dict[str, list[str]]:
+    """Fetch risk chunks from DB and map to per-product risk note strings."""
+    chunks_map = await risk_chunks_for_products(product_ids)
+    return {pid: build_risk_notes(chunks) for pid, chunks in chunks_map.items()}
+
+
+def build_risk_notes(chunks: list[ChunkDocument]) -> list[str]:
+    """Map risk-role chunks to concise human-readable risk notes."""
+    notes: list[str] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        chunk_type = chunk.metadata.get("chunk_type", "")
+        text = chunk.chunk_text.strip()
+        if not text:
+            continue
+
+        if chunk_type == "negative_review":
+            nickname = chunk.metadata.get("nickname", "")
+            rating = chunk.metadata.get("rating", "?")
+            note = f"用户{nickname}评分{rating}：{_truncate(text, _RISK_NOTE_MAX_CHARS)}"
+        elif chunk_type == "warning":
+            note = _truncate(text, _RISK_NOTE_MAX_CHARS)
+        elif chunk_type == "faq":
+            note = _truncate(text, _RISK_NOTE_MAX_CHARS)
+        else:
+            note = _truncate(text, _RISK_NOTE_MAX_CHARS)
+
+        if note and note not in seen:
+            seen.add(note)
+            notes.append(note)
+        if len(notes) >= _RISK_NOTE_LIMIT:
+            break
+    return notes
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max_chars - 1] + "…"

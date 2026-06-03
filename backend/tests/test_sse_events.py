@@ -288,3 +288,34 @@ class TestSkuOptionsNormalization:
         )
         data = event.model_dump()
         jsonschema.validate(data, sse_schema)
+
+    def test_final_decision_score_breakdown_serializes_and_validates(self, sse_schema):
+        """FinalDecisionEvent with score_breakdown must validate against the JSON Schema."""
+        seq = EventSeq("turn_score_test")
+        event = FinalDecisionEvent(
+            session_id="s1",
+            turn_id="turn_score_test",
+            seq=seq.next(),
+            event_id=seq.event_id(),
+            node_id="decision_turn_score_test",
+            winner_product_id="p1",
+            summary="综合评分最高",
+            why=["性价比突出"],
+            not_for=["敏感肌慎用"],
+            decision_status="selected",
+            confidence="high",
+            next_step="accept_recommendation",
+            score_breakdown={
+                "retrieval": 0.85,
+                "criteria_match": 1.25,
+                "user_signal": 1.0,
+                "evidence": 0.45,
+                "risk_penalty": 0.0,
+                "final_score": 0.8125,
+                "rank": 1,
+            },
+        )
+        data = event.model_dump()
+        assert data["score_breakdown"]["final_score"] == 0.8125
+        assert data["score_breakdown"]["rank"] == 1
+        jsonschema.validate(data, sse_schema)

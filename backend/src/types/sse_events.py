@@ -219,6 +219,7 @@ class FinalDecisionEvent(SSEEventBase):
     next_step: Literal["adjust_criteria", "replace_deck", "continue_current_deck", "accept_recommendation"] | None = (
         None
     )
+    score_breakdown: dict[str, Any] | None = None
 
 
 class DoneEvent(SSEEventBase):

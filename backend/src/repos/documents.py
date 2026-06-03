@@ -274,6 +274,43 @@ async def evidence_for_product(product: ProductPayload) -> list[EvidencePayload]
 _EVIDENCE_KIND_PRIORITY = ("why_buy", "faq", "risk", "compare")
 
 
+async def risk_chunks_for_products(product_ids: list[str]) -> dict[str, list[ChunkDocument]]:
+    """Fetch risk-role chunks for given products (negative reviews, warnings)."""
+    if not product_ids:
+        return {}
+    await create_db_and_tables()
+    try:
+        async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+            rows: list[ProductChunk] = list(
+                (
+                    await session.exec(
+                        select(ProductChunk)
+                        .where(col(ProductChunk.product_id).in_(product_ids))
+                        .order_by(col(ProductChunk.product_id), col(ProductChunk.chunk_index))
+                    )
+                ).all()
+            )
+    except SQLAlchemyError:
+        logger.exception("risk_chunks_for_products failed")
+        return {}
+
+    result: dict[str, list[ChunkDocument]] = {}
+    for row in rows:
+        meta = row.chunk_metadata or {}
+        if meta.get("retrieval_role") != "risk":
+            continue
+        doc = ChunkDocument(
+            id=row.id,
+            product_id=row.product_id,
+            chunk_text=row.chunk_text,
+            chunk_index=row.chunk_index,
+            embedding=row.embedding,
+            metadata=meta,
+        )
+        result.setdefault(row.product_id, []).append(doc)
+    return result
+
+
 async def _evidence_chunks(product_id: str) -> list[ChunkDocument]:
     await create_db_and_tables()
     try:

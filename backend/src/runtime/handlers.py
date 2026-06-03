@@ -46,7 +46,7 @@ from src.services.decision_scoring import decision_confidence, score_candidates
 from src.services.evidence import get_evidence
 from src.services.fallbacks import get_fallback_events, record_fallback
 from src.services.feedback import get_feedback_context, record_feedback
-from src.services.recommendation_reasons import build_reason_atoms, reason_from_atoms
+from src.services.recommendation_reasons import build_reason_atoms, fetch_risk_notes_for_products, reason_from_atoms
 from src.services.retriever import filter_products
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
 from src.types.schemas import CartResponse, ChatStreamRequest, DecisionResult, IntentResult
@@ -603,7 +603,7 @@ async def continue_recommendation_from_criteria(
             confidence=confidence,
             next_step="accept_recommendation" if status == "selected" else "adjust_criteria",
         )
-        yield _final_decision_event(ctx, criteria, products, merged)
+        yield _final_decision_event(ctx, criteria, products, merged, score_breakdown=winner.score_breakdown)
         await _persist_recommendation(ctx, body, criteria, retrieval)
         yield ctx.done("completed")
         return
@@ -751,7 +751,9 @@ async def continue_decision_from_current_deck(
         next_step=next_step,
     )
 
-    yield _final_decision_event(ctx, criteria, products, merged, deck_id=deck_id)
+    yield _final_decision_event(
+        ctx, criteria, products, merged, deck_id=deck_id, score_breakdown=winner.score_breakdown
+    )
     await save_recommendation_turn(
         ctx.session_id,
         criteria,
@@ -859,6 +861,9 @@ async def _product_card_events(
     *,
     risk_notes_extra: list[str] | None = None,
 ) -> AsyncGenerator[ProductCardEvent, None]:
+    product_ids = [p.product_id for p in products]
+    risk_notes_map = await fetch_risk_notes_for_products(product_ids)
+
     for rank, product in enumerate(products, start=1):
         ctx.ensure_active()
         evidence = evidences_by_product.get(product.product_id)
@@ -866,6 +871,8 @@ async def _product_card_events(
             evidence = await get_evidence(product)
         evidences_by_product[product.product_id] = evidence
         reason_atoms = build_reason_atoms(criteria, product, evidence)
+        per_product_risk = risk_notes_map.get(product.product_id, [])
+        all_risk_notes = list(risk_notes_extra or []) + per_product_risk
         yield ProductCardEvent(
             session_id=ctx.session_id,
             turn_id=ctx.turn_id,
@@ -878,7 +885,7 @@ async def _product_card_events(
             product=product,
             reason=reason_from_atoms(product, reason_atoms),
             reason_atoms=reason_atoms,
-            risk_notes=list(risk_notes_extra or []),
+            risk_notes=all_risk_notes,
             evidence=evidence,
             actions=[
                 QuickActionPayload(action_id="show_evidence", label=msg.QA_SHOW_EVIDENCE, action="open_evidence"),
@@ -1099,6 +1106,7 @@ def _final_decision_event(
     products: list[ProductPayload],
     decision: DecisionResult,
     deck_id: str | None = None,
+    score_breakdown: dict | None = None,
 ) -> FinalDecisionEvent:
     alternatives = [
         AlternativePayload(product_id=p.product_id, name=p.name)
@@ -1130,6 +1138,7 @@ def _final_decision_event(
         decision_status=decision.decision_status,
         confidence=decision.confidence,
         next_step=decision.next_step,
+        score_breakdown=score_breakdown,
     )
 
 

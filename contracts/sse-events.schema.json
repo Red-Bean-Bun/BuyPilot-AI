@@ -269,7 +269,8 @@
             "next_actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } },
             "decision_status": { "type": ["string", "null"], "enum": ["selected", "no_match", "no_suitable_winner", "needs_more_signal", null] },
             "confidence": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] },
-            "next_step": { "type": ["string", "null"], "enum": ["adjust_criteria", "replace_deck", "continue_current_deck", "accept_recommendation", null] }
+            "next_step": { "type": ["string", "null"], "enum": ["adjust_criteria", "replace_deck", "continue_current_deck", "accept_recommendation", null] },
+            "score_breakdown": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }
           },
           "required": ["event", "winner_product_id", "summary"]
         }
