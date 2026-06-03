@@ -33,6 +33,9 @@ class Product(SQLModel, table=True):
     image_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     product_url: str | None = None
     product_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column("metadata", JSON))
+    marketing_description: str | None = None
+    official_faq: list[dict[str, str]] = Field(default_factory=list, sa_column=Column("official_faq", JSON))
+    user_reviews: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column("user_reviews", JSON))
 
 
 class ProductChunk(SQLModel, table=True):
@@ -199,6 +202,14 @@ class ApiRequestLog(SQLModel, table=True):
     duration_ms: float
     client_ip: str | None = None
     user_agent: str | None = None
+    request_content_type: str | None = None
+    request_body_json: dict[str, Any] | list[Any] | None = Field(default=None, sa_column=Column(JSON))
+    request_body_text: str | None = None
+    request_body_truncated: bool = False
+    response_content_type: str | None = None
+    response_body_json: dict[str, Any] | list[Any] | None = Field(default=None, sa_column=Column(JSON))
+    response_body_text: str | None = None
+    response_body_truncated: bool = False
     error_code: str | None = None
     error_type: str | None = None
     created_at: datetime = Field(default_factory=utc_now)

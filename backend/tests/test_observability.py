@@ -54,8 +54,17 @@ async def test_feedback_endpoint_records_audit_event_and_session_request(test_cl
                 "reason": "不喜欢香味",
             },
         )
+        assert response.status_code == 200
 
-    assert response.status_code == 200
+        request_rows = await list_api_request_logs(session_id="sess_feedback_obs")
+        request_response = await c.get(
+            f"/admin/observability/requests/{request_rows[0].request_id}",
+            headers={"Authorization": "Bearer test-key"},
+        )
+        filtered_response = await c.get(
+            "/admin/observability/requests?method=POST&path=/feedback",
+            headers={"Authorization": "Bearer test-key"},
+        )
 
     audit_rows = await list_audit_events(session_id="sess_feedback_obs", action="feedback.created")
     assert len(audit_rows) == 1
@@ -63,9 +72,19 @@ async def test_feedback_endpoint_records_audit_event_and_session_request(test_cl
     assert audit_rows[0].resource_id == "p_beauty_011"
     assert audit_rows[0].audit_metadata["reason"] == "不喜欢香味"
 
-    request_rows = await list_api_request_logs(session_id="sess_feedback_obs")
     assert [row.path for row in request_rows] == ["/feedback"]
     assert request_rows[0].trace_id == "trace_feedback_001"
+    assert request_rows[0].request_body_json["session_id"] == "sess_feedback_obs"
+    assert request_rows[0].request_body_json["product_id"] == "p_beauty_011"
+    assert request_rows[0].response_body_json["status"] == "received"
+
+    assert request_response.status_code == 200
+    request_payload = request_response.json()
+    assert request_payload["request_id"] == request_rows[0].request_id
+    assert request_payload["requests"][0]["request_body_json"]["reason"] == "不喜欢香味"
+    assert request_payload["requests"][0]["response_body_json"]["session_id"] == "sess_feedback_obs"
+    assert filtered_response.status_code == 200
+    assert any(row["request_id"] == request_rows[0].request_id for row in filtered_response.json())
 
 
 @pytest.mark.asyncio
@@ -107,6 +126,8 @@ async def test_chat_turn_audit_can_be_queried_by_observability_api(test_client, 
 
     turn_payload = turn_response.json()
     assert turn_payload["turn_id"] == "turn_chat_obs"
+    assert "retrieval_traces" in turn_payload
+    assert "evidence_links" in turn_payload
     assert {event["action"] for event in turn_payload["audit_events"]} >= {
         "chat.turn_started",
         "chat.turn_completed",
@@ -115,6 +136,8 @@ async def test_chat_turn_audit_can_be_queried_by_observability_api(test_client, 
 
     session_payload = session_response.json()
     assert session_payload["session_id"] == "sess_chat_obs"
+    assert "retrieval_traces" in session_payload
+    assert "evidence_links" in session_payload
     assert any(event["turn_id"] == "turn_chat_obs" for event in session_payload["audit_events"])
 
 

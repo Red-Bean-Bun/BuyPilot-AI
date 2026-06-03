@@ -55,7 +55,7 @@ body::before{
   color:#8b5cf6;font-weight:500;
   -webkit-text-fill-color:#8b5cf6;
 }
-.gf-search{display:flex;gap:8px;flex:1;max-width:480px;margin-left:auto;align-items:center}
+.gf-search{display:flex;gap:8px;flex:1;max-width:720px;margin-left:auto;align-items:center}
 .gf-input{
   height:36px;padding:0 14px;
   background:rgba(255,255,255,0.6);border:1px solid rgba(0,0,0,0.08);
@@ -71,6 +71,7 @@ body::before{
   box-shadow:0 0 0 4px rgba(99,102,241,0.1);
   background:rgba(255,255,255,0.85);
 }
+.gf-select{flex:0 0 128px;font-family:inherit}
 .gf-btn{
   height:36px;padding:0 16px;border:none;
   border-radius:18px;
@@ -137,23 +138,31 @@ body::before{
 
 /* tabs: glass bar */
 .gf-tabs{
-  display:flex;height:44px;align-items:stretch;gap:4px;
+  display:flex;height:56px;align-items:stretch;gap:4px;
   background:rgba(255,255,255,0.5);
   backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   border-bottom:1px solid rgba(0,0,0,0.05);padding:0 24px;
 }
 .tab{
-  padding:0 18px;font-size:13px;color:#64748b;
+  padding:7px 14px 6px;font-size:13px;color:#64748b;
   cursor:pointer;border-bottom:2px solid transparent;
-  display:flex;align-items:center;gap:6px;transition:all .15s;font-weight:500;
+  display:flex;flex-direction:column;justify-content:center;gap:2px;transition:all .15s;font-weight:500;
+  min-width:84px;max-width:150px;
 }
 .tab:hover{color:#334155}
 .tab.on{color:#6366f1;border-bottom-color:#8b5cf6}
+.tab.warn{color:#b45309}
+.tab.err{color:#dc2626}
+.tab-main{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab-sub{font:10px ui-monospace,monospace;color:#94a3b8;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.tab.warn .tab-sub{color:#b45309}.tab.err .tab-sub{color:#dc2626}
 .tab-n{
   font:11px ui-monospace,monospace;color:#94a3b8;
   background:rgba(0,0,0,0.04);border-radius:10px;padding:1px 7px;line-height:18px;
 }
 .tab.on .tab-n{color:#fff;background:linear-gradient(135deg,#6366f1,#8b5cf6)}
+.tab.warn .tab-n{color:#fff;background:#f59e0b}.tab.err .tab-n{color:#fff;background:#ef4444}
 
 .gf-panel{flex:1;overflow-y:auto;padding:24px;position:relative}
 
@@ -290,11 +299,17 @@ pre.json{
 <div class="gf-header">
   <div class="gf-brand">Chat Stream <span class="gf-brand-sub">Observer</span></div>
   <div class="gf-search">
-    <label id="filterToggle" class="gf-filter" title="只显示 Chat 请求">
-      <input type="checkbox" id="filterChatOnly" onchange="loadRecentRequests()" />
-      <span>仅 Chat</span>
-    </label>
-    <input id="searchInput" class="gf-input" type="text" placeholder="turn_id / session_id" />
+    <select id="kindFilter" class="gf-input gf-select" onchange="loadRecentRequests()" title="接口类型筛选">
+      <option value="">全部接口</option>
+      <option value="chat">Chat</option>
+      <option value="upload">Upload</option>
+      <option value="feedback">Feedback</option>
+      <option value="cart">Cart</option>
+      <option value="product">Product</option>
+      <option value="cancel">Cancel</option>
+      <option value="error">Error</option>
+    </select>
+    <input id="searchInput" class="gf-input" type="text" placeholder="request_id / turn_id / session_id" />
     <button class="gf-btn gf-btn-primary" onclick="handleSearch()">查询</button>
     <button class="gf-btn gf-btn-ghost" onclick="loadRecentRequests()">刷新</button>
   </div>
@@ -316,8 +331,11 @@ pre.json{
       <div class="tab on" data-tab="overview">概览</div>
       <div class="tab" data-tab="llm">LLM <span class="tab-n" id="llmN"></span></div>
       <div class="tab" data-tab="sse">SSE <span class="tab-n" id="sseN"></span></div>
+      <div class="tab" data-tab="trace">Trace <span class="tab-n" id="traceN"></span></div>
+      <div class="tab" data-tab="evidence">Evidence <span class="tab-n" id="evidenceN"></span></div>
       <div class="tab" data-tab="diag">诊断 <span class="tab-n" id="diagN"></span></div>
       <div class="tab" data-tab="audit">审计</div>
+      <div class="tab" data-tab="eval">Eval</div>
     </div>
     <div class="gf-panel" id="tabContent">
       <div class="empty">选择左侧请求或输入 ID 查询</div>
@@ -327,8 +345,10 @@ pre.json{
 
 <script>
 const API = '/admin/observability';
+const EVAL_API = '/admin/eval';
 const adminToken = new URLSearchParams(window.location.search).get('token') || '';
 let bundle = null, tab = 'overview';
+let evalData = null, evalLoading = false;
 
 /* ── Utilities ──────────────────────────────── */
 
@@ -373,6 +393,159 @@ function evtColor(t){
   return({error:'#d94a38',done:'#4caf50',text_delta:'#4caf50',thinking:'#8e8e8e',clarification:'#e8a838'})[t]||'#8e8e8e';
 }
 
+function endpointKind(path){
+  if(path==='/chat/stream')return'chat';
+  if(path==='/chat/cancel')return'cancel';
+  if(path==='/feedback'||path==='/chat/feedback')return'feedback';
+  if(path==='/upload/image'||path==='/chat/upload/image')return'upload';
+  if((path||'').startsWith('/cart/'))return'cart';
+  if((path||'').startsWith('/products/'))return'product';
+  return'other';
+}
+
+function productButton(productId){
+  const id=escapeHtml(productId);
+  return '<button class="inline-btn mono" onclick="loadProductDetail(\''+id+'\')">'+id+'</button>';
+}
+
+function bundlePrimaryRequest(b){
+  return (b?.requests||[])[0]||{};
+}
+
+function bundleKind(b){
+  if(!b)return'none';
+  if(b.product_detail)return'product_detail';
+  const req=bundlePrimaryRequest(b);
+  if(b.turn_id||req.path==='/chat/stream')return'chat';
+  if(b.session_id&&!req.path)return'session';
+  return endpointKind(req.path);
+}
+
+function visibleTabsForBundle(b){
+  if(!b)return['overview','eval'];
+  const kind=bundleKind(b);
+  if(kind==='product_detail')return['overview'];
+  const auditCount=(b.audit_events||[]).length;
+  const diagCount=(b.context_diagnostics||[]).length;
+  const traceCount=(b.retrieval_traces||[]).length;
+  const evidenceCount=(b.evidence_links||[]).length;
+  if(kind==='chat'||kind==='session'){
+    const tabs=['overview','llm','sse'];
+    if(traceCount)tabs.push('trace');
+    if(evidenceCount)tabs.push('evidence');
+    if(diagCount)tabs.push('diag');
+    if(auditCount)tabs.push('audit');
+    return tabs;
+  }
+  if(kind==='feedback'||kind==='upload'||kind==='cancel'||kind==='cart'){
+    return auditCount?['overview','audit']:['overview'];
+  }
+  return auditCount?['overview','audit']:['overview'];
+}
+
+function applyTabVisibility(){
+  const visible=new Set(visibleTabsForBundle(bundle));
+  if(!visible.has(tab)){
+    tab=visible.has('overview')?'overview':Array.from(visible)[0]||'overview';
+  }
+  document.querySelectorAll('.tab').forEach(el=>{
+    const show=visible.has(el.dataset.tab);
+    el.style.display=show?'flex':'none';
+    el.classList.toggle('on',show&&el.dataset.tab===tab);
+  });
+  updateTabSummaries();
+}
+
+function updateTabSummaries(){
+  document.querySelectorAll('.tab').forEach(el=>{
+    const info=tabInfo(el.dataset.tab,bundle);
+    el.classList.toggle('warn',info.severity==='warn');
+    el.classList.toggle('err',info.severity==='err');
+    el.title=info.title||'';
+    el.innerHTML=
+      '<span class="tab-main">'+
+        '<span class="tab-label">'+escapeHtml(info.label)+'</span>'+
+        (info.count!==''?'<span class="tab-n">'+escapeHtml(info.count)+'</span>':'')+
+      '</span>'+
+      '<span class="tab-sub">'+escapeHtml(info.note||'')+'</span>';
+  });
+}
+
+function tabInfo(tabId,b){
+  const req=bundlePrimaryRequest(b);
+  const kind=bundleKind(b);
+  const llm=b?.llm_calls||[];
+  const sse=b?.sse_events||[];
+  const traces=b?.retrieval_traces||[];
+  const evidence=b?.evidence_links||[];
+  const diag=b?.context_diagnostics||[];
+  const audit=b?.audit_events||[];
+  const labels={overview:'概览',llm:'LLM',sse:'SSE',trace:'Trace',evidence:'Evidence',diag:'诊断',audit:'审计',eval:'Eval'};
+  if(tabId==='overview'){
+    const sc=Number(req.status_code||0);
+    const label=b?.product_detail?'商品详情':labels.overview;
+    const count=req.status_code?String(req.status_code):'';
+    const note=req.path?shortPath(req.path):kindLabel(kind);
+    return {label,count,note,severity:sc>=400?'err':sc>=300?'warn':'',title:req.path||''};
+  }
+  if(tabId==='llm'){
+    const failed=llm.filter(c=>c.status==='failed'||c.error_type||c.error_message).length;
+    const fallback=llm.filter(c=>c.fallback_from||c.status==='fallback').length;
+    const slow=llm.filter(c=>Number(c.duration_ms||0)>=3000).length;
+    const note=[failed?failed+' failed':'',fallback?fallback+' fallback':'',slow?slow+' slow':''].filter(Boolean).join(' · ')||'调用链路';
+    return {label:'LLM',count:String(llm.length),note,severity:failed?'err':fallback||slow?'warn':'',title:'模型调用、fallback、耗时与解析结果'};
+  }
+  if(tabId==='sse'){
+    const errors=sse.filter(e=>e.event_type==='error').length;
+    const done=sse.find(e=>e.event_type==='done');
+    const lastSeq=Math.max(0,...sse.map(e=>Number(e.seq)||0));
+    return {label:'SSE',count:String(sse.length),note:errors?errors+' error':done?'done #'+lastSeq:'last #'+lastSeq,severity:errors?'err':'',title:'流式事件顺序、done/error 与商品卡输出'};
+  }
+  if(tabId==='trace'){
+    const selected=new Set(traces.flatMap(t=>t.selected_ids||[]));
+    const hits=traces.reduce((sum,t)=>sum+Number(t.hit_count||0),0);
+    return {label:'Trace',count:String(traces.length),note:hits+' hits · '+selected.size+' selected',severity:traces.length?'':'warn',title:'检索过滤、向量召回、rerank 与最终选中商品'};
+  }
+  if(tabId==='evidence'){
+    const products=new Set(evidence.map(e=>e.product_id).filter(Boolean));
+    return {label:'Evidence',count:String(evidence.length),note:products.size+' products',severity:evidence.length?'':'warn',title:'推荐证据绑定、snippet 与来源 chunk'};
+  }
+  if(tabId==='diag'){
+    const errors=diag.filter(d=>(d.metadata||d).severity==='error').length;
+    const warns=diag.length-errors;
+    return {label:'诊断',count:String(diag.length),note:errors?errors+' error':warns?warns+' warn':'clean',severity:errors?'err':warns?'warn':'',title:'上下文、约束传递和多轮状态诊断'};
+  }
+  if(tabId==='audit'){
+    const effects=audit.filter(e=>e.side_effect).length;
+    const last=audit[0]?.action||'事件流';
+    return {label:'审计',count:String(audit.length),note:effects+' sidefx · '+last,severity:'',title:'业务副作用、资源变更与审计 metadata'};
+  }
+  if(tabId==='eval'){
+    const runs=evalData?.runs||[];
+    const samples=evalData?.samples||[];
+    return {label:'Eval',count:runs.length?String(runs.length):'',note:samples.length?samples.length+' samples':'评测闭环',severity:'',title:'评测 runs 和 samples，只读展示'};
+  }
+  return {label:labels[tabId]||tabId,count:'',note:''};
+}
+
+function shortPath(path){
+  if(!path)return'-';
+  if(path.length<=18)return path;
+  return path.slice(0,16)+'...';
+}
+
+function kindLabel(kind){
+  return({chat:'chat stream',session:'session bundle',upload:'image upload',feedback:'feedback',cart:'cart api',product:'product api',cancel:'cancel api',product_detail:'product detail'})[kind]||'request';
+}
+
+function countBy(items,fn){
+  return items.reduce((acc,item)=>{
+    const key=fn(item);
+    acc[key]=(acc[key]||0)+1;
+    return acc;
+  },{});
+}
+
 function togglePanel(el){
   const arrow=el.querySelector('.collapse-arrow');
   const body=el.nextElementSibling;
@@ -394,23 +567,26 @@ async function loadRecentRequests(){
   const list=document.getElementById('requestList');
   list.innerHTML='<div class="loading">加载中...</div>';
   try{
-    let reqs=await fetchJson(API+'/requests?limit=50');
-    const chatOnly=document.getElementById('filterChatOnly').checked;
-    if(chatOnly){
-      reqs=reqs.filter(r=>r.turn_id||r.session_id);
+    let reqs=await fetchJson(API+'/requests?limit=100');
+    const kind=document.getElementById('kindFilter').value;
+    if(kind){
+      reqs=reqs.filter(r=>kind==='error'?Number(r.status_code||0)>=400:endpointKind(r.path)===kind);
     }
     document.getElementById('reqCount').textContent=reqs.length;
     if(!reqs.length){list.innerHTML='<div class="empty">暂无请求</div>';return}
     list.replaceChildren(...reqs.map(r=>{
       const sessionId=r.session_id||'';
-      const targetKind=r.turn_id?'turn':(sessionId?'session':'');
-      const targetId=r.turn_id||sessionId||'';
+      const requestId=r.request_id||'';
+      const isChatStream=(r.path==='/chat/stream');
+      const targetKind=(isChatStream&&r.turn_id)?'turn':(requestId?'request':(sessionId?'session':''));
+      const targetId=(targetKind==='turn'?r.turn_id:(targetKind==='request'?requestId:sessionId))||'';
       const displayId=targetId||(r.trace_id||r.request_id||'-');
       const sc=Number(r.status_code||0);
       const ok=sc>=200&&sc<300;
       const item=document.createElement('div');
       item.className='row';item.dataset.key=targetId;
       if(targetKind==='turn')item.addEventListener('click', () => loadTurn(targetId));
+      else if(targetKind==='request')item.addEventListener('click', () => loadRequest(targetId));
       else if(targetKind==='session')item.addEventListener('click', () => loadSession(targetId));
       const path=document.createElement('div');
       path.className='row-path mono';
@@ -454,10 +630,33 @@ async function loadSession(id){
   catch(e){p.innerHTML='<div class="empty" style="color:#d94a38">加载失败: '+escapeHtml(e.message)+'</div>'}
 }
 
+async function loadRequest(id){
+  if(!id||id==='-')return;
+  document.querySelectorAll('.row').forEach(el=>el.classList.toggle('on',el.dataset.key===id));
+  const p=document.getElementById('tabContent');
+  p.innerHTML='<div class="loading">加载 request...</div>';
+  try{bundle=await fetchJson(API+'/requests/'+encodeURIComponent(id));updateBadge();render()}
+  catch(e){p.innerHTML='<div class="empty" style="color:#d94a38">加载失败: '+escapeHtml(e.message)+'</div>'}
+}
+
+async function loadProductDetail(id){
+  if(!id)return;
+  const p=document.getElementById('tabContent');
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.dataset.tab==='overview'));
+  tab='overview';
+  p.innerHTML='<div class="loading">加载商品详情...</div>';
+  try{
+    const detail=await fetchJson('/products/'+encodeURIComponent(id));
+    bundle={product_id:id,product_detail:detail,requests:[],audit_events:[],llm_calls:[],sse_events:[],retrieval_traces:[],evidence_links:[],context_diagnostics:[]};
+    updateBadge();render();
+  }catch(e){p.innerHTML='<div class="empty" style="color:#d94a38">加载失败: '+escapeHtml(e.message)+'</div>'}
+}
+
 function handleSearch(){
   const q=document.getElementById('searchInput').value.trim();
   if(!q)return;
-  if(q.startsWith('turn_'))loadTurn(q);
+  if(q.startsWith('req_'))loadRequest(q);
+  else if(q.startsWith('turn_'))loadTurn(q);
   else if(q.startsWith('session_')||q.includes('_session_'))loadSession(q);
   else loadTurn(q);
 }
@@ -465,25 +664,30 @@ document.getElementById('searchInput').addEventListener('keydown',e=>{if(e.key==
 
 document.getElementById('tabBar').addEventListener('click',e=>{
   const t=e.target.closest('.tab');if(!t)return;
+  if(t.style.display==='none')return;
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');
   tab=t.dataset.tab;
-  if(bundle)render();
+  if(bundle||tab==='eval')render();
 });
 
 function updateBadge(){
+  applyTabVisibility();
   if(!bundle)return;
   const set=(id,n)=>{const e=document.getElementById(id);if(e)e.textContent=n||''};
   set('llmN',(bundle.llm_calls||[]).length);
   set('sseN',(bundle.sse_events||[]).length);
+  set('traceN',(bundle.retrieval_traces||[]).length);
+  set('evidenceN',(bundle.evidence_links||[]).length);
   set('diagN',(bundle.context_diagnostics||[]).length);
 }
 
 function render(){
   const p=document.getElementById('tabContent');
-  if(!bundle)return;
+  if(tab==='eval'){p.innerHTML=renderEval();return}
+  if(!bundle){p.innerHTML='<div class="empty">选择左侧请求或输入 ID 查询</div>';return}
   p.innerHTML=(
-    {overview:renderOverview,llm:renderLLM,sse:renderSSE,diag:renderDiag,audit:renderAudit}
+    {overview:renderOverview,llm:renderLLM,sse:renderSSE,trace:renderTrace,evidence:renderEvidence,diag:renderDiag,audit:renderAudit}
     [tab]||renderOverview
   )(bundle);
 }
@@ -491,12 +695,28 @@ function render(){
 /* ── Overview ─────────────────────────────── */
 
 function renderOverview(b){
+  if(b.product_detail){
+    const product=b.product_detail.product||{};
+    return(
+      '<div class="stat-row">'+
+        '<div class="stat"><div class="stat-lbl">Product ID</div><div class="stat-val muted">'+escapeHtml(b.product_id||product.product_id||'-')+'</div></div>'+
+        '<div class="stat"><div class="stat-lbl">名称</div><div class="stat-val muted">'+escapeHtml(product.name||product.title||'-')+'</div></div>'+
+        '<div class="stat"><div class="stat-lbl">FAQ</div><div class="stat-val">'+(b.product_detail.faqs||[]).length+'</div></div>'+
+        '<div class="stat"><div class="stat-lbl">Reviews</div><div class="stat-val">'+(b.product_detail.reviews||[]).length+'</div></div>'+
+      '</div>'+
+      '<div class="pnl"><div class="pnl-head">商品详情响应</div><div class="pnl-body">'+jblock(b.product_detail)+'</div></div>'
+    );
+  }
   const req=(b.requests||[])[0]||{};
   const llmC=(b.llm_calls||[]).length;
   const sseC=(b.sse_events||[]).length;
+  const traceC=(b.retrieval_traces||[]).length;
+  const evidenceC=(b.evidence_links||[]).length;
   const diagC=(b.context_diagnostics||[]).length;
+  const auditC=(b.audit_events||[]).length;
   const dur=req.duration_ms||0;
   const sc=Number(req.status_code||0);
+  const visibleTabs=new Set(visibleTabsForBundle(b));
 
   let timings={};
   for(const e of(b.audit_events||[])){
@@ -520,20 +740,67 @@ function renderOverview(b){
       '</div>';
   }
 
+  const statCards=[
+    statCard(b.turn_id?'Turn ID':b.session_id?'Session ID':'Request ID',b.turn_id||b.session_id||b.request_id||'-','muted'),
+    statCard('Endpoint',(req.method&&req.path)?req.method+' '+req.path:'-','muted'),
+    statCard('总耗时',fmtMs(dur),'warn'),
+    statCard('状态',req.status_code||'-',sc>=200&&sc<300?'ok':'err'),
+  ];
+  if(visibleTabs.has('llm')||llmC)statCards.push(statCard('LLM',llmC));
+  if(visibleTabs.has('sse')||sseC)statCards.push(statCard('SSE',sseC));
+  if(visibleTabs.has('trace')||visibleTabs.has('evidence')||traceC||evidenceC)statCards.push(statCard('Trace/Evidence',traceC+'/'+evidenceC));
+  if(visibleTabs.has('diag')||diagC)statCards.push(statCard('诊断',diagC,diagC?'warn':'ok'));
+  if(visibleTabs.has('audit')||auditC)statCards.push(statCard('审计',auditC,auditC?'':'muted'));
+
   return(
-    '<div class="stat-row">'+
-      '<div class="stat"><div class="stat-lbl">Turn ID</div><div class="stat-val muted">'+escapeHtml(b.turn_id||'-')+'</div></div>'+
-      '<div class="stat"><div class="stat-lbl">总耗时</div><div class="stat-val warn">'+fmtMs(dur)+'</div></div>'+
-      '<div class="stat"><div class="stat-lbl">LLM</div><div class="stat-val">'+llmC+'</div></div>'+
-      '<div class="stat"><div class="stat-lbl">SSE</div><div class="stat-val">'+sseC+'</div></div>'+
-      '<div class="stat"><div class="stat-lbl">诊断</div><div class="stat-val '+(diagC?'warn':'ok')+'">'+diagC+'</div></div>'+
-      '<div class="stat"><div class="stat-lbl">状态</div><div class="stat-val '+(sc>=200&&sc<300?'ok':'err')+'">'+(req.status_code||'-')+'</div></div>'+
-    '</div>'+
+    '<div class="stat-row">'+statCards.join('')+'</div>'+
+    renderFocusPanel(b)+
     (entries.length?(
       '<div class="pnl"><div class="pnl-head">阶段耗时</div><div class="pnl-body">'+timingHtml+'</div></div>'
     ):'')+
-    '<div class="pnl"><div class="pnl-head">请求详情</div><div class="pnl-body">'+jblock(req)+'</div></div>'
+    '<div class="pnl"><div class="pnl-head">请求详情</div><div class="pnl-body">'+jblock(req)+'</div></div>'+
+    renderBodyPanel('Request Body',req.request_body_json,req.request_body_text,req.request_body_truncated,req.request_content_type)+
+    renderBodyPanel('Response Body',req.response_body_json,req.response_body_text,req.response_body_truncated,req.response_content_type)
   );
+}
+
+function renderFocusPanel(b){
+  const kind=bundleKind(b);
+  const tabs=visibleTabsForBundle(b).filter(x=>x!=='overview'&&x!=='eval');
+  const tips={
+    chat:['先看 SSE 是否 done/error','再看 LLM fallback/slow','Trace/Evidence 判断推荐是否有检索和证据支撑'],
+    session:['按请求顺序看多轮状态','关注反馈是否注入下一轮 criteria','Trace/Evidence 判断会话内推荐链路'],
+    upload:['重点看 Request/Response Body','审计里有文件名、mime、bytes、宽高','后续 chat 是否引用 image_url'],
+    feedback:['重点看 feedback action/reason/deck_id/product_id','审计确认 feedback.created','下一轮 chat 再看 criteria 是否变化'],
+    cart:['重点看响应里的 items/total_price','审计确认数量更新或删除副作用','404 通常是商品或购物车项不存在'],
+    product:['重点看响应里的 product/highlights/faqs/reviews','404 表示商品 ID 不存在或未入库'],
+    cancel:['重点看 canceled/local_cancelled/persisted_cancelled','再回到 chat turn 看取消后是否仍继续推送'],
+    product_detail:['检查商品事实、FAQ、reviews 和 highlights 是否齐全'],
+  };
+  const lines=tips[kind]||['先看请求/响应体','再看审计事件','错误请求优先看状态码和 error body'];
+  const tabText=tabs.length?'建议查看：'+tabs.map(tabName).join(' / '):'当前接口主要看概览';
+  return(
+    '<div class="pnl"><div class="pnl-head">观察重点 <span class="lbl">'+escapeHtml(kindLabel(kind))+'</span></div>'+
+    '<div class="pnl-body">'+
+      '<div style="font-size:13px;color:#475569;margin-bottom:8px">'+escapeHtml(tabText)+'</div>'+
+      lines.map(x=>'<div class="diag-kv"><span class="diag-k">focus</span><span>'+escapeHtml(x)+'</span></div>').join('')+
+    '</div></div>'
+  );
+}
+
+function tabName(id){
+  return({llm:'LLM',sse:'SSE',trace:'Trace',evidence:'Evidence',diag:'诊断',audit:'审计'})[id]||id;
+}
+
+function statCard(label,value,cls){
+  return '<div class="stat"><div class="stat-lbl">'+escapeHtml(label)+'</div><div class="stat-val '+(cls||'')+'">'+escapeHtml(value)+'</div></div>';
+}
+
+function renderBodyPanel(title,jsonBody,textBody,truncated,contentType){
+  if(jsonBody==null&&!textBody)return'';
+  const badge=contentType?'<span class="lbl">'+escapeHtml(contentType)+(truncated?' · truncated':'')+'</span>':'';
+  const body=jsonBody!=null?jblock(jsonBody):'<pre class="json">'+escapeHtml(textBody)+'</pre>';
+  return '<div class="pnl"><div class="pnl-head">'+escapeHtml(title)+' '+badge+'</div><div class="pnl-body">'+body+'</div></div>';
 }
 
 /* ── LLM Calls ────────────────────────────── */
@@ -541,7 +808,30 @@ function renderOverview(b){
 function renderLLM(b){
   const calls=b.llm_calls||[];
   if(!calls.length)return'<div class="empty">暂无 LLM 调用</div>';
-  return calls.map(c=>{
+  const failed=calls.filter(c=>c.status==='failed'||c.error_type||c.error_message).length;
+  const fallback=calls.filter(c=>c.fallback_from||c.status==='fallback').length;
+  const slow=calls.filter(c=>Number(c.duration_ms||0)>=3000).length;
+  const slowest=calls.reduce((max,c)=>Math.max(max,Number(c.duration_ms||0)),0);
+  const byTask=countBy(calls,c=>c.task||'-');
+  const taskRows=Object.entries(byTask).map(([task,count])=>{
+    const taskCalls=calls.filter(c=>(c.task||'-')===task);
+    const total=taskCalls.reduce((sum,c)=>sum+Number(c.duration_ms||0),0);
+    const errors=taskCalls.filter(c=>c.status==='failed'||c.error_type).length;
+    const providers=[...new Set(taskCalls.map(c=>c.provider).filter(Boolean))].join(',');
+    return '<tr><td class="mono">'+escapeHtml(task)+'</td><td>'+count+'</td><td>'+fmtMs(total/count)+'</td><td>'+escapeHtml(providers||'-')+'</td><td class="'+(errors?'s-err':'s-ok')+'">'+errors+'</td></tr>';
+  }).join('');
+  const summary=
+    '<div class="stat-row">'+
+      statCard('Calls',calls.length)+
+      statCard('Failed',failed,failed?'err':'ok')+
+      statCard('Fallback',fallback,fallback?'warn':'ok')+
+      statCard('Slow >=3s',slow,slow?'warn':'ok')+
+      statCard('Slowest',fmtMs(slowest),slowest>=3000?'warn':'')+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">任务分布</div><div class="pnl-body">'+
+      '<table class="tbl"><thead><tr><th>Task</th><th>Calls</th><th>Avg</th><th>Provider</th><th>Errors</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
+    '</div></div>';
+  return summary+calls.map(c=>{
     const task=escapeHtml(c.task||'-');
     const st=statusCls(c.status);
     let content='';
@@ -584,13 +874,39 @@ function renderLLM(b){
 function renderSSE(b){
   const evts=b.sse_events||[];
   if(!evts.length)return'<div class="empty">暂无 SSE 事件</div>';
+  const sorted=[...evts].sort((a,b)=>(Number(a.seq)||0)-(Number(b.seq)||0));
+  const seqs=sorted.map(e=>Number(e.seq)||0).filter(Boolean);
+  const maxSeq=Math.max(0,...seqs);
+  const missing=[];
+  for(let i=1;i<=maxSeq;i++){if(!seqs.includes(i))missing.push(i)}
+  const errors=evts.filter(e=>e.event_type==='error').length;
+  const done=evts.find(e=>e.event_type==='done');
+  const productIds=[...new Set(evts.flatMap(e=>e.product_ids||[]))];
+  const byType=countBy(evts,e=>e.event_type||'-');
+  const typeRows=Object.entries(byType).map(([type,count])=>(
+    '<tr><td class="mono">'+escapeHtml(type)+'</td><td>'+count+'</td></tr>'
+  )).join('');
+  const summary=
+    '<div class="stat-row">'+
+      statCard('Events',evts.length)+
+      statCard('Last Seq',maxSeq,missing.length?'warn':'')+
+      statCard('Missing Seq',missing.length,missing.length?'warn':'ok')+
+      statCard('Errors',errors,errors?'err':'ok')+
+      statCard('Finish',done?.finish_reason||'-',done?'ok':'warn')+
+      statCard('Products',productIds.length)+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">事件分布</div><div class="pnl-body">'+
+      '<table class="tbl"><thead><tr><th>Type</th><th>Count</th></tr></thead><tbody>'+typeRows+'</tbody></table>'+
+      (productIds.length?'<div style="margin-top:10px"><span class="lbl">Products</span><div>'+productIds.map(productButton).join(' ')+'</div></div>':'')+
+      (missing.length?'<div class="err-box">Missing seq: '+escapeHtml(missing.join(','))+'</div>':'')+
+    '</div></div>';
   const rows=evts.map(e=>{
     const details=[];
     if(e.stage)details.push('stage='+escapeHtml(e.stage));
     if(e.deck_id)details.push('deck='+escapeHtml(e.deck_id));
     if(e.criteria_id)details.push('criteria='+escapeHtml(e.criteria_id));
     if(e.message_id)details.push('msg='+escapeHtml(e.message_id));
-    if(e.product_ids&&e.product_ids.length)details.push('products=['+e.product_ids.map(escapeHtml).join(',')+']');
+    if(e.product_ids&&e.product_ids.length)details.push('products=['+e.product_ids.map(productButton).join(',')+']');
     if(e.finish_reason)details.push('finish='+escapeHtml(e.finish_reason));
     if(e.delta_preview)details.push('delta="'+escapeHtml(e.delta_preview.slice(0,60))+(e.delta_preview.length>60?'...':'')+'"');
     return(
@@ -602,7 +918,79 @@ function renderSSE(b){
       '</tr>'
     );
   }).join('');
-  return '<table class="tbl"><thead><tr><th>#</th><th>Type</th><th>Time</th><th>Details</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  return summary+'<table class="tbl"><thead><tr><th>#</th><th>Type</th><th>Time</th><th>Details</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+/* ── Retrieval Trace / Evidence ───────────── */
+
+function renderTrace(b){
+  const traces=b.retrieval_traces||[];
+  if(!traces.length)return'<div class="empty">暂无 retrieval trace</div>';
+  const selected=[...new Set(traces.flatMap(t=>t.selected_ids||[]))];
+  const totalHits=traces.reduce((sum,t)=>sum+Number(t.hit_count||0),0);
+  const totalVector=traces.reduce((sum,t)=>sum+Number(t.vector_count||0),0);
+  const fallbackEvents=traces.flatMap(t=>t.filters_applied?._fallbacks||[]);
+  const summary=
+    '<div class="stat-row">'+
+      statCard('Traces',traces.length)+
+      statCard('Hits',totalHits)+
+      statCard('Vector Candidates',totalVector)+
+      statCard('Selected',selected.length,selected.length?'ok':'warn')+
+      statCard('Fallbacks',fallbackEvents.length,fallbackEvents.length?'warn':'ok')+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">最终选中商品</div><div class="pnl-body">'+
+      (selected.length?selected.map(productButton).join(' '):'<span class="s-warn">暂无 selected_ids</span>')+
+    '</div></div>';
+  return summary+traces.map(t=>{
+    const selected=(t.selected_ids||[]).map(productButton).join(', ');
+    return(
+      '<div class="pnl">'+
+        '<div class="pnl-head collapse" onclick="togglePanel(this)">'+
+          '<span><span class="collapse-arrow">▶</span> <strong>'+escapeHtml(t.criteria_id||'-')+'</strong> '+
+          '<span class="lbl">hits '+escapeHtml(t.hit_count||0)+' · vector '+escapeHtml(t.vector_count||0)+'</span></span>'+
+          '<span class="lbl">'+(t.created_at?new Date(t.created_at).toLocaleTimeString('zh-CN'):'')+'</span>'+
+        '</div>'+
+        '<div class="collapse-body">'+
+          '<div class="pnl-body">'+
+            '<div style="margin-bottom:10px"><span class="lbl">Selected</span><div class="mono">'+selected+'</div></div>'+
+            '<div style="margin-bottom:10px"><span class="lbl">Filters Applied</span>'+jblock(t.filters_applied)+'</div>'+
+            '<div style="margin-bottom:10px"><span class="lbl">Vector Top K</span>'+jblock(t.vector_top_k)+'</div>'+
+            '<div><span class="lbl">Rerank Top N</span>'+jblock(t.rerank_top_n)+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'
+    );
+  }).join('');
+}
+
+function renderEvidence(b){
+  const links=b.evidence_links||[];
+  if(!links.length)return'<div class="empty">暂无 evidence links</div>';
+  const byProduct=countBy(links,e=>e.product_id||'-');
+  const byType=countBy(links,e=>e.evidence_type||'-');
+  const productRows=Object.entries(byProduct).map(([productId,count])=>(
+    '<tr><td>'+productButton(productId)+'</td><td>'+count+'</td><td>'+escapeHtml((links.find(e=>e.product_id===productId)?.snippet||'-').slice(0,80))+'</td></tr>'
+  )).join('');
+  const typeText=Object.entries(byType).map(([k,v])=>k+': '+v).join(' · ');
+  const summary=
+    '<div class="stat-row">'+
+      statCard('Evidence',links.length)+
+      statCard('Products',Object.keys(byProduct).length)+
+      statCard('Types',Object.keys(byType).length)+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">商品证据覆盖 <span class="lbl">'+escapeHtml(typeText||'-')+'</span></div><div class="pnl-body">'+
+      '<table class="tbl"><thead><tr><th>Product</th><th>Evidence</th><th>Example Snippet</th></tr></thead><tbody>'+productRows+'</tbody></table>'+
+    '</div></div>';
+  const rows=links.map(e=>(
+    '<tr>'+
+      '<td>'+productButton(e.product_id||'-')+'</td>'+
+      '<td class="mono">'+escapeHtml(e.evidence_type||'-')+'</td>'+
+      '<td class="mono">'+escapeHtml(e.cited_in||'-')+'</td>'+
+      '<td>'+escapeHtml(e.snippet||'-')+'</td>'+
+      '<td class="mono">'+escapeHtml(e.source_id_raw||e.chunk_id||'-')+'</td>'+
+    '</tr>'
+  )).join('');
+  return summary+'<table class="tbl"><thead><tr><th>Product</th><th>Type</th><th>Cited In</th><th>Snippet</th><th>Source</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
 
 /* ── Diagnostics ──────────────────────────── */
@@ -610,7 +998,20 @@ function renderSSE(b){
 function renderDiag(b){
   const d=b.context_diagnostics||[];
   if(!d.length)return'<div class="empty" style="color:#4caf50">无诊断警告 - 多轮约束传递正常</div>';
-  return d.map(x=>{
+  const errors=d.filter(x=>(x.metadata||x).severity==='error').length;
+  const warnings=d.length-errors;
+  const codes=countBy(d,x=>(x.metadata||x).diagnostic_code||'-');
+  const codeRows=Object.entries(codes).map(([code,count])=>'<tr><td class="mono">'+escapeHtml(code)+'</td><td>'+count+'</td></tr>').join('');
+  const summary=
+    '<div class="stat-row">'+
+      statCard('Diagnostics',d.length)+
+      statCard('Errors',errors,errors?'err':'ok')+
+      statCard('Warnings',warnings,warnings?'warn':'ok')+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">诊断代码分布</div><div class="pnl-body">'+
+      '<table class="tbl"><thead><tr><th>Code</th><th>Count</th></tr></thead><tbody>'+codeRows+'</tbody></table>'+
+    '</div></div>';
+  return summary+d.map(x=>{
     const m=x.metadata||x;
     const sev=m.severity||'warning';
     const fields=Object.entries(m).filter(([k])=>!['diagnostic_code','severity'].includes(k));
@@ -633,6 +1034,21 @@ function renderDiag(b){
 function renderAudit(b){
   const evts=b.audit_events||[];
   if(!evts.length)return'<div class="empty">暂无审计事件</div>';
+  const sideEffects=evts.filter(e=>e.side_effect).length;
+  const resources=countBy(evts,e=>e.resource_type||'-');
+  const actions=countBy(evts,e=>e.action||'-');
+  const actionRows=Object.entries(actions).slice(0,12).map(([action,count])=>'<tr><td class="mono">'+escapeHtml(action)+'</td><td>'+count+'</td></tr>').join('');
+  const resourceText=Object.entries(resources).map(([k,v])=>k+': '+v).join(' · ');
+  const summary=
+    '<div class="stat-row">'+
+      statCard('Events',evts.length)+
+      statCard('Side Effects',sideEffects,sideEffects?'warn':'muted')+
+      statCard('Resources',Object.keys(resources).length)+
+      statCard('Latest',evts[0]?.action||'-','muted')+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">Action 分布 <span class="lbl">'+escapeHtml(resourceText||'-')+'</span></div><div class="pnl-body">'+
+      '<table class="tbl"><thead><tr><th>Action</th><th>Count</th></tr></thead><tbody>'+actionRows+'</tbody></table>'+
+    '</div></div>';
   const rows=evts.map((e,i)=>{
     let metaCell='-';
     if(e.metadata){
@@ -650,7 +1066,7 @@ function renderAudit(b){
       '</tr>'
     );
   }).join('');
-  return '<table class="tbl"><thead><tr><th>时间</th><th>Action</th><th>Resource</th><th>Metadata</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  return summary+'<table class="tbl"><thead><tr><th>时间</th><th>Action</th><th>Resource</th><th>Metadata</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
 
 function expandAuditMeta(btn,idx){
@@ -660,7 +1076,69 @@ function expandAuditMeta(btn,idx){
   cell.innerHTML='<pre class="json">'+hlJson(meta)+'</pre>';
 }
 
+/* ── Eval (read-only) ─────────────────────── */
+
+function renderEval(){
+  if(!evalData&&!evalLoading){
+    loadEvalData();
+    return'<div class="loading">加载评测数据...</div>';
+  }
+  if(evalLoading)return'<div class="loading">加载评测数据...</div>';
+  if(evalData?.error)return'<div class="empty" style="color:#d94a38">'+escapeHtml(evalData.error)+'</div>';
+  const runs=evalData?.runs||[];
+  const samples=evalData?.samples||[];
+  const runRows=runs.map(r=>(
+    '<tr>'+
+      '<td class="mono">'+escapeHtml(r.run_name||r.id||'-')+'</td>'+
+      '<td>'+escapeHtml(r.strategy_tag||'-')+'</td>'+
+      '<td class="mono">'+escapeHtml(r.sample_count||0)+'</td>'+
+      '<td class="mono">'+escapeHtml(r.overall_score??'-')+'</td>'+
+      '<td class="mono">'+(r.created_at?new Date(r.created_at).toLocaleString('zh-CN'):'-')+'</td>'+
+    '</tr>'
+  )).join('');
+  const sampleRows=samples.slice(0,30).map(s=>(
+    '<tr>'+
+      '<td class="mono">'+escapeHtml(s.id||'-')+'</td>'+
+      '<td>'+escapeHtml(s.question||'-')+'</td>'+
+      '<td>'+escapeHtml(s.scenario_type||'-')+'</td>'+
+      '<td>'+escapeHtml(s.difficulty||'-')+'</td>'+
+      '<td class="mono">'+escapeHtml((s.tags||[]).join(','))+'</td>'+
+    '</tr>'
+  )).join('');
+  return(
+    '<div class="stat-row">'+
+      '<div class="stat"><div class="stat-lbl">Eval Runs</div><div class="stat-val">'+runs.length+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">Samples</div><div class="stat-val">'+samples.length+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">Latest Score</div><div class="stat-val">'+escapeHtml(runs[0]?.overall_score??'-')+'</div></div>'+
+    '</div>'+
+    '<div class="pnl"><div class="pnl-head">Recent Runs</div><div class="pnl-body">'+
+      (runs.length?'<table class="tbl"><thead><tr><th>Run</th><th>Strategy</th><th>Samples</th><th>Score</th><th>Created</th></tr></thead><tbody>'+runRows+'</tbody></table>':'<div class="empty">暂无 eval runs</div>')+
+    '</div></div>'+
+    '<div class="pnl"><div class="pnl-head">Samples</div><div class="pnl-body">'+
+      (samples.length?'<table class="tbl"><thead><tr><th>ID</th><th>Question</th><th>Scenario</th><th>Difficulty</th><th>Tags</th></tr></thead><tbody>'+sampleRows+'</tbody></table>':'<div class="empty">暂无 eval samples</div>')+
+    '</div></div>'
+  );
+}
+
+async function loadEvalData(){
+  evalLoading=true;
+  try{
+    const [runs,samples]=await Promise.all([
+      fetchJson(EVAL_API+'/runs?limit=20'),
+      fetchJson(EVAL_API+'/samples')
+    ]);
+    evalData={runs,samples};
+  }catch(e){
+    evalData={error:e.message};
+  }finally{
+    evalLoading=false;
+    updateTabSummaries();
+    if(tab==='eval')render();
+  }
+}
+
 /* ── Init ─────────────────────────────────── */
+applyTabVisibility();
 loadRecentRequests();
 </script>
 </body>

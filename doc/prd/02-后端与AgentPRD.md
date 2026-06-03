@@ -190,7 +190,10 @@ products (
   brand         TEXT,
   image_urls    TEXT[],
   product_url   TEXT,
-  metadata      JSONB DEFAULT '{}'       -- 品类结构化属性（如肤质适用、存储规格、运动类型等）
+  metadata      JSONB DEFAULT '{}',       -- 品类结构化属性（如肤质适用、存储规格、运动类型等）+ highlights
+  marketing_description TEXT,             -- 品牌营销描述原文（详情页展示用）
+  official_faq  JSON DEFAULT '[]',        -- [{question, answer}]（详情页展示用）
+  user_reviews  JSON DEFAULT '[]'         -- [{nickname, rating, content}]（详情页展示用）
 )
 
 product_chunks (
@@ -794,6 +797,13 @@ POST /upload/image         — 图片上传与多模态解析
 GET /cart/{session_id}     — 查询购物车内容
   响应: {items: [{product_id, name, price, quantity, added_at}], total_items, total_price}
   注: Demo 4 需要"查看购物车底板"，前端通过此端点获取购物车内容用于渲染
+
+GET /products/{product_id} — 商品详情（详情页渲染用）
+  响应: {product: ProductPayload, marketing_description, highlights[], faqs[], reviews[]}
+  注: Android 端收到 SSE product_card 事件时投机预取此接口，用户点击商品卡片时从缓存读取，详情页秒开。
+      product 字段与 SSE product_card 中的 product 结构一致（自包含响应）。
+      highlights 为预计算静态卖点（3-5条，存 Product.metadata），marketing_description/official_faq/user_reviews 存 Product 表新增列。
+      详见 doc/prd/03-商品详情接口PRD.md
 ```
 
 客户端携带 session_id，后端持久化轨迹但不维护登录态。
@@ -927,6 +937,8 @@ backend/
 │   │   ├── cancel.py            # /chat/cancel
 │   │   ├── feedback.py          # /feedback
 │   │   ├── upload.py            # /upload/image
+│   │   ├── cart.py              # /cart/{session_id} 购物车查询
+│   │   ├── products.py          # /products/{product_id} 商品详情（详情页渲染用）
 │   │   ├── admin_products.py    # 管理后台：商品数据
 │   │   ├── admin_documents.py   # 管理后台：文档/知识库
 │   │   ├── admin_feedback.py    # 管理后台：用户反馈

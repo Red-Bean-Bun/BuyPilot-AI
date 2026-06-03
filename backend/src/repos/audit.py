@@ -27,6 +27,14 @@ async def insert_api_request_log(
     turn_id: str | None = None,
     client_ip: str | None = None,
     user_agent: str | None = None,
+    request_content_type: str | None = None,
+    request_body_json: dict[str, Any] | list[Any] | None = None,
+    request_body_text: str | None = None,
+    request_body_truncated: bool = False,
+    response_content_type: str | None = None,
+    response_body_json: dict[str, Any] | list[Any] | None = None,
+    response_body_text: str | None = None,
+    response_body_truncated: bool = False,
     error_code: str | None = None,
     error_type: str | None = None,
 ) -> str | None:
@@ -42,6 +50,14 @@ async def insert_api_request_log(
         duration_ms=duration_ms,
         client_ip=client_ip,
         user_agent=user_agent,
+        request_content_type=request_content_type,
+        request_body_json=request_body_json,
+        request_body_text=request_body_text,
+        request_body_truncated=request_body_truncated,
+        response_content_type=response_content_type,
+        response_body_json=response_body_json,
+        response_body_text=response_body_text,
+        response_body_truncated=response_body_truncated,
         error_code=error_code,
         error_type=error_type,
     )
@@ -99,22 +115,42 @@ async def insert_audit_event(
 
 async def list_api_request_logs(
     *,
+    request_id: str | None = None,
     trace_id: str | None = None,
     session_id: str | None = None,
     turn_id: str | None = None,
+    path: str | None = None,
+    method: str | None = None,
+    status_code: int | None = None,
     limit: int = 50,
 ) -> list[ApiRequestLog]:
     await create_db_and_tables()
     statement = select(ApiRequestLog)
+    if request_id:
+        statement = statement.where(ApiRequestLog.request_id == request_id)
     if trace_id:
         statement = statement.where(ApiRequestLog.trace_id == trace_id)
     if session_id:
         statement = statement.where(ApiRequestLog.session_id == session_id)
     if turn_id:
         statement = statement.where(ApiRequestLog.turn_id == turn_id)
+    if path:
+        statement = statement.where(ApiRequestLog.path == path)
+    if method:
+        statement = statement.where(ApiRequestLog.method == method.upper())
+    if status_code:
+        statement = statement.where(ApiRequestLog.status_code == status_code)
     statement = statement.order_by(ApiRequestLog.created_at.desc()).limit(limit)
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         return list((await session.exec(statement)).all())
+
+
+async def get_api_request_log_by_request_id(request_id: str) -> ApiRequestLog | None:
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        return (
+            await session.exec(select(ApiRequestLog).where(ApiRequestLog.request_id == request_id).limit(1))
+        ).first()
 
 
 async def list_api_request_logs_by_request_ids(request_ids: list[str], limit: int = 50) -> list[ApiRequestLog]:
@@ -180,6 +216,7 @@ async def list_request_ids_by_turn_id(turn_id: str) -> list[str]:
 
 async def list_audit_events(
     *,
+    request_id: str | None = None,
     trace_id: str | None = None,
     session_id: str | None = None,
     turn_id: str | None = None,
@@ -188,6 +225,8 @@ async def list_audit_events(
 ) -> list[AuditEvent]:
     await create_db_and_tables()
     statement = select(AuditEvent)
+    if request_id:
+        statement = statement.where(AuditEvent.request_id == request_id)
     if trace_id:
         statement = statement.where(AuditEvent.trace_id == trace_id)
     if session_id:

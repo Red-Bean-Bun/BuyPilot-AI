@@ -450,11 +450,12 @@ async def continue_recommendation_from_criteria(
             previous_product_ids = await get_previous_product_ids(ctx.session_id)
             feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
 
+    retrieval_capture: CapturedStage[RetrievalResult] | None = None
     if precomputed_retrieval is not None:
         retrieval = precomputed_retrieval
     else:
         yield ctx.thinking("searching", msg.THINKING_SEARCHING)
-        retrieval_capture: CapturedStage[RetrievalResult] = CapturedStage()
+        retrieval_capture = CapturedStage()
         ctx.ensure_active()
         async for event in _capture_stage_result(
             retrieval_capture,
@@ -478,7 +479,7 @@ async def continue_recommendation_from_criteria(
     if not products:
         # Retry without product_type filter — recommend related same-category items
         product_type = criteria.constraints.product_type
-        if product_type:
+        if product_type and retrieval_capture is not None:
             relaxed = criteria.model_copy(update={
                 "constraints": criteria.constraints.model_copy(update={"product_type": None}),
             })

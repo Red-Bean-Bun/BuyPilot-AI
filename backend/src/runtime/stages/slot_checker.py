@@ -12,6 +12,14 @@ _NARROWING_CONSTRAINT_KEYS = frozenset(
 )
 
 
+# Categories whose sub-types have high price variance, making budget a required
+# slot before retrieval.  Map: category -> set of normalised product_types that
+# trigger the budget clarification.  Add new entries here instead of branching.
+_BUDGET_REQUIRED: dict[str, frozenset[str]] = {
+    "数码电子": frozenset({"智能手机"}),
+}
+
+
 def check_required_slots(message: str, intent: IntentResult) -> list[str]:
     """Return missing required slots. Only clarifies when truly missing key entry info.
 
@@ -40,10 +48,11 @@ def _has_narrowing_constraints(constraints: dict) -> bool:
 
 
 def _needs_budget(category: str, product_type: object, constraints: dict) -> bool:
-    if category != "数码电子" or constraints.get("budget_max") is not None:
+    required_types = _BUDGET_REQUIRED.get(category)
+    if required_types is None or constraints.get("budget_max") is not None:
         return False
     normalized = normalize_product_type(str(product_type)) if product_type is not None else None
-    return normalized == "智能手机"
+    return normalized in required_types
 
 
 def build_clarification_question(missing_slots: list[str]) -> tuple[str, list[str]]:

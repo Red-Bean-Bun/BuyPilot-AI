@@ -6,6 +6,7 @@ from datetime import timezone
 from typing import Any
 
 from src.repos.audit import (
+    get_api_request_log_by_request_id,
     insert_api_request_log,
     insert_audit_event,
     list_api_request_logs,
@@ -37,6 +38,14 @@ async def record_api_request(
     duration_ms: float,
     client_ip: str | None = None,
     user_agent: str | None = None,
+    request_content_type: str | None = None,
+    request_body_json: dict[str, Any] | list[Any] | None = None,
+    request_body_text: str | None = None,
+    request_body_truncated: bool = False,
+    response_content_type: str | None = None,
+    response_body_json: dict[str, Any] | list[Any] | None = None,
+    response_body_text: str | None = None,
+    response_body_truncated: bool = False,
     error_code: str | None = None,
     error_type: str | None = None,
 ) -> str | None:
@@ -53,6 +62,14 @@ async def record_api_request(
         duration_ms=duration_ms,
         client_ip=client_ip,
         user_agent=user_agent,
+        request_content_type=request_content_type,
+        request_body_json=request_body_json,
+        request_body_text=request_body_text,
+        request_body_truncated=request_body_truncated,
+        response_content_type=response_content_type,
+        response_body_json=response_body_json,
+        response_body_text=response_body_text,
+        response_body_truncated=response_body_truncated,
         error_code=error_code,
         error_type=error_type,
     )
@@ -102,6 +119,14 @@ def api_request_log_payload(row) -> dict[str, Any]:
         "duration_ms": row.duration_ms,
         "client_ip": row.client_ip,
         "user_agent": row.user_agent,
+        "request_content_type": row.request_content_type,
+        "request_body_json": row.request_body_json,
+        "request_body_text": row.request_body_text,
+        "request_body_truncated": row.request_body_truncated,
+        "response_content_type": row.response_content_type,
+        "response_body_json": row.response_body_json,
+        "response_body_text": row.response_body_text,
+        "response_body_truncated": row.response_body_truncated,
         "error_code": row.error_code,
         "error_type": row.error_type,
         "created_at": _ensure_utc_iso(row.created_at),
@@ -149,6 +174,17 @@ async def list_request_log_payloads(**filters: Any) -> list[dict[str, Any]]:
             if not payload.get("turn_id"):
                 payload["turn_id"] = turn_ids_by_request.get(payload["request_id"])
     return payloads
+
+
+async def get_request_log_payload(request_id: str) -> dict[str, Any] | None:
+    row = await get_api_request_log_by_request_id(request_id)
+    if row is None:
+        return None
+    payload = api_request_log_payload(row)
+    if not payload.get("turn_id"):
+        turn_ids_by_request = await map_turn_ids_by_request_ids([request_id])
+        payload["turn_id"] = turn_ids_by_request.get(request_id)
+    return payload
 
 
 async def list_audit_event_payloads(**filters: Any) -> list[dict[str, Any]]:
