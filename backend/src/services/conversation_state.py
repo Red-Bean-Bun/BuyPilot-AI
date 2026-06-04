@@ -9,6 +9,7 @@ from src.repos.conversations import (
     list_recent_turns,
     save_turn,
 )
+from src.services.feedback import get_feedback_context
 from src.types.sse_events import CriteriaPayload
 
 
@@ -44,20 +45,52 @@ async def get_previous_deck_id(session_id: str) -> str | None:
     return await get_last_deck_id(session_id)
 
 
-async def get_conversation_summary(session_id: str, max_turns: int = 2) -> str:
+async def get_conversation_summary(session_id: str, max_turns: int = 4) -> str:
     """Build a compact summary of recent conversation turns for LLM context.
 
     Returns an empty string when there is no history (first turn), so the
     prompt template variable renders as a no-op for single-turn use.
+
+    Enhanced format includes:
+    - User message (truncated to 100 chars)
+    - Criteria summary (purchase standards)
+    - Recommended product count and IDs
+    - Feedback context (avoided/liked products, trait preferences)
     """
     turns = await list_recent_turns(session_id, max_turns)
     if not turns:
         return ""
+
+    # Fetch feedback context for the session to enrich summary
+    feedback = await get_feedback_context(session_id)
+
     lines: list[str] = []
     for i, turn in enumerate(turns, 1):
-        user = str(turn["user_message"])[:80]
+        user = str(turn["user_message"])[:100]
         summary = str(turn.get("summary", ""))
         product_ids = list(turn.get("product_ids", []))  # type: ignore[arg-type]
-        ids_str = "、".join(str(pid) for pid in product_ids[:3])
-        lines.append(f"第{i}轮: 用户'{user}', 购买标准'{summary}', 推荐了{len(product_ids)}个商品({ids_str}).")
+        ids_str = "、".join(str(pid) for pid in product_ids[:5])
+
+        line = f"第{i}轮: 用户'{user}'"
+        if summary:
+            line += f"\n  → 标准: {summary}"
+        if product_ids:
+            line += f"\n  → 推荐: {len(product_ids)}个商品 ({ids_str})"
+        lines.append(line)
+
+    # Append feedback summary if any feedback exists
+    feedback_lines: list[str] = []
+    if feedback.get("avoid_products"):
+        feedback_lines.append(f"不喜欢的商品: {', '.join(feedback['avoid_products'][:3])}")
+    if feedback.get("liked_products"):
+        feedback_lines.append(f"喜欢的商品: {', '.join(feedback['liked_products'][:3])}")
+    if feedback.get("avoid_traits"):
+        feedback_lines.append(f"避免的特征: {', '.join(feedback['avoid_traits'][:3])}")
+    if feedback.get("prefer_traits"):
+        feedback_lines.append(f"偏好的特征: {', '.join(feedback['prefer_traits'][:3])}")
+
+    if feedback_lines:
+        lines.append("用户反馈:")
+        lines.extend(f"  • {fl}" for fl in feedback_lines)
+
     return "\n".join(lines)

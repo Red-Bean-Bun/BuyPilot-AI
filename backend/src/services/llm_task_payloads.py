@@ -27,6 +27,7 @@ _SCHEMA_TASK_NAMES = {
     "generate_recommendation": "generate_recommendation",
     "generate_recommendation_stream": "generate_recommendation_stream",
     "generate_decision": "generate_decision",
+    "generate_comparison": "generate_comparison",
     "analyze_image": "analyze_image",
 }
 
@@ -236,6 +237,61 @@ def decision_messages(
     ]
 
 
+def comparison_narration_messages(
+    products: list,
+    axes: list,
+    winner_product_id: str | None,
+    winner_reason: str | None,
+    tradeoffs: list[str],
+    risk_notes: list,
+    mode: str,
+) -> list[dict[str, Any]]:
+    """Build messages for comparison narration LLM task."""
+    payload = {
+        "products": [
+            {"product_id": p.product_id, "name": p.name, "price": p.price, "brand": p.brand}
+            for p in products
+        ],
+        "axes": [
+            {
+                "name": a.name,
+                "values": [
+                    {"product_id": v.product_id, "score": v.score, "detail": v.detail}
+                    for v in a.values
+                ],
+            }
+            for a in axes
+        ],
+        "winner_product_id": winner_product_id,
+        "winner_reason": winner_reason,
+        "tradeoffs": tradeoffs,
+        "risk_notes": [
+            {"product_id": r.product_id, "note": r.note} for r in risk_notes
+        ],
+        "mode": mode,
+    }
+    prompt_vars = {
+        "products": payload["products"],
+        "axes": payload["axes"],
+        "winner_product_id": winner_product_id or "无",
+        "winner_reason": winner_reason or "无",
+        "tradeoffs": tradeoffs,
+        "risk_notes": payload["risk_notes"],
+        "mode": mode,
+    }
+    return [
+        {
+            "role": "system",
+            "content": _prompt_content(
+                "generate_comparison",
+                prompt_vars,
+                _schema_override("generate_comparison"),
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
 def parse_json_object(text: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text)
@@ -286,6 +342,13 @@ def normalize_intent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if target_product_id is None:
         target_product_id = normalized.get("product_id") or normalized.get("target_product")
     normalized["target_product_id"] = _normalize_nullable_string(target_product_id)
+
+    # Extract compare_product_ids from LLM output or extracted_constraints
+    compare_ids = normalized.get("compare_product_ids")
+    if compare_ids is None and isinstance(normalized.get("extracted_constraints"), dict):
+        compare_ids = normalized["extracted_constraints"].pop("compare_product_ids", None)
+    normalized["compare_product_ids"] = _normalize_string_list(compare_ids)
+
     return normalized
 
 
@@ -298,7 +361,7 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "recommend_product": "recommend",
             "shopping": "recommend",
             "filter": "recommend",
-            "compare": "recommend",
+            "compare": "compare",
             "clarify": "clarify",
             "unclear": "clarify",
             "question": "clarify",
@@ -329,7 +392,9 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "推荐": "recommend",
             "筛选": "recommend",
             "过滤": "recommend",
-            "对比": "recommend",
+            "对比": "compare",
+            "比较": "compare",
+            "pk": "compare",
             "澄清": "clarify",
             "追问": "clarify",
             "继续": "continue",

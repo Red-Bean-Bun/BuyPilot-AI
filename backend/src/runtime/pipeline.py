@@ -18,11 +18,13 @@ from src.runtime.message_rules import (
     extract_product_lookup_hints,
     extract_product_type_hint,
     has_shopping_signal,
+    is_compare_phrase,
     is_commercial_claim_question,
     is_replace_deck_phrase,
     maybe_intercept_budget_patch,
     maybe_shopping_intent,
     message_with_image_context,
+    resolve_compare_targets,
 )
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions, run_criteria
 from src.runtime.stages.decision import run_decision
@@ -206,33 +208,21 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
     resolved = await _merge_followup_context(ctx.session_id, resolved)
 
     if _unsupported_product_type(resolved.intent):
-        # Not a hard stop: strip unsupported product_type and fall through
-        # so the handler can recommend related same-category products.
         _pt = (resolved.intent.extracted_constraints or {}).get("product_type")
         # When the "unsupported" product_type is actually a brand, skip the
         # misleading "not covered" text — the brand matcher will pick it up
         # and retrieval will find matching products.
-        if not (_pt and is_known_brand_or_synonym(str(_pt))):
-            yield TextDeltaEvent(
-                session_id=ctx.session_id,
-                turn_id=ctx.turn_id,
-                seq=ctx.seq.next(),
-                event_id=ctx.seq.event_id(),
-                node_id=f"unsupported_{ctx.turn_id}",
-                created_at_ms=now_ms(),
-                message_id=f"unsupported_{ctx.turn_id}",
-                delta=msg.UNSUPPORTED_PRODUCT_TYPE_TEMPLATE.format(
-                    product_type=_pt or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
-                ),
-                done=True,
+        if _pt and is_known_brand_or_synonym(str(_pt)):
+            constraints = dict(resolved.intent.extracted_constraints or {})
+            constraints["product_type"] = None
+            resolved = _ResolvedIntent(
+                body=resolved.body,
+                intent=resolved.intent.model_copy(update={"extracted_constraints": constraints}),
             )
-        constraints = dict(resolved.intent.extracted_constraints or {})
-        constraints["product_type"] = None
-        resolved = _ResolvedIntent(
-            body=resolved.body,
-            intent=resolved.intent.model_copy(update={"extracted_constraints": constraints}),
-        )
-        # Falls through to normal recommendation below — no return here.
+        else:
+            async for event in _emit_unsupported_product_type(ctx, resolved.intent):
+                yield event
+            return
 
     missing_slots = _missing_slots(resolved.body, resolved.intent)
     if missing_slots:
@@ -305,6 +295,19 @@ async def _resolve_intent(
         else:
             synthetic_intent = IntentResult(intent="recommend")
 
+    # Compare: deterministic pre-check for "对比第一个和第二个" style requests
+    if synthetic_intent is None and is_compare_phrase(pipeline_body.message):
+        previous_ids = await get_previous_product_ids(ctx.session_id)
+        if previous_ids:
+            resolved = resolve_compare_targets(pipeline_body.message, previous_ids)
+            if len(resolved) >= 2:
+                prev = await get_previous_criteria(ctx.session_id)
+                synthetic_intent = IntentResult(
+                    intent="compare",
+                    category=prev.category or None if prev else None,
+                    compare_product_ids=resolved,
+                )
+
     if synthetic_intent is not None:
         intent = synthetic_intent
     else:
@@ -365,7 +368,8 @@ async def _resolve_intent(
     if intent.intent in {"recommend", "clarify"} and not intent.category and not pipeline_body.image_url:
         inferred = category_from_text(pipeline_body.message)
         if inferred:
-            intent = intent.model_copy(update={"category": inferred})
+            if not _is_ambiguous_scene_only_category_inference(pipeline_body.message, inferred):
+                intent = intent.model_copy(update={"category": inferred})
 
     # Product-lookup extraction: "有鼠标吗" → product_type="鼠标"
     # Runs for all shopping intents to catch queries the LLM may miss.
@@ -409,6 +413,8 @@ async def _resolve_intent(
 
 
 def _missing_slots(pipeline_body: ChatStreamRequest, intent: IntentResult) -> list[str]:
+    if intent.intent == "compare":
+        return []
     if pipeline_body.criteria_patch or pipeline_body.image_url:
         return []
     return check_required_slots(pipeline_body.message, intent)
@@ -486,7 +492,7 @@ def _is_topic_switch(intent: IntentResult, previous: CriteriaPayload) -> bool:
 
 
 def _should_merge_previous_context(intent: IntentResult) -> bool:
-    if intent.intent in {"clarify", "continue"}:
+    if intent.intent in {"clarify", "continue", "compare"}:
         return True
     if intent.intent != "recommend":
         return False
@@ -504,6 +510,31 @@ def _unsupported_product_type(intent: IntentResult) -> bool:
     if normalize_category(product_type) in KNOWN_CATEGORIES:
         return False
     return bool(product_type and not is_supported_product_type(str(product_type)))
+
+
+_AMBIGUOUS_PHOTO_SCENE_TERMS = ("拍照", "摄影", "拍摄", "自拍")
+_CONCRETE_DIGITAL_PRODUCT_TERMS = (
+    "手机",
+    "相机",
+    "耳机",
+    "电脑",
+    "笔记本",
+    "平板",
+    "微单",
+    "单反",
+    "镜头",
+)
+
+
+def _is_ambiguous_scene_only_category_inference(message: str, category: str) -> bool:
+    """Avoid turning a photo-taking scene into a digital-product category too early."""
+    if category != "数码电子":
+        return False
+    if not any(term in message for term in _AMBIGUOUS_PHOTO_SCENE_TERMS):
+        return False
+    if any(term in message for term in _CONCRETE_DIGITAL_PRODUCT_TERMS):
+        return False
+    return extract_product_type_hint(message) is None
 
 
 def _should_emit_partial_criteria(missing_slots: list[str], criteria: CriteriaPayload) -> bool:

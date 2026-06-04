@@ -128,12 +128,75 @@ class AlternativePayload(BaseModel):
     name: str
 
 
+class CompareAxisValuePayload(BaseModel):
+    """Single product's score on one comparison axis."""
+
+    product_id: str
+    score: float | None = None
+    label: str | None = None
+    detail: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class CompareAxisPayload(BaseModel):
+    """One comparison dimension with per-product values."""
+
+    name: str
+    values: list[CompareAxisValuePayload] = Field(default_factory=list)
+
+
+class CompareRiskNotePayload(BaseModel):
+    product_id: str
+    note: str
+
+
 class QuickActionPayload(BaseModel):
     action_id: str
     label: str
     action: str
     feedback_type: str | None = None
     criteria_patch: dict[str, Any] | None = None
+
+
+class DecisionBarrierPayload(BaseModel):
+    barrier_type: Literal[
+        "fear_wrong_choice",
+        "value_uncertainty",
+        "fit_uncertainty",
+        "trust_uncertainty",
+        "price_sensitive",
+        "choice_overload",
+    ]
+    label: str
+    reason: str = ""
+    conversion_strategy: str = ""
+
+
+class SearchStrategyPayload(BaseModel):
+    category: str | None = None
+    product_type: str | None = None
+    use_scenario: str | None = None
+
+
+class PrimaryDirectionPayload(BaseModel):
+    title: str
+    summary: str = ""
+    why: str = ""
+    search_strategy: SearchStrategyPayload = Field(default_factory=SearchStrategyPayload)
+    available_in_catalog: bool = False
+    supporting_product_count: int = 0
+
+
+class ShoppingStrategyPayload(BaseModel):
+    strategy_id: str
+    scene_type: Literal["gift", "interest", "usage", "risk_sensitive", "goal_oriented"]
+    scene_summary: str = ""
+    user_problem: str = ""
+    decision_barrier: DecisionBarrierPayload | None = None
+    primary_direction: PrimaryDirectionPayload
+    avoid_risks: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    confidence: Literal["low", "medium", "high"] = "medium"
 
 
 class ThinkingEvent(SSEEventBase):
@@ -156,6 +219,7 @@ class CriteriaCardEvent(SSEEventBase):
     display_mode: DisplayMode = "summary_card"
     editable: bool = True
     criteria: CriteriaPayload = Field(default_factory=CriteriaPayload)
+    shopping_strategy: ShoppingStrategyPayload | None = None
     quick_actions: list[QuickActionPayload] = Field(default_factory=list)
 
 
@@ -236,6 +300,22 @@ class ErrorEvent(SSEEventBase):
     retryable: bool = True
 
 
+class CompareCardEvent(SSEEventBase):
+    event: Literal["compare_card"] = "compare_card"
+    display_mode: DisplayMode = "summary_card"
+    compare_id: str
+    source_deck_id: str | None = None
+    mode: Literal["exploratory", "decision"]
+    focus: str | None = None
+    products: list[ProductPayload] = Field(default_factory=list)
+    axes: list[CompareAxisPayload] = Field(default_factory=list)
+    winner_product_id: str | None = None
+    winner_reason: str | None = None
+    tradeoffs: list[str] = Field(default_factory=list)
+    risk_notes: list[CompareRiskNotePayload] = Field(default_factory=list)
+    confidence: Literal["high", "medium", "low"] | None = None
+
+
 SSEEvent = Union[
     ThinkingEvent,
     ClarificationEvent,
@@ -246,6 +326,7 @@ SSEEvent = Union[
     FinalDecisionEvent,
     DoneEvent,
     ErrorEvent,
+    CompareCardEvent,
 ]
 
 EVENT_TAG_MAP: dict[str, type[SSEEvent]] = {
@@ -258,6 +339,7 @@ EVENT_TAG_MAP: dict[str, type[SSEEvent]] = {
     "final_decision": FinalDecisionEvent,
     "done": DoneEvent,
     "error": ErrorEvent,
+    "compare_card": CompareCardEvent,
 }
 
 

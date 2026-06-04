@@ -26,6 +26,7 @@ from src.services.llm_gateway import (
     _stream_chat_task,
 )
 from src.services.llm_task_payloads import (
+    comparison_narration_messages,
     criteria_from_live_payload as _criteria_from_live_payload,
     criteria_messages,
     decision_messages,
@@ -118,6 +119,7 @@ __all__ = [
     "generate_criteria",
     "generate_decision",
     "generate_recommendation",
+    "stream_comparison_narration",
     "stream_recommendation",
 ]
 
@@ -402,6 +404,41 @@ def _sanitize_decision(
         confidence=decision.confidence,
         next_step=decision.next_step,
     )
+
+
+async def stream_comparison_narration(
+    products: list[ProductPayload],
+    axes: list,
+    winner_product_id: str | None,
+    winner_reason: str | None,
+    tradeoffs: list[str],
+    risk_notes: list,
+    mode: str,
+) -> AsyncGenerator[str, None]:
+    """Stream comparison narration text from the LLM."""
+    messages = comparison_narration_messages(
+        products, axes, winner_product_id, winner_reason, tradeoffs, risk_notes, mode,
+    )
+    emitted = False
+    try:
+        async for delta in _stream_chat_task("generate_comparison", messages):
+            if not delta:
+                continue
+            emitted = True
+            yield delta
+    except Exception:
+        if emitted:
+            raise
+        logger.warning(
+            "Comparison narration stream failed; yielding fallback text.",
+            exc_info=True,
+        )
+        if winner_reason:
+            yield winner_reason
+        elif tradeoffs:
+            yield "、".join(tradeoffs[:2])
+        else:
+            yield "两款商品各有特点，建议根据个人偏好选择。"
 
 
 def _json_preview(value: Any) -> str:

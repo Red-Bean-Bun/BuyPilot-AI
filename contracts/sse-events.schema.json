@@ -11,7 +11,8 @@
     { "$ref": "#/$defs/cart_action" },
     { "$ref": "#/$defs/final_decision" },
     { "$ref": "#/$defs/done" },
-    { "$ref": "#/$defs/error" }
+    { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/compare_card" }
   ],
   "$defs": {
     "envelope": {
@@ -151,6 +152,66 @@
       },
       "required": ["action_id", "label", "action"]
     },
+    "decision_barrier_payload": {
+      "type": "object",
+      "properties": {
+        "barrier_type": {
+          "type": "string",
+          "enum": [
+            "fear_wrong_choice",
+            "value_uncertainty",
+            "fit_uncertainty",
+            "trust_uncertainty",
+            "price_sensitive",
+            "choice_overload"
+          ]
+        },
+        "label": { "type": "string" },
+        "reason": { "type": "string" },
+        "conversion_strategy": { "type": "string" }
+      },
+      "required": ["barrier_type", "label"]
+    },
+    "search_strategy_payload": {
+      "type": "object",
+      "properties": {
+        "category": { "type": ["string", "null"] },
+        "product_type": { "type": ["string", "null"] },
+        "use_scenario": { "type": ["string", "null"] }
+      }
+    },
+    "primary_direction_payload": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "why": { "type": "string" },
+        "search_strategy": { "$ref": "#/$defs/search_strategy_payload" },
+        "available_in_catalog": { "type": "boolean" },
+        "supporting_product_count": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["title"]
+    },
+    "shopping_strategy_payload": {
+      "type": "object",
+      "properties": {
+        "strategy_id": { "type": "string" },
+        "scene_type": {
+          "type": "string",
+          "enum": ["gift", "interest", "usage", "risk_sensitive", "goal_oriented"]
+        },
+        "scene_summary": { "type": "string" },
+        "user_problem": { "type": "string" },
+        "decision_barrier": {
+          "anyOf": [{ "$ref": "#/$defs/decision_barrier_payload" }, { "type": "null" }]
+        },
+        "primary_direction": { "$ref": "#/$defs/primary_direction_payload" },
+        "avoid_risks": { "type": "array", "items": { "type": "string" } },
+        "assumptions": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+      },
+      "required": ["strategy_id", "scene_type", "primary_direction"]
+    },
     "thinking": {
       "allOf": [
         { "$ref": "#/$defs/envelope" },
@@ -192,6 +253,9 @@
             "display_mode": { "const": "summary_card" },
             "editable": { "type": "boolean" },
             "criteria": { "$ref": "#/$defs/criteria_payload" },
+            "shopping_strategy": {
+              "anyOf": [{ "$ref": "#/$defs/shopping_strategy_payload" }, { "type": "null" }]
+            },
             "quick_actions": { "type": "array", "items": { "$ref": "#/$defs/quick_action_payload" } }
           },
           "required": ["event"]
@@ -306,6 +370,59 @@
             "retryable": { "type": "boolean" }
           },
           "required": ["event", "code", "message"]
+        }
+      ]
+    },
+    "compare_axis_value_payload": {
+      "type": "object",
+      "description": "Single product's score on one comparison axis",
+      "properties": {
+        "product_id": { "type": "string" },
+        "score": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "label": { "type": ["string", "null"] },
+        "detail": { "type": ["string", "null"] },
+        "evidence_ids": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["product_id"]
+    },
+    "compare_axis_payload": {
+      "type": "object",
+      "description": "One comparison dimension with per-product values",
+      "properties": {
+        "name": { "type": "string" },
+        "values": { "type": "array", "items": { "$ref": "#/$defs/compare_axis_value_payload" } }
+      },
+      "required": ["name", "values"]
+    },
+    "compare_risk_note_payload": {
+      "type": "object",
+      "properties": {
+        "product_id": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["product_id", "note"]
+    },
+    "compare_card": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "event": { "const": "compare_card" },
+            "display_mode": { "const": "summary_card" },
+            "compare_id": { "type": "string" },
+            "source_deck_id": { "type": ["string", "null"] },
+            "mode": { "type": "string", "enum": ["exploratory", "decision"] },
+            "focus": { "type": ["string", "null"] },
+            "products": { "type": "array", "items": { "$ref": "#/$defs/product_payload" } },
+            "axes": { "type": "array", "items": { "$ref": "#/$defs/compare_axis_payload" } },
+            "winner_product_id": { "type": ["string", "null"] },
+            "winner_reason": { "type": ["string", "null"] },
+            "tradeoffs": { "type": "array", "items": { "type": "string" } },
+            "risk_notes": { "type": "array", "items": { "$ref": "#/$defs/compare_risk_note_payload" } },
+            "confidence": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] }
+          },
+          "required": ["event", "compare_id", "mode", "products", "axes"]
         }
       ]
     }

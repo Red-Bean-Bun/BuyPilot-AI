@@ -90,6 +90,7 @@ class IntentResult(BaseModel):
         "clarify",
         "continue",
         "feedback",
+        "compare",
         "add_to_cart",
         "remove_from_cart",
         "update_cart_quantity",
@@ -101,6 +102,7 @@ class IntentResult(BaseModel):
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)
     soft_preferences: list[str] = Field(default_factory=list)
     target_product_id: str | None = None
+    compare_product_ids: list[str] = Field(default_factory=list)
 
 
 class RecommendationResult(BaseModel):

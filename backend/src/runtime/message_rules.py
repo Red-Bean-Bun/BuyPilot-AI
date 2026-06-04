@@ -569,3 +569,83 @@ def extract_product_type_hint(message: str) -> str | None:
             if child in text:
                 return child
     return None
+
+
+# ── Compare intent deterministic rules ────────────────────────────────
+
+_COMPARE_MARKERS = (
+    "对比",
+    "比较",
+    "比一下",
+    "pk",
+    "PK",
+    "vs",
+    "VS",
+    "哪个好",
+    "哪个更好",
+    "哪个更",
+    "哪款好",
+    "哪款更",
+    "怎么选",
+    "选哪个",
+    "选哪款",
+)
+
+# Patterns for extracting multiple ordinal references: "第一个和第二个"
+_ORDINAL_PATTERN = re.compile(r"第\s*(\d+)\s*(?:个|款|件|项)")
+_CN_ORDINAL_MAP = {
+    "一": 0, "二": 1, "三": 2, "四": 3, "五": 4,
+    "两": 1,  # "前两个"
+}
+_CN_ORDINAL_PATTERN = re.compile(r"第([一二三四五])")
+
+
+def is_compare_phrase(message: str) -> bool:
+    """Deterministic check: does this message look like a compare request?"""
+    text = message.strip().lower()
+    return any(marker.lower() in text for marker in _COMPARE_MARKERS)
+
+
+def resolve_compare_targets(message: str, previous_product_ids: list[str]) -> list[str]:
+    """Resolve ordinal references in a compare message to actual product IDs.
+
+    Handles patterns like:
+    - "第一个和第二个" -> [ids[0], ids[1]]
+    - "前三款" -> ids[:3]
+    - "对比1和3" -> [ids[0], ids[2]]
+
+    Returns the resolved product IDs, or empty list if resolution fails.
+    """
+    if not previous_product_ids:
+        return []
+
+    indices: list[int] = []
+
+    # Arabic numerals: "第1个和第3个" or "1和3"
+    for match in _ORDINAL_PATTERN.finditer(message):
+        idx = max(0, int(match.group(1)) - 1)
+        if idx not in indices:
+            indices.append(idx)
+
+    # Chinese ordinals: "第一个和第三个"
+    for match in _CN_ORDINAL_PATTERN.finditer(message):
+        idx = _CN_ORDINAL_MAP.get(match.group(1))
+        if idx is not None and idx not in indices:
+            indices.append(idx)
+
+    # "前N个" pattern
+    top_n_match = re.search(r"前\s*(\d+|[一二三四五])\s*(?:个|款|件)", message)
+    if top_n_match and not indices:
+        raw = top_n_match.group(1)
+        n = _CN_ORDINAL_MAP.get(raw, 0) + 1 if not raw.isdigit() else int(raw)
+        indices = list(range(min(n, len(previous_product_ids))))
+
+    if not indices:
+        return []
+
+    resolved = []
+    for idx in indices:
+        if 0 <= idx < len(previous_product_ids):
+            resolved.append(previous_product_ids[idx])
+
+    return resolved

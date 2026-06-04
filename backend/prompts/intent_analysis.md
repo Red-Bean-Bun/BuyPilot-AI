@@ -24,7 +24,7 @@
 
 ```json
 {
-  "intent": "recommend | clarify | continue | feedback | add_to_cart | remove_from_cart | update_cart_quantity | view_cart | chitchat",
+  "intent": "recommend | clarify | continue | feedback | compare | add_to_cart | remove_from_cart | update_cart_quantity | view_cart | chitchat",
   "confidence": 0.9,
   "category": "美妆护肤 | 数码电子 | 服饰运动 | 食品生活 | null",
   "extracted_constraints": {
@@ -33,7 +33,8 @@
     "use_scenario": null
   },
   "soft_preferences": ["一句话总结用户想要什么"],
-  "target_product_id": null
+  "target_product_id": null,
+  "compare_product_ids": []
 }
 ```
 
@@ -75,6 +76,7 @@
    - clarify: 用户在澄清需求、回答追问，或信息不足需要追问
    - continue: 用户确认已有标准、要求继续筛选，或已看过候选商品后要求收敛最终建议
    - feedback: 用户表达不喜欢、排除某商品/品牌/特征等反馈
+   - compare: 用户要求对比/比较两个或更多已推荐的商品（如"对比第一个和第二个"、"比较一下这几款"、"A和B哪个好"）。必须提取 compare_product_ids（如果用户用序数词引用商品，如"第一个""第二个"）
    - add_to_cart: 用户要把系统已推荐或已展示的商品加入购物车（必须有明确的商品指向，如"把这个加到购物车"、"第一款加购"）。当用户附带图片并说"想买这个"/"帮我找找这个"/"有没有这个"时，这是 recommend（找类似商品），不是 add_to_cart。
    - remove_from_cart: 用户要从购物车删除/移出商品
    - update_cart_quantity: 用户要修改购物车里商品数量
@@ -200,6 +202,21 @@ Output:
   "category": "食品生活",
   "extracted_constraints": {},
   "soft_preferences": ["用户想购买图片中的橙汁饮料"],
+  "target_product_id": null
+}
+```
+
+Input: "对比第一个和第二个手机"
+Output:
+```json
+{
+  "intent": "compare",
+  "confidence": 0.95,
+  "category": "数码电子",
+  "extracted_constraints": {
+    "compare_product_ids": ["第一个", "第二个"]
+  },
+  "soft_preferences": ["用户想对比之前推荐的手机"],
   "target_product_id": null
 }
 ```
