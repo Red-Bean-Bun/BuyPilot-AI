@@ -19,7 +19,14 @@ from src.config.tuning import (
     INTER_CARD_DELAY_MS,
     SSE_DELTA_POLL_TIMEOUT_SECONDS,
 )
-from src.runtime.cart_rules import message_refers_to_previous_product, quantity_from_intent, referenced_product_id
+from src.runtime.cart_handlers import (
+    handle_add_to_cart,
+    handle_remove_from_cart,
+    handle_update_cart_quantity,
+    handle_view_cart,
+)
+from src.runtime.compare_handlers import handle_compare
+from src.runtime.cart_rules import message_refers_to_previous_product, referenced_product_id
 from src.runtime.message_rules import is_replace_deck_phrase
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
@@ -34,7 +41,6 @@ from src.runtime.streaming import (
     start_stage_task,
 )
 from src.services.audit import record_audit_event
-from src.services.cart import add_product_to_cart, get_session_cart, remove_product_from_cart, update_product_quantity
 from src.services.catalog import get_product
 from src.services.conversation_state import (
     get_previous_criteria,
@@ -49,12 +55,9 @@ from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, fetch_risk_notes_for_products, reason_from_atoms
 from src.services.retriever import filter_products
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
-from src.types.schemas import CartResponse, ChatStreamRequest, DecisionResult, IntentResult
+from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
 from src.types.sse_events import (
     AlternativePayload,
-    CartActionEvent,
-    CartItemEventPayload,
-    CartSummaryPayload,
     ClarificationEvent,
     CriteriaCardEvent,
     CriteriaPayload,
@@ -64,6 +67,7 @@ from src.types.sse_events import (
     ProductPayload,
     QuickActionPayload,
     SSEEventBase,
+    ShoppingStrategyPayload,
     TextDeltaEvent,
     now_ms,
 )
@@ -96,103 +100,6 @@ class CapturedStage(Generic[T]):
         if self.value is None:
             raise RuntimeError(f"{stage} stage completed without a result.")
         return self.value
-
-
-async def handle_view_cart(
-    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
-) -> AsyncGenerator[SSEEventBase, None]:
-    del body, intent
-    yield ctx.thinking("generating", msg.THINKING_VIEWING_CART)
-    yield await _cart_action_event(ctx, "view", "", 0, "success")
-    yield ctx.done()
-
-
-async def handle_add_to_cart(
-    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
-) -> AsyncGenerator[SSEEventBase, None]:
-    product_id = await referenced_product_id(ctx.session_id, intent, body.message)
-    if product_id is None:
-        async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_ADD):
-            yield event
-        yield ctx.done()
-        return
-    quantity = quantity_from_intent(intent, body.message, default=1)
-    try:
-        await add_product_to_cart(ctx.session_id, product_id, quantity=quantity)
-    except ValueError:
-        yield await _cart_action_event(ctx, "add", product_id, 0, "failed")
-        yield ctx.done()
-        return
-    await record_audit_event(
-        "cart.item_added",
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        resource_type="cart_item",
-        resource_id=product_id,
-        metadata={"quantity": quantity, "source": "chat_intent"},
-    )
-    ctx.ensure_active()
-    yield await _cart_action_event(ctx, "add", product_id, quantity, "success")
-    yield ctx.done()
-
-
-async def handle_remove_from_cart(
-    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
-) -> AsyncGenerator[SSEEventBase, None]:
-    product_id = await referenced_product_id(ctx.session_id, intent, body.message)
-    if product_id is None:
-        async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_REMOVE):
-            yield event
-        yield ctx.done()
-        return
-    try:
-        item = await remove_product_from_cart(ctx.session_id, product_id)
-    except ValueError:
-        item = None
-    if item is None:
-        yield await _cart_action_event(ctx, "remove", product_id, 0, "failed")
-        yield ctx.done()
-        return
-    await record_audit_event(
-        "cart.item_removed",
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        resource_type="cart_item",
-        resource_id=product_id,
-        metadata={"source": "chat_intent"},
-    )
-    yield await _cart_action_event(ctx, "remove", product_id, 0, "success")
-    yield ctx.done()
-
-
-async def handle_update_cart_quantity(
-    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
-) -> AsyncGenerator[SSEEventBase, None]:
-    product_id = await referenced_product_id(ctx.session_id, intent, body.message)
-    if product_id is None:
-        async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_UPDATE):
-            yield event
-        yield ctx.done()
-        return
-    quantity = quantity_from_intent(intent, body.message, default=1)
-    try:
-        item = await update_product_quantity(ctx.session_id, product_id, quantity)
-    except ValueError:
-        item = None
-    if item is None:
-        yield await _cart_action_event(ctx, "update_quantity", product_id, quantity, "failed")
-        yield ctx.done()
-        return
-    await record_audit_event(
-        "cart.quantity_updated",
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        resource_type="cart_item",
-        resource_id=product_id,
-        metadata={"quantity": quantity, "source": "chat_intent"},
-    )
-    yield await _cart_action_event(ctx, "update_quantity", product_id, quantity, "success")
-    yield ctx.done()
 
 
 async def handle_chitchat(
@@ -329,6 +236,51 @@ def _ensure_brand_products(
     return inject_brand_preference_products(products, criteria, feedback)
 
 
+async def _try_build_shopping_strategy_plan(
+    ctx: StreamContext,
+    body: ChatStreamRequest,
+    intent: IntentResult,
+    criteria: CriteriaPayload,
+    feedback: dict,
+    image_embedding: list[float] | None,
+) -> tuple[CriteriaPayload, ShoppingStrategyPayload | None, str | None, str | None] | None:
+    """Try to build shopping strategy plan for scenario-based recommendations.
+
+    Returns (updated_criteria, shopping_strategy, scene_judgement_text, reason_hint) if successful.
+    Returns None if normal filter_recommend flow should be used.
+    """
+    try:
+        from src.services.shopping_strategy import (
+            build_shopping_strategy_plan,
+            build_scenario_reason_hint,
+        )
+    except ImportError:
+        logger.debug("shopping_strategy service not available, using normal flow")
+        return None
+
+    async def retrieval_probe(probe_criteria: CriteriaPayload) -> RetrievalResult:
+        return await ctx.stages.run_retrieval(
+            probe_criteria, top_n=3, feedback=feedback, image_embedding=image_embedding
+        )
+
+    try:
+        plan = await build_shopping_strategy_plan(
+            body,
+            intent,
+            criteria,
+            retrieval_probe=retrieval_probe,
+        )
+    except Exception:
+        logger.warning("Shopping strategy plan failed, falling back to normal flow", exc_info=True)
+        return None
+
+    if plan is None:
+        return None
+
+    reason_hint = build_scenario_reason_hint(plan.shopping_strategy)
+    return (plan.criteria, plan.shopping_strategy, plan.scene_judgement_text, reason_hint)
+
+
 async def handle_recommendation(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
@@ -403,6 +355,18 @@ async def handle_recommendation(
     except Exception:
         precomputed = None
 
+    # ── Try shopping strategy for scenario-based recommendations ──
+    strategy_result = await _try_build_shopping_strategy_plan(
+        ctx, body, intent, criteria, feedback, image_embedding
+    )
+    shopping_strategy: ShoppingStrategyPayload | None = None
+    scene_judgement_text: str | None = None
+    reason_hint: str | None = None
+    if strategy_result is not None:
+        criteria, shopping_strategy, scene_judgement_text, reason_hint = strategy_result
+        # Discard speculative retrieval — strategy may have changed criteria
+        precomputed = None
+
     if precomputed is not None:
         # Always re-screen with full criteria. The speculative retrieval used
         # a CriteriaPayload built from intent (which may lack brand_avoid,
@@ -424,6 +388,9 @@ async def handle_recommendation(
         precomputed_retrieval=precomputed,
         precomputed_feedback=feedback,
         image_embedding=image_embedding,
+        shopping_strategy=shopping_strategy,
+        scene_judgement_text=scene_judgement_text,
+        reason_hint=reason_hint,
     ):
         yield event
 
@@ -465,8 +432,24 @@ async def continue_recommendation_from_criteria(
     precomputed_retrieval: RetrievalResult | None = None,
     precomputed_feedback: dict | None = None,
     image_embedding: list[float] | None = None,
+    shopping_strategy: ShoppingStrategyPayload | None = None,
+    scene_judgement_text: str | None = None,
+    reason_hint: str | None = None,
 ) -> AsyncGenerator[SSEEventBase, None]:
     ctx.ensure_active()
+
+    # For scenario-based flow: emit scene judgement text and criteria_card early
+    is_scenario_flow = shopping_strategy is not None
+    if is_scenario_flow:
+        if scene_judgement_text:
+            async for event in stream_text(
+                ctx,
+                scene_judgement_text,
+                message_id=f"scene_{ctx.turn_id}",
+                node_id=f"scene_{ctx.turn_id}",
+            ):
+                yield event
+        yield _criteria_card_event(ctx, criteria, shopping_strategy=shopping_strategy)
 
     if precomputed_feedback is not None:
         feedback = precomputed_feedback
@@ -525,6 +508,11 @@ async def continue_recommendation_from_criteria(
             if fallback_retrieval.products:
                 products = fallback_retrieval.products
                 evidences_by_product = dict(fallback_retrieval.evidence_by_product)
+                retrieval = RetrievalResult(
+                    products=products,
+                    evidence_by_product=evidences_by_product,
+                    trace_details=fallback_retrieval.trace_details,
+                )
                 # Check if any returned products match the requested type via hierarchy
                 _expanded = {a.lower() for a in product_type_aliases(product_type)}
                 _has_match = any(
@@ -535,12 +523,14 @@ async def continue_recommendation_from_criteria(
                     fallback_text = f"以下是为你筛选的{product_type}相关商品"
                 else:
                     fallback_text = f"当前商品库没有{product_type}，以下是同品类的相关推荐"
-                yield _criteria_card_event(ctx, criteria)
+                if not is_scenario_flow:
+                    yield _criteria_card_event(ctx, criteria)
                 async for event in stream_text(ctx, fallback_text):
                     yield event
                 # Fall through to product card emission below
             else:
-                yield _criteria_card_event(ctx, criteria)
+                if not is_scenario_flow:
+                    yield _criteria_card_event(ctx, criteria)
                 async for event in stream_text(
                     ctx,
                     _no_match_followup_text(criteria),
@@ -552,7 +542,8 @@ async def continue_recommendation_from_criteria(
                 yield ctx.done("awaiting_criteria_adjustment")
                 return
         else:
-            yield _criteria_card_event(ctx, criteria)
+            if not is_scenario_flow:
+                yield _criteria_card_event(ctx, criteria)
             async for event in stream_text(
                 ctx,
                 _no_match_followup_text(criteria),
@@ -574,10 +565,18 @@ async def continue_recommendation_from_criteria(
             key=lambda p: (keyword_boost_score(p, _keyword_hints), -(p.price or float('inf'))),
             reverse=True,
         )
+        retrieval = RetrievalResult(
+            products=products,
+            evidence_by_product=evidences_by_product,
+            trace_details=retrieval.trace_details,
+        )
 
     # Emit product cards with pacing delay (built into _product_card_events)
     async for event in _product_card_events(
-        ctx, criteria, products, evidences_by_product, risk_notes_extra=risk_notes_extra
+        ctx, criteria, products, evidences_by_product,
+        risk_notes_extra=risk_notes_extra,
+        reason_hint=reason_hint,
+        shopping_strategy=shopping_strategy,
     ):
         yield event
 
@@ -592,7 +591,8 @@ async def continue_recommendation_from_criteria(
         )
         status, confidence = decision_confidence(scored, user_signal_count=0)
 
-        yield _criteria_card_event(ctx, criteria)
+        if not is_scenario_flow:
+            yield _criteria_card_event(ctx, criteria)
         yield ctx.thinking("decision", msg.THINKING_DECISION)
         winner = scored[0]
         decision = await _run_decision_with_context(
@@ -636,7 +636,8 @@ async def continue_recommendation_from_criteria(
         logger.warning("Recommendation stream text failed; continuing with product cards.", exc_info=True)
 
     # Step 2: criteria_card as post-hoc filter adjustment card
-    yield _criteria_card_event(ctx, criteria)
+    if not is_scenario_flow:
+        yield _criteria_card_event(ctx, criteria)
 
     # Step 3: followup guidance text ("你可以自然语言调整...")
     if budget_relaxed:
@@ -849,7 +850,11 @@ def _feedback_with_avoided_products(feedback: dict[str, list[str]], product_ids:
     return merged
 
 
-def _criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> CriteriaCardEvent:
+def _criteria_card_event(
+    ctx: StreamContext,
+    criteria: CriteriaPayload,
+    shopping_strategy: ShoppingStrategyPayload | None = None,
+) -> CriteriaCardEvent:
     return CriteriaCardEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -858,6 +863,7 @@ def _criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> Crite
         node_id=f"criteria_{criteria.criteria_id}",
         created_at_ms=now_ms(),
         criteria=criteria,
+        shopping_strategy=shopping_strategy,
         quick_actions=criteria_quick_actions(category=criteria.category or None),
     )
 
@@ -869,6 +875,8 @@ async def _product_card_events(
     evidences_by_product: dict[str, list[EvidencePayload]],
     *,
     risk_notes_extra: list[str] | None = None,
+    reason_hint: str | None = None,
+    shopping_strategy: ShoppingStrategyPayload | None = None,
 ) -> AsyncGenerator[ProductCardEvent, None]:
     product_ids = [p.product_id for p in products]
     risk_notes_map = await fetch_risk_notes_for_products(product_ids)
@@ -882,6 +890,13 @@ async def _product_card_events(
         reason_atoms = build_reason_atoms(criteria, product, evidence)
         per_product_risk = risk_notes_map.get(product.product_id, [])
         all_risk_notes = list(risk_notes_extra or []) + per_product_risk
+
+        # Use reason_hint for scenario-based flow, otherwise use atoms
+        if reason_hint:
+            reason_text = reason_hint
+        else:
+            reason_text = reason_from_atoms(product, reason_atoms)
+
         yield ProductCardEvent(
             session_id=ctx.session_id,
             turn_id=ctx.turn_id,
@@ -892,7 +907,7 @@ async def _product_card_events(
             created_at_ms=now_ms(),
             rank=rank,
             product=product,
-            reason=reason_from_atoms(product, reason_atoms),
+            reason=reason_text,
             reason_atoms=reason_atoms,
             risk_notes=all_risk_notes,
             evidence=evidence,
@@ -1122,6 +1137,28 @@ def _final_decision_event(
         for p in products
         if p.product_id != decision.winner_product_id
     ][:2]
+
+    # Build next_actions: always include cheaper and compare
+    next_actions: list[QuickActionPayload] = [
+        QuickActionPayload(
+            action_id="cheaper",
+            label=msg.QA_CHEAPER,
+            action="criteria_patch",
+            criteria_patch={"constraints": {"budget_max": _cheaper_budget_max(criteria)}},
+        ),
+        QuickActionPayload(action_id="compare", label=msg.QA_COMPARE, action="compare"),
+    ]
+
+    # Add add_to_cart action when decision_status is selected and winner exists
+    if decision.decision_status == "selected" and decision.winner_product_id:
+        next_actions.append(
+            QuickActionPayload(
+                action_id="add_winner_to_cart",
+                label=msg.QA_ADD_TO_CART,
+                action="add_to_cart",
+            )
+        )
+
     return FinalDecisionEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -1135,15 +1172,7 @@ def _final_decision_event(
         why=decision.why,
         not_for=decision.not_for,
         alternatives=alternatives,
-        next_actions=[
-            QuickActionPayload(
-                action_id="cheaper",
-                label=msg.QA_CHEAPER,
-                action="criteria_patch",
-                criteria_patch={"constraints": {"budget_max": _cheaper_budget_max(criteria)}},
-            ),
-            QuickActionPayload(action_id="compare", label=msg.QA_COMPARE, action="compare"),
-        ],
+        next_actions=next_actions,
         decision_status=decision.decision_status,
         confidence=decision.confidence,
         next_step=decision.next_step,
@@ -1231,64 +1260,13 @@ INTENT_HANDLERS: dict[str, IntentHandler] = {
     "clarify": handle_recommendation,
     "continue": handle_continue,
     "feedback": handle_recommendation,
+    "compare": handle_compare,
     "view_cart": handle_view_cart,
     "add_to_cart": handle_add_to_cart,
     "remove_from_cart": handle_remove_from_cart,
     "update_cart_quantity": handle_update_cart_quantity,
     "chitchat": handle_chitchat,
 }
-
-
-async def _clarify_cart_target(ctx: StreamContext, question: str) -> AsyncGenerator[SSEEventBase, None]:
-    yield ctx.thinking("clarifying", msg.THINKING_CONFIRM_CART)
-    yield ClarificationEvent(
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"clarification_{ctx.turn_id}",
-        created_at_ms=now_ms(),
-        question=question,
-        required_slots=["target_product"],
-        suggested_options=[],
-    )
-
-
-async def _cart_action_event(
-    ctx: StreamContext, action: str, product_id: str, quantity: int, status: str
-) -> CartActionEvent:
-    cart = _cart_summary_payload(await get_session_cart(ctx.session_id))
-    return CartActionEvent(
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"cart_{ctx.turn_id}",
-        created_at_ms=now_ms(),
-        action=action,
-        product_id=product_id,
-        quantity=quantity,
-        status=status,
-        cart=cart,
-    )
-
-
-def _cart_summary_payload(cart: CartResponse) -> CartSummaryPayload:
-    return CartSummaryPayload(
-        items=[
-            CartItemEventPayload(
-                product_id=item.product_id,
-                name=item.name,
-                price=item.price,
-                quantity=item.quantity,
-                added_at=item.added_at,
-                product=item.product,
-            )
-            for item in cart.items
-        ],
-        total_items=cart.total_items,
-        total_price=cart.total_price,
-    )
 
 
 def _cheaper_budget_max(criteria: CriteriaPayload) -> float:
