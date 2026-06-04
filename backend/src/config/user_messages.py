@@ -62,6 +62,8 @@ INTRO_CONDITIONS_INFIX = "这几个条件找一组候选。"
 INTRO_SINGLE_CATEGORY_SUFFIX = "看到商品后也可以继续调整筛选范围。"
 
 # ── Clarification questions and options ─────────────────────────────────
+# See also: prompts/clarification.md ## DeterministicQuestions section
+# These constants are used by slot_checker.py for deterministic clarification.
 
 CLARIFY_CATEGORY_QUESTION = "你想买哪一类商品？"
 CLARIFY_BUDGET_QUESTION = "这类商品价格跨度比较大，你的预算或价位范围大概是多少？"
@@ -114,6 +116,7 @@ QA_LOW_FAT = "低脂"
 RISK_OVER_BUDGET = "原预算内无匹配，此为超预算备选"
 
 # ── Cart clarification questions ────────────────────────────────────────
+# See also: prompts/clarification.md ## DeterministicQuestions ### Cart Clarification
 
 CART_CLARIFY_ADD = "你想把哪个商品加入购物车？"
 CART_CLARIFY_REMOVE = "你想从购物车移出哪个商品？"
@@ -145,3 +148,8 @@ PRODUCT_TYPE_HINTS_BY_CATEGORY: dict[str, str] = {
     "服饰运动": "跑步鞋、篮球鞋、T恤、背包",
     "食品生活": "茶饮、咖啡、零食、调味品",
 }
+
+# ── Compare stage labels ─────────────────────────────────────────────
+
+THINKING_COMPARING = "正在对比商品..."
+COMPARE_CLARIFY = "你想对比哪几个商品？可以说「第一个和第二个」，或者从推荐列表中选择。"

@@ -98,3 +98,27 @@
   "tone": "friendly"
 }
 ```
+
+## DeterministicQuestions
+
+确定性澄清问题（由 slot_checker.py 直接使用，不经过 LLM）：
+
+### Category Clarification
+- question: 你想买哪一类商品？
+- options: 美妆护肤, 数码电子, 服饰运动, 食品生活
+
+### Budget Clarification
+- question: 这类商品价格跨度比较大，你的预算或价位范围大概是多少？
+- options: 1000-2000元, 2000-4000元, 4000元以上
+
+### Product Type Clarification
+- question: 你想买具体哪一类商品？
+- options: 洁面, 防晒, 面霜, 精华, 手机, 耳机, 跑鞋, T恤, 咖啡, 茶饮, 零食
+
+### Fallback
+- question: 请补充一下你的购买需求。
+
+### Cart Clarification
+- add: 你想把哪个商品加入购物车？
+- remove: 你想从购物车移出哪个商品？
+- update: 你想修改哪个商品的数量？
