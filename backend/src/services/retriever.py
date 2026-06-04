@@ -35,6 +35,7 @@ from src.repos.documents import (
 )
 from src.repos.products import get_product, list_products
 from src.services.embedding import embed_text
+from src.services.retrieval_cache import get_retrieval_cache
 from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
 from src.services.reranker import rerank_texts
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
@@ -86,6 +87,13 @@ async def retrieve_with_evidence(
     feedback: Mapping[str, list[str]] | None = None,
     image_embedding: list[float] | None = None,
 ) -> RetrievalOutput:
+    # Check cache first (skip for visual queries which are image-specific)
+    cache = get_retrieval_cache()
+    if image_embedding is None:
+        cached = cache.get(criteria, feedback)
+        if cached is not None:
+            return cached
+
     filters = _retrieval_filters(feedback)
     query_embedding = await embed_text(criteria_query_text(criteria))
 
@@ -178,11 +186,17 @@ async def retrieve_with_evidence(
     )
     if visual_recall_stats:
         trace["visual_recall"] = visual_recall_stats
-    return RetrievalOutput(
+    result = RetrievalOutput(
         products=[hit.product for hit in ranked_hits],
         evidence_by_product=evidence_map,
         trace_details=trace,
     )
+
+    # Cache result for text-only queries
+    if image_embedding is None:
+        cache.set(criteria, feedback, result)
+
+    return result
 
 
 async def _vector_recall_from_db(
