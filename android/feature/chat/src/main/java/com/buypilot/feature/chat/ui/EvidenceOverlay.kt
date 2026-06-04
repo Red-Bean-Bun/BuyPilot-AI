@@ -1,24 +1,30 @@
 package com.buypilot.feature.chat.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,38 +32,44 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.buypilot.core.model.EvidencePayload
-import com.buypilot.core.model.ProductPayload
 import com.buypilot.core.model.ReasonAtomPayload
 import com.buypilot.feature.chat.R
 import com.buypilot.feature.chat.state.ChatUiState
 
 private const val ProductEvidenceEnterMs = 560
-private val EvidenceBackdropTop = Color(0xFF171A22)
-private val EvidenceBackdropMiddle = Color(0xFF10141B)
-private val EvidenceBackdropBottom = Color(0xFF0C0F14)
-private val EvidencePaper = Color(0xFFFFFEFA)
-private val EvidencePaperSoft = Color(0xFFF7F4EF)
-private val EvidencePaperBorder = Color(0xFFECE4DA)
-private val EvidenceInk = Color(0xFF20242B)
-private val EvidenceInkSecondary = Color(0xFF686E77)
-private val EvidenceInkMuted = Color(0xFF969DA8)
-private val EvidenceQuoteBg = Color(0xFFF4F6F8)
+
+// Light minimal evidence palette
+private val EvidenceBg = Color(0xFFF8F9FB)
+private val EvidenceSurface = Color(0xFFFFFFFF)
+private val EvidenceSurfaceRaised = Color(0xFFF4F5F7)
+private val EvidenceBorder = Color(0xFFE8EAF0)
+private val EvidenceInk = Color(0xFF111318)
+private val EvidenceInkSecondary = Color(0xFF4A5060)
+private val EvidenceInkMuted = Color(0xFF9EA5B4)
+private val EvidenceAccent = Color(0xFFFF6A3D)
+private val EvidenceAccentSoft = Color(0xFFFFF2EE)
+private val EvidenceNumberBg = Color(0xFFF0F1F4)
 
 @Composable
 fun ProductEvidenceOverlayScreen(
@@ -71,7 +83,7 @@ fun ProductEvidenceOverlayScreen(
     val payload = state.findProduct(deckId, productId, deckNodeKey)
 
     if (payload == null) {
-        Surface(color = EvidenceBackdropTop, modifier = Modifier.fillMaxSize()) {
+        Surface(color = EvidenceBg, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 ProductPageTopBar(title = "推荐证据", onBack = onBack)
                 ExpiredRecommendationState(onBack = onBack)
@@ -80,7 +92,6 @@ fun ProductEvidenceOverlayScreen(
         return
     }
 
-    val product = payload.product
     val evidenceItems = payload.evidence
         .mapNotNull { evidence -> evidence.takeIf { it.cleanSnippet().isNotBlank() } }
     val evidenceByKey = remember(evidenceItems) {
@@ -94,6 +105,13 @@ fun ProductEvidenceOverlayScreen(
         .take(5)
     val linkedEvidenceKeys = reasonAtoms.mapNotNull { it.evidenceId?.trim()?.takeIf(String::isNotBlank) }.toSet()
     val remainingEvidence = evidenceItems.filter { it.linkKey() !in linkedEvidenceKeys }
+    val riskSourceTexts = remember(state.productDetails[productId]) {
+        state.productDetails[productId]
+            ?.reviews
+            ?.map { it.content.withoutInternalDebugTokens().trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+    }
     val routeProgressState = rememberRouteEnterProgress(
         key = "evidence_${deckId}_${deckNodeKey.orEmpty()}_${productId}",
         durationMillis = ProductEvidenceEnterMs,
@@ -103,44 +121,29 @@ fun ProductEvidenceOverlayScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        EvidenceBackdropTop,
-                        EvidenceBackdropMiddle,
-                        EvidenceBackdropBottom,
-                    ),
-                ),
-            ),
+            .background(EvidenceBg),
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .navigationBarsPadding(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 96.dp, bottom = 56.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 116.dp, bottom = 52.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             item("lead") {
-                EvidenceMotionBlock(progress = progress, start = 0.08f, end = 0.58f, offsetY = 22f) {
+                EvidenceMotionBlock(progress = progress, start = 0.08f, end = 0.58f, offsetY = 18f) {
                     EvidenceLead()
                 }
             }
-            item("product") {
-                EvidenceMotionBlock(progress = progress, start = 0.18f, end = 0.72f, offsetY = 26f) {
-                    EvidenceProductStrip(
-                        product = product,
-                        backendBaseUrl = state.backendBaseUrl,
-                    )
-                }
-            }
             item("report") {
-                EvidenceMotionBlock(progress = progress, start = 0.28f, end = 1f, offsetY = 34f) {
+                EvidenceMotionBlock(progress = progress, start = 0.2f, end = 1f, offsetY = 24f) {
                     EvidenceReportSurface(
                         reason = reason,
                         reasonAtoms = reasonAtoms,
                         evidenceByKey = evidenceByKey,
                         remainingEvidence = remainingEvidence,
                         riskNotes = payload.riskNotes,
+                        riskSourceTexts = riskSourceTexts,
                     )
                 }
             }
@@ -160,11 +163,11 @@ fun ProductEvidenceOverlayScreen(
                     scaleY = lerp(0.94f, 1f, chromeEnter)
                 }
                 .zIndex(2f)
-                .size(46.dp)
-                .background(Color.White.copy(alpha = 0.1f), CircleShape)
-                .border(1.dp, Color.White.copy(alpha = 0.1f), CircleShape),
+                .size(44.dp)
+                .background(EvidenceSurface, CircleShape)
+                .border(1.dp, EvidenceBorder, CircleShape),
             colors = IconButtonDefaults.iconButtonColors(
-                contentColor = Color.White.copy(alpha = 0.92f),
+                contentColor = EvidenceInk,
             ),
         ) {
             Icon(
@@ -199,92 +202,34 @@ private fun EvidenceMotionBlock(
 
 @Composable
 private fun EvidenceLead() {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text(
-            text = "为什么推荐它",
-            color = Color.White,
-            fontSize = 26.sp,
-            lineHeight = 31.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "基于当前筛选条件和商品资料",
-            color = Color.White.copy(alpha = 0.52f),
-            fontSize = BuyPilotType.Label,
-            lineHeight = 17.sp,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-@Composable
-private fun EvidenceProductStrip(
-    product: ProductPayload,
-    backendBaseUrl: String,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.White.copy(alpha = 0.08f),
-        shape = RoundedCornerShape(24.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .size(68.dp)
-                    .clip(RoundedCornerShape(19.dp))
-                    .background(Color.White.copy(alpha = 0.86f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                ProductImage(
-                    product = product,
-                    backendBaseUrl = backendBaseUrl,
-                    decodeSizePx = 180,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Text(
-                    text = product.displayName(),
-                    color = Color.White.copy(alpha = 0.94f),
-                    fontSize = BuyPilotType.LargeBody,
-                    lineHeight = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = product.brandLabel(),
-                        color = Color.White.copy(alpha = 0.52f),
-                        fontSize = BuyPilotType.Label,
-                        lineHeight = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = product.priceLabel(),
-                        color = BuyPilotColors.Primary,
-                        fontSize = BuyPilotType.LargeBody,
-                        lineHeight = 21.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                }
-            }
+                    .size(4.dp, 22.dp)
+                    .background(EvidenceAccent, RoundedCornerShape(2.dp)),
+            )
+            Text(
+                text = "为什么推荐它",
+                color = EvidenceInk,
+                fontSize = 24.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+        Text(
+            text = "基于筛选条件、商品资料与用户评价交叉校验",
+            color = EvidenceInkMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 17.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 12.dp),
+        )
     }
 }
 
@@ -295,51 +240,43 @@ private fun EvidenceReportSurface(
     evidenceByKey: Map<String, EvidencePayload>,
     remainingEvidence: List<EvidencePayload>,
     riskNotes: List<String>,
+    riskSourceTexts: List<String>,
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 14.dp,
-                shape = RoundedCornerShape(28.dp),
-                ambientColor = Color.Black.copy(alpha = 0.18f),
-                spotColor = Color.Black.copy(alpha = 0.1f),
-            ),
-        color = EvidencePaper,
-        shape = RoundedCornerShape(28.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, EvidencePaperBorder),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            if (reason.isNotBlank()) {
-                EvidenceConclusion(reason = reason)
-            }
-            if (reasonAtoms.isNotEmpty()) {
-                EvidenceSoftDivider()
-                EvidenceSectionTitle(title = "匹配理由", subtitle = "每条理由都有对应来源")
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (reason.isNotBlank()) {
+            EvidenceConclusion(reason = reason)
+        }
+        if (reasonAtoms.isNotEmpty()) {
+            EvidenceSectionCard(title = "命中的购买标准", subtitle = "每条理由均来自真实商品资料") {
+                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     reasonAtoms.forEachIndexed { index, atom ->
                         val evidence = atom.evidenceId
                             ?.trim()
                             ?.takeIf(String::isNotBlank)
                             ?.let(evidenceByKey::get)
                         EvidenceReasonRow(index = index, atom = atom, evidence = evidence)
+                        if (index != reasonAtoms.lastIndex) {
+                            HorizontalDivider(thickness = 1.dp, color = EvidenceBorder)
+                        }
                     }
                 }
             }
-            val cleanRiskNotes = riskNotes.map { it.withoutInternalDebugTokens().trim() }.filter(String::isNotBlank)
-            if (cleanRiskNotes.isNotEmpty()) {
-                EvidenceSoftDivider()
-                EvidenceRiskCard(notes = cleanRiskNotes)
-            }
-            if (remainingEvidence.isNotEmpty()) {
-                EvidenceSoftDivider()
-                EvidenceSectionTitle(title = "证据来源", subtitle = "商品资料、官方问答和用户评价")
-                Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                    remainingEvidence.take(5).forEach { evidence ->
+        }
+        val cleanRiskNotes = riskNotes.toEvidenceRiskItems(riskSourceTexts)
+        if (cleanRiskNotes.isNotEmpty()) {
+            EvidenceRiskCard(items = cleanRiskNotes)
+        }
+        if (remainingEvidence.isNotEmpty()) {
+            EvidenceSectionCard(title = "更多证据", subtitle = "商品资料、官方问答与用户评价") {
+                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    remainingEvidence.take(5).forEachIndexed { index, evidence ->
                         EvidenceSnippetCard(evidence = evidence)
+                        if (index != minOf(remainingEvidence.size, 5) - 1) {
+                            HorizontalDivider(thickness = 1.dp, color = EvidenceBorder)
+                        }
                     }
                 }
             }
@@ -349,13 +286,36 @@ private fun EvidenceReportSurface(
 
 @Composable
 private fun EvidenceConclusion(reason: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        EvidenceSectionTitle(title = "推荐判断", subtitle = null)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(EvidenceAccentSoft, RoundedCornerShape(16.dp))
+            .border(1.dp, EvidenceAccent.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(EvidenceAccent, CircleShape),
+            )
+            Text(
+                text = "推荐判断",
+                color = EvidenceAccent,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
         Text(
             text = reason,
             color = EvidenceInk,
-            fontSize = 20.sp,
-            lineHeight = 29.sp,
+            fontSize = 17.sp,
+            lineHeight = 26.sp,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -367,57 +327,59 @@ private fun EvidenceReasonRow(
     atom: ReasonAtomPayload,
     evidence: EvidencePayload?,
 ) {
-    val title = listOf(atom.dimension, atom.value)
-        .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
-        .filter(String::isNotBlank)
-        .distinct()
-        .joinToString(" · ")
-        .ifBlank { "匹配项" }
+    val title = atom.userFacingReasonTitle()
     val body = atom.text.withoutInternalDebugTokens().trim()
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.Top,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.72f), CircleShape)
-                .border(1.dp, BuyPilotColors.Primary.copy(alpha = 0.18f), CircleShape),
-            contentAlignment = Alignment.Center,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(
-                text = (index + 1).toString(),
-                color = BuyPilotColors.PrimaryDark,
-                fontSize = BuyPilotType.Tiny,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Text(
-                text = title,
-                color = EvidenceInk,
-                fontSize = BuyPilotType.LargeBody,
-                lineHeight = 21.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (body.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(EvidenceNumberBg, RoundedCornerShape(8.dp))
+                    .border(1.dp, EvidenceBorder, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
-                    text = body,
-                    color = EvidenceInkSecondary,
-                    fontSize = BuyPilotType.Body,
-                    lineHeight = 21.sp,
+                    text = "%02d".format(index + 1),
+                    color = EvidenceAccent,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    fontWeight = FontWeight.Bold,
                 )
             }
-            evidence?.let {
-                EvidenceInlineQuote(evidence = it)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    text = title,
+                    color = EvidenceInk,
+                    fontSize = BuyPilotType.LargeBody,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (body.isNotBlank()) {
+                    Text(
+                        text = body,
+                        color = EvidenceInkSecondary,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 21.sp,
+                    )
+                }
             }
+        }
+        evidence?.let {
+            EvidenceInlineQuote(evidence = it)
         }
     }
 }
@@ -426,12 +388,262 @@ private fun EvidenceReasonRow(
 private fun EvidenceInlineQuote(evidence: EvidencePayload) {
     val snippet = evidence.cleanSnippet()
     if (snippet.isBlank()) return
+    val parts = remember(snippet) { snippet.toEvidenceSnippetParts() }
+    var showDialog by rememberSaveable(evidence.evidenceId, snippet) { androidx.compose.runtime.mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(EvidenceQuoteBg, RoundedCornerShape(14.dp))
-            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 13.dp, vertical = 11.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .background(EvidenceSurfaceRaised)
+            .border(1.dp, EvidenceBorder, RoundedCornerShape(10.dp))
+            .clickable(role = Role.Button) { showDialog = true }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            EvidenceSourceLabel(evidence = evidence)
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "查看完整 →",
+                color = EvidenceAccent,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (parts.size > 1) {
+            // parts[0]=标题, parts[1]=品牌, parts[2]=品类, parts[3]=价格, ...
+            Text(
+                text = parts.first(),
+                color = EvidenceInkSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 21.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // 只取品牌/品类/价格（前3个meta字段），过滤掉场景、别名等冗余字段
+            val keyMeta = parts.drop(1).take(3).joinToString("  ·  ")
+            if (keyMeta.isNotBlank()) {
+                Text(
+                    text = keyMeta,
+                    color = EvidenceInkMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 17.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            Text(
+                text = snippet,
+                color = EvidenceInkSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 21.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    if (showDialog) {
+        if (parts.size > 1) {
+            EvidenceProductDialog(parts = parts, onDismiss = { showDialog = false })
+        } else {
+            EvidenceTextDialog(
+                title = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
+                body = snippet,
+                onDismiss = { showDialog = false },
+            )
+        }
+    }
+}
+
+@Composable
+private fun EvidenceTextDialog(
+    title: String,
+    body: String,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            color = EvidenceSurface,
+            shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, EvidenceBorder),
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+                    .heightIn(max = 520.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = title,
+                    color = EvidenceInk,
+                    fontSize = BuyPilotType.Title,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = body,
+                    color = EvidenceInkSecondary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 23.sp,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            }
+        }
+    }
+}
+
+private val ProductPartLabels = listOf("商品名", "品牌", "品类", "价格", "使用场景", "别名")
+
+@Composable
+private fun EvidenceProductDialog(parts: List<String>, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true, usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            color = EvidenceSurface,
+            shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, EvidenceBorder),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("商品资料", color = EvidenceInk, fontSize = BuyPilotType.Title, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+                parts.forEachIndexed { i, part ->
+                    val label = ProductPartLabels.getOrElse(i) { "其他" }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(label, color = EvidenceInkMuted, fontSize = BuyPilotType.Label, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
+                        Text(part, color = EvidenceInkSecondary, fontSize = BuyPilotType.Body, lineHeight = 22.sp)
+                    }
+                    if (i != parts.lastIndex) HorizontalDivider(thickness = 1.dp, color = EvidenceBorder)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EvidenceRiskCard(items: List<EvidenceRiskItemUi>) {
+    var selectedIndex by remember(items) { androidx.compose.runtime.mutableIntStateOf(-1) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFF5F3), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0xFFFFDDD6), RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(20.dp)
+                    .background(Color(0xFFD14A20).copy(alpha = 0.10f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "!",
+                    color = Color(0xFFE05530),
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 14.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Text(
+                text = "留意点",
+                color = Color(0xFFD14A20),
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "来自真实评价或商品资料",
+                color = EvidenceInkMuted,
+                fontSize = BuyPilotType.Tiny,
+                lineHeight = 14.sp,
+            )
+        }
+        items.forEachIndexed { index, item ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(role = Role.Button) { selectedIndex = index }
+                    .padding(vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                item.label?.let { label ->
+                    Text(
+                        text = label,
+                        color = Color(0xFFD14A20),
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = item.text,
+                    color = EvidenceInkSecondary,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 22.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "查看完整 →",
+                    color = Color(0xFFD14A20),
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            if (index != items.lastIndex) {
+                HorizontalDivider(thickness = 1.dp, color = Color(0xFFFFDDD6))
+            }
+        }
+    }
+    selectedIndex
+        .takeIf { it in items.indices }
+        ?.let { index ->
+            EvidenceTextDialog(
+                title = "留意点",
+                body = items[index].text,
+                onDismiss = { selectedIndex = -1 },
+            )
+        }
+}
+
+@Composable
+private fun EvidenceSnippetCard(evidence: EvidencePayload) {
+    val snippet = evidence.cleanSnippet()
+    if (snippet.isBlank()) return
+    var expanded by rememberSaveable(evidence.evidenceId, snippet) { androidx.compose.runtime.mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .animateContentSize()
+            .fillMaxWidth()
+            .clickable(enabled = snippet.length > 96) { expanded = !expanded }
+            .padding(vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         EvidenceSourceLabel(evidence = evidence)
@@ -439,59 +651,19 @@ private fun EvidenceInlineQuote(evidence: EvidencePayload) {
             text = snippet,
             color = EvidenceInkSecondary,
             fontSize = BuyPilotType.Body,
-            lineHeight = 21.sp,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
+            lineHeight = 22.sp,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
         )
-    }
-}
-
-@Composable
-private fun EvidenceRiskCard(notes: List<String>) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(BuyPilotColors.WarningSoft.copy(alpha = 0.86f), RoundedCornerShape(18.dp))
-            .border(1.dp, BuyPilotColors.Warning.copy(alpha = 0.2f), RoundedCornerShape(18.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = "需要留意",
-            color = Color(0xFF8F5A00),
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        notes.forEach { note ->
+        if (snippet.length > 96) {
             Text(
-                text = note,
-                color = EvidenceInkSecondary,
-                fontSize = BuyPilotType.Body,
-                lineHeight = 21.sp,
+                text = if (expanded) "收起" else "展开全文 →",
+                color = EvidenceAccent,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
             )
         }
-    }
-}
-
-@Composable
-private fun EvidenceSnippetCard(evidence: EvidencePayload) {
-    val snippet = evidence.cleanSnippet()
-    if (snippet.isBlank()) return
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        EvidenceSourceLabel(evidence = evidence)
-        Text(
-            text = snippet,
-            color = EvidenceInkSecondary,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 22.sp,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
-        )
-        HorizontalDivider(
-            thickness = 1.dp,
-            color = BuyPilotColors.Border.copy(alpha = 0.72f),
-        )
     }
 }
 
@@ -503,6 +675,7 @@ private fun EvidenceSourceLabel(evidence: EvidencePayload) {
     ) {
         EvidencePill(evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"))
         evidence.trustLabel?.withoutInternalDebugTokens()?.trim()?.takeIf(String::isNotBlank)?.let {
+            Text(text = "·", color = EvidenceInkMuted, fontSize = BuyPilotType.Label, lineHeight = 16.sp)
             EvidencePill(it, muted = true)
         }
     }
@@ -512,52 +685,150 @@ private fun EvidenceSourceLabel(evidence: EvidencePayload) {
 private fun EvidencePill(label: String, muted: Boolean = false) {
     Text(
         text = label,
-        color = if (muted) EvidenceInkMuted else BuyPilotColors.PrimaryDark,
-        fontSize = BuyPilotType.Tiny,
-        lineHeight = 13.sp,
+        color = if (muted) EvidenceInkMuted else EvidenceAccent,
+        fontSize = BuyPilotType.Label,
+        lineHeight = 16.sp,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier
-            .background(
-                if (muted) BuyPilotColors.SurfaceMuted.copy(alpha = 0.78f) else BuyPilotColors.PrimarySoft.copy(alpha = 0.72f),
-                CircleShape,
-            )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
 @Composable
-private fun EvidenceSectionTitle(title: String, subtitle: String? = null) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            color = EvidenceInk,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        subtitle?.takeIf(String::isNotBlank)?.let {
+private fun EvidenceSectionCard(
+    title: String,
+    subtitle: String,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(EvidenceSurface, RoundedCornerShape(16.dp))
+            .border(1.dp, EvidenceBorder, RoundedCornerShape(16.dp)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = it,
+                text = title,
+                color = EvidenceInk,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = subtitle,
                 color = EvidenceInkMuted,
                 fontSize = BuyPilotType.Tiny,
                 lineHeight = 14.sp,
-                fontWeight = FontWeight.Medium,
             )
+        }
+        HorizontalDivider(thickness = 1.dp, color = EvidenceBorder)
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+            content()
         }
     }
 }
 
-@Composable
-private fun EvidenceSoftDivider() {
-    Spacer(Modifier.height(2.dp))
-    HorizontalDivider(
-        thickness = 1.dp,
-        color = EvidencePaperBorder.copy(alpha = 0.86f),
-    )
-}
-
 private fun EvidencePayload.cleanSnippet(): String =
     snippet.withoutInternalDebugTokens().trim()
+
+private data class EvidenceRiskItemUi(
+    val label: String?,
+    val text: String,
+)
+
+private fun String.toEvidenceSnippetParts(): List<String> =
+    split('|')
+        .map { part ->
+            part
+                .withoutInternalDebugTokens()
+                .trim()
+                .replace(Regex("""\s+"""), " ")
+        }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+        .ifEmpty { listOf(this.withoutInternalDebugTokens().trim()) }
+
+private fun List<String>.toEvidenceRiskItems(sourceTexts: List<String>): List<EvidenceRiskItemUi> =
+    mapNotNull { raw ->
+        val clean = raw
+            .withoutMarkdownMarkup()
+            .withoutInternalDebugTokens()
+            .trim()
+            .takeIf(String::isNotBlank)
+            ?: return@mapNotNull null
+        if (clean.looksLikeQuestionAnswerEvidence()) return@mapNotNull null
+        val marker = RiskRatingMarkerRegex.find(clean)
+        val label = marker?.groupValues?.getOrNull(1)?.trim()?.takeIf(String::isNotBlank)
+        val text = clean
+            .replace(RiskRatingMarkerRegex, "")
+            .replace(Regex("""^\s*[·•\-\s]+"""), "")
+            .trim()
+            .expandFromSources(sourceTexts)
+            .takeIf(String::isNotBlank)
+            ?: return@mapNotNull null
+        EvidenceRiskItemUi(label = label, text = text)
+    }
+        .distinctBy { it.text }
+        .take(3)
+
+private fun String.expandFromSources(sourceTexts: List<String>): String {
+    val probe = substringBefore("...")
+        .substringBefore("…")
+        .trim()
+        .takeIf { it.length >= 12 }
+        ?: return this
+    val compactProbe = probe.compactForEvidenceMatch()
+    return sourceTexts.firstOrNull { source ->
+        val compactSource = source.compactForEvidenceMatch()
+        compactSource.contains(compactProbe) || compactProbe.take(18).let(compactSource::contains)
+    } ?: this
+}
+
+private fun String.compactForEvidenceMatch(): String =
+    withoutMarkdownMarkup()
+        .withoutInternalDebugTokens()
+        .replace(Regex("""\s+"""), "")
+        .trim()
+
+private val RiskRatingMarkerRegex = Regex("""\[([^\]\[:：]{1,16})\s+评分[:：]\s*(\d{1,2})\]""")
+private val QaEvidenceRegex = Regex("""(?:^|\s)(?:Q|问|问题)\s*[:：].*(?:A|答|回答)\s*[:：]""", RegexOption.IGNORE_CASE)
+private val QuestionOnlyEvidenceRegex = Regex("""^\s*(?:Q|问|问题)\s*[:：]""", RegexOption.IGNORE_CASE)
+
+private fun String.looksLikeQuestionAnswerEvidence(): Boolean =
+    QaEvidenceRegex.containsMatchIn(this) || QuestionOnlyEvidenceRegex.containsMatchIn(this)
+
+private fun ReasonAtomPayload.userFacingReasonTitle(): String {
+    val dimensionLabel = dimension.userFacingReasonDimension()
+    val cleanValue = value
+        .withoutMarkdownMarkup()
+        .withoutInternalDebugTokens()
+        .trim()
+    return listOf(dimensionLabel, cleanValue)
+        .filter(String::isNotBlank)
+        .distinct()
+        .joinToString(" · ")
+        .ifBlank { "匹配项" }
+}
+
+private fun String.userFacingReasonDimension(): String =
+    when (withoutMarkdownMarkup().withoutInternalDebugTokens().trim().lowercase()) {
+        "product_type", "category", "sub_category", "type" -> "品类"
+        "budget", "price", "price_range", "budget_max", "budget_min" -> "预算"
+        "scenario", "use_case", "use_scenario" -> "使用场景"
+        "brand", "brand_prefer", "brand_avoid" -> "品牌"
+        "skin_type", "skin" -> "肤质"
+        "ingredient", "ingredient_prefer", "ingredient_avoid" -> "成分"
+        "storage", "memory" -> "存储"
+        "camera", "photo" -> "影像"
+        "battery" -> "续航"
+        else -> withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
+    }
 
 private fun EvidencePayload.linkKey(): String? =
     evidenceId?.trim()?.takeIf(String::isNotBlank)

@@ -130,6 +130,7 @@ data class FinalDecisionPayload(
     @SerialName("not_for") val notFor: List<String> = emptyList(),
     val alternatives: List<AlternativePayload> = emptyList(),
     @SerialName("next_actions") val nextActions: List<QuickActionPayload> = emptyList(),
+    @SerialName("score_breakdown") val scoreBreakdown: Map<String, Double> = emptyMap(),
     @SerialName("decision_status") val decisionStatus: String? = null,
     val confidence: String? = null,
     @SerialName("next_step") val nextStep: String? = null,

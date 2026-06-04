@@ -86,6 +86,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -551,7 +552,17 @@ internal fun BuyPilotChatScreen(
         }
         val latestDecision = timelinePresentation.latestFinalDecisionPayload
         when (action.action) {
-            "compare", "open_evidence" -> {
+            "compare" -> {
+                val sourceDeckNodeKey = timelinePresentation.latestFinalDecisionKey
+                    ?.let { timelinePresentation.finalDecisionSourceDeckKeyByDecisionKey[it] }
+                    ?: timelinePresentation.latestProductDeckKey
+                if (sourceDeckNodeKey != null) {
+                    openSheet(ChatSheetContent.ProductCompare(sourceDeckNodeKey))
+                } else {
+                    onQuickAction(action)
+                }
+            }
+            "open_evidence" -> {
                 if (latestDecision != null) {
                     openSheet(
                         ChatSheetContent.DecisionEvidence(
@@ -996,29 +1007,42 @@ internal fun BuyPilotChatScreen(
                             dismissSheet { onCriteriaPatch(patch) }
                         },
                     )
-                    is ChatSheetContent.DecisionEvidence -> DecisionEvidenceSheet(
-                        payload = targetContent.payload,
-                        productsById = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey]
-                            ?.let { sheetProductDeckNodeByKey[it] }
-                            ?.productsByProductId()
-                            ?: sheetProductsById,
-                        productDeckIdByProductId = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey]
-                            ?.let { sheetProductDeckNodeByKey[it] }
-                            ?.deckIdsByProductId()
-                            ?: sheetProductDeckIdByProductId,
-                        sourceDeckNodeKey = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey],
-                        cartState = state.cartState,
-                        onProductDetailOpen = { deckId, productId, deckNodeKey ->
+                    is ChatSheetContent.DecisionEvidence -> {
+                        val sourceDeckNodeKey = sheetFinalDecisionSourceDeckKeyByDecisionKey[targetContent.sourceNodeKey]
+                        val sourceDeck = sourceDeckNodeKey?.let { sheetProductDeckNodeByKey[it] }
+                        DecisionEvidenceSheet(
+                            payload = targetContent.payload,
+                            productsById = sourceDeck?.productsByProductId() ?: sheetProductsById,
+                            productDeckIdByProductId = sourceDeck?.deckIdsByProductId() ?: sheetProductDeckIdByProductId,
+                            swipeState = sourceDeck?.deckId?.let { state.productSwipeStates[it] },
+                            sourceDeckNodeKey = sourceDeckNodeKey,
+                            cartState = state.cartState,
+                            onProductDetailOpen = { deckId, productId, deckNodeKey ->
+                                dismissSheet {
+                                    openProductDetailAfterTimelineFreeze(
+                                        deckId = deckId,
+                                        productId = productId,
+                                        anchorNodeKey = targetContent.sourceNodeKey,
+                                        deckNodeKey = deckNodeKey,
+                                    )
+                                }
+                            },
+                            onQuickAction = ::dispatchQuickAction,
+                        )
+                    }
+                    is ChatSheetContent.ProductCompare -> ProductCompareSheet(
+                        deck = sheetProductDeckNodeByKey[targetContent.sourceDeckNodeKey],
+                        backendBaseUrl = state.backendBaseUrl,
+                        onProductDetailOpen = { deckId, productId ->
                             dismissSheet {
                                 openProductDetailAfterTimelineFreeze(
                                     deckId = deckId,
                                     productId = productId,
-                                    anchorNodeKey = targetContent.sourceNodeKey,
-                                    deckNodeKey = deckNodeKey,
+                                    anchorNodeKey = targetContent.sourceDeckNodeKey,
+                                    deckNodeKey = targetContent.sourceDeckNodeKey,
                                 )
                             }
                         },
-                        onQuickAction = ::dispatchQuickAction,
                     )
                     ChatSheetContent.Cart -> CartSheet(
                         state = state.cartState,
@@ -2754,8 +2778,10 @@ internal fun DecisionSummaryCard(
         { onProductDetailOpen(deckId, winnerProductId.orEmpty(), sourceDeckNodeKey) }
     }
     val product = winner?.product
-    val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
-    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
+    val whyItems = payload.why
+        .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
+        .filter { it.isNotBlank() }
+        .take(3)
     val statusBadge = payload.decisionStatusBadge()
     val canAddWinnerToCart = winner != null && !winnerProductId.isNullOrBlank()
     val nextActions = payload.nextActions.filter { action ->
@@ -2768,7 +2794,6 @@ internal fun DecisionSummaryCard(
     val hasDecisionBody = winner != null ||
         !winnerProductId.isNullOrBlank() ||
         whyItems.isNotEmpty() ||
-        notForItems.isNotEmpty() ||
         statusBadge?.showCardWhenEmpty == true
 
     LaunchedEffect(motionKey, hasDecisionBody, alreadyEntered, motionEnabled) {
@@ -2810,6 +2835,11 @@ internal fun DecisionSummaryCard(
                     border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f)),
                 ) {
                     Column {
+                        DecisionRecommendationHeader(
+                            label = if (winner != null) "首选推荐" else statusBadge?.label ?: "推荐结论",
+                            accent = statusBadge?.accent ?: BuyPilotColors.PrimaryDark,
+                            surface = statusBadge?.surface ?: BuyPilotColors.PrimarySoft.copy(alpha = 0.62f),
+                        )
                         Column(
                             Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -2902,9 +2932,6 @@ internal fun DecisionSummaryCard(
                                     alreadyEntered = alreadyEntered,
                                 )
                             }
-                            if (notForItems.isNotEmpty()) {
-                                WarningBox(notForItems.joinToString("；"))
-                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End,
@@ -2940,6 +2967,55 @@ internal fun DecisionSummaryCard(
             ScrollableQuickActionRow(
                 actions = nextActions,
                 onQuickAction = onQuickAction,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DecisionRecommendationHeader(
+    label: String,
+    accent: Color,
+    surface: Color,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        surface.copy(alpha = 0.78f),
+                        BuyPilotColors.SurfaceCard,
+                    ),
+                ),
+            )
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(accent.copy(alpha = 0.1f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_favorite_24),
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+            Text(
+                text = label,
+                color = accent,
+                fontSize = BuyPilotType.LargeBody,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -3095,6 +3171,95 @@ private fun FinalDecisionPayload.decisionSummaryText(): String {
 
 private fun String.withoutLeadingMarkdownDivider(): String =
     replaceFirst(Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*"""), "").trimStart()
+
+private fun List<String>.toDecisionNotForItems(productsById: Map<String, ProductCardPayload>): List<String> =
+    mapNotNull { raw ->
+        val clean = raw.withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
+        if (clean.isBlank()) return@mapNotNull null
+        productsById[clean]?.product?.displayName("")?.takeIf(String::isNotBlank) ?: clean
+    }
+        .filterNot { it.looksLikeQuestionAnswerEvidenceForDecision() }
+        .distinct()
+        .take(4)
+
+private fun ProductSwipeState?.toDecisionFeedbackTrace(productsById: Map<String, ProductCardPayload>): DecisionFeedbackTraceUi? {
+    val actions = this?.undoStack.orEmpty()
+        .filter { action ->
+            action.feedbackType == "like" ||
+                action.feedbackType == "not_interested" ||
+                action.action == "like" ||
+                action.action == "not_interested"
+        }
+        .distinctBy { "${it.productId}_${it.feedbackType}_${it.action}" }
+    if (actions.isEmpty()) return null
+    fun nameOf(productId: String): String =
+        productsById[productId]?.product?.displayName("")?.takeIf(String::isNotBlank)
+            ?: productId.takeUnless { it.startsWith("p_", ignoreCase = true) || it.startsWith("pg_", ignoreCase = true) }
+            ?: "候选商品"
+    val preferred = actions
+        .filter { it.feedbackType == "like" || it.action == "like" }
+        .map { nameOf(it.productId) }
+        .distinct()
+        .take(3)
+    val excluded = actions
+        .filter { it.feedbackType == "not_interested" || it.action == "not_interested" }
+        .map { nameOf(it.productId) }
+        .distinct()
+        .take(3)
+    if (preferred.isEmpty() && excluded.isEmpty()) return null
+    return DecisionFeedbackTraceUi(preferredNames = preferred, excludedNames = excluded)
+}
+
+private fun Map<String, Double>.toDecisionScoreItems(): List<DecisionScoreItemUi> =
+    entries
+        .mapNotNull { (key, value) ->
+            val label = key.userFacingScoreLabel().takeIf(String::isNotBlank) ?: return@mapNotNull null
+            if (value.isNaN() || value.isInfinite()) return@mapNotNull null
+            DecisionScoreItemUi(label = label, value = value)
+        }
+        .sortedBy { item ->
+            DecisionScoreOrder.indexOf(item.label).let { if (it == -1) Int.MAX_VALUE else it }
+        }
+        .take(6)
+
+private val DecisionScoreOrder = listOf("检索相关", "标准匹配", "用户偏好", "证据质量", "风险扣分", "综合得分")
+
+private fun String.userFacingScoreLabel(): String =
+    when (withoutMarkdownMarkup().withoutInternalDebugTokens().trim().lowercase()) {
+        "retrieval", "retrieval_score", "relevance", "retrieval_relevance" -> "检索相关"
+        "criteria", "criteria_match", "constraint_match", "match_score" -> "标准匹配"
+        "preference", "user_preference", "feedback", "feedback_score" -> "用户偏好"
+        "evidence", "evidence_quality", "evidence_score" -> "证据质量"
+        "risk", "risk_penalty", "risk_score" -> "风险扣分"
+        "overall", "total", "final", "final_score", "score" -> "综合得分"
+        else -> withoutMarkdownMarkup()
+            .withoutInternalDebugTokens()
+            .trim()
+            .replace('_', ' ')
+            .takeIf { it.any(Char::isCjk) }
+            ?: ""
+    }
+
+private fun Double.scoreFraction(): Float {
+    return normalizedScore().coerceIn(0.04, 1.0).toFloat()
+}
+
+private fun Double.scoreLabel(): String =
+    "${(normalizedScore() * 100).roundToInt()}%"
+
+private fun Double.normalizedScore(): Double =
+    when {
+        this <= 1.0 -> this
+        this <= 10.0 -> this / 10.0
+        else -> this / 100.0
+    }
+        .coerceIn(0.0, 1.0)
+
+private val DecisionQaEvidenceRegex = Regex("""(?:^|\s)(?:Q|问|问题)\s*[:：].*(?:A|答|回答)\s*[:：]""", RegexOption.IGNORE_CASE)
+private val DecisionQuestionOnlyEvidenceRegex = Regex("""^\s*(?:Q|问|问题)\s*[:：]""", RegexOption.IGNORE_CASE)
+
+private fun String.looksLikeQuestionAnswerEvidenceForDecision(): Boolean =
+    DecisionQaEvidenceRegex.containsMatchIn(this) || DecisionQuestionOnlyEvidenceRegex.containsMatchIn(this)
 
 @Composable
 private fun DecisionStateMetaRow(
@@ -3635,7 +3800,6 @@ private fun CinematicProductDetailPanel(
         ?.takeIf { it.isNotEmpty() }
     val hasBelowDividerContent = cartAction != null ||
         attributeRows.isNotEmpty() ||
-        payload.riskNotes.isNotEmpty() ||
         description != null ||
         faqs != null ||
         reviews != null
@@ -3738,9 +3902,6 @@ private fun CinematicProductDetailPanel(
         if (attributeRows.isNotEmpty()) {
             ImmersiveSectionTitle("商品信息")
             ProductAttributeRowsDark(rows = attributeRows)
-        }
-        if (payload.riskNotes.isNotEmpty()) {
-            ImmersiveWarningBox(payload.riskNotes.joinToString("；"))
         }
         description?.let { ProductDescriptionSection(description = it) }
         faqs?.let { ProductFaqSection(faqs = it) }
@@ -3903,89 +4064,223 @@ private fun ProductDescriptionSection(description: String) {
 
 @Composable
 private fun ProductFaqSection(faqs: List<FaqItem>) {
-    var expandedIndex by rememberSaveable(faqs.size) { mutableIntStateOf(-1) }
+    var selectedIndex by rememberSaveable(faqs.size) { mutableIntStateOf(-1) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ImmersiveSectionTitle("官方问答")
-        faqs.forEachIndexed { index, faq ->
-            val expanded = expandedIndex == index
-            Surface(
-                color = BuyPilotColors.SurfaceCard,
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.76f)),
-                modifier = Modifier.animateContentSize(tween(durationMillis = 210, easing = PremiumRevealEase)),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .clickable(
-                            role = Role.Button,
-                            onClick = { expandedIndex = if (expanded) -1 else index },
-                        )
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(if (expanded) 8.dp else 0.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = faq.question,
-                            color = BuyPilotColors.TextPrimary,
-                            fontSize = BuyPilotType.Label,
-                            lineHeight = 18.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = if (expanded) "收起" else "展开",
-                            color = BuyPilotColors.TextMuted,
-                            fontSize = BuyPilotType.Tiny,
-                            lineHeight = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                    AnimatedVisibility(
-                        visible = expanded,
-                        enter = fadeIn(tween(durationMillis = 160, easing = MenuEaseOut)) +
-                            expandVertically(tween(durationMillis = 190, easing = PremiumRevealEase)),
-                        exit = fadeOut(tween(durationMillis = 120, easing = MenuEaseOut)) +
-                            shrinkVertically(tween(durationMillis = 150, easing = MenuEaseOut)),
-                    ) {
-                        Text(
-                            text = faq.answer,
-                            color = BuyPilotColors.TextSecondary,
-                            fontSize = BuyPilotType.Body,
-                            lineHeight = 23.sp,
-                        )
-                    }
-                }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp),
+        ) {
+            itemsIndexed(faqs.take(8), key = { index, faq -> "${faq.question}_$index" }) { index, faq ->
+                ProductFaqPreviewCard(
+                    faq = faq,
+                    onClick = { selectedIndex = index },
+                )
             }
+        }
+    }
+    selectedIndex
+        .takeIf { it in faqs.indices }
+        ?.let { index ->
+            val faq = faqs[index]
+            ProductTextPreviewDialog(
+                title = faq.question,
+                eyebrow = "官方问答",
+                body = faq.answer,
+                onDismiss = { selectedIndex = -1 },
+            )
+        }
+}
+
+@Composable
+private fun ProductFaqPreviewCard(
+    faq: FaqItem,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .width(282.dp)
+            .heightIn(min = 132.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(role = Role.Button, onClick = onClick),
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.74f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Text(
+                text = faq.question,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 21.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            faq.answer.takeIf { it.isNotBlank() }?.let { answer ->
+                Text(
+                    text = answer,
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 18.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "查看完整",
+                color = BuyPilotColors.Info,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
 
 @Composable
 private fun ProductReviewsSection(reviews: List<ReviewItem>) {
+    var selectedIndex by rememberSaveable(reviews.size) { mutableIntStateOf(-1) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ImmersiveSectionTitle("用户评价 (${reviews.size})")
         RatingDistributionBar(reviews)
-        reviews.forEach { review ->
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp),
+        ) {
+            itemsIndexed(reviews.take(8), key = { index, review -> "${review.nickname}_${review.rating}_$index" }) { index, review ->
+                ProductReviewPreviewCard(
+                    review = review,
+                    onClick = { selectedIndex = index },
+                )
+            }
+        }
+    }
+    selectedIndex
+        .takeIf { it in reviews.indices }
+        ?.let { index ->
+            val review = reviews[index]
+            ProductTextPreviewDialog(
+                title = review.nickname.ifBlank { "用户评价" },
+                eyebrow = "用户评价",
+                body = review.content,
+                rating = review.rating,
+                onDismiss = { selectedIndex = -1 },
+            )
+        }
+}
+
+@Composable
+private fun ProductReviewPreviewCard(
+    review: ReviewItem,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .width(260.dp)
+            .heightIn(min = 132.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(role = Role.Button, onClick = onClick),
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.74f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = review.nickname.ifBlank { "用户评价" },
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Label,
+                    lineHeight = 17.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                RatingStars(rating = review.rating)
+            }
+            Text(
+                text = review.content,
+                color = BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Body,
+                lineHeight = 22.sp,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "查看完整",
+                color = BuyPilotColors.Info,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductTextPreviewDialog(
+    title: String,
+    eyebrow: String,
+    body: String,
+    rating: Int? = null,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp),
+            color = BuyPilotColors.SurfaceCard,
+            shape = RoundedCornerShape(24.dp),
+            shadowElevation = 12.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.64f)),
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+                    .heightIn(max = 520.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = review.nickname.ifBlank { "用户评价" },
-                        color = BuyPilotColors.TextMuted,
+                        text = eyebrow,
+                        color = BuyPilotColors.PrimaryDark,
                         fontSize = BuyPilotType.Label,
-                        lineHeight = 17.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.72f), CircleShape)
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
                     )
-                    RatingStars(rating = review.rating)
+                    Spacer(Modifier.weight(1f))
+                    rating?.let { RatingStars(rating = it) }
                 }
                 Text(
-                    text = review.content,
+                    text = title,
+                    color = BuyPilotColors.TextPrimary,
+                    fontSize = BuyPilotType.Title,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = body,
                     color = BuyPilotColors.TextSecondary,
                     fontSize = BuyPilotType.Body,
-                    lineHeight = 22.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 23.sp,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                 )
             }
         }
@@ -5153,8 +5448,8 @@ private fun AttachmentMenu(
             .padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        AttachmentAction(R.drawable.ic_image_24, "相册图片", enabled = true, onClick = onImageInput)
-        AttachmentAction(R.drawable.ic_add_photo_24, "拍照识别", enabled = true, onClick = onCameraInput)
+        AttachmentAction(R.drawable.ic_image_24, "商品图识别", enabled = true, onClick = onImageInput)
+        AttachmentAction(R.drawable.ic_add_photo_24, "拍照/截图识别", enabled = true, onClick = onCameraInput)
         AttachmentAction(R.drawable.ic_mic_24, "语音输入", enabled = false, onClick = {})
     }
 }
@@ -5599,17 +5894,27 @@ private fun DecisionEvidenceSheet(
     payload: FinalDecisionPayload,
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
+    swipeState: ProductSwipeState?,
     sourceDeckNodeKey: String? = null,
     cartState: ChatCartUiState,
     onProductDetailOpen: (String, String, String?) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val whyItems = payload.why.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
-    val notForItems = payload.notFor.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }.filter { it.isNotBlank() }
+    val notForItems = payload.notFor.toDecisionNotForItems(productsById)
     val alternatives = payload.alternatives.filter {
         it.name.withoutInternalDebugTokens().isNotBlank()
     }
     val winnerProductId = payload.winnerProductId?.takeIf { it.isNotBlank() }
+    val winner = winnerProductId?.let(productsById::get)
+    val feedbackTrace = remember(swipeState, productsById) {
+        swipeState.toDecisionFeedbackTrace(productsById)
+    }
+    val scoreItems = remember(payload.scoreBreakdown) { payload.scoreBreakdown.toDecisionScoreItems() }
+    val winnerRiskNote = winner
+        ?.riskNotes
+        ?.map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
+        ?.firstOrNull { it.isNotBlank() && !it.looksLikeQuestionAnswerEvidenceForDecision() }
     val nextActions = payload.nextActions
         .filter { it.label.isNotBlank() && it.action != "view_cart" }
         .map { action ->
@@ -5623,17 +5928,6 @@ private fun DecisionEvidenceSheet(
     SheetContentColumn(expandToMaxHeight = false) {
         SheetTitle("决策依据")
 
-        if (payload.summary.isNotBlank()) {
-            DecisionEvidenceSummary(
-                summary = payload.summary,
-                winnerProductId = payload.winnerProductId,
-                productsById = productsById,
-                productDeckIdByProductId = productDeckIdByProductId,
-                sourceDeckNodeKey = sourceDeckNodeKey,
-                onProductDetailOpen = onProductDetailOpen,
-            )
-        }
-
         if (whyItems.isNotEmpty()) {
             DecisionEvidenceListSection(
                 title = "为什么选它",
@@ -5642,6 +5936,23 @@ private fun DecisionEvidenceSheet(
                 accentColor = BuyPilotColors.Primary,
                 surfaceColor = BuyPilotColors.PrimarySoft.copy(alpha = 0.28f),
             )
+        }
+
+        feedbackTrace?.let {
+            DecisionFeedbackTraceSection(trace = it)
+        }
+
+        if (scoreItems.isNotEmpty()) {
+            DecisionScoreBreakdownSection(
+                items = scoreItems,
+                motionKey = "decision_evidence_${winnerProductId.orEmpty()}_${scoreItems.size}",
+                motionEnabled = false,
+                alreadyEntered = true,
+            )
+        }
+
+        winnerRiskNote?.let {
+            DecisionLightRiskNote(text = it)
         }
 
         if (notForItems.isNotEmpty()) {
@@ -5662,15 +5973,305 @@ private fun DecisionEvidenceSheet(
                 onProductDetailOpen = onProductDetailOpen,
             )
         }
+    }
+}
 
-        if (nextActions.isNotEmpty()) {
-            DecisionNextActionsSection(
-                actions = nextActions,
-                cartState = cartState,
-                onQuickAction = onQuickAction,
-            )
+@Composable
+private fun ProductCompareSheet(
+    deck: ProductDeckNode?,
+    backendBaseUrl: String,
+    onProductDetailOpen: (String, String) -> Unit,
+) {
+    val products = deck?.products.orEmpty()
+    SheetContentColumn(expandToMaxHeight = products.size > 2) {
+        SheetTitle("当前候选对比")
+        if (products.isEmpty() || deck == null) {
+            InlineSystemNotice("这组候选已经不可用")
+            return@SheetContentColumn
+        }
+        Text(
+            text = "基于当前候选字段整理，不代表额外的 AI 对比结论。",
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 17.sp,
+        )
+
+        val dimensions = remember(products) { extractCompareDimensions(products) }
+
+        ProductCompareTable(
+            products = products,
+            dimensions = dimensions,
+            backendBaseUrl = backendBaseUrl,
+            deckId = deck.deckId,
+            onProductDetailOpen = onProductDetailOpen,
+        )
+    }
+}
+
+private fun String.toCompareDimensionLabel(): String =
+    when (withoutMarkdownMarkup().withoutInternalDebugTokens().trim().lowercase()) {
+        "product_type", "category", "sub_category", "type" -> "品类"
+        "budget", "price", "price_range", "budget_max", "budget_min" -> "价格"
+        "scenario", "use_case", "use_scenario" -> "使用场景"
+        "brand", "brand_prefer", "brand_avoid" -> "品牌"
+        "skin_type", "skin" -> "肤质"
+        "ingredient", "ingredient_prefer", "ingredient_avoid" -> "成分"
+        "storage", "memory" -> "存储"
+        "camera", "photo" -> "影像"
+        "battery" -> "续航"
+        else -> withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
+    }
+
+private fun extractCompareDimensions(products: List<ProductCardPayload>): List<String> {
+    val compareEvidence = products
+        .flatMap { it.evidence }
+        .firstOrNull { it.sourceType == "compare" }
+
+    val explicitAxes = compareEvidence
+        ?.snippet
+        ?.withoutInternalDebugTokens()
+        ?.split("；")
+        ?.map { it.trim() }
+        ?.filter { it.isNotBlank() }
+        .orEmpty()
+
+    if (explicitAxes.isNotEmpty()) return explicitAxes
+
+    val atomDimensions = products
+        .flatMap { it.reasonAtoms }
+        .map { it.dimension.withoutInternalDebugTokens().trim().toCompareDimensionLabel() }
+        .filter { it.isNotBlank() }
+        .distinct()
+
+    // 只有 1 条 atom 维度时数据太稀少，直接走品类 fallback 更有用
+    if (atomDimensions.size >= 2) return atomDimensions
+
+    val category = products.firstOrNull()?.product?.category.orEmpty()
+    return when {
+        category.contains("美妆", true) || category.contains("护肤", true) ->
+            listOf("肤质匹配", "成分风险", "使用场景", "价格")
+        category.contains("数码", true) || category.contains("电子", true) ->
+            listOf("品类", "性能", "续航", "价格")
+        category.contains("服饰", true) || category.contains("运动", true) ->
+            listOf("运动场景", "材质/脚感", "尺码适配", "价格")
+        category.contains("食品", true) || category.contains("生活", true) ->
+            listOf("配料", "糖分/热量", "储存方式", "价格")
+        else -> listOf("品类", "价格", "品牌")
+    }
+}
+
+private fun getCellValue(payload: ProductCardPayload, dimension: String): String {
+    payload.reasonAtoms
+        .firstOrNull {
+            it.dimension.withoutInternalDebugTokens().trim()
+                .equals(dimension, ignoreCase = true)
+        }
+        ?.value
+        ?.withoutInternalDebugTokens()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?.let { return it }
+
+    payload.reasonAtoms
+        .firstOrNull {
+            val d = it.dimension.withoutInternalDebugTokens().trim()
+            d.contains(dimension, ignoreCase = true) ||
+            dimension.contains(d, ignoreCase = true)
+        }
+        ?.value
+        ?.withoutInternalDebugTokens()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?.let { return it }
+
+    return when (dimension) {
+        "价格" -> payload.product.priceLabel()
+        "品牌" -> payload.product.brandLabel()
+        "推荐理由" -> payload.reason.withoutInternalDebugTokens()
+            .trim()
+            .take(30)
+            .let { if (it.length >= 30) "$it..." else it }
+        else -> "—"
+    }
+}
+
+@Composable
+private fun ProductCompareTable(
+    products: List<ProductCardPayload>,
+    dimensions: List<String>,
+    backendBaseUrl: String,
+    deckId: String,
+    onProductDetailOpen: (String, String) -> Unit,
+) {
+    val scrollState = rememberScrollState()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState),
+    ) {
+        Column(
+            modifier = Modifier.width(88.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            Spacer(Modifier.height(148.dp))
+            dimensions.forEach { dimension ->
+                DimensionLabelCell(dimension)
+            }
+        }
+
+        products.forEach { payload ->
+            Column(
+                modifier = Modifier.width(112.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                ProductCompareHeader(
+                    payload = payload,
+                    backendBaseUrl = backendBaseUrl,
+                    onClick = {
+                        payload.product.productId
+                            .takeIf(String::isNotBlank)
+                            ?.let { onProductDetailOpen(deckId, it) }
+                    },
+                )
+                dimensions.forEach { dimension ->
+                    ProductCompareCell(
+                        value = getCellValue(payload, dimension),
+                        isWinner = payload.rank == 1 && getCellValue(payload, dimension) != "—",
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun ProductCompareHeader(
+    payload: ProductCardPayload,
+    backendBaseUrl: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .padding(vertical = 8.dp)
+            .clickable(role = Role.Button, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "#${payload.rank.takeIf { it > 0 } ?: 1}",
+            color = BuyPilotColors.TextMuted,
+            fontSize = BuyPilotType.Tiny,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f), CircleShape)
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+        )
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .background(BuyPilotColors.SurfaceImageAlt, RoundedCornerShape(14.dp))
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                .padding(4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            ProductImage(
+                product = payload.product,
+                backendBaseUrl = backendBaseUrl,
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+            )
+        }
+        Text(
+            text = payload.product.displayName(),
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Tiny,
+            lineHeight = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun DimensionLabelCell(dimension: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BuyPilotColors.SurfaceCard)
+            .border(0.5.dp, BuyPilotColors.Border.copy(alpha = 0.28f))
+            .padding(vertical = 11.dp, horizontal = 8.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text = dimension,
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun ProductCompareCell(
+    value: String,
+    isWinner: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (isWinner) BuyPilotColors.PrimarySoft.copy(alpha = 0.25f)
+                else BuyPilotColors.SurfaceCard
+            )
+            .border(0.5.dp, BuyPilotColors.Border.copy(alpha = 0.28f))
+            .padding(horizontal = 6.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = value,
+            color = if (isWinner) BuyPilotColors.PrimaryDark else BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = if (isWinner) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun ProductCompareMeta(
+    text: String,
+    accent: Boolean = false,
+    warning: Boolean = false,
+) {
+    Text(
+        text = text.withoutMarkdownMarkup(),
+        color = when {
+            warning -> BuyPilotColors.Warning
+            accent -> BuyPilotColors.PrimaryDark
+            else -> BuyPilotColors.TextMuted
+        },
+        fontSize = BuyPilotType.Tiny,
+        lineHeight = 14.sp,
+        fontWeight = if (accent || warning) FontWeight.SemiBold else FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .background(
+                when {
+                    warning -> BuyPilotColors.WarningSoft.copy(alpha = 0.5f)
+                    accent -> BuyPilotColors.PrimarySoft.copy(alpha = 0.42f)
+                    else -> BuyPilotColors.SurfaceMuted.copy(alpha = 0.64f)
+                },
+                CircleShape,
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
 }
 
 @Composable
@@ -5962,12 +6563,14 @@ private fun DecisionNextActionsSection(
                 isInCart -> "这件商品已在购物车中"
                 isAddToCart && productId == null -> "缺少商品信息，暂不可操作"
                 isAddToCart -> "绑定当前结论商品"
-                action.action == "open_evidence" || action.action == "compare" -> "查看更多判断依据"
+                action.action == "open_evidence" -> "查看更多判断依据"
+                action.action == "compare" -> "查看当前候选差异"
                 else -> "继续调整推荐"
             },
             iconRes = when (action.action) {
                 "add_to_cart" -> R.drawable.ic_shopping_bag_24
-                "open_evidence", "compare" -> R.drawable.ic_article_24
+                "compare" -> R.drawable.ic_compare_arrows_24
+                "open_evidence" -> R.drawable.ic_article_24
                 else -> R.drawable.ic_arrow_upward_24
             },
             enabled = enabled,
@@ -6906,6 +7509,327 @@ private fun DecisionReasonItem(
                 fontWeight = FontWeight.Medium,
             ),
         )
+    }
+}
+
+@Immutable
+private data class DecisionFeedbackTraceUi(
+    val preferredNames: List<String>,
+    val excludedNames: List<String>,
+)
+
+@Immutable
+private data class DecisionScoreItemUi(
+    val label: String,
+    val value: Double,
+)
+
+@Composable
+private fun DecisionFeedbackTraceSection(trace: DecisionFeedbackTraceUi) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("你的反馈参与了这次判断")
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.52f),
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.68f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DecisionFeedbackTraceRow("已偏好", trace.preferredNames, BuyPilotColors.Success)
+                DecisionFeedbackTraceRow("已排除", trace.excludedNames, BuyPilotColors.TextMuted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DecisionFeedbackTraceRow(
+    label: String,
+    names: List<String>,
+    accent: Color,
+) {
+    if (names.isEmpty()) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            color = accent,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.width(48.dp),
+        )
+        Text(
+            text = names.joinToString("、"),
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 21.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun DecisionScoreBreakdownSection(
+    items: List<DecisionScoreItemUi>,
+    motionKey: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("决策评分")
+        // Gauge grid: up to 3 per row
+        val rows = items.chunked(3)
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            rows.forEach { rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    rowItems.forEach { item ->
+                        Box(modifier = Modifier.weight(1f)) {
+                        StaggeredRevealMotion(
+                            key = "${motionKey}_score_${item.label}",
+                            motionEnabled = motionEnabled,
+                            alreadyEntered = alreadyEntered,
+                            delayMillis = 60,
+                            durationMillis = 260,
+                            initialOffsetY = 8.dp,
+                        ) {
+                            DecisionScoreGauge(item = item)
+                        }
+                        }
+                    }
+                    // fill empty slots in last row
+                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DecisionScoreGauge(item: DecisionScoreItemUi) {
+    val fraction = item.value.scoreFraction()
+    val isRisk = item.label.contains("风险")
+    val trackColor = BuyPilotColors.SurfaceMuted
+    val fillColor = if (isRisk) BuyPilotColors.Warning else BuyPilotColors.Primary
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BuyPilotColors.SurfaceCard, RoundedCornerShape(14.dp))
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.68f), RoundedCornerShape(14.dp))
+            .padding(vertical = 14.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(52.dp)) {
+            Canvas(modifier = Modifier.size(52.dp)) {
+                val stroke = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                val sweep = 270f
+                val startAngle = 135f
+                // track
+                drawArc(
+                    color = trackColor,
+                    startAngle = startAngle,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    style = stroke,
+                )
+                // fill
+                if (fraction > 0f) {
+                    drawArc(
+                        color = fillColor,
+                        startAngle = startAngle,
+                        sweepAngle = sweep * fraction,
+                        useCenter = false,
+                        style = stroke,
+                    )
+                }
+            }
+            Text(
+                text = item.value.scoreLabel(),
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            text = item.label,
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Tiny,
+            lineHeight = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun DecisionLightRiskNote(text: String) {
+    val preview = remember(text) { text.toDecisionRiskPreview() }
+    if (preview.body.isBlank()) return
+    var showFull by rememberSaveable(preview.body) { androidx.compose.runtime.mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(13.dp))
+            .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.34f))
+            .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.58f), RoundedCornerShape(13.dp))
+            .clickable(role = Role.Button) { showFull = true }
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(BuyPilotColors.Warning.copy(alpha = 0.72f), CircleShape),
+            )
+            Text(
+                text = preview.badge,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            preview.sourceLabel?.let {
+                Text(
+                    text = it,
+                    color = BuyPilotColors.TextMuted,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            } ?: Spacer(Modifier.weight(1f))
+        }
+        Text(
+            text = preview.body,
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 21.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (preview.body.length > 42) {
+            Text(
+                text = "全文",
+                color = BuyPilotColors.PrimaryDark.copy(alpha = 0.82f),
+                fontSize = BuyPilotType.Label,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+    if (showFull) {
+        ProductTextPreviewDialog(
+            title = preview.sourceLabel ?: preview.badge,
+            eyebrow = preview.badge,
+            body = preview.body,
+            rating = preview.rating,
+            onDismiss = { showFull = false },
+        )
+    }
+}
+
+private data class DecisionRiskPreview(
+    val badge: String,
+    val sourceLabel: String?,
+    val body: String,
+    val rating: Int?,
+)
+
+private fun String.toDecisionRiskPreview(): DecisionRiskPreview {
+    var clean = withoutMarkdownMarkup()
+        .withoutInternalDebugTokens()
+        .trim()
+    val marker = DecisionRiskRatingMarkerRegex.find(clean)
+    var reviewer = marker?.groupValues?.getOrNull(1)?.trim()?.takeIf(String::isNotBlank)
+    var rating = marker?.groupValues?.getOrNull(2)?.toIntOrNull()?.coerceIn(1, 5)
+    clean = clean.replace(DecisionRiskRatingMarkerRegex, "").trim()
+
+    val leading = DecisionRiskLeadingRatingRegex.find(clean)
+    if (leading != null) {
+        reviewer = reviewer ?: leading.groupValues.getOrNull(1)?.trim()?.takeIf(String::isNotBlank)
+        rating = rating ?: leading.groupValues.getOrNull(2)?.toIntOrNull()?.coerceIn(1, 5)
+        clean = clean.replaceFirst(DecisionRiskLeadingRatingRegex, "").trim()
+    }
+
+    clean = clean
+        .replace(Regex("""^[：:，,、\s]+"""), "")
+        .trim()
+
+    val badge = if (rating != null) "低分反馈" else "留意点"
+    val source = when {
+        !reviewer.isNullOrBlank() && rating != null -> "$reviewer · $rating 分"
+        rating != null -> "$rating 分评价"
+        else -> null
+    }
+    return DecisionRiskPreview(
+        badge = badge,
+        sourceLabel = source,
+        body = clean,
+        rating = rating,
+    )
+}
+
+private val DecisionRiskRatingMarkerRegex = Regex("""\[([^\]\[:：]{1,16})\s+评分[:：]\s*(\d{1,2})\]""")
+private val DecisionRiskLeadingRatingRegex = Regex("""^\s*(?:用户\s*)?([^\s:：，,\[]{1,18})?\s*评分\s*(\d{1,2})\s*[:：]\s*""")
+
+@Composable
+private fun DecisionNotForSection(items: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        SectionTitle("不适合这些情况")
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = BuyPilotColors.SurfaceMuted.copy(alpha = 0.46f),
+            shape = RoundedCornerShape(15.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.62f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                items.take(3).forEach { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 7.dp)
+                                .size(5.dp)
+                                .background(BuyPilotColors.TextMuted.copy(alpha = 0.72f), CircleShape),
+                        )
+                        Text(
+                            text = item,
+                            color = BuyPilotColors.TextSecondary,
+                            fontSize = BuyPilotType.Body,
+                            lineHeight = 21.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

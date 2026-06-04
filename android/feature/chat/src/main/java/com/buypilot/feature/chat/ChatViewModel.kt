@@ -315,6 +315,7 @@ class ChatViewModel @Inject constructor(
             )
 
     private var streamJob: Job? = null
+    private val backgroundCartJobsByProductId = mutableMapOf<String, Job>()
     private val pendingFeedbackJobsByDeck = mutableMapOf<String, MutableList<Job>>()
     private val convergenceJobsByDeck = mutableMapOf<String, Job>()
     private val pendingConvergenceRequestsByDeck = mutableMapOf<String, PendingConvergenceRequest>()
@@ -614,6 +615,7 @@ class ChatViewModel @Inject constructor(
         forcedClientTurnId: String? = null,
         pendingCartProductId: String? = null,
         converge: Boolean = false,
+        backgroundCartAction: Boolean = false,
     ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = forcedClientTurnId ?: Ids.clientTurnId()
@@ -639,7 +641,7 @@ class ChatViewModel @Inject constructor(
                     )
                 }
             }
-        } else {
+        } else if (!backgroundCartAction) {
             _uiState.update {
                 it.copy(
                     currentTurnId = clientTurnId,
@@ -659,28 +661,31 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        streamJob?.cancel()
-        streamJob = viewModelScope.launch {
-            val request = ChatStreamRequest(
-                message = message,
-                sessionId = currentSessionId,
-                imageUrl = imageUrl,
-                criteriaPatch = criteriaPatch,
-                skipStages = skipStages,
-                clientTurnId = clientTurnId,
-                clientTraceId = Ids.clientTraceId(),
-                converge = converge,
-            )
-            var convergenceProducedDecision = false
-            var convergenceFinished = false
-            var convergenceContractFailed = false
-            var convergenceFailed = false
-            val isConvergenceStream = !convergenceDeckId.isNullOrBlank()
-            if (isConvergenceStream) {
-                logConvergence {
-                    "stream start deck=$convergenceDeckId turn=$clientTurnId session=$currentSessionId message=$message"
+        if (!backgroundCartAction) {
+            streamJob?.cancel()
+        }
+        val streamTask = viewModelScope.launch {
+            try {
+                val request = ChatStreamRequest(
+                    message = message,
+                    sessionId = currentSessionId,
+                    imageUrl = imageUrl,
+                    criteriaPatch = criteriaPatch,
+                    skipStages = skipStages,
+                    clientTurnId = clientTurnId,
+                    clientTraceId = Ids.clientTraceId(),
+                    converge = converge,
+                )
+                var convergenceProducedDecision = false
+                var convergenceFinished = false
+                var convergenceContractFailed = false
+                var convergenceFailed = false
+                val isConvergenceStream = !convergenceDeckId.isNullOrBlank()
+                if (isConvergenceStream) {
+                    logConvergence {
+                        "stream start deck=$convergenceDeckId turn=$clientTurnId session=$currentSessionId message=$message"
+                    }
                 }
-            }
 
             suspend fun collectStream() {
                 chatRepository.streamChat(request)
@@ -732,6 +737,9 @@ class ChatViewModel @Inject constructor(
                                 "event deck=$convergenceDeckId turn=$clientTurnId type=${deckScopedEnvelope.event.wireValue} " +
                                     "eventDeck=${deckScopedEnvelope.deckId} finish=${done?.finishReason}"
                             }
+                        }
+                        if (backgroundCartAction && !deckScopedEnvelope.event.isVisibleForBackgroundCartAction()) {
+                            return@collect
                         }
                         if (isConvergenceStream && deckScopedEnvelope.event == AgentEventType.FinalDecision) {
                             convergenceProducedDecision = true
@@ -793,7 +801,20 @@ class ChatViewModel @Inject constructor(
                     turnId = clientTurnId,
                 )
             }
-            clearPendingAddToCart(pendingCartProductId)
+            } finally {
+                clearPendingAddToCart(pendingCartProductId)
+            }
+        }
+        if (backgroundCartAction && pendingCartProductId != null) {
+            backgroundCartJobsByProductId[pendingCartProductId]?.cancel()
+            backgroundCartJobsByProductId[pendingCartProductId] = streamTask
+            streamTask.invokeOnCompletion {
+                if (backgroundCartJobsByProductId[pendingCartProductId] === streamTask) {
+                    backgroundCartJobsByProductId.remove(pendingCartProductId)
+                }
+            }
+        } else {
+            streamJob = streamTask
         }
     }
 
@@ -926,9 +947,29 @@ class ChatViewModel @Inject constructor(
             "add_to_cart" -> addCurrentRecommendationToCart(action.productId)
             "feedback" -> handleFeedbackQuickAction(action)
             "view_cart" -> refreshCart()
-            else -> Unit
+            else -> sendQuickActionAsUserQuestion(action)
         }
     }
+
+    private fun sendQuickActionAsUserQuestion(action: QuickActionPayload) {
+        val message = action.label
+            .trim()
+            .takeIf { it.isNotBlank() }
+            ?: action.action
+                .quickActionFallbackMessage()
+                .takeIf { it.isNotBlank() }
+            ?: return
+        sendMessage(message)
+    }
+
+    private fun String.quickActionFallbackMessage(): String =
+        when (trim().lowercase(Locale.ROOT)) {
+            "criteria_patch" -> "帮我按这个方向调整筛选"
+            "find_alternative", "alternative", "cheaper", "lower_budget" -> "帮我找一个更合适的平替"
+            "why_not", "explain_exclusion" -> "为什么没有推荐我提到的那款？"
+            "review_cart", "cart_review" -> "帮我复核一下购物车里的选择"
+            else -> ""
+        }
 
     fun addProductToCart(productId: String) {
         addCurrentRecommendationToCart(productId)
@@ -947,6 +988,7 @@ class ChatViewModel @Inject constructor(
             message = target.addToCartCommand(),
             showUserMessage = false,
             pendingCartProductId = target.productId,
+            backgroundCartAction = true,
         )
         submitProductInteraction(
             sessionId = state.sessionId,
@@ -2007,6 +2049,11 @@ class ChatViewModel @Inject constructor(
             this == AgentEventType.CriteriaCard ||
             this == AgentEventType.ProductCard ||
             this == AgentEventType.Clarification
+
+    private fun AgentEventType.isVisibleForBackgroundCartAction(): Boolean =
+        this == AgentEventType.CartAction ||
+            this == AgentEventType.Done ||
+            this == AgentEventType.Error
 
     private fun String.needsMockClarification(): Boolean {
         val text = lowercase()
