@@ -28,7 +28,8 @@ def get_async_engine() -> AsyncEngine:
         engine_kwargs = {}
         if async_url.startswith("sqlite"):
             # SQLite needs check_same_thread=False for async access and NullPool
-            # (no connection pooling across threads). Only used for test isolation.
+            # (no connection pooling across threads). ONLY for pytest test isolation;
+            # production requires PostgreSQL + pgvector (enforced by settings._resolve_database_url).
             engine_kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": NullPool}
         cached = (database_url, create_async_engine(async_url, **engine_kwargs))
         _ASYNC_ENGINE_CACHE = cached

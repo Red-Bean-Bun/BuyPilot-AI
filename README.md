@@ -125,20 +125,47 @@ doc/
 
 ### 评委验收路径（推荐）
 
-```bash
-# 1) 准备真实模型配置：复制模板到项目根目录 .env，并填写 BAILIAN_API_KEY。
-cp .env.example .env
+#### 前置要求
 
-# 2) 启动 Postgres/pgvector + FastAPI；首次启动会自动建表、入库并生成 text embedding。
+1. **Docker Desktop** 已安装并运行
+2. **百炼 API Key**：访问 https://bailian.console.aliyun.com/ 获取（需阿里云账号）
+3. 项目根目录有写权限
+
+#### 启动步骤
+
+```bash
+# 1) 准备配置文件
+cp .env.example .env
+# 编辑 .env，填写 BAILIAN_API_KEY=sk-your-real-key
+
+# 2) 启动 Postgres/pgvector + FastAPI
+#    首次启动会自动：建表 → 入库 100 商品 → 生成 1292 个 text embedding
+#    启动日志会显示 API Key 配置状态
 make rebuild
 
-# 3) 构建图片 embedding 索引（拍照找货需要，text seed 不包含）
+# 3) 构建图片 embedding 索引（拍照找货 Demo 需要）
+#    需要百炼 VL API 权限（同一 Key 通常可用）
 make seed-image
 
-# 4) 验证
-make db-stats     # 确认 products:100, chunks:1292, image_embeddings:100
-make smoke        # live RAG 门禁
+# 4) 验证启动成功
+make db-stats     # 应显示 products:100, chunks:1292, image_embeddings:100
+make smoke        # 运行 live RAG 门禁测试
 ```
+
+#### 启动日志说明
+
+启动时会打印配置检查信息：
+- `✅ BAILIAN_API_KEY 已配置` — API Key 已填写
+- `⚠️ BAILIAN_API_KEY 未配置或为占位符` — 需要编辑 .env 填写真实 Key
+
+#### 常见问题
+
+| 问题 | 解决方案 |
+|------|---------|
+| `BAILIAN_API_KEY 未配置` | 编辑 `.env` 文件，填写 `BAILIAN_API_KEY=sk-xxx` |
+| `make rebuild` 卡在 embedding | 首次生成 1292 个 embedding 需 2-5 分钟，请耐心等待 |
+| `image_embeddings: 0` | 运行 `make seed-image` 构建图片索引 |
+| 端口 5432/8000 被占用 | 修改 `deploy/docker-compose.yml` 端口映射 |
 
 说明：PostgreSQL + pgvector 是后端运行时必需依赖；SQLite 仅作为 pytest 隔离测试路径，不支持日常开发或答辩运行。
 

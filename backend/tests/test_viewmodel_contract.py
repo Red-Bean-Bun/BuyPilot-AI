@@ -23,7 +23,7 @@ from src.types.sse_events import (
     CriteriaPayload,
     ProductPayload,
 )
-from tests.conftest import parse_sse_stream
+from tests.conftest import collect_sse_stream, parse_sse_stream
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -52,6 +52,41 @@ class TestAPIInputValidation:
         async with test_client as c:
             resp = await c.post("/chat/stream", json={"message": "x" * 2001})
         assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_emoji_only_message_returns_422_or_clarification(self, test_client, _seed_for_api):
+        """Emoji-only message should either be rejected or trigger clarification.
+
+        Pure emoji without shopping intent should not produce product recommendations.
+        """
+        async with test_client as c:
+            async with c.stream(
+                "POST",
+                "/chat/stream",
+                json={"message": "🛒📱💰"},
+            ) as resp:
+                assert resp.status_code == 200
+                events = await collect_sse_stream(resp)
+
+        # Should not return product_card for emoji-only input
+        event_types = [tag for tag, _ in events]
+        assert "product_card" not in event_types or "clarification" in event_types
+
+    @pytest.mark.asyncio
+    async def test_english_message_triggers_clarification(self, test_client, _seed_for_api):
+        """English message without Chinese should trigger clarification or chitchat hint."""
+        async with test_client as c:
+            async with c.stream(
+                "POST",
+                "/chat/stream",
+                json={"message": "recommend something cheap"},
+            ) as resp:
+                assert resp.status_code == 200
+                events = await collect_sse_stream(resp)
+
+        # Should handle gracefully (clarification or chitchat hint)
+        event_types = [tag for tag, _ in events]
+        assert "done" in event_types or "error" in event_types
 
     @pytest.mark.asyncio
     async def test_upload_non_multipart_returns_415(self, test_client):
