@@ -294,7 +294,7 @@ async def test_issue8_android_markdown_rendering_uses_markwon():
         / "feature"
         / "chat"
         / "ui"
-        / "BuyPilotChatScreen.kt"
+        / "MarkdownRendering.kt"
     )
     source = screen_path.read_text(encoding="utf-8")
 

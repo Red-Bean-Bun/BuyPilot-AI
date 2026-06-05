@@ -20,6 +20,7 @@ def test_env_configures_bailian_profile():
 
 
 def test_runtime_rejects_sqlite_database_url(monkeypatch):
+    monkeypatch.setenv("BAILIAN_API_KEY", "real-key-not-test")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///./buypilot-dev.db")
     settings_module._settings = None
 
