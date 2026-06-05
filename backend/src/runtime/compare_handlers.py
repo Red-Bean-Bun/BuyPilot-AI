@@ -45,7 +45,7 @@ async def handle_compare(
 
     # 1. Thinking
     yield ctx.thinking("comparing", msg.THINKING_COMPARING)
-    await ctx.ensure_active()
+    ctx.ensure_active()
 
     # 2. Resolve product IDs to compare
     product_ids = await _resolve_compare_product_ids(ctx.session_id, intent, body.message)
@@ -93,7 +93,7 @@ async def handle_compare(
     compare_id = f"cmp_{uuid.uuid4().hex[:12]}"
 
     # 5. Build comparison (service layer)
-    await ctx.ensure_active()
+    ctx.ensure_active()
     comparison = await build_comparison(
         product_ids=[p.product_id for p in products],
         category=category,
