@@ -14,9 +14,6 @@ internal sealed interface ChatSheetContent {
         val payload: FinalDecisionPayload,
         val sourceNodeKey: String = "",
     ) : ChatSheetContent
-    data class ProductCompare(
-        val sourceDeckNodeKey: String = "",
-    ) : ChatSheetContent
     data object Cart : ChatSheetContent
 }
 
@@ -39,7 +36,6 @@ internal val ChatSheetContentSaver = Saver<ChatSheetContent?, String>(
             null -> SavedSheetNone
             ChatSheetContent.Cart -> "cart"
             is ChatSheetContent.Criteria -> "criteria:${ChatSheetJson.encodeToString(content.payload)}"
-            is ChatSheetContent.ProductCompare -> "compare:${content.sourceDeckNodeKey}"
             is ChatSheetContent.DecisionEvidence -> "decision:${ChatSheetJson.encodeToString(
                 SavedDecisionEvidenceSheet(
                     payload = content.payload,
@@ -55,7 +51,6 @@ internal val ChatSheetContentSaver = Saver<ChatSheetContent?, String>(
             saved.startsWith("criteria:") -> runCatching {
                 ChatSheetContent.Criteria(ChatSheetJson.decodeFromString(saved.removePrefix("criteria:")))
             }.getOrNull()
-            saved.startsWith("compare:") -> ChatSheetContent.ProductCompare(saved.removePrefix("compare:"))
             saved.startsWith("decision:") -> runCatching {
                 val payload = saved.removePrefix("decision:")
                 val sheet = ChatSheetJson.decodeFromString<SavedDecisionEvidenceSheet>(payload)

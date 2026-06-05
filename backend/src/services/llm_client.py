@@ -26,6 +26,7 @@ from src.services.llm_gateway import (
     _stream_chat_task,
 )
 from src.services.llm_task_payloads import (
+    comparison_conclusion_messages,
     comparison_narration_messages,
     criteria_from_live_payload as _criteria_from_live_payload,
     criteria_messages,
@@ -116,6 +117,7 @@ __all__ = [
     "generate_criteria",
     "generate_decision",
     "generate_recommendation",
+    "stream_comparison_conclusion",
     "stream_comparison_narration",
     "stream_recommendation",
 ]
@@ -435,6 +437,76 @@ async def stream_comparison_narration(
             yield "、".join(tradeoffs[:2])
         else:
             yield "两款商品各有特点，建议根据个人偏好选择。"
+
+
+async def stream_comparison_conclusion(
+    products: list[ProductPayload],
+    axes: list,
+    winner_product_id: str | None,
+    winner_reason: str | None,
+    tradeoffs: list[str],
+    risk_notes: list,
+    mode: str,
+) -> AsyncGenerator[str, None]:
+    """Stream the post-table comparison closing advice from the LLM."""
+    messages = comparison_conclusion_messages(
+        products, axes, winner_product_id, winner_reason, tradeoffs, risk_notes, mode,
+    )
+    emitted = False
+    try:
+        async for delta in _stream_chat_task("generate_comparison", messages):
+            if not delta:
+                continue
+            emitted = True
+            yield delta
+    except Exception:
+        if emitted:
+            raise
+        logger.warning(
+            "Comparison conclusion stream failed; yielding fallback text.",
+            exc_info=True,
+        )
+        fallback = _comparison_conclusion_fallback(products, axes, winner_product_id, winner_reason, tradeoffs)
+        if fallback:
+            yield fallback
+
+
+def _comparison_conclusion_fallback(
+    products: list[ProductPayload],
+    axes: list,
+    winner_product_id: str | None,
+    winner_reason: str | None,
+    tradeoffs: list[str],
+) -> str:
+    winner = next((p for p in products if p.product_id == winner_product_id), None)
+    other = next((p for p in products if p.product_id != winner_product_id), None)
+    winner_name = _short_compare_name(winner.name if winner else "")
+    other_name = _short_compare_name(other.name if other else "")
+    first_axis = _axis_name_from_tradeoff(tradeoffs[0]) if tradeoffs else "综合表现"
+    second_axis = _axis_name_from_tradeoff(tradeoffs[1]) if len(tradeoffs) > 1 else "稳妥选择"
+    if winner_name and other_name:
+        return f"这两款不用纠结太久，先按你的核心优先级来。更看重{first_axis}就选{winner_name}；更在意{second_axis}再考虑{other_name}。"
+    if winner_name:
+        return f"如果想要更省心的选择，{winner_name}会更稳。"
+    return winner_reason or "这几款差距不大，优先选更贴合你核心需求的那一款。"
+
+
+def _axis_name_from_tradeoff(text: str) -> str:
+    cleaned = text.strip()
+    for marker in ("在", "方面"):
+        if marker not in cleaned:
+            continue
+    match = re.search(r"在(.+?)方面", cleaned)
+    if match:
+        return match.group(1).strip() or "综合表现"
+    return cleaned[:8] or "综合表现"
+
+
+def _short_compare_name(name: str) -> str:
+    cleaned = re.sub(r"\s+", " ", name).strip()
+    if not cleaned:
+        return ""
+    return cleaned[:14]
 
 
 def _json_preview(value: Any) -> str:

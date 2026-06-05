@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.buypilot.core.model.AlternativePayload
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.EvidencePayload
 import com.buypilot.core.model.FinalDecisionPayload
@@ -73,6 +74,17 @@ data class FinalDecisionNode(
     val alternatives: List<AlternativePayload> = payload.alternatives
     val nextActions: List<QuickActionPayload> = payload.nextActions
 }
+
+@Immutable
+data class CompareCardNode(
+    override val key: String,
+    val payload: CompareCardPayload,
+    val turnId: String = "",
+    val narrationContent: String = "",
+    val narrationDone: Boolean = false,
+    val conclusionContent: String = "",
+    val conclusionDone: Boolean = false,
+) : ChatUiNode
 
 @Immutable
 data class CartActionNode(

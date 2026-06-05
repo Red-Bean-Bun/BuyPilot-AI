@@ -1,12 +1,14 @@
 package com.buypilot.feature.chat.presentation
 
 import androidx.compose.runtime.Immutable
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CompareCardNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -26,6 +28,7 @@ internal data class TimelinePresentationState(
     val productsById: Map<String, ProductCardPayload> = emptyMap(),
     val productDeckIdByProductId: Map<String, String> = emptyMap(),
     val productDeckNodeByKey: Map<String, ProductDeckNode> = emptyMap(),
+    val compareCardBySourceDeckId: Map<String, CompareCardPayload> = emptyMap(),
     val finalDecisionSourceDeckKeyByDecisionKey: Map<String, String> = emptyMap(),
     val latestProductDeckKey: String? = null,
     val latestFinalDecisionKey: String? = null,
@@ -51,6 +54,7 @@ internal data class TimelineRenderContext(
     val productsById: Map<String, ProductCardPayload> = emptyMap(),
     val productDeckIdByProductId: Map<String, String> = emptyMap(),
     val productDeckNodeByKey: Map<String, ProductDeckNode> = emptyMap(),
+    val compareCardBySourceDeckId: Map<String, CompareCardPayload> = emptyMap(),
     val finalDecisionSourceDeckKeyByDecisionKey: Map<String, String> = emptyMap(),
     val latestProductDeckKey: String? = null,
     val productSwipeStates: Map<String, ProductSwipeState> = emptyMap(),
@@ -78,6 +82,7 @@ internal val TimelineRenderItem.timelineContentType: String
             is CriteriaNode -> "standalone_criteria"
             is ProductDeckNode -> "standalone_products"
             is FinalDecisionNode -> "standalone_decision"
+            is CompareCardNode -> "standalone_compare"
             is CartActionNode -> "standalone_cart"
             is ErrorNode -> "standalone_error"
             is UserMessageNode -> "standalone_user"
@@ -121,6 +126,7 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
     val productsById = linkedMapOf<String, ProductCardPayload>()
     val productDeckIdByProductId = linkedMapOf<String, String>()
     val productDeckNodeByKey = linkedMapOf<String, ProductDeckNode>()
+    val compareCardBySourceDeckId = linkedMapOf<String, CompareCardPayload>()
     val finalDecisionSourceDeckKeyByDecisionKey = linkedMapOf<String, String>()
     val finalDecisionKeys = linkedSetOf<String>()
     val clarificationKeys = mutableListOf<String>()
@@ -188,6 +194,12 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
                     }
                 }
             }
+            is CompareCardNode -> {
+                hasStructuredContent = true
+                node.payload.sourceDeckId
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { deckId -> compareCardBySourceDeckId[deckId] = node.payload }
+            }
             is CriteriaNode -> {
                 hasStructuredContent = true
             }
@@ -227,6 +239,7 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
             productsById = productsById,
             productDeckIdByProductId = productDeckIdByProductId,
             productDeckNodeByKey = productDeckNodeByKey,
+            compareCardBySourceDeckId = compareCardBySourceDeckId,
             finalDecisionSourceDeckKeyByDecisionKey = finalDecisionSourceDeckKeyByDecisionKey,
             latestProductDeckKey = latestProductDeckKey,
             productSwipeStates = productSwipeStates,
@@ -241,6 +254,7 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
         productsById = productsById,
         productDeckIdByProductId = productDeckIdByProductId,
         productDeckNodeByKey = productDeckNodeByKey,
+        compareCardBySourceDeckId = compareCardBySourceDeckId,
         finalDecisionSourceDeckKeyByDecisionKey = finalDecisionSourceDeckKeyByDecisionKey,
         latestProductDeckKey = latestProductDeckKey,
         latestFinalDecisionKey = latestFinalDecisionKey,
@@ -266,6 +280,7 @@ private fun ChatUiNode.assistantTurnId(): String? =
         is CriteriaNode -> turnId
         is ProductDeckNode -> turnId
         is FinalDecisionNode -> turnId
+        is CompareCardNode -> turnId
         else -> null
     }?.takeIf { it.isNotBlank() }
 

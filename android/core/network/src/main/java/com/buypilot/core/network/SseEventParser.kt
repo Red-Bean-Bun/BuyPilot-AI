@@ -7,6 +7,7 @@ import com.buypilot.core.model.AgentPayload
 import com.buypilot.core.model.AgentUiEnvelope
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.DonePayload
 import com.buypilot.core.model.ErrorPayload
@@ -67,6 +68,7 @@ class SseEventParser @Inject constructor(
             AgentEventType.ProductCard -> json.decodeFromJsonElement<ProductCardPayload>(source)
             AgentEventType.CartAction -> json.decodeFromJsonElement<CartActionPayload>(source)
             AgentEventType.FinalDecision -> json.decodeFromJsonElement<FinalDecisionPayload>(source)
+            AgentEventType.CompareCard -> json.decodeFromJsonElement<CompareCardPayload>(source)
             AgentEventType.Done -> json.decodeFromJsonElement<DonePayload>(source)
             AgentEventType.Error -> json.decodeFromJsonElement<ErrorPayload>(source)
             AgentEventType.Unknown -> UnknownPayload(source)
@@ -92,6 +94,7 @@ class SseEventParser @Inject constructor(
             AgentEventType.ProductCard -> deckId ?: "deck_$turnId"
             AgentEventType.CartAction -> "cart_$turnId"
             AgentEventType.FinalDecision -> "decision_$turnId"
+            AgentEventType.CompareCard -> "compare_$turnId"
             AgentEventType.Done -> "done_$turnId"
             AgentEventType.Error -> "error_$turnId"
             AgentEventType.Unknown -> "unknown_$turnId"
@@ -114,6 +117,7 @@ class SseEventParser @Inject constructor(
             AgentEventType.ProductCard -> "swipe_deck_item"
             AgentEventType.CartAction -> "inline_card"
             AgentEventType.FinalDecision -> "summary_card"
+            AgentEventType.CompareCard -> "summary_card"
             AgentEventType.Done -> "none"
             AgentEventType.Error -> "inline_card"
             AgentEventType.Unknown -> "none"

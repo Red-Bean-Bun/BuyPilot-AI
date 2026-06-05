@@ -12,7 +12,7 @@ from src.repos.documents import ChunkDocument, risk_chunks_for_products
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload, ReasonAtomPayload
 
 _RISK_NOTE_LIMIT = 3
-_RISK_NOTE_MAX_CHARS = 80
+_RISK_NOTE_MAX_CHARS = 180
 
 _REASON_ATOM_LIMIT = 4
 

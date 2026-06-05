@@ -616,6 +616,7 @@ class ChatViewModel @Inject constructor(
         pendingCartProductId: String? = null,
         converge: Boolean = false,
         backgroundCartAction: Boolean = false,
+        suppressComposerStreaming: Boolean = false,
     ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = forcedClientTurnId ?: Ids.clientTurnId()
@@ -631,7 +632,10 @@ class ChatViewModel @Inject constructor(
                     fromEditResubmit = fromEditResubmit,
                 )
                 if (convergenceDeckId.isNullOrBlank()) {
-                    withUserMessage
+                    withUserMessage.copy(
+                        currentTurnId = clientTurnId,
+                        suppressComposerStreamingTurnId = null,
+                    )
                 } else {
                     ChatReducer.convergeDeck(
                         state = withUserMessage.copy(currentTurnId = clientTurnId),
@@ -648,6 +652,7 @@ class ChatViewModel @Inject constructor(
                     inputState = ChatInputState.Streaming,
                     isStreaming = true,
                     lastError = null,
+                    suppressComposerStreamingTurnId = clientTurnId.takeIf { suppressComposerStreaming },
                 )
             }
         }
@@ -962,6 +967,20 @@ class ChatViewModel @Inject constructor(
         sendMessage(message)
     }
 
+    fun compareProductsByRank(ranks: List<Int>) {
+        val normalizedRanks = ranks
+            .filter { it > 0 }
+            .distinct()
+            .take(4)
+        if (normalizedRanks.size < 2 || BuildConfig.USE_MOCK_CHAT) return
+
+        startRealStream(
+            message = "对比${normalizedRanks.joinToString("、") { it.toChineseOrdinalLabel() }}",
+            showUserMessage = false,
+            suppressComposerStreaming = true,
+        )
+    }
+
     private fun String.quickActionFallbackMessage(): String =
         when (trim().lowercase(Locale.ROOT)) {
             "criteria_patch" -> "帮我按这个方向调整筛选"
@@ -969,6 +988,15 @@ class ChatViewModel @Inject constructor(
             "why_not", "explain_exclusion" -> "为什么没有推荐我提到的那款？"
             "review_cart", "cart_review" -> "帮我复核一下购物车里的选择"
             else -> ""
+        }
+
+    private fun Int.toChineseOrdinalLabel(): String =
+        when (this) {
+            1 -> "第一个"
+            2 -> "第二个"
+            3 -> "第三个"
+            4 -> "第四个"
+            else -> "第${this}个"
         }
 
     fun addProductToCart(productId: String) {

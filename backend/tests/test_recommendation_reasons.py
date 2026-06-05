@@ -118,4 +118,4 @@ def test_build_risk_notes_truncates_long_text():
     notes = build_risk_notes(chunks)
     assert len(notes) == 1
     assert notes[0].endswith("…")
-    assert len(notes[0]) <= 80
+    assert len(notes[0]) <= 180

@@ -292,6 +292,64 @@ def comparison_narration_messages(
     ]
 
 
+def comparison_conclusion_messages(
+    products: list,
+    axes: list,
+    winner_product_id: str | None,
+    winner_reason: str | None,
+    tradeoffs: list[str],
+    risk_notes: list,
+    mode: str,
+) -> list[dict[str, Any]]:
+    """Build messages for the post-artifact comparison conclusion."""
+    payload = {
+        "products": [
+            {"product_id": p.product_id, "name": p.name, "price": p.price, "brand": p.brand}
+            for p in products
+        ],
+        "axes": [
+            {
+                "name": a.name,
+                "values": [
+                    {"product_id": v.product_id, "score": v.score, "detail": v.detail}
+                    for v in a.values
+                ],
+            }
+            for a in axes
+        ],
+        "winner_product_id": winner_product_id,
+        "winner_reason": winner_reason,
+        "tradeoffs": tradeoffs,
+        "risk_notes": [
+            {"product_id": r.product_id, "note": r.note} for r in risk_notes
+        ],
+        "mode": mode,
+        "output_intent": "post_table_closing_advice",
+    }
+    system_prompt = (
+        _prompt_content(
+            "generate_comparison",
+            {
+                "products": payload["products"],
+                "axes": payload["axes"],
+                "winner_product_id": winner_product_id or "无",
+                "winner_reason": winner_reason or "无",
+                "tradeoffs": tradeoffs,
+                "risk_notes": payload["risk_notes"],
+                "mode": mode,
+            },
+            _schema_override("generate_comparison"),
+        )
+        + "\n\n额外要求：这次只输出表格后的收束建议。语气要像可信的导购助手，有一点情绪价值和参考性，"
+        "先帮用户降低选择压力，再给清楚取舍。可以使用“更稳”“更省心”“更适合你当前重点”这类表达，"
+        "但只能依据传入维度和评分，不得编造。不要重复表格，不要列清单，不要写标题，2 句话以内，不超过 90 字。"
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
 def parse_json_object(text: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text)

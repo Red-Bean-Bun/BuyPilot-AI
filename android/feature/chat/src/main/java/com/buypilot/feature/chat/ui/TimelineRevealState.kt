@@ -345,7 +345,9 @@ internal fun List<ChatUiNode>.canRevealThinkingNode(
         .payload
         .userFacingThinkingMessage()
         .isBlank()
-    if (visualOnlyThinking) return false
+    if (visualOnlyThinking && (this[index] as ThinkingNode).payload.stage != LocalAssistantPendingStage) {
+        return false
+    }
     return when (nextNode) {
         null -> true
         is AiStreamNode -> {

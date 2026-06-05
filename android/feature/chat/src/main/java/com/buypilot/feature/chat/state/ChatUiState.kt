@@ -61,6 +61,7 @@ data class ChatUiState(
     val lastAssistantMessageKey: String? = null,
     val streamingTextKey: String? = null,
     val streamingTextLength: Int = 0,
+    val suppressComposerStreamingTurnId: String? = null,
     val productSwipeStates: Map<String, ProductSwipeState> = emptyMap(),
     val awaitingConvergenceDeckIds: Set<String> = emptySet(),
     val latestConvergeableDeckId: String? = null,

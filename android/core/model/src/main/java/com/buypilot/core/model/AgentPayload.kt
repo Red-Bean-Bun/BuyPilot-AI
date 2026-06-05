@@ -123,6 +123,42 @@ data class CartSummaryPayload(
 )
 
 @Serializable
+data class CompareAxisValuePayload(
+    @SerialName("product_id") val productId: String = "",
+    val score: Double? = null,
+    val label: String? = null,
+    val detail: String? = null,
+    @SerialName("evidence_ids") val evidenceIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class CompareAxisPayload(
+    val name: String = "",
+    val values: List<CompareAxisValuePayload> = emptyList(),
+)
+
+@Serializable
+data class CompareRiskNotePayload(
+    @SerialName("product_id") val productId: String = "",
+    val note: String = "",
+)
+
+@Serializable
+data class CompareCardPayload(
+    @SerialName("compare_id") val compareId: String = "",
+    @SerialName("source_deck_id") val sourceDeckId: String? = null,
+    val mode: String = "exploratory",
+    val focus: String? = null,
+    val products: List<ProductPayload> = emptyList(),
+    val axes: List<CompareAxisPayload> = emptyList(),
+    @SerialName("winner_product_id") val winnerProductId: String? = null,
+    @SerialName("winner_reason") val winnerReason: String? = null,
+    val tradeoffs: List<String> = emptyList(),
+    @SerialName("risk_notes") val riskNotes: List<CompareRiskNotePayload> = emptyList(),
+    val confidence: String? = null,
+) : AgentPayload
+
+@Serializable
 data class FinalDecisionPayload(
     @SerialName("winner_product_id") val winnerProductId: String? = null,
     val summary: String = "",

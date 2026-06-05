@@ -18,11 +18,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -56,8 +56,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -208,6 +206,7 @@ import coil.load
 import coil.compose.AsyncImage
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.EvidencePayload
 import com.buypilot.core.model.FinalDecisionPayload
@@ -223,6 +222,7 @@ import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CompareCardNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -275,6 +275,7 @@ private const val CriteriaCardEnterMs = 560
 private const val DecisionCardEnterMs = 760
 private const val DecisionReasonBaseDelayMs = 240
 private const val DecisionReasonStaggerMs = 120
+private const val MaxCompareSelectionCount = 4
 private val ProductDeckFooterHeight = 46.dp
 
 private data class PendingClarificationAnswer(
@@ -324,7 +325,6 @@ private data class DecisionStatusBadge(
     val showCardWhenEmpty: Boolean = false,
 )
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BuyPilotChatScreen(
@@ -338,6 +338,7 @@ internal fun BuyPilotChatScreen(
     onCriteriaPatch: (JsonObject) -> Unit,
     onCancel: () -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onCompareProducts: (List<Int>) -> Unit,
     onCartOpen: () -> Unit,
     onCartSheetRequestHandled: (Long) -> Unit,
     onCartQuantityChange: (String, Int) -> Unit,
@@ -380,6 +381,12 @@ internal fun BuyPilotChatScreen(
     var userBubbleSnapshots by remember { mutableStateOf(emptyMap<String, ClarificationChipSnapshot>()) }
     var clarificationManualSource by remember { mutableStateOf<ClarificationManualSource?>(null) }
     var keyboardFlightSnapshot by remember { mutableStateOf<ClarificationChipSnapshot?>(null) }
+    var compareDetailPayload by remember { mutableStateOf<CompareCardPayload?>(null) }
+    var pendingInlineCompareDeckId by rememberSaveable { mutableStateOf<String?>(null) }
+    var inlineCompareTurnIds by rememberSaveable(stateSaver = StringSetSaver) {
+        mutableStateOf(emptySet<String>())
+    }
+    var inlineComparePayloadByDeckId by remember { mutableStateOf(emptyMap<String, CompareCardPayload>()) }
     var flightSequence by remember { mutableStateOf(0) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
     var timelineTopPx by remember { mutableStateOf(0f) }
@@ -533,6 +540,22 @@ internal fun BuyPilotChatScreen(
         }
     }
 
+    LaunchedEffect(state.nodes, pendingInlineCompareDeckId, inlineCompareTurnIds) {
+        val deckId = pendingInlineCompareDeckId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val compareNode = state.nodes
+            .filterIsInstance<CompareCardNode>()
+            .lastOrNull { node ->
+                node.turnId.isNotBlank() &&
+                    node.turnId !in inlineCompareTurnIds &&
+                    node.payload.sourceDeckId == deckId
+            }
+        if (compareNode != null) {
+            inlineComparePayloadByDeckId = inlineComparePayloadByDeckId + (deckId to compareNode.payload)
+            inlineCompareTurnIds = inlineCompareTurnIds + compareNode.turnId
+            pendingInlineCompareDeckId = null
+        }
+    }
+
     fun sendAndClear(message: String, imageUrl: String? = null) {
         val next = message.trim()
         if (next.isEmpty() && imageUrl == null) return
@@ -552,16 +575,6 @@ internal fun BuyPilotChatScreen(
         }
         val latestDecision = timelinePresentation.latestFinalDecisionPayload
         when (action.action) {
-            "compare" -> {
-                val sourceDeckNodeKey = timelinePresentation.latestFinalDecisionKey
-                    ?.let { timelinePresentation.finalDecisionSourceDeckKeyByDecisionKey[it] }
-                    ?: timelinePresentation.latestProductDeckKey
-                if (sourceDeckNodeKey != null) {
-                    openSheet(ChatSheetContent.ProductCompare(sourceDeckNodeKey))
-                } else {
-                    onQuickAction(action)
-                }
-            }
             "open_evidence" -> {
                 if (latestDecision != null) {
                     openSheet(
@@ -618,6 +631,10 @@ internal fun BuyPilotChatScreen(
         userBubbleSnapshots = emptyMap()
         clarificationManualSource = null
         keyboardFlightSnapshot = null
+        compareDetailPayload = null
+        pendingInlineCompareDeckId = null
+        inlineCompareTurnIds = emptySet()
+        inlineComparePayloadByDeckId = emptyMap()
         focusManager.clearFocus()
         keyboardController?.hide()
         onInputChanged("", false)
@@ -713,8 +730,9 @@ internal fun BuyPilotChatScreen(
         }
     }
 
-    BackHandler(enabled = sheetContent != null || composerFocused) {
+    BackHandler(enabled = compareDetailPayload != null || sheetContent != null || composerFocused) {
         when {
+            compareDetailPayload != null -> compareDetailPayload = null
             sheetContent != null -> dismissSheet()
             composerFocused -> focusManager.clearFocus()
         }
@@ -759,6 +777,8 @@ internal fun BuyPilotChatScreen(
                     timelineInstanceId = timelineInstanceId,
                     externalRouteFreezeRequestId = timelineExternalRouteFreezeRequestId,
                     externalRouteFreezeAnchorNodeKey = pendingProductDetailAfterTimelineFreeze?.anchorNodeKey,
+                    inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                    inlineCompareTurnIds = inlineCompareTurnIds,
                     onExternalRouteFreezeReady = ::finishProductDetailFreeze,
                     onClarificationOption = { label, snapshot ->
                         answerClarification(
@@ -770,6 +790,12 @@ internal fun BuyPilotChatScreen(
                     onCriteriaEdit = { openSheet(ChatSheetContent.Criteria(it)) },
                     onProductOpen = onOpenProductDeck,
                     onProductDetailOpen = onOpenProductDetail,
+                    onCompareProducts = onCompareProducts,
+                    onInlineCompareProducts = { deckId, ranks ->
+                        pendingInlineCompareDeckId = deckId
+                        onCompareProducts(ranks)
+                    },
+                    onCompareDetailOpen = { payload -> compareDetailPayload = payload },
                     onConvergeRecommendation = onConvergeProductDeck,
                     onWelcomePromptClick = { loadWelcomePrompt(it) },
                     onDecisionEvidence = { payload, sourceNodeKey ->
@@ -869,10 +895,13 @@ internal fun BuyPilotChatScreen(
             }
         }
 
+        val composerStreaming = state.isStreaming &&
+            state.currentTurnId != state.suppressComposerStreamingTurnId
+
         BottomComposer(
             text = input,
             inputState = state.inputState,
-            isStreaming = state.isStreaming,
+            isStreaming = composerStreaming,
             isTextRevealing = assistantVisualActive,
             awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
@@ -963,6 +992,17 @@ internal fun BuyPilotChatScreen(
                 }
             },
         )
+
+        compareDetailPayload?.let { payload ->
+            CompareModeScreen(
+                payload = payload,
+                backendBaseUrl = state.backendBaseUrl,
+                onDismiss = { compareDetailPayload = null },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(6f),
+            )
+        }
     }
 
     LaunchedEffect(state.lastUserMessageKey, activeClarificationFlight?.id) {
@@ -1027,23 +1067,9 @@ internal fun BuyPilotChatScreen(
                                     )
                                 }
                             },
-                            onQuickAction = ::dispatchQuickAction,
+                            onQuickAction = { action -> dispatchQuickAction(action) },
                         )
                     }
-                    is ChatSheetContent.ProductCompare -> ProductCompareSheet(
-                        deck = sheetProductDeckNodeByKey[targetContent.sourceDeckNodeKey],
-                        backendBaseUrl = state.backendBaseUrl,
-                        onProductDetailOpen = { deckId, productId ->
-                            dismissSheet {
-                                openProductDetailAfterTimelineFreeze(
-                                    deckId = deckId,
-                                    productId = productId,
-                                    anchorNodeKey = targetContent.sourceDeckNodeKey,
-                                    deckNodeKey = targetContent.sourceDeckNodeKey,
-                                )
-                            }
-                        },
-                    )
                     ChatSheetContent.Cart -> CartSheet(
                         state = state.cartState,
                         backendBaseUrl = state.backendBaseUrl,
@@ -1139,6 +1165,8 @@ private fun ConversationStage(
     timelineInstanceId: Int,
     externalRouteFreezeRequestId: Int,
     externalRouteFreezeAnchorNodeKey: String?,
+    inlineComparePayloadByDeckId: Map<String, CompareCardPayload>,
+    inlineCompareTurnIds: Set<String>,
     onExternalRouteFreezeReady: (Int) -> Unit,
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
@@ -1146,6 +1174,9 @@ private fun ConversationStage(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?) -> Unit,
+    onCompareProducts: (List<Int>) -> Unit,
+    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onWelcomePromptClick: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
@@ -1216,6 +1247,8 @@ private fun ConversationStage(
                     timelinePresentation = timelinePresentation,
                     externalRouteFreezeRequestId = externalRouteFreezeRequestId,
                     externalRouteFreezeAnchorNodeKey = externalRouteFreezeAnchorNodeKey,
+                    inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                    inlineCompareTurnIds = inlineCompareTurnIds,
                     onExternalRouteFreezeReady = onExternalRouteFreezeReady,
                     onClarificationOption = onClarificationOption,
                     onClarificationManualInput = onClarificationManualInput,
@@ -1223,6 +1256,9 @@ private fun ConversationStage(
                     onCriteriaEdit = onCriteriaEdit,
                     onProductOpen = onProductOpen,
                     onProductDetailOpen = onProductDetailOpen,
+                    onCompareProducts = onCompareProducts,
+                    onInlineCompareProducts = onInlineCompareProducts,
+                    onCompareDetailOpen = onCompareDetailOpen,
                     onConvergeRecommendation = onConvergeRecommendation,
                     onDecisionEvidence = onDecisionEvidence,
                     onRetryLastMessage = onRetryLastMessage,
@@ -1988,6 +2024,7 @@ internal fun ProductRecommendationStrip(
     hasPendingDecision: Boolean,
     deckConverged: Boolean,
     deckStillStreaming: Boolean,
+    comparePayload: CompareCardPayload?,
     convergeActionReady: Boolean,
     compactHistory: Boolean,
     motionEnabled: Boolean,
@@ -1995,6 +2032,7 @@ internal fun ProductRecommendationStrip(
     onEntered: () -> Unit,
     onOpen: (String, String?) -> Unit,
     onOpenDetail: (String, String) -> Unit,
+    onCompare: (List<Int>) -> Unit,
     onConverge: () -> Unit,
 ) {
     val products = node.products
@@ -2022,6 +2060,15 @@ internal fun ProductRecommendationStrip(
     val productIdSignature = remember(products) {
         products.joinToString(separator = "|") { it.product.productId }
     }
+    var comparePicking by rememberSaveable(node.key, productIdSignature) { mutableStateOf(false) }
+    var selectedCompareRanks by rememberSaveable(node.key, productIdSignature) {
+        mutableStateOf(products.take(2).mapIndexed { index, _ -> index + 1 })
+    }
+    LaunchedEffect(comparePicking, products.size) {
+        if (comparePicking && selectedCompareRanks.size < 2 && products.size >= 2) {
+            selectedCompareRanks = listOf(1, 2)
+        }
+    }
 
     val pagerState = rememberPagerState(
         initialPage = preferredPage,
@@ -2044,7 +2091,7 @@ internal fun ProductRecommendationStrip(
     val chromeProgress = remember(arrivalProgress) { { segmentProgress(arrivalProgress(), 0.46f, 1f) } }
     val convergeButtonTargetProgress = if (awaitingConvergence && !deckFullyHandled && convergeActionReady) 1f else 0f
     val convergeButtonProgress by animateFloatAsState(
-        targetValue = convergeButtonTargetProgress,
+        targetValue = if (comparePicking) 1f else convergeButtonTargetProgress,
         animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
         label = "product_deck_converge_button_progress",
     )
@@ -2062,95 +2109,189 @@ internal fun ProductRecommendationStrip(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = if (singleCandidate) "唯一匹配商品" else "候选商品",
+                    text = if (comparePicking) {
+                        "货比三家"
+                    } else if (singleCandidate) {
+                        "唯一匹配商品"
+                    } else {
+                        "候选商品"
+                    },
                     color = BuyPilotColors.TextPrimary,
                     fontSize = BuyPilotType.Title,
                     lineHeight = 23.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.7f), CircleShape)
-                    .border(1.dp, BuyPilotColors.Primary.copy(alpha = 0.12f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = products.size.toString(),
-                    color = BuyPilotColors.PrimaryDark,
-                    fontSize = 13.sp,
-                    lineHeight = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
+            ProductDeckModeIconButton(
+                picking = comparePicking,
+                enabled = products.size >= 2 && !deckStillStreaming,
+                onClick = {
+                    comparePicking = !comparePicking
+                    if (!comparePicking) {
+                        selectedCompareRanks = products.take(2).mapIndexed { index, _ -> index + 1 }
+                    }
+                },
+            )
+        }
+        AnimatedContent(
+            targetState = comparePicking,
+            transitionSpec = {
+                if (targetState) {
+                    fadeIn(
+                        animationSpec = tween(durationMillis = 230, delayMillis = 45, easing = MenuEaseOut),
+                    ) + slideInVertically(
+                        animationSpec = tween(durationMillis = 280, delayMillis = 35, easing = MenuEaseOut),
+                        initialOffsetY = { it / 14 },
+                    ) + scaleIn(
+                        animationSpec = tween(durationMillis = 280, delayMillis = 35, easing = MenuEaseOut),
+                        initialScale = 0.972f,
+                        transformOrigin = TransformOrigin(0.5f, 0.16f),
+                    ) togetherWith fadeOut(
+                        animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+                    ) + slideOutVertically(
+                        animationSpec = tween(durationMillis = 160, easing = MenuEaseIn),
+                        targetOffsetY = { -it / 20 },
+                    ) + scaleOut(
+                        animationSpec = tween(durationMillis = 160, easing = MenuEaseIn),
+                        targetScale = 0.966f,
+                        transformOrigin = TransformOrigin(0.5f, 0.12f),
+                    )
+                } else {
+                    fadeIn(
+                        animationSpec = tween(durationMillis = 190, delayMillis = 25, easing = MenuEaseOut),
+                    ) + slideInVertically(
+                        animationSpec = tween(durationMillis = 220, delayMillis = 20, easing = MenuEaseOut),
+                        initialOffsetY = { -it / 26 },
+                    ) + scaleIn(
+                        animationSpec = tween(durationMillis = 220, delayMillis = 20, easing = MenuEaseOut),
+                        initialScale = 0.982f,
+                        transformOrigin = TransformOrigin(0.5f, 0.18f),
+                    ) togetherWith fadeOut(
+                        animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+                    ) + slideOutVertically(
+                        animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
+                        targetOffsetY = { it / 24 },
+                    ) + scaleOut(
+                        animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
+                        targetScale = 0.986f,
+                        transformOrigin = TransformOrigin(0.5f, 0.1f),
+                    )
+                }
+            },
+            label = "product_deck_compare_mode",
+        ) { picking ->
+            if (picking) {
+                ProductDeckComparePicker(
+                    products = products,
+                    backendBaseUrl = backendBaseUrl,
+                    selectedRanks = selectedCompareRanks,
+                    chromeProgress = chromeProgress,
+                    confirmEnabled = selectedCompareRanks.size >= 2,
+                    motionEnabled = motionEnabled,
+                    onSelectionChange = { selectedCompareRanks = it },
+                    onConfirm = {
+                        if (selectedCompareRanks.size >= 2) {
+                            comparePicking = false
+                            onCompare(selectedCompareRanks)
+                        }
+                    },
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(238.dp),
+                ) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
+                        pageSpacing = 14.dp,
+                        beyondViewportPageCount = 0,
+                    ) { page ->
+                        val payload = products[page]
+                        val pageOffset = (
+                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                            ).coerceIn(-1f, 1f)
+                        val distance = abs(pageOffset)
+                        val thumbModifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                scaleX = 1f - distance * 0.055f
+                                scaleY = 1f - distance * 0.075f
+                                alpha = 1f - distance * 0.18f
+                            }
+                        val openProduct = {
+                            val productId = payload.product.productId.takeIf { id -> id.isNotBlank() }
+                            if (productId != null) {
+                                onOpenDetail(node.deckId, productId)
+                            } else {
+                                onOpen(node.deckId, null)
+                            }
+                        }
+                        if (page == 0) {
+                            ProductDeckArrivalMotion(
+                                arrivalProgress = arrivalProgress,
+                            ) {
+                                ProductRecommendationThumb(
+                                    payload = payload,
+                                    backendBaseUrl = backendBaseUrl,
+                                    selected = page == activeIndex,
+                                    arrivalProgress = arrivalProgress,
+                                    onClick = openProduct,
+                                    modifier = thumbModifier,
+                                )
+                            }
+                        } else {
+                            ProductRecommendationThumb(
+                                payload = payload,
+                                backendBaseUrl = backendBaseUrl,
+                                selected = page == activeIndex,
+                                onClick = openProduct,
+                                modifier = thumbModifier,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if (!comparePicking) {
+            ProductDeckFooterControls(
+                showIndicators = !singleCandidate,
+                productCount = products.size,
+                activeIndex = activeIndex,
+                chromeProgress = chromeProgress,
+                buttonProgress = convergeButtonProgress,
+                buttonLabel = "帮我选",
+                enabled = true,
+                onConverge = onConverge,
+            )
+        }
+        AnimatedVisibility(
+            visible = !comparePicking && comparePayload != null,
+            enter = fadeIn(
+                animationSpec = tween(durationMillis = 180, delayMillis = 40, easing = MenuEaseOut),
+            ) + slideInVertically(
+                animationSpec = tween(durationMillis = 220, delayMillis = 35, easing = MenuEaseOut),
+                initialOffsetY = { it / 12 },
+            ) + expandVertically(
+                animationSpec = tween(durationMillis = 220, delayMillis = 35, easing = MenuEaseOut),
+                expandFrom = Alignment.Top,
+            ),
+            exit = fadeOut(
+                animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+            ) + shrinkVertically(
+                animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
+                shrinkTowards = Alignment.Top,
+            ),
+        ) {
+            comparePayload?.let { payload ->
+                ProductDeckMarkdownCompareTable(
+                    payload = payload,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(238.dp),
-        ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
-                pageSpacing = 14.dp,
-                beyondViewportPageCount = 0,
-            ) { page ->
-                val payload = products[page]
-                val pageOffset = (
-                    (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                    ).coerceIn(-1f, 1f)
-                val distance = abs(pageOffset)
-                val thumbModifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        scaleX = 1f - distance * 0.055f
-                        scaleY = 1f - distance * 0.075f
-                        alpha = 1f - distance * 0.18f
-                }
-                val openProduct = {
-                    val productId = payload.product.productId.takeIf { it.isNotBlank() }
-                    if (productId != null) {
-                        onOpenDetail(node.deckId, productId)
-                    } else {
-                        onOpen(node.deckId, null)
-                    }
-                }
-                if (page == 0) {
-                    ProductDeckArrivalMotion(
-                        arrivalProgress = arrivalProgress,
-                    ) {
-                        ProductRecommendationThumb(
-                            payload = payload,
-                            backendBaseUrl = backendBaseUrl,
-                            selected = page == activeIndex,
-                            arrivalProgress = arrivalProgress,
-                            onClick = openProduct,
-                            modifier = thumbModifier,
-                        )
-                    }
-                } else {
-                    ProductRecommendationThumb(
-                        payload = payload,
-                        backendBaseUrl = backendBaseUrl,
-                        selected = page == activeIndex,
-                        onClick = openProduct,
-                        modifier = thumbModifier,
-                    )
-                }
-            }
-        }
-        ProductDeckFooterControls(
-            showIndicators = !singleCandidate,
-            productCount = products.size,
-            activeIndex = activeIndex,
-            chromeProgress = chromeProgress,
-            buttonProgress = convergeButtonProgress,
-            buttonLabel = "帮我选",
-            onConverge = onConverge,
-        )
     }
 }
 
@@ -2162,6 +2303,7 @@ private fun ProductDeckFooterControls(
     chromeProgress: () -> Float,
     buttonProgress: Float,
     buttonLabel: String,
+    enabled: Boolean,
     onConverge: () -> Unit,
 ) {
     Column(
@@ -2172,7 +2314,7 @@ private fun ProductDeckFooterControls(
                 val chrome = chromeProgress()
                 alpha = maxOf(chrome, buttonProgress * 0.96f)
                 translationY = (1f - chrome.coerceIn(0f, 1f)) * 4f
-            },
+        },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = if (showIndicators) Arrangement.spacedBy(6.dp) else Arrangement.Center,
     ) {
@@ -2185,9 +2327,512 @@ private fun ProductDeckFooterControls(
         ProductDeckConvergeMiniButton(
             label = buttonLabel,
             visibleProgress = buttonProgress,
+            enabled = enabled,
             onClick = onConverge,
             modifier = Modifier,
         )
+    }
+}
+
+@Composable
+private fun ProductDeckModeIconButton(
+    picking: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val backgroundColor by animateColorAsState(
+        targetValue = if (picking) {
+            BuyPilotColors.PrimarySoft.copy(alpha = 0.76f)
+        } else {
+            BuyPilotColors.SurfaceCard.copy(alpha = 0.88f)
+        },
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "product_deck_compare_icon_background",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (picking) {
+            BuyPilotColors.Primary.copy(alpha = 0.22f)
+        } else {
+            BuyPilotColors.Border.copy(alpha = 0.7f)
+        },
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "product_deck_compare_icon_border",
+    )
+    val tint by animateColorAsState(
+        targetValue = if (picking) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "product_deck_compare_icon_tint",
+    )
+    val containerScale by animateFloatAsState(
+        targetValue = if (picking) 1.04f else 1f,
+        animationSpec = tween(durationMillis = 190, easing = MenuEaseOut),
+        label = "product_deck_compare_icon_scale",
+    )
+    val iconTilt by animateFloatAsState(
+        targetValue = if (picking) -45f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+        label = "product_deck_compare_icon_tilt",
+    )
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .graphicsLayer {
+                scaleX = containerScale
+                scaleY = containerScale
+            }
+            .clip(CircleShape)
+            .background(backgroundColor, CircleShape)
+            .border(1.dp, borderColor, CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        AnimatedContent(
+            targetState = picking,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(durationMillis = 150, easing = MenuEaseOut)) +
+                    scaleIn(initialScale = 0.86f, animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) togetherWith
+                    fadeOut(animationSpec = tween(durationMillis = 100, easing = MenuEaseIn)) +
+                    scaleOut(targetScale = 0.88f, animationSpec = tween(durationMillis = 100, easing = MenuEaseIn))
+            },
+            label = "product_deck_compare_icon_swap",
+        ) { active ->
+            Icon(
+                painter = painterResource(if (active) R.drawable.ic_close_24 else R.drawable.ic_compare_arrows_24),
+                contentDescription = if (active) "取消对比选择" else "选择商品对比",
+                tint = tint.copy(alpha = if (enabled) 1f else 0.38f),
+                modifier = Modifier
+                    .size(if (active) 16.dp else 17.dp)
+                    .graphicsLayer {
+                        rotationZ = if (active) iconTilt * 0.55f else iconTilt
+                    },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductDeckComparePicker(
+    products: List<ProductCardPayload>,
+    backendBaseUrl: String,
+    selectedRanks: List<Int>,
+    chromeProgress: () -> Float,
+    confirmEnabled: Boolean,
+    motionEnabled: Boolean,
+    onSelectionChange: (List<Int>) -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val visibleProducts = products.take(6)
+    val productIdSignature = remember(visibleProducts) {
+        visibleProducts.joinToString(separator = "|") { it.product.productId }
+    }
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        val compactGrid = visibleProducts.size >= 4
+        val horizontalGap = if (compactGrid) 8.dp else 10.dp
+        val itemWidth = if (compactGrid) {
+            (maxWidth - horizontalGap) / 2
+        } else {
+            (maxWidth - horizontalGap * (visibleProducts.size - 1).coerceAtLeast(0)) /
+                visibleProducts.size.coerceAtLeast(1)
+        }
+        val itemHeight = if (compactGrid) 94.dp else 178.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val chrome = chromeProgress()
+                    alpha = chrome
+                    translationY = (1f - chrome.coerceIn(0f, 1f)) * 6f
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (compactGrid) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    visibleProducts.chunked(2).forEachIndexed { rowIndex, rowProducts ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(horizontalGap),
+                        ) {
+                            rowProducts.forEachIndexed { colIndex, payload ->
+                                val index = rowIndex * 2 + colIndex
+                                ProductDeckCompareCandidateCard(
+                                    rank = index + 1,
+                                    payload = payload,
+                                    backendBaseUrl = backendBaseUrl,
+                                    selected = index + 1 in selectedRanks,
+                                    compact = true,
+                                    entryIndex = index,
+                                    motionEnabled = motionEnabled,
+                                    modifier = Modifier
+                                        .width(itemWidth)
+                                        .height(itemHeight),
+                                    onClick = {
+                                        val rank = index + 1
+                                        val selected = rank in selectedRanks
+                                        val nextRanks = if (selected) {
+                                            if (selectedRanks.size <= 2) selectedRanks else selectedRanks - rank
+                                        } else {
+                                            if (selectedRanks.size >= MaxCompareSelectionCount) selectedRanks else selectedRanks + rank
+                                        }.distinct().sorted()
+                                        onSelectionChange(nextRanks)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(horizontalGap, Alignment.CenterHorizontally),
+                ) {
+                    visibleProducts.forEachIndexed { index, payload ->
+                        val rank = index + 1
+                        val selected = rank in selectedRanks
+                        ProductDeckCompareCandidateCard(
+                            rank = rank,
+                            payload = payload,
+                            backendBaseUrl = backendBaseUrl,
+                            selected = selected,
+                            compact = false,
+                            entryIndex = index,
+                            motionEnabled = motionEnabled,
+                            modifier = Modifier
+                                .width(itemWidth)
+                                .height(itemHeight),
+                            onClick = {
+                                val nextRanks = if (selected) {
+                                    if (selectedRanks.size <= 2) selectedRanks else selectedRanks - rank
+                                } else {
+                                    if (selectedRanks.size >= MaxCompareSelectionCount) selectedRanks else selectedRanks + rank
+                                }.distinct().sorted()
+                                onSelectionChange(nextRanks)
+                            },
+                        )
+                    }
+                }
+            }
+            val confirmProgressState = if (motionEnabled) {
+                rememberRouteEnterProgress(
+                    key = "compare-confirm-$productIdSignature-$compactGrid",
+                    durationMillis = 220,
+                    delayMillis = if (compactGrid) 135 else 95,
+                )
+            } else {
+                rememberUpdatedState(1f)
+            }
+            val confirmProgress = confirmProgressState.value
+            ProductDeckConvergeMiniButton(
+                label = "确认",
+                visibleProgress = confirmProgress,
+                enabled = confirmEnabled,
+                onClick = onConfirm,
+                modifier = Modifier
+                    .height(30.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductDeckConvergeMiniButton(
+    label: String,
+    visibleProgress: Float,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (visibleProgress <= 0.01f) return
+    val textProgress = segmentProgress(visibleProgress, 0.5f, 1f)
+    Row(
+        modifier = modifier
+            .graphicsLayer {
+                alpha = visibleProgress
+                translationY = (1f - visibleProgress) * 5f
+                scaleX = lerp(0.98f, 1f, textProgress)
+                scaleY = lerp(0.98f, 1f, textProgress)
+                transformOrigin = TransformOrigin(1f, 0.5f)
+            }
+            .alpha(if (enabled) 1f else 0.42f)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .height(28.dp)
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = BuyPilotColors.TextMuted.copy(alpha = lerp(0f, 0.82f, textProgress)),
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ProductDeckCompareCandidateCard(
+    rank: Int,
+    payload: ProductCardPayload,
+    backendBaseUrl: String,
+    selected: Boolean,
+    compact: Boolean,
+    entryIndex: Int,
+    motionEnabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val product = payload.product
+    val density = LocalDensity.current
+    val entryDelayMs = if (compact) {
+        (entryIndex / 2) * 40 + (entryIndex % 2) * 14
+    } else {
+        entryIndex * 38
+    }
+    val entryProgressState = if (motionEnabled) {
+        rememberRouteEnterProgress(
+            key = "compare-card-${payload.product.productId}-$compact",
+            durationMillis = 260,
+            delayMillis = entryDelayMs,
+        )
+    } else {
+        rememberUpdatedState(1f)
+    }
+    val entryProgress = entryProgressState.value
+    val stagedModifier = modifier.graphicsLayer {
+        alpha = entryProgress
+        translationY = (1f - entryProgress) * with(density) {
+            if (compact) 8.dp.toPx() else 12.dp.toPx()
+        }
+        scaleX = lerp(0.974f, 1f, entryProgress)
+        scaleY = lerp(0.974f, 1f, entryProgress)
+        transformOrigin = TransformOrigin(0.5f, 0.12f)
+    }
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) {
+            BuyPilotColors.Primary.copy(alpha = 0.48f)
+        } else {
+            BuyPilotColors.Border.copy(alpha = 0.56f)
+        },
+        animationSpec = tween(durationMillis = 170, easing = MenuEaseOut),
+        label = "product_deck_compare_card_border",
+    )
+    val backgroundColor by animateColorAsState(
+        targetValue = if (selected) {
+            BuyPilotColors.PrimarySoft.copy(alpha = 0.2f)
+        } else {
+            BuyPilotColors.SurfaceCard.copy(alpha = 0.96f)
+        },
+        animationSpec = tween(durationMillis = 170, easing = MenuEaseOut),
+        label = "product_deck_compare_card_background",
+    )
+    val checkProgress by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(durationMillis = if (selected) 150 else 90, easing = if (selected) MenuEaseOut else MenuEaseIn),
+        label = "product_deck_compare_check_progress",
+    )
+    if (compact) {
+        CompactCompareCandidateRow(
+            rank = rank,
+            payload = payload,
+            backendBaseUrl = backendBaseUrl,
+            borderColor = borderColor,
+            backgroundColor = backgroundColor,
+            checkProgress = checkProgress,
+            modifier = stagedModifier,
+            onClick = onClick,
+        )
+        return
+    }
+    Column(
+        modifier = stagedModifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(backgroundColor, RoundedCornerShape(16.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable(role = Role.Checkbox, onClick = onClick)
+            .padding(if (compact) 7.dp else 9.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = true)
+                .heightIn(min = if (compact) 44.dp else 86.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(BuyPilotColors.SurfaceImageAlt),
+            contentAlignment = Alignment.Center,
+        ) {
+            ProductImage(
+                product = product,
+                backendBaseUrl = backendBaseUrl,
+                decodeSizePx = if (compact) 150 else 210,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(if (compact) 5.dp else 7.dp),
+                contentScale = ContentScale.Fit,
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(5.dp)
+                    .height(18.dp)
+                    .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.9f), CircleShape)
+                    .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.5f), CircleShape)
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "#$rank",
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .graphicsLayer {
+                        alpha = checkProgress
+                        scaleX = lerp(0.82f, 1f, checkProgress)
+                        scaleY = lerp(0.82f, 1f, checkProgress)
+                    }
+                    .size(18.dp)
+                    .background(BuyPilotColors.Primary, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "✓",
+                    color = BuyPilotColors.OnPrimary,
+                    fontSize = 11.sp,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        Text(
+            text = product.displayName(),
+            color = BuyPilotColors.TextPrimary,
+            fontSize = if (compact) 12.sp else 13.sp,
+            lineHeight = if (compact) 15.sp else 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        ProductPriceLabel(
+            price = product.priceLabel(),
+            modifier = Modifier.fillMaxWidth(),
+            compact = compact,
+        )
+    }
+}
+
+@Composable
+private fun CompactCompareCandidateRow(
+    rank: Int,
+    payload: ProductCardPayload,
+    backendBaseUrl: String,
+    borderColor: Color,
+    backgroundColor: Color,
+    checkProgress: Float,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val product = payload.product
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(15.dp))
+            .background(backgroundColor, RoundedCornerShape(15.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(15.dp))
+            .clickable(role = Role.Checkbox, onClick = onClick)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(BuyPilotColors.SurfaceImageAlt),
+            contentAlignment = Alignment.Center,
+        ) {
+            ProductImage(
+                product = product,
+                backendBaseUrl = backendBaseUrl,
+                decodeSizePx = 140,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(5.dp),
+                contentScale = ContentScale.Fit,
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = (-2).dp, y = (-2).dp)
+                    .height(18.dp)
+                    .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.94f), CircleShape)
+                    .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.48f), CircleShape)
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "#$rank",
+                    color = BuyPilotColors.TextSecondary,
+                    fontSize = BuyPilotType.Tiny,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = product.displayName(),
+                color = BuyPilotColors.TextPrimary,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            ProductPriceLabel(
+                price = product.priceLabel(),
+                compact = true,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .graphicsLayer {
+                    alpha = checkProgress
+                    scaleX = lerp(0.82f, 1f, checkProgress)
+                    scaleY = lerp(0.82f, 1f, checkProgress)
+                }
+                .size(20.dp)
+                .background(BuyPilotColors.Primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "✓",
+                color = BuyPilotColors.OnPrimary,
+                fontSize = 12.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -2221,42 +2866,6 @@ private fun ProductDeckPageIndicators(
                     .background(indicatorColor, CircleShape),
             )
         }
-    }
-}
-
-@Composable
-private fun ProductDeckConvergeMiniButton(
-    label: String,
-    visibleProgress: Float,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (visibleProgress <= 0.01f) return
-    val textProgress = segmentProgress(visibleProgress, 0.5f, 1f)
-    Row(
-        modifier = modifier
-            .graphicsLayer {
-                alpha = visibleProgress
-                translationY = (1f - visibleProgress) * 5f
-                scaleX = lerp(0.98f, 1f, textProgress)
-                scaleY = lerp(0.98f, 1f, textProgress)
-                transformOrigin = TransformOrigin(1f, 0.5f)
-            }
-            .clickable(role = Role.Button, onClick = onClick)
-            .height(28.dp)
-            .padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            color = BuyPilotColors.TextMuted.copy(alpha = lerp(0f, 0.82f, textProgress)),
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -2620,14 +3229,15 @@ private fun ProductRecommendationThumb(
 private fun ProductPriceLabel(
     price: String,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val match = remember(price) { Regex("""^([¥￥$]?)(\d+(?:\.\d+)?)(.*)$""").find(price) }
     if (match == null) {
         Text(
             text = price,
             color = BuyPilotColors.PrimaryDark,
-            fontSize = BuyPilotType.Body,
-            lineHeight = 18.sp,
+            fontSize = if (compact) 13.sp else BuyPilotType.Body,
+            lineHeight = if (compact) 16.sp else 18.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -2642,7 +3252,7 @@ private fun ProductPriceLabel(
             if (currency.isNotBlank()) {
                 withStyle(
                     SpanStyle(
-                        fontSize = 11.sp,
+                        fontSize = if (compact) 9.sp else 11.sp,
                         fontWeight = FontWeight.SemiBold,
                     ),
                 ) {
@@ -2650,9 +3260,9 @@ private fun ProductPriceLabel(
                 }
             }
             withStyle(
-                SpanStyle(
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    SpanStyle(
+                        fontSize = if (compact) 14.sp else 16.sp,
+                        fontWeight = FontWeight.SemiBold,
                 ),
             ) {
                 append(amount)
@@ -2660,7 +3270,7 @@ private fun ProductPriceLabel(
             if (suffix.isNotBlank()) {
                 withStyle(
                     SpanStyle(
-                        fontSize = 10.sp,
+                        fontSize = if (compact) 9.sp else 10.sp,
                         fontWeight = FontWeight.Medium,
                         color = BuyPilotColors.TextMuted,
                     ),
@@ -2670,7 +3280,7 @@ private fun ProductPriceLabel(
             }
         },
         color = BuyPilotColors.PrimaryDark,
-        lineHeight = 20.sp,
+        lineHeight = if (compact) 17.sp else 20.sp,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier,
@@ -2769,6 +3379,8 @@ internal fun DecisionSummaryCard(
     onEntered: () -> Unit,
     onEvidence: () -> Unit,
     onProductDetailOpen: (String, String, String?) -> Unit,
+    compareProducts: List<ProductCardPayload>,
+    onCompareProducts: (List<Int>) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val winnerProductId = payload.winnerProductId?.takeIf { it.isNotBlank() }
@@ -2966,6 +3578,8 @@ internal fun DecisionSummaryCard(
         if (nextActions.isNotEmpty()) {
             ScrollableQuickActionRow(
                 actions = nextActions,
+                compareProducts = compareProducts,
+                onCompareProducts = onCompareProducts,
                 onQuickAction = onQuickAction,
             )
         }
@@ -5977,304 +6591,6 @@ private fun DecisionEvidenceSheet(
 }
 
 @Composable
-private fun ProductCompareSheet(
-    deck: ProductDeckNode?,
-    backendBaseUrl: String,
-    onProductDetailOpen: (String, String) -> Unit,
-) {
-    val products = deck?.products.orEmpty()
-    SheetContentColumn(expandToMaxHeight = products.size > 2) {
-        SheetTitle("当前候选对比")
-        if (products.isEmpty() || deck == null) {
-            InlineSystemNotice("这组候选已经不可用")
-            return@SheetContentColumn
-        }
-        Text(
-            text = "基于当前候选字段整理，不代表额外的 AI 对比结论。",
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 17.sp,
-        )
-
-        val dimensions = remember(products) { extractCompareDimensions(products) }
-
-        ProductCompareTable(
-            products = products,
-            dimensions = dimensions,
-            backendBaseUrl = backendBaseUrl,
-            deckId = deck.deckId,
-            onProductDetailOpen = onProductDetailOpen,
-        )
-    }
-}
-
-private fun String.toCompareDimensionLabel(): String =
-    when (withoutMarkdownMarkup().withoutInternalDebugTokens().trim().lowercase()) {
-        "product_type", "category", "sub_category", "type" -> "品类"
-        "budget", "price", "price_range", "budget_max", "budget_min" -> "价格"
-        "scenario", "use_case", "use_scenario" -> "使用场景"
-        "brand", "brand_prefer", "brand_avoid" -> "品牌"
-        "skin_type", "skin" -> "肤质"
-        "ingredient", "ingredient_prefer", "ingredient_avoid" -> "成分"
-        "storage", "memory" -> "存储"
-        "camera", "photo" -> "影像"
-        "battery" -> "续航"
-        else -> withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
-    }
-
-private fun extractCompareDimensions(products: List<ProductCardPayload>): List<String> {
-    val compareEvidence = products
-        .flatMap { it.evidence }
-        .firstOrNull { it.sourceType == "compare" }
-
-    val explicitAxes = compareEvidence
-        ?.snippet
-        ?.withoutInternalDebugTokens()
-        ?.split("；")
-        ?.map { it.trim() }
-        ?.filter { it.isNotBlank() }
-        .orEmpty()
-
-    if (explicitAxes.isNotEmpty()) return explicitAxes
-
-    val atomDimensions = products
-        .flatMap { it.reasonAtoms }
-        .map { it.dimension.withoutInternalDebugTokens().trim().toCompareDimensionLabel() }
-        .filter { it.isNotBlank() }
-        .distinct()
-
-    // 只有 1 条 atom 维度时数据太稀少，直接走品类 fallback 更有用
-    if (atomDimensions.size >= 2) return atomDimensions
-
-    val category = products.firstOrNull()?.product?.category.orEmpty()
-    return when {
-        category.contains("美妆", true) || category.contains("护肤", true) ->
-            listOf("肤质匹配", "成分风险", "使用场景", "价格")
-        category.contains("数码", true) || category.contains("电子", true) ->
-            listOf("品类", "性能", "续航", "价格")
-        category.contains("服饰", true) || category.contains("运动", true) ->
-            listOf("运动场景", "材质/脚感", "尺码适配", "价格")
-        category.contains("食品", true) || category.contains("生活", true) ->
-            listOf("配料", "糖分/热量", "储存方式", "价格")
-        else -> listOf("品类", "价格", "品牌")
-    }
-}
-
-private fun getCellValue(payload: ProductCardPayload, dimension: String): String {
-    payload.reasonAtoms
-        .firstOrNull {
-            it.dimension.withoutInternalDebugTokens().trim()
-                .equals(dimension, ignoreCase = true)
-        }
-        ?.value
-        ?.withoutInternalDebugTokens()
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?.let { return it }
-
-    payload.reasonAtoms
-        .firstOrNull {
-            val d = it.dimension.withoutInternalDebugTokens().trim()
-            d.contains(dimension, ignoreCase = true) ||
-            dimension.contains(d, ignoreCase = true)
-        }
-        ?.value
-        ?.withoutInternalDebugTokens()
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?.let { return it }
-
-    return when (dimension) {
-        "价格" -> payload.product.priceLabel()
-        "品牌" -> payload.product.brandLabel()
-        "推荐理由" -> payload.reason.withoutInternalDebugTokens()
-            .trim()
-            .take(30)
-            .let { if (it.length >= 30) "$it..." else it }
-        else -> "—"
-    }
-}
-
-@Composable
-private fun ProductCompareTable(
-    products: List<ProductCardPayload>,
-    dimensions: List<String>,
-    backendBaseUrl: String,
-    deckId: String,
-    onProductDetailOpen: (String, String) -> Unit,
-) {
-    val scrollState = rememberScrollState()
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState),
-    ) {
-        Column(
-            modifier = Modifier.width(88.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-        ) {
-            Spacer(Modifier.height(148.dp))
-            dimensions.forEach { dimension ->
-                DimensionLabelCell(dimension)
-            }
-        }
-
-        products.forEach { payload ->
-            Column(
-                modifier = Modifier.width(112.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                ProductCompareHeader(
-                    payload = payload,
-                    backendBaseUrl = backendBaseUrl,
-                    onClick = {
-                        payload.product.productId
-                            .takeIf(String::isNotBlank)
-                            ?.let { onProductDetailOpen(deckId, it) }
-                    },
-                )
-                dimensions.forEach { dimension ->
-                    ProductCompareCell(
-                        value = getCellValue(payload, dimension),
-                        isWinner = payload.rank == 1 && getCellValue(payload, dimension) != "—",
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProductCompareHeader(
-    payload: ProductCardPayload,
-    backendBaseUrl: String,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .padding(vertical = 8.dp)
-            .clickable(role = Role.Button, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = "#${payload.rank.takeIf { it > 0 } ?: 1}",
-            color = BuyPilotColors.TextMuted,
-            fontSize = BuyPilotType.Tiny,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .background(BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f), CircleShape)
-                .padding(horizontal = 7.dp, vertical = 3.dp),
-        )
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .background(BuyPilotColors.SurfaceImageAlt, RoundedCornerShape(14.dp))
-                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
-                .padding(4.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            ProductImage(
-                product = payload.product,
-                backendBaseUrl = backendBaseUrl,
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
-            )
-        }
-        Text(
-            text = payload.product.displayName(),
-            color = BuyPilotColors.TextPrimary,
-            fontSize = BuyPilotType.Tiny,
-            lineHeight = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
-@Composable
-private fun DimensionLabelCell(dimension: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(BuyPilotColors.SurfaceCard)
-            .border(0.5.dp, BuyPilotColors.Border.copy(alpha = 0.28f))
-            .padding(vertical = 11.dp, horizontal = 8.dp),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Text(
-            text = dimension,
-            color = BuyPilotColors.TextSecondary,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-@Composable
-private fun ProductCompareCell(
-    value: String,
-    isWinner: Boolean,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                if (isWinner) BuyPilotColors.PrimarySoft.copy(alpha = 0.25f)
-                else BuyPilotColors.SurfaceCard
-            )
-            .border(0.5.dp, BuyPilotColors.Border.copy(alpha = 0.28f))
-            .padding(horizontal = 6.dp, vertical = 11.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = value,
-            color = if (isWinner) BuyPilotColors.PrimaryDark else BuyPilotColors.TextPrimary,
-            fontSize = BuyPilotType.Label,
-            lineHeight = 16.sp,
-            fontWeight = if (isWinner) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
-@Composable
-private fun ProductCompareMeta(
-    text: String,
-    accent: Boolean = false,
-    warning: Boolean = false,
-) {
-    Text(
-        text = text.withoutMarkdownMarkup(),
-        color = when {
-            warning -> BuyPilotColors.Warning
-            accent -> BuyPilotColors.PrimaryDark
-            else -> BuyPilotColors.TextMuted
-        },
-        fontSize = BuyPilotType.Tiny,
-        lineHeight = 14.sp,
-        fontWeight = if (accent || warning) FontWeight.SemiBold else FontWeight.Medium,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .background(
-                when {
-                    warning -> BuyPilotColors.WarningSoft.copy(alpha = 0.5f)
-                    accent -> BuyPilotColors.PrimarySoft.copy(alpha = 0.42f)
-                    else -> BuyPilotColors.SurfaceMuted.copy(alpha = 0.64f)
-                },
-                CircleShape,
-            )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-    )
-}
-
-@Composable
 private fun DecisionEvidenceSummary(
     summary: String,
     winnerProductId: String?,
@@ -7377,10 +7693,26 @@ private fun ScrollableChipRow(
 @Composable
 private fun ScrollableQuickActionRow(
     actions: List<QuickActionPayload>,
+    compareProducts: List<ProductCardPayload> = emptyList(),
     modifier: Modifier = Modifier,
+    onCompareProducts: (List<Int>) -> Unit = {},
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val productSignature = remember(compareProducts) {
+        compareProducts.joinToString(separator = "|") { it.product.productId }
+    }
+    var expandedCompareActionId by rememberSaveable(productSignature, actions.size) { mutableStateOf<String?>(null) }
+    var selectedCompareRanks by rememberSaveable(productSignature, actions.size) {
+        mutableStateOf(compareProducts.take(2).mapIndexed { index, _ -> index + 1 })
+    }
+    val compareProductsForPicker = remember(compareProducts) { compareProducts.take(MaxCompareSelectionCount) }
+    LaunchedEffect(productSignature, compareProductsForPicker.size) {
+        selectedCompareRanks = compareProductsForPicker.take(2).mapIndexed { index, _ -> index + 1 }
+        if (compareProductsForPicker.size < 2) {
+            expandedCompareActionId = null
+        }
+    }
     val canScrollBackward by remember(actions.size) {
         derivedStateOf {
             listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
@@ -7389,25 +7721,278 @@ private fun ScrollableQuickActionRow(
     val canScrollForward by remember(actions.size) {
         derivedStateOf { listState.canScrollForward }
     }
-    EdgeFadedLazyRow(
-        modifier = modifier,
-        leadingAlpha = if (canScrollBackward) 1f else 0f,
-        trailingAlpha = if (canScrollForward) 1f else 0f,
-        height = 36.dp,
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp),
     ) {
-        LazyRow(
-            state = listState,
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 28.dp),
+        EdgeFadedLazyRow(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            leadingAlpha = if (canScrollBackward) 1f else 0f,
+            trailingAlpha = if (canScrollForward) 1f else 0f,
+            height = 36.dp,
         ) {
-            itemsIndexed(actions, key = { index, action ->
-                action.actionId.ifEmpty { "$index:${action.label}" }
-            }) { _, action ->
-                SmallActionChip(action.label) { onQuickAction(action) }
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 28.dp),
+            ) {
+                itemsIndexed(actions, key = { index, action ->
+                    action.actionId.ifEmpty { "$index:${action.label}" }
+                }) { index, action ->
+                    val actionKey = action.actionId.ifBlank { "$index:${action.label}" }
+                    SmallActionChip(action.label) {
+                        if (action.action == "compare" && compareProductsForPicker.size >= 2) {
+                            expandedCompareActionId =
+                                if (expandedCompareActionId == actionKey) null else actionKey
+                            selectedCompareRanks = selectedCompareRanks
+                                .ifEmpty { compareProductsForPicker.take(2).mapIndexed { productIndex, _ -> productIndex + 1 } }
+                        } else {
+                            expandedCompareActionId = null
+                            onQuickAction(action)
+                        }
+                    }
+                }
             }
         }
     }
+    if (expandedCompareActionId != null && compareProductsForPicker.size >= 2) {
+        CompareActionPickerDialog(
+            products = compareProductsForPicker,
+            selectedRanks = selectedCompareRanks,
+            onSelectionChange = { selectedCompareRanks = it },
+            onDismiss = { expandedCompareActionId = null },
+            onConfirm = {
+                if (selectedCompareRanks.size >= 2) {
+                    val ranks = selectedCompareRanks.sorted()
+                    expandedCompareActionId = null
+                    onCompareProducts(ranks)
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun CompareActionPickerDialog(
+    products: List<ProductCardPayload>,
+    selectedRanks: List<Int>,
+    onSelectionChange: (List<Int>) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    var visible by remember { mutableStateOf(false) }
+    var dismissRequested by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        visible = true
+    }
+    LaunchedEffect(dismissRequested) {
+        if (dismissRequested) {
+            visible = false
+            kotlinx.coroutines.delay(170L)
+            onDismiss()
+        }
+    }
+    fun requestDismiss() {
+        if (!dismissRequested) {
+            dismissRequested = true
+        }
+    }
+    Dialog(
+        onDismissRequest = ::requestDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = ::requestDismiss,
+                )
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 30.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                modifier = Modifier.matchParentSize(),
+                enter = fadeIn(tween(durationMillis = 180, easing = MenuEaseOut)),
+                exit = fadeOut(tween(durationMillis = 150, easing = MenuEaseIn)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(BuyPilotColors.TextPrimary.copy(alpha = 0.2f)),
+                )
+            }
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(tween(durationMillis = 190, easing = MenuEaseOut)) +
+                    slideInVertically(tween(durationMillis = 260, easing = MenuEaseOut)) { it / 14 } +
+                    scaleIn(
+                        initialScale = 0.965f,
+                        animationSpec = tween(durationMillis = 260, easing = MenuEaseOut),
+                    ),
+                exit = fadeOut(tween(durationMillis = 120, easing = MenuEaseIn)) +
+                    slideOutVertically(tween(durationMillis = 150, easing = MenuEaseIn)) { it / 18 } +
+                    scaleOut(
+                        targetScale = 0.975f,
+                        animationSpec = tween(durationMillis = 150, easing = MenuEaseIn),
+                    ),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
+                    color = BuyPilotColors.SurfaceCard,
+                    shape = RoundedCornerShape(26.dp),
+                    shadowElevation = 22.dp,
+                    tonalElevation = 2.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.68f)),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        products.forEachIndexed { index, payload ->
+                            val rank = index + 1
+                            CompareActionProductRow(
+                                rank = rank,
+                                name = payload.product.shortDecisionCompareName(),
+                                selected = rank in selectedRanks,
+                                onClick = {
+                                    val selected = rank in selectedRanks
+                                    val next = if (selected) {
+                                        if (selectedRanks.size <= 2) selectedRanks else selectedRanks - rank
+                                    } else {
+                                        if (selectedRanks.size >= MaxCompareSelectionCount) selectedRanks else selectedRanks + rank
+                                    }.distinct().sorted()
+                                    onSelectionChange(next)
+                                },
+                            )
+                        }
+                        HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.42f))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(onClick = ::requestDismiss, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)) {
+                                Text(
+                                    text = "取消",
+                                    color = BuyPilotColors.TextMuted,
+                                    fontSize = BuyPilotType.Label,
+                                    lineHeight = 16.sp,
+                                )
+                            }
+                            TextButton(
+                                onClick = onConfirm,
+                                enabled = selectedRanks.size >= 2,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                            ) {
+                                Text(
+                                    text = "开始对比",
+                                    color = if (selectedRanks.size >= 2) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
+                                    fontSize = BuyPilotType.Label,
+                                    lineHeight = 16.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompareActionProductRow(
+    rank: Int,
+    name: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val background by animateColorAsState(
+        targetValue = if (selected) BuyPilotColors.PrimarySoft.copy(alpha = 0.35f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 150, easing = MenuEaseOut),
+        label = "compare_action_product_background",
+    )
+    val border by animateColorAsState(
+        targetValue = if (selected) BuyPilotColors.Primary.copy(alpha = 0.18f) else BuyPilotColors.Border.copy(alpha = 0.0f),
+        animationSpec = tween(durationMillis = 150, easing = MenuEaseOut),
+        label = "compare_action_product_border",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(background, RoundedCornerShape(14.dp))
+            .border(1.dp, border, RoundedCornerShape(14.dp))
+            .clickable(role = Role.Checkbox, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .background(
+                    if (selected) BuyPilotColors.PrimaryDark else BuyPilotColors.SurfaceSubtle,
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = rank.toString(),
+                color = if (selected) Color.White else BuyPilotColors.TextSecondary,
+                fontSize = BuyPilotType.Tiny,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            text = name,
+            color = BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+private fun ProductPayload.shortDecisionCompareName(): String {
+    val clean = displayName("").withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
+    if (clean.isBlank()) return "商品"
+    val brandName = brand.orEmpty().withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
+    val withoutBrand = if (brandName.isNotBlank() && clean.startsWith(brandName, ignoreCase = true)) {
+        clean.removePrefix(brandName).trim()
+    } else {
+        clean
+    }
+    return withoutBrand
+        .replace(Regex("\\s+"), " ")
+        .split(Regex("[，,（(]"))
+        .firstOrNull()
+        ?.trim()
+        ?.take(16)
+        ?.ifBlank { clean.take(16) }
+        ?: clean.take(16)
 }
 
 private data class ChipColorSet(

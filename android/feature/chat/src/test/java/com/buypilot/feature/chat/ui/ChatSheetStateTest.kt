@@ -25,18 +25,4 @@ class ChatSheetStateTest {
         assertEquals("优先选这款", evidence.payload.summary)
         assertEquals("final_decision_1", evidence.sourceNodeKey)
     }
-
-    @Test
-    fun productCompareSheetSaverKeepsSourceDeckNodeKey() {
-        val content = ChatSheetContent.ProductCompare(sourceDeckNodeKey = "deck_node_1")
-        val scope = object : SaverScope {
-            override fun canBeSaved(value: Any): Boolean = true
-        }
-
-        val saved = with(ChatSheetContentSaver) { scope.save(content) }
-        val restored = saved?.let { ChatSheetContentSaver.restore(it) }
-
-        assertTrue(restored is ChatSheetContent.ProductCompare)
-        assertEquals("deck_node_1", (restored as ChatSheetContent.ProductCompare).sourceDeckNodeKey)
-    }
 }

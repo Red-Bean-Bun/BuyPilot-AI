@@ -192,6 +192,7 @@ import coil.load
 import coil.compose.AsyncImage
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.EvidencePayload
 import com.buypilot.core.model.FinalDecisionPayload
@@ -204,6 +205,7 @@ import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CompareCardNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -264,6 +266,7 @@ private const val RouteReturnAnchorSettleFrames = 14
 private const val RouteReturnAnchorStableFrames = 3
 private const val RouteReturnAnchorFrameDelayMs = 24L
 private const val ThinkingVisibilityDelayMs = 100L
+internal const val LocalAssistantPendingStage = "local_pending_request"
 private const val ThinkingTextHandoffEnterMs = 220
 private const val ThinkingTextHandoffHoldMs = 240L
 private const val ThinkingTextHandoffExitMs = 180L
@@ -303,6 +306,8 @@ internal fun ChatTimeline(
     timelinePresentation: TimelinePresentationState,
     externalRouteFreezeRequestId: Int = 0,
     externalRouteFreezeAnchorNodeKey: String? = null,
+    inlineComparePayloadByDeckId: Map<String, CompareCardPayload> = emptyMap(),
+    inlineCompareTurnIds: Set<String> = emptySet(),
     onExternalRouteFreezeReady: (Int) -> Unit = {},
     onClarificationOption: (String, ClarificationChipSnapshot?) -> Unit,
     onClarificationManualInput: () -> Unit,
@@ -310,6 +315,9 @@ internal fun ChatTimeline(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?) -> Unit,
+    onCompareProducts: (List<Int>) -> Unit,
+    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
     onRetryLastMessage: () -> Unit,
@@ -414,7 +422,15 @@ internal fun ChatTimeline(
     val timelineRevealedMessageKeys = revealStore.completedTextKeySet()
     val timelineLiveRevealedMessageKeys = revealStore.liveRevealedTextKeySet()
     val hasTimelineError = timelinePresentation.hasTimelineError
-    val timelineItems = timelinePresentation.items
+    val sourceTimelineItems = timelinePresentation.items
+    val timelineItems = remember(
+        sourceTimelineItems,
+        state.isStreaming,
+        state.currentTurnId,
+        state.suppressComposerStreamingTurnId,
+    ) {
+        sourceTimelineItems.withLocalPendingAssistantTurn(state)
+    }
     val timelineScrollAnchorSignature = remember(timelineItems) {
         timelineItems.scrollAnchorSignature()
     }
@@ -1251,6 +1267,7 @@ internal fun ChatTimeline(
                             TimelineNodeContent(
                                 node = item.node,
                                 renderContext = renderContext,
+                                inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
                                 timelineMotionEnabled = timelineMotionEnabled,
                                 hiddenUserMessage = hiddenUserMessage,
                                 activeFlightMessageKey = activeFlightMessageKey,
@@ -1267,6 +1284,9 @@ internal fun ChatTimeline(
                                 onCriteriaEdit = onCriteriaEdit,
                                 onProductOpen = openProductFromTimeline,
                                 onProductDetailOpen = openProductDetailFromTimeline,
+                                onCompareProducts = onCompareProducts,
+                                onInlineCompareProducts = onInlineCompareProducts,
+                                onCompareDetailOpen = onCompareDetailOpen,
                                 onConvergeRecommendation = onConvergeRecommendation,
                                 onDecisionEvidence = onDecisionEvidence,
                                 onRetryLastMessage = onRetryLastMessage,
@@ -1284,46 +1304,54 @@ internal fun ChatTimeline(
                             )
                         }
                     }
-                    is AssistantTurnTimelineItem -> TimelineItemMotion(
-                        animateEnter = false,
-                        hasEntered = revealStore.hasEnteredTimelineItem(item.key),
-                        onEntered = { revealStore.markTimelineItemEntered(item.key) },
-                    ) {
-                        AssistantTurnBlock(
-                            item = item,
-                            renderContext = renderContext,
-                            timelineMotionEnabled = timelineMotionEnabled,
-                            revealStore = revealStore,
-                            activeFlightMessageKey = activeFlightMessageKey,
-                            revealedMessageKeys = timelineRevealedMessageKeys,
-                            liveRevealedMessageKeys = timelineLiveRevealedMessageKeys,
-                            dismissingClarificationKey = dismissingClarificationKey,
-                            dismissedClarificationKeys = dismissedClarificationKeys,
-                            selectedClarificationOption = selectedClarificationOption,
-                            onClarificationOption = onClarificationOption,
-                            onClarificationManualInput = onClarificationManualInput,
-                            onClarificationManualSource = onClarificationManualSource,
-                            onCriteriaEdit = onCriteriaEdit,
-                            onProductOpen = openProductFromTimeline,
-                            onProductDetailOpen = openProductDetailFromTimeline,
-                            onConvergeRecommendation = onConvergeRecommendation,
-                            onDecisionEvidence = onDecisionEvidence,
-                            onRetryLastMessage = onRetryLastMessage,
-                            onEditLastMessage = onEditLastMessage,
-                            onQuickAction = onQuickAction,
-                            onUserImagePreview = onUserImagePreview,
-                            onMessageRevealComplete = onMessageRevealComplete,
-                            onMessageRevealActiveChange = onMessageRevealActiveChange,
-                            onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
-                            onStreamingTextProgress = { requestCurrentTurnRevealFollowScroll() },
-                            onTextCompleted = revealStore::markTextCompleted,
-                            onTextRevealProgress = revealStore::updateTextProgress,
-                            onStructuredStarted = revealStore::markStructuredNodeStarted,
-                            onStructuredEntered = ::markStructuredEntered,
-                            onNodePositioned = ::recordMeasuredNodeTop,
-                            onUserBubblePositioned = onUserBubblePositioned,
-                            onClarificationCardDismissed = onClarificationCardDismissed,
-                        )
+                    is AssistantTurnTimelineItem -> {
+                        if (item.turnId !in inlineCompareTurnIds) {
+                            TimelineItemMotion(
+                                animateEnter = false,
+                                hasEntered = revealStore.hasEnteredTimelineItem(item.key),
+                                onEntered = { revealStore.markTimelineItemEntered(item.key) },
+                            ) {
+                                AssistantTurnBlock(
+                                    item = item,
+                                    renderContext = renderContext,
+                                    inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                                    timelineMotionEnabled = timelineMotionEnabled,
+                                    revealStore = revealStore,
+                                    activeFlightMessageKey = activeFlightMessageKey,
+                                    revealedMessageKeys = timelineRevealedMessageKeys,
+                                    liveRevealedMessageKeys = timelineLiveRevealedMessageKeys,
+                                    dismissingClarificationKey = dismissingClarificationKey,
+                                    dismissedClarificationKeys = dismissedClarificationKeys,
+                                    selectedClarificationOption = selectedClarificationOption,
+                                    onClarificationOption = onClarificationOption,
+                                    onClarificationManualInput = onClarificationManualInput,
+                                    onClarificationManualSource = onClarificationManualSource,
+                                    onCriteriaEdit = onCriteriaEdit,
+                                    onProductOpen = openProductFromTimeline,
+                                    onProductDetailOpen = openProductDetailFromTimeline,
+                                    onCompareProducts = onCompareProducts,
+                                    onInlineCompareProducts = onInlineCompareProducts,
+                                    onCompareDetailOpen = onCompareDetailOpen,
+                                    onConvergeRecommendation = onConvergeRecommendation,
+                                    onDecisionEvidence = onDecisionEvidence,
+                                    onRetryLastMessage = onRetryLastMessage,
+                                    onEditLastMessage = onEditLastMessage,
+                                    onQuickAction = onQuickAction,
+                                    onUserImagePreview = onUserImagePreview,
+                                    onMessageRevealComplete = onMessageRevealComplete,
+                                    onMessageRevealActiveChange = onMessageRevealActiveChange,
+                                    onAssistantTurnVisualActiveChange = onAssistantTurnVisualActiveChange,
+                                    onStreamingTextProgress = { requestCurrentTurnRevealFollowScroll() },
+                                    onTextCompleted = revealStore::markTextCompleted,
+                                    onTextRevealProgress = revealStore::updateTextProgress,
+                                    onStructuredStarted = revealStore::markStructuredNodeStarted,
+                                    onStructuredEntered = ::markStructuredEntered,
+                                    onNodePositioned = ::recordMeasuredNodeTop,
+                                    onUserBubblePositioned = onUserBubblePositioned,
+                                    onClarificationCardDismissed = onClarificationCardDismissed,
+                                )
+                            }
+                        }
                     }
                     is StandaloneTimelineItem -> TimelineItemMotion(
                         animateEnter = timelineMotionEnabled,
@@ -1333,6 +1361,7 @@ internal fun ChatTimeline(
                         TimelineNodeContent(
                             node = item.node,
                             renderContext = renderContext,
+                            inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
                             timelineMotionEnabled = timelineMotionEnabled,
                             structuredMotionEnabled = timelineMotionEnabled &&
                                 !revealStore.hasStartedStructuredNode(item.node.key),
@@ -1359,6 +1388,9 @@ internal fun ChatTimeline(
                             onCriteriaEdit = onCriteriaEdit,
                             onProductOpen = openProductFromTimeline,
                             onProductDetailOpen = openProductDetailFromTimeline,
+                            onCompareProducts = onCompareProducts,
+                            onInlineCompareProducts = onInlineCompareProducts,
+                            onCompareDetailOpen = onCompareDetailOpen,
                             onConvergeRecommendation = onConvergeRecommendation,
                             onDecisionEvidence = onDecisionEvidence,
                             onRetryLastMessage = onRetryLastMessage,
@@ -1443,6 +1475,7 @@ internal fun ChatTimeline(
 private fun AssistantTurnBlock(
     item: AssistantTurnTimelineItem,
     renderContext: TimelineRenderContext,
+    inlineComparePayloadByDeckId: Map<String, CompareCardPayload>,
     timelineMotionEnabled: Boolean,
     revealStore: TimelineRevealStore,
     activeFlightMessageKey: String?,
@@ -1457,6 +1490,9 @@ private fun AssistantTurnBlock(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?, String?) -> Unit,
+    onCompareProducts: (List<Int>) -> Unit,
+    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
     onRetryLastMessage: () -> Unit,
@@ -1648,6 +1684,7 @@ private fun AssistantTurnBlock(
                             TimelineNodeContent(
                                 node = node,
                                 renderContext = renderContext,
+                                inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
                                 timelineMotionEnabled = timelineMotionEnabled,
                                 productConvergeActionReady = productConvergeActionReady,
                                 structuredMotionEnabled = !turnSettled &&
@@ -1678,6 +1715,9 @@ private fun AssistantTurnBlock(
                                 onCriteriaEdit = onCriteriaEdit,
                                 onProductOpen = onProductOpen,
                                 onProductDetailOpen = onProductDetailOpen,
+                                onCompareProducts = onCompareProducts,
+                                onInlineCompareProducts = onInlineCompareProducts,
+                                onCompareDetailOpen = onCompareDetailOpen,
                                 onConvergeRecommendation = onConvergeRecommendation,
                                 onDecisionEvidence = onDecisionEvidence,
                                 onRetryLastMessage = onRetryLastMessage,
@@ -1839,6 +1879,27 @@ internal fun List<TimelineRenderItem>.scrollAnchorSignature(): String =
         }
     }
 
+private fun List<TimelineRenderItem>.withLocalPendingAssistantTurn(state: ChatUiState): List<TimelineRenderItem> {
+    val turnId = state.currentTurnId?.takeIf { it.isNotBlank() } ?: return this
+    if (!state.isStreaming) return this
+    if (state.suppressComposerStreamingTurnId == turnId) return this
+    val hasAssistantTurn = any { item ->
+        item is AssistantTurnTimelineItem && item.turnId == turnId
+    }
+    if (hasAssistantTurn) return this
+    return this + AssistantTurnTimelineItem(
+        turnId = turnId,
+        nodes = listOf(
+            ThinkingNode(
+                key = "local_pending_$turnId",
+                payload = ThinkingPayload(stage = LocalAssistantPendingStage),
+                turnId = turnId,
+            ),
+        ),
+        segmentIndex = 0,
+    )
+}
+
 private fun ChatUiNode.scrollAnchorSignaturePart(): String =
     listOfNotNull(
         key,
@@ -1878,6 +1939,13 @@ private fun ChatUiNode.structureSignaturePart(): String =
             ).joinToString(separator = "/")
             "$key/${deckId.orEmpty()}/$winner/$actionSignature/$contentSignature"
         }
+        is CompareCardNode -> {
+            val productSignature = payload.products.joinToString(separator = "+") { it.productId.ifBlank { it.name } }
+            val axisSignature = payload.axes.joinToString(separator = "+") { axis ->
+                "${axis.name}:${axis.values.size}"
+            }
+            "$key/${payload.compareId}/$productSignature/$axisSignature/${payload.winnerProductId.orEmpty()}/$narrationDone/${narrationContent.length}"
+        }
         is CartActionNode -> {
             val cartItems = payload.cart?.totalItems ?: 0
             "$key/${payload.action}/${payload.status}/${payload.productId.orEmpty()}/${payload.quantity}/$cartItems"
@@ -1906,7 +1974,8 @@ private fun TurnNodeMotion(
         node is ClarificationNode ||
         node is CriteriaNode ||
         node is ProductDeckNode ||
-        node is FinalDecisionNode
+        node is FinalDecisionNode ||
+        node is CompareCardNode
     ) {
         content()
         return
@@ -1967,6 +2036,7 @@ private fun TurnNodeMotion(
 private fun TimelineNodeContent(
     node: ChatUiNode,
     renderContext: TimelineRenderContext,
+    inlineComparePayloadByDeckId: Map<String, CompareCardPayload>,
     timelineMotionEnabled: Boolean,
     productConvergeActionReady: Boolean = true,
     structuredMotionEnabled: Boolean = timelineMotionEnabled,
@@ -1988,6 +2058,9 @@ private fun TimelineNodeContent(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?, String?) -> Unit,
+    onCompareProducts: (List<Int>) -> Unit,
+    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
     onRetryLastMessage: () -> Unit,
@@ -2017,10 +2090,16 @@ private fun TimelineNodeContent(
         )
         is ThinkingNode -> {
             val statusMessage = node.payload.userFacingThinkingMessage()
-            AssistantInlineStatus(
-                message = statusMessage,
-                motionEnabled = renderContext.currentTurnId == node.turnId,
-            )
+            if (node.payload.stage == LocalAssistantPendingStage) {
+                AssistantPendingStatus(
+                    motionEnabled = renderContext.currentTurnId == node.turnId,
+                )
+            } else {
+                AssistantInlineStatus(
+                    message = statusMessage,
+                    motionEnabled = renderContext.currentTurnId == node.turnId,
+                )
+            }
         }
         is AiStreamNode -> StreamingAssistantText(
             nodeKey = node.key,
@@ -2102,6 +2181,7 @@ private fun TimelineNodeContent(
                 hasPendingDecision = deckIsLatest && node.deckId in renderContext.pendingDecisions,
                 deckConverged = deckConverged,
                 deckStillStreaming = renderContext.isStreaming && renderContext.currentTurnId == node.turnId,
+                comparePayload = inlineComparePayloadByDeckId[node.deckId],
                 convergeActionReady = productConvergeActionReady,
                 compactHistory = shouldCompactProductDeckHistory(
                     node = node,
@@ -2115,9 +2195,22 @@ private fun TimelineNodeContent(
                 onEntered = { onStructuredEntered(node.key) },
                 onOpen = { deckId, productId -> onProductOpen(deckId, productId, node.key) },
                 onOpenDetail = { deckId, productId -> onProductDetailOpen(deckId, productId, node.key, node.key) },
+                onCompare = { ranks -> onInlineCompareProducts(node.deckId, ranks) },
                 onConverge = { onConvergeRecommendation(node.deckId) },
             )
         }
+        is CompareCardNode -> CompareSummaryCard(
+            payload = node.payload,
+            narrationContent = node.narrationContent,
+            narrationDone = node.narrationDone,
+            conclusionContent = node.conclusionContent,
+            conclusionDone = node.conclusionDone,
+            backendBaseUrl = renderContext.backendBaseUrl,
+            motionEnabled = structuredMotionEnabled,
+            alreadyEntered = structuredAlreadyEntered,
+            onEntered = { onStructuredEntered(node.key) },
+            onOpenDetail = { onCompareDetailOpen(node.payload) },
+        )
         is FinalDecisionNode -> Box(
             modifier = Modifier.onGloballyPositioned { coordinates ->
                 onNodePositioned(node.key, coordinates.positionInRoot().y.roundToInt())
@@ -2143,7 +2236,11 @@ private fun TimelineNodeContent(
                 onProductDetailOpen = { deckId, productId, deckNodeKey ->
                     onProductDetailOpen(deckId, productId, node.key, deckNodeKey)
                 },
-                onQuickAction = onQuickAction,
+                compareProducts = sourceDeck?.products.orEmpty(),
+                onCompareProducts = onCompareProducts,
+                onQuickAction = { action ->
+                    onQuickAction(action)
+                },
             )
         }
         is CartActionNode -> CartActionCard(
@@ -2335,6 +2432,64 @@ private fun AssistantInlineStatus(
             text = displayMessage,
             motionEnabled = motionEnabled,
         )
+    }
+}
+
+@Composable
+private fun AssistantPendingStatus(
+    motionEnabled: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ThinkingMascotAnimation(
+            modifier = Modifier.size(28.dp),
+            motionEnabled = motionEnabled,
+        )
+        Spacer(Modifier.width(8.dp))
+        AssistantPendingDots(motionEnabled = motionEnabled)
+    }
+}
+
+@Composable
+private fun AssistantPendingDots(
+    motionEnabled: Boolean,
+) {
+    val transition = rememberInfiniteTransition(label = "assistant_pending_dots")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 960, easing = MenuEaseOut),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "assistant_pending_dot_progress",
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(3) { index ->
+            val dotProgress = if (motionEnabled) {
+                val shifted = (progress + index * 0.18f) % 1f
+                1f - abs(shifted * 2f - 1f)
+            } else {
+                0.45f
+            }
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .graphicsLayer {
+                        alpha = lerp(0.28f, 0.82f, dotProgress)
+                        scaleX = lerp(0.82f, 1.04f, dotProgress)
+                        scaleY = lerp(0.82f, 1.04f, dotProgress)
+                    }
+                    .background(BuyPilotColors.ThinkingShimmer, CircleShape),
+            )
+        }
     }
 }
 

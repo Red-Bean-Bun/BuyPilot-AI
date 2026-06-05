@@ -8,6 +8,7 @@ enum class AgentEventType(val wireValue: String) {
     ProductCard("product_card"),
     CartAction("cart_action"),
     FinalDecision("final_decision"),
+    CompareCard("compare_card"),
     Done("done"),
     Error("error"),
     Unknown("unknown");

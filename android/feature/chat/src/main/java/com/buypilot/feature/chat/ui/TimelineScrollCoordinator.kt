@@ -9,6 +9,7 @@ import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CompareCardNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -478,6 +479,7 @@ private fun ChatUiNode.assistantTurnIdOrNull(): String? =
         is CriteriaNode -> turnId
         is ProductDeckNode -> turnId
         is FinalDecisionNode -> turnId
+        is CompareCardNode -> turnId
         is CartActionNode -> turnId
         is ErrorNode -> turnId
         is UserMessageNode -> null

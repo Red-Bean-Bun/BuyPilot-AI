@@ -558,8 +558,8 @@ def _generate_risk_notes(
             if any(kw in e.snippet for kw in ("风险", "注意", "不适合", "踩坑", "差评", "退货"))
         ]
         if risk_evidence:
-            # Take the first risk evidence snippet, truncated
-            note = risk_evidence[0].snippet[:100]
+            # Keep enough context for the UI to explain the risk without becoming a full review.
+            note = risk_evidence[0].snippet[:180]
             risk_notes.append(CompareRiskNotePayload(
                 product_id=product.product_id,
                 note=note,

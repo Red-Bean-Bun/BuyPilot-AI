@@ -7,6 +7,9 @@ import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.CartItemPayload
 import com.buypilot.core.model.CartSummaryPayload
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CompareAxisPayload
+import com.buypilot.core.model.CompareAxisValuePayload
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.CriteriaPayload
 import com.buypilot.core.model.DonePayload
@@ -19,6 +22,7 @@ import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CompareCardNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -229,6 +233,173 @@ class ChatReducerTest {
         assertEquals(2, nodes.size)
         assertEquals(listOf("p1", "p2"), nodes.map { it.payload.productId })
         assertEquals(listOf("cart_action", "cart_action_turn_2"), nodes.map { it.key })
+    }
+
+    @Test
+    fun compareCardCreatesStructuredNodeAndClearsThinking() {
+        val thinking = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_turn_cmp",
+                turnId = "turn_cmp",
+                payload = ThinkingPayload(stage = "comparing", message = "正在对比候选商品"),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            thinking,
+            envelope(
+                event = AgentEventType.CompareCard,
+                nodeId = "compare_turn_cmp",
+                turnId = "turn_cmp",
+                payload = CompareCardPayload(
+                    compareId = "cmp_1",
+                    products = listOf(
+                        ProductPayload(productId = "p1", name = "商品一", category = "数码电子"),
+                        ProductPayload(productId = "p2", name = "商品二", category = "数码电子"),
+                    ),
+                    axes = listOf(
+                        CompareAxisPayload(
+                            name = "影像",
+                            values = listOf(
+                                CompareAxisValuePayload(productId = "p1", score = 86.0),
+                                CompareAxisValuePayload(productId = "p2", score = 72.0),
+                            ),
+                        ),
+                    ),
+                    winnerProductId = "p1",
+                    winnerReason = "更适合拍照",
+                ),
+            ),
+        )
+
+        assertFalse(state.nodes.any { it is ThinkingNode })
+        val node = state.nodes.single() as CompareCardNode
+        assertEquals("cmp_1", node.payload.compareId)
+        assertEquals("p1", node.payload.winnerProductId)
+        assertEquals("turn_cmp", node.turnId)
+    }
+
+    @Test
+    fun compareNarrationTextDeltaStreamsIntoCompareCard() {
+        val compareState = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.CompareCard,
+                nodeId = "compare_turn_cmp",
+                turnId = "turn_cmp",
+                payload = CompareCardPayload(
+                    compareId = "cmp_1",
+                    products = listOf(
+                        ProductPayload(productId = "p1", name = "商品一", category = "数码电子"),
+                        ProductPayload(productId = "p2", name = "商品二", category = "数码电子"),
+                    ),
+                ),
+            ),
+        )
+
+        val streamed = listOf("第一款", "更适合你。").fold(compareState) { acc, delta ->
+            ChatReducer.reduce(
+                acc,
+                envelope(
+                    event = AgentEventType.TextDelta,
+                    nodeId = "compare_narration_turn_cmp",
+                    turnId = "turn_cmp",
+                    payload = TextDeltaPayload(
+                        messageId = "compare_narration_turn_cmp",
+                        delta = delta,
+                        done = false,
+                    ),
+                ),
+            )
+        }.let { acc ->
+            ChatReducer.reduce(
+                acc,
+                envelope(
+                    event = AgentEventType.TextDelta,
+                    nodeId = "compare_narration_turn_cmp",
+                    turnId = "turn_cmp",
+                    payload = TextDeltaPayload(
+                        messageId = "compare_narration_turn_cmp",
+                        delta = "",
+                        done = true,
+                    ),
+                ),
+            )
+        }
+
+        val compareNode = streamed.nodes.single() as CompareCardNode
+        assertEquals("第一款更适合你。", compareNode.narrationContent)
+        assertTrue(compareNode.narrationDone)
+        assertFalse(streamed.nodes.any { it is AiStreamNode })
+        assertEquals(compareNode.key, streamed.streamingTextKey)
+        assertEquals("第一款更适合你。".length, streamed.streamingTextLength)
+    }
+
+    @Test
+    fun deckBoundCompareCardIsMappedToSourceDeckAndStillRenderableAsTurn() {
+        val deckState = listOf(
+            product(rank = 1, productId = "p1", turnId = "turn_products"),
+            product(rank = 2, productId = "p2", turnId = "turn_products"),
+        ).fold(ChatUiState()) { state, event -> ChatReducer.reduce(state, event) }
+        val withThinking = ChatReducer.reduce(
+            deckState,
+            envelope(
+                event = AgentEventType.Thinking,
+                nodeId = "thinking_compare",
+                turnId = "turn_cmp",
+                payload = ThinkingPayload(stage = "comparing", message = "正在对比候选商品"),
+            ),
+        )
+        val withCompare = ChatReducer.reduce(
+            withThinking,
+            envelope(
+                event = AgentEventType.CompareCard,
+                nodeId = "compare_turn_cmp",
+                turnId = "turn_cmp",
+                payload = CompareCardPayload(
+                    compareId = "cmp_1",
+                    sourceDeckId = "deck_1",
+                    products = listOf(
+                        ProductPayload(productId = "p1", name = "商品一", category = "数码电子"),
+                        ProductPayload(productId = "p2", name = "商品二", category = "数码电子"),
+                    ),
+                    axes = listOf(
+                        CompareAxisPayload(
+                            name = "影像",
+                            values = listOf(
+                                CompareAxisValuePayload(productId = "p1", score = 86.0),
+                                CompareAxisValuePayload(productId = "p2", score = 72.0),
+                            ),
+                        ),
+                    ),
+                    winnerProductId = "p1",
+                    winnerReason = "更适合拍照",
+                ),
+            ),
+        )
+        val state = ChatReducer.reduce(
+            withCompare,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "compare_narration_turn_cmp",
+                turnId = "turn_cmp",
+                payload = TextDeltaPayload(
+                    messageId = "compare_narration_turn_cmp",
+                    delta = "这里是后端对比叙述",
+                    done = true,
+                ),
+            ),
+        )
+
+        val presentation = state.toTimelinePresentationState()
+
+        assertEquals("cmp_1", presentation.compareCardBySourceDeckId["deck_1"]?.compareId)
+        assertTrue(presentation.items.any { item ->
+            item is com.buypilot.feature.chat.presentation.AssistantTurnTimelineItem &&
+                item.turnId == "turn_cmp"
+        })
     }
 
     @Test

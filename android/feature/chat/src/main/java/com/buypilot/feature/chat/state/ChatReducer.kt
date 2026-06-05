@@ -5,6 +5,7 @@ import com.buypilot.core.model.AgentPayload
 import com.buypilot.core.model.AgentUiEnvelope
 import com.buypilot.core.model.CartActionPayload
 import com.buypilot.core.model.ClarificationPayload
+import com.buypilot.core.model.CompareCardPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.CriteriaPayload
 import com.buypilot.core.model.DonePayload
@@ -17,6 +18,7 @@ import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CartActionNode
 import com.buypilot.feature.chat.model.ChatUiNode
 import com.buypilot.feature.chat.model.ClarificationNode
+import com.buypilot.feature.chat.model.CompareCardNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.ErrorNode
 import com.buypilot.feature.chat.model.FinalDecisionNode
@@ -58,6 +60,7 @@ object ChatReducer {
             latestConvergeableDeckId = null,
             activeConvergenceDeckId = null,
             pendingDecisions = emptyMap(),
+            suppressComposerStreamingTurnId = null,
         )
 
     fun reduce(
@@ -153,6 +156,31 @@ object ChatReducer {
 
             AgentEventType.FinalDecision -> reduceFinalDecision(contentBase, envelope)
 
+            AgentEventType.CompareCard -> {
+                val payload = envelope.payload as CompareCardPayload
+                val rawNodeKey = envelope.nodeId.ifBlank { "compare_${envelope.turnId}" }
+                val existing = contentBase.nodes.filterIsInstance<CompareCardNode>()
+                    .lastOrNull {
+                        it.turnId == envelope.turnId &&
+                            it.key.matchesRawOrTurnScopedNodeKey(rawNodeKey, envelope.turnId)
+                    }
+                val nodeKey = existing?.key ?: contentBase.uniqueNodeKeyForTurn(rawNodeKey, envelope.turnId)
+                contentBase.upsertNode(
+                    CompareCardNode(
+                        key = nodeKey,
+                        payload = payload,
+                        turnId = envelope.turnId,
+                        narrationContent = existing?.narrationContent.orEmpty(),
+                        narrationDone = existing?.narrationDone == true,
+                        conclusionContent = existing?.conclusionContent.orEmpty(),
+                        conclusionDone = existing?.conclusionDone == true,
+                    ),
+                ).copy(
+                    inputState = ChatInputState.Streaming,
+                    isStreaming = true,
+                )
+            }
+
             AgentEventType.Done -> {
                 val payload = envelope.payload as DonePayload
                 val awaitingDeckId = payload.deckId?.takeIf { it.isNotBlank() }
@@ -180,6 +208,8 @@ object ChatReducer {
                         ChatInputState.Idle
                     },
                     isStreaming = false,
+                    suppressComposerStreamingTurnId = doneBase.suppressComposerStreamingTurnId
+                        ?.takeUnless { it == envelope.turnId },
                     awaitingCriteriaAdjustment = payload.finishReason == "awaiting_criteria_adjustment",
                     activeConvergenceDeckId = if (
                         doneBase.activeConvergenceDeckId != null &&
@@ -215,6 +245,8 @@ object ChatReducer {
                     inputState = ChatInputState.Error,
                     isStreaming = false,
                     lastError = payload.message,
+                    suppressComposerStreamingTurnId = contentBase.suppressComposerStreamingTurnId
+                        ?.takeUnless { it == envelope.turnId },
                 )
             }
 
@@ -227,6 +259,7 @@ object ChatReducer {
         return base.copy(
             inputState = ChatInputState.Canceled,
             isStreaming = false,
+            suppressComposerStreamingTurnId = null,
             cartState = base.cartState.copy(pendingAddProductIds = emptySet()),
         )
     }
@@ -356,6 +389,12 @@ object ChatReducer {
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
         val payload = envelope.payload as TextDeltaPayload
+        if (payload.isCompareNarration(envelope)) {
+            return state.reduceCompareNarration(envelope.turnId, payload)
+        }
+        if (payload.isCompareConclusion(envelope)) {
+            return state.reduceCompareConclusion(envelope.turnId, payload)
+        }
         if (state.isActiveConvergenceTurn(envelope)) {
             return state
         }
@@ -392,6 +431,122 @@ object ChatReducer {
             lastAssistantMessageKey = node.key,
             streamingTextKey = node.key,
             streamingTextLength = node.content.length,
+        )
+    }
+
+    private fun TextDeltaPayload.isCompareNarration(envelope: AgentUiEnvelope<AgentPayload>): Boolean =
+        messageId.startsWith("compare_narration_") || envelope.nodeId.startsWith("compare_narration_")
+
+    private fun TextDeltaPayload.isCompareConclusion(envelope: AgentUiEnvelope<AgentPayload>): Boolean =
+        messageId.startsWith("compare_conclusion_") || envelope.nodeId.startsWith("compare_conclusion_")
+
+    private fun ChatUiState.reduceCompareNarration(
+        turnId: String,
+        payload: TextDeltaPayload,
+    ): ChatUiState {
+        val compareNode = nodes
+            .filterIsInstance<CompareCardNode>()
+            .lastOrNull { it.turnId == turnId }
+
+        if (compareNode == null) {
+            if (payload.delta.isEmpty()) {
+                return copy(lastError = null)
+            }
+            val rawMessageKey = payload.messageId.ifBlank { "compare_narration_$turnId" }
+            val existing = nodes.filterIsInstance<AiStreamNode>()
+                .firstOrNull { it.turnId == turnId && it.messageId == payload.messageId }
+            val node = AiStreamNode(
+                key = existing?.key ?: uniqueNodeKeyForTurn(rawMessageKey, turnId),
+                messageId = payload.messageId,
+                content = existing?.content.orEmpty() + payload.delta,
+                done = payload.done,
+                turnId = turnId,
+            )
+            return upsertNode(node).copy(
+                inputState = ChatInputState.Streaming,
+                isStreaming = true,
+                lastError = null,
+                lastAssistantMessageKey = node.key,
+                streamingTextKey = node.key,
+                streamingTextLength = node.content.length,
+            )
+        }
+
+        val nextContent = compareNode.narrationContent + payload.delta
+        var changed = false
+        val nextNodes = nodes.map { node ->
+            if (node is CompareCardNode && node.key == compareNode.key) {
+                changed = true
+                node.copy(
+                    narrationContent = nextContent,
+                    narrationDone = payload.done,
+                )
+            } else {
+                node
+            }
+        }
+        return (if (changed) copy(nodes = nextNodes) else this).copy(
+            inputState = ChatInputState.Streaming,
+            isStreaming = true,
+            lastError = null,
+            lastAssistantMessageKey = compareNode.key,
+            streamingTextKey = compareNode.key,
+            streamingTextLength = nextContent.length,
+        )
+    }
+
+    private fun ChatUiState.reduceCompareConclusion(
+        turnId: String,
+        payload: TextDeltaPayload,
+    ): ChatUiState {
+        val compareNode = nodes
+            .filterIsInstance<CompareCardNode>()
+            .lastOrNull { it.turnId == turnId }
+
+        if (compareNode == null) {
+            if (payload.delta.isEmpty()) {
+                return copy(lastError = null)
+            }
+            val rawMessageKey = payload.messageId.ifBlank { "compare_conclusion_$turnId" }
+            val existing = nodes.filterIsInstance<AiStreamNode>()
+                .firstOrNull { it.turnId == turnId && it.messageId == payload.messageId }
+            val node = AiStreamNode(
+                key = existing?.key ?: uniqueNodeKeyForTurn(rawMessageKey, turnId),
+                messageId = payload.messageId,
+                content = existing?.content.orEmpty() + payload.delta,
+                done = payload.done,
+                turnId = turnId,
+            )
+            return upsertNode(node).copy(
+                inputState = ChatInputState.Streaming,
+                isStreaming = true,
+                lastError = null,
+                lastAssistantMessageKey = node.key,
+                streamingTextKey = node.key,
+                streamingTextLength = node.content.length,
+            )
+        }
+
+        val nextContent = compareNode.conclusionContent + payload.delta
+        var changed = false
+        val nextNodes = nodes.map { node ->
+            if (node is CompareCardNode && node.key == compareNode.key) {
+                changed = true
+                node.copy(
+                    conclusionContent = nextContent,
+                    conclusionDone = payload.done,
+                )
+            } else {
+                node
+            }
+        }
+        return (if (changed) copy(nodes = nextNodes) else this).copy(
+            inputState = ChatInputState.Streaming,
+            isStreaming = true,
+            lastError = null,
+            lastAssistantMessageKey = compareNode.key,
+            streamingTextKey = compareNode.key,
+            streamingTextLength = nextContent.length,
         )
     }
 
@@ -738,6 +893,7 @@ object ChatReducer {
             is CriteriaNode -> turnId
             is ProductDeckNode -> turnId
             is FinalDecisionNode -> turnId
+            is CompareCardNode -> turnId
             else -> null
         }?.takeIf { it.isNotBlank() }
 
@@ -754,6 +910,7 @@ object ChatReducer {
             AgentEventType.ProductCard,
             AgentEventType.Clarification,
             AgentEventType.Unknown -> false
+            AgentEventType.CompareCard -> true
             AgentEventType.FinalDecision -> true
             AgentEventType.Done -> !state.hasClarificationForTurn(turnId)
             else -> true

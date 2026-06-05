@@ -20,7 +20,7 @@ from src.services.conversation_state import (
     get_previous_deck_id,
     get_previous_product_ids,
 )
-from src.services.llm_client import stream_comparison_narration
+from src.services.llm_client import stream_comparison_conclusion, stream_comparison_narration
 from src.types.schemas import ChatStreamRequest, IntentResult
 from src.types.sse_events import (
     CompareCardEvent,
@@ -124,7 +124,7 @@ async def handle_compare(
         confidence=comparison.confidence,
     )
 
-    # 7. Stream LLM narration (text_delta)
+    # 7. Stream LLM overview narration (text_delta)
     message_id = f"compare_narration_{ctx.turn_id}"
     full_text = ""
     try:
@@ -173,7 +173,55 @@ async def handle_compare(
             done=True,
         )
 
-    # 8. Done
+    # 8. Stream post-table closing advice (text_delta)
+    conclusion_message_id = f"compare_conclusion_{ctx.turn_id}"
+    conclusion_text = ""
+    try:
+        async for delta in stream_comparison_conclusion(
+            products=comparison.products,
+            axes=comparison.axes,
+            winner_product_id=comparison.winner_product_id,
+            winner_reason=comparison.winner_reason,
+            tradeoffs=comparison.tradeoffs,
+            risk_notes=comparison.risk_notes,
+            mode=comparison.mode,
+        ):
+            if delta:
+                conclusion_text += delta
+                from src.types.sse_events import TextDeltaEvent
+
+                yield TextDeltaEvent(
+                    session_id=ctx.session_id,
+                    turn_id=ctx.turn_id,
+                    seq=ctx.seq.next(),
+                    event_id=ctx.seq.event_id(),
+                    node_id=f"compare_conclusion_{ctx.turn_id}",
+                    created_at_ms=now_ms(),
+                    display_mode="inline_text",
+                    message_id=conclusion_message_id,
+                    delta=delta,
+                    done=False,
+                )
+    except Exception:
+        logger.warning("Comparison conclusion LLM failed; omitting closing advice.", exc_info=True)
+
+    if conclusion_text:
+        from src.types.sse_events import TextDeltaEvent
+
+        yield TextDeltaEvent(
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            seq=ctx.seq.next(),
+            event_id=ctx.seq.event_id(),
+            node_id=f"compare_conclusion_{ctx.turn_id}",
+            created_at_ms=now_ms(),
+            display_mode="inline_text",
+            message_id=conclusion_message_id,
+            delta="",
+            done=True,
+        )
+
+    # 9. Done
     yield ctx.done()
 
 
