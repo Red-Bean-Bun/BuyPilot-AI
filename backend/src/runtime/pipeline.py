@@ -333,6 +333,16 @@ async def _resolve_intent(
             logger.info("Reclassified add_to_cart → recommend (no product reference)")
             intent = intent.model_copy(update={"intent": "recommend"})
 
+    # Guard: reclassify unresolvable compare → recommend
+    # The compare handler requires ≥2 previous products to reference.
+    # When fewer exist (0 or 1), reclassify to recommend so the pipeline
+    # finds products first. Compare can follow after seeing results.
+    if intent.intent == "compare":
+        previous_ids = await get_previous_product_ids(ctx.session_id)
+        if len(previous_ids) < 2:
+            logger.info("Reclassified compare → recommend (need ≥2 previous products, have %d)", len(previous_ids))
+            intent = intent.model_copy(update={"intent": "recommend"})
+
     yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent))
 
 

@@ -512,3 +512,87 @@ async def test_add_to_cart_no_product_reference_reclassified_to_recommend(monkey
         e for e in events if e.event == "clarification" and getattr(e, "required_slots", None) == ["target_product"]
     ]
     assert cart_clarifications == []
+
+
+async def test_compare_no_previous_products_reclassified_to_recommend(monkeypatch):
+    """LLM classifies as compare but no previous products exist → reclassify to recommend.
+
+    Regression test for: user says "对比X和Y" without prior recommendations,
+    causing an infinite clarification loop. The guard should reclassify to
+    recommend so the pipeline finds products first.
+    """
+    async def compare_intent(session_id, body):
+        del session_id, body
+        return IntentResult(intent="compare", confidence=0.9, category="数码电子")
+
+    async def no_previous_products(session_id):
+        del session_id
+        return []
+
+    async def no_previous_criteria(session_id):
+        del session_id
+        return None
+
+    monkeypatch.setattr(pipeline_module, "run_intent", compare_intent)
+    monkeypatch.setattr(pipeline_module, "get_previous_product_ids", no_previous_products)
+    monkeypatch.setattr(pipeline_module, "get_previous_criteria", no_previous_criteria)
+
+    events = [
+        event
+        async for event in chat_stream(
+            "s_reclassify_compare",
+            ChatStreamRequest(message="对比第一个和第二个"),
+        )
+    ]
+
+    tags = [event.event for event in events]
+    # Should follow recommend path, not emit compare_card or compare clarification
+    assert "compare_card" not in tags
+    # The compare-specific clarification should never appear
+    compare_clarifications = [
+        e for e in events
+        if e.event == "clarification"
+        and getattr(e, "required_slots", None) == ["compare_products"]
+    ]
+    assert compare_clarifications == []
+
+
+async def test_compare_single_product_reclassified_to_recommend(monkeypatch):
+    """LLM classifies as compare but only 1 previous product → reclassify to recommend.
+
+    The compare handler needs ≥2 products. With only 1, the ordinal resolution
+    ("对比第一个和第二个") can resolve at most 1 target, triggering the same
+    deadlock as the 0-product case.
+    """
+    async def compare_intent(session_id, body):
+        del session_id, body
+        return IntentResult(intent="compare", confidence=0.9, category="数码电子")
+
+    async def single_product(session_id):
+        del session_id
+        return ["p_digital_001"]
+
+    async def no_previous_criteria(session_id):
+        del session_id
+        return None
+
+    monkeypatch.setattr(pipeline_module, "run_intent", compare_intent)
+    monkeypatch.setattr(pipeline_module, "get_previous_product_ids", single_product)
+    monkeypatch.setattr(pipeline_module, "get_previous_criteria", no_previous_criteria)
+
+    events = [
+        event
+        async for event in chat_stream(
+            "s_reclassify_compare_one",
+            ChatStreamRequest(message="对比第一个和第二个"),
+        )
+    ]
+
+    tags = [event.event for event in events]
+    assert "compare_card" not in tags
+    compare_clarifications = [
+        e for e in events
+        if e.event == "clarification"
+        and getattr(e, "required_slots", None) == ["compare_products"]
+    ]
+    assert compare_clarifications == []

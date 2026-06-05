@@ -124,6 +124,9 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/test_message_rules.py::_seed_test_brands -> mr.get_known_brands",
     # Pipeline test: add_to_cart reclassification mock
     "tests/test_pipeline.py::test_add_to_cart_no_product_reference_reclassified_to_recommend -> src.runtime.pipeline.get_previous_product_ids",
+    # Pipeline test: compare reclassification mock (same pattern as add_to_cart guard)
+    "tests/test_pipeline.py::test_compare_no_previous_products_reclassified_to_recommend -> src.runtime.pipeline.get_previous_product_ids",
+    "tests/test_pipeline.py::test_compare_single_product_reclassified_to_recommend -> src.runtime.pipeline.get_previous_product_ids",
 }
 
 
