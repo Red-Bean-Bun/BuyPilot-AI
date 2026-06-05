@@ -72,9 +72,6 @@ _FORBIDDEN_COMMERCIAL_TERMS = (
     "送到",
 )
 
-# Backward-compatible alias for recommendation validation.
-_FORBIDDEN_RECOMMENDATION_TERMS = _FORBIDDEN_COMMERCIAL_TERMS
-
 
 def _schedule_parsed_json_update(
     task: str,
@@ -364,14 +361,13 @@ def _validate_recommendation_chunks(chunks: list[str], products: list[ProductPay
     if unknown_names:
         raise RuntimeError("Live recommendation text referenced products outside the candidate set.")
 
-    forbidden_terms = [term for term in _FORBIDDEN_RECOMMENDATION_TERMS if term in text]
+    forbidden_terms = [term for term in _FORBIDDEN_COMMERCIAL_TERMS if term in text]
     if forbidden_terms:
         raise RuntimeError(f"Live recommendation text contained unsupported commercial claims: {forbidden_terms}.")
 
 
 # ── Decision text sanitisation (总评 #7) ────────────────────────────────────
 
-_DECISION_FORBIDDEN_TERMS = _FORBIDDEN_COMMERCIAL_TERMS
 _DECISION_SAFE_REPLACEMENT = msg.DECISION_SAFE_REPLACEMENT
 
 
@@ -386,7 +382,7 @@ def _sanitize_decision(
     non_candidate_names = sorted(name for name in all_names - candidate_names if name and len(name) >= 2)
 
     def _clean(text: str) -> str:
-        for term in _DECISION_FORBIDDEN_TERMS:
+        for term in _FORBIDDEN_COMMERCIAL_TERMS:
             if term in text:
                 text = text.replace(term, _DECISION_SAFE_REPLACEMENT)
         for name in non_candidate_names:

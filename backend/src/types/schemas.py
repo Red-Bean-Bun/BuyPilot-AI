@@ -111,14 +111,19 @@ class RecommendationResult(BaseModel):
     evidence_by_product: dict[str, list[EvidencePayload]] = Field(default_factory=dict)
 
 
+DecisionStatus = Literal["selected", "no_match", "no_suitable_winner", "needs_more_signal"]
+DecisionConfidence = Literal["high", "medium", "low"]
+DecisionNextStep = Literal["adjust_criteria", "replace_deck", "continue_current_deck", "accept_recommendation"]
+
+
 class DecisionResult(BaseModel):
     winner_product_id: str
     summary: str
     why: list[str] = Field(default_factory=list)
     not_for: list[str] = Field(default_factory=list)
-    decision_status: str | None = None
-    confidence: str | None = None
-    next_step: str | None = None
+    decision_status: DecisionStatus | None = None
+    confidence: DecisionConfidence | None = None
+    next_step: DecisionNextStep | None = None
 
 
 class SessionState(BaseModel):

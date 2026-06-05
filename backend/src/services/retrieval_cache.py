@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,7 +43,7 @@ class RetrievalCache:
         self._hits = 0
         self._misses = 0
 
-    def get(self, criteria: CriteriaPayload, feedback: dict[str, list[str]] | None) -> Any | None:
+    def get(self, criteria: CriteriaPayload, feedback: Mapping[str, list[str]] | None) -> Any | None:
         """Retrieve cached result if available and not expired."""
         if not get_settings().retrieval_cache_enabled:
             return None
@@ -62,7 +63,7 @@ class RetrievalCache:
     def set(
         self,
         criteria: CriteriaPayload,
-        feedback: dict[str, list[str]] | None,
+        feedback: Mapping[str, list[str]] | None,
         value: Any,
         ttl_seconds: float | None = None,
     ) -> None:
@@ -97,7 +98,7 @@ class RetrievalCache:
             "misses": self._misses,
         }
 
-    def _make_key(self, criteria: CriteriaPayload, feedback: dict[str, list[str]] | None) -> str:
+    def _make_key(self, criteria: CriteriaPayload, feedback: Mapping[str, list[str]] | None) -> str:
         """Generate cache key from criteria + feedback."""
         criteria_json = criteria.model_dump_json()
         feedback_json = json.dumps(feedback or {}, sort_keys=True, default=str)

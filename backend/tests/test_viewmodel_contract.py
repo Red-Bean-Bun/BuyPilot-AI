@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.runtime.message_rules import extract_adjustment_hints
+from src.services.message_rules import extract_adjustment_hints
 from src.services.decision_scoring import (
     SIGNAL_NOT_INTERESTED,
     _compute_user_signal_scores,

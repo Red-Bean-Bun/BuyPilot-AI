@@ -27,7 +27,7 @@ from src.runtime.cart_handlers import (
 )
 from src.runtime.compare_handlers import handle_compare
 from src.runtime.cart_rules import message_refers_to_previous_product, referenced_product_id
-from src.runtime.message_rules import is_replace_deck_phrase
+from src.services.message_rules import is_replace_deck_phrase
 from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions
 from src.runtime.stages.recommendation import RetrievalResult
 from src.config.domain_terms import normalize_product_type, product_type_aliases
@@ -55,7 +55,7 @@ from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, fetch_risk_notes_for_products, reason_from_atoms
 from src.services.retriever import filter_products
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
-from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult
+from src.types.schemas import ChatStreamRequest, DecisionNextStep, DecisionResult, IntentResult
 from src.types.sse_events import (
     AlternativePayload,
     ClarificationEvent,
@@ -297,10 +297,13 @@ async def handle_recommendation(
         product_ids_task = None
 
     # ── Fire image embedding in parallel (for visual similarity retrieval) ──
-    image_embedding_task: asyncio.Task | None = None
+    image_embedding_task: TimedTask[list[float] | None] | None = None
     if body.image_url:
-        image_embedding_task = asyncio.create_task(ctx.stages.run_image_embedding(body.image_url))
-        ctx.background_tasks.append(TimedTask(task=image_embedding_task, started_at=time.perf_counter()))
+        image_embedding_task = start_stage_task(
+            ctx,
+            ctx.stages.run_image_embedding(body.image_url),
+            background=True,
+        )
 
     # ── Build speculative criteria (instant, no I/O) ──
     spec_criteria = criteria_from_intent(intent, summary=_speculative_summary(intent))
@@ -322,7 +325,7 @@ async def handle_recommendation(
         feedback = _feedback_with_avoided_products(feedback, previous_product_ids)
 
     # ── Speculative retrieval: launch in background while criteria runs ──
-    image_embedding = await image_embedding_task if image_embedding_task else None
+    image_embedding = await image_embedding_task.task if image_embedding_task else None
     retrieval_task = start_stage_task(
         ctx,
         ctx.stages.run_retrieval(spec_criteria, top_n=12, feedback=feedback, image_embedding=image_embedding),
@@ -516,7 +519,8 @@ async def continue_recommendation_from_criteria(
                 # Check if any returned products match the requested type via hierarchy
                 _expanded = {a.lower() for a in product_type_aliases(product_type)}
                 _has_match = any(
-                    normalize_product_type(p.sub_category).lower() in _expanded
+                    (normalized := normalize_product_type(p.sub_category)) is not None
+                    and normalized.lower() in _expanded
                     for p in products
                 )
                 if _has_match:
@@ -722,7 +726,7 @@ async def continue_decision_from_current_deck(
     status, confidence = decision_confidence(scored, user_signal_count=user_signal_count)
 
     # Determine next_step from decision status
-    next_step: str | None = None
+    next_step: DecisionNextStep | None = None
     if status == "selected":
         next_step = "accept_recommendation"
     elif status == "needs_more_signal":
@@ -818,22 +822,22 @@ async def _run_decision_with_context(
     locked_winner_product_id: str | None = None,
     score_breakdown: dict | None = None,
 ) -> DecisionResult:
+    # Check if the stage accepts optional kwargs (supports test stubs)
     kwargs: dict[str, object] = {}
-    if _callable_accepts(ctx.stages.run_decision, "locked_winner_product_id"):
+    sig_params = _get_callable_params(ctx.stages.run_decision)
+    if "locked_winner_product_id" in sig_params and locked_winner_product_id is not None:
         kwargs["locked_winner_product_id"] = locked_winner_product_id
-    if _callable_accepts(ctx.stages.run_decision, "score_breakdown"):
+    if "score_breakdown" in sig_params and score_breakdown is not None:
         kwargs["score_breakdown"] = score_breakdown
     return await ctx.stages.run_decision(criteria, products, evidences_by_product, **kwargs)
 
 
-def _callable_accepts(func: Callable[..., object], parameter_name: str) -> bool:
+def _get_callable_params(func: Callable[..., object]) -> set[str]:
+    """Get parameter names from callable signature (cached for common cases)."""
     try:
-        parameters = inspect.signature(func).parameters.values()
+        return set(inspect.signature(func).parameters.keys())
     except (TypeError, ValueError):
-        return False
-    return any(
-        parameter.name == parameter_name or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters
-    )
+        return set()
 
 
 def _is_replace_deck_request(body: ChatStreamRequest) -> bool:
@@ -990,19 +994,56 @@ async def _stream_recommendation_text_events(
                 await pump_task
 
 
+def _split_at_boundaries(
+    text: str,
+    *,
+    min_chars: int,
+    max_chars: int,
+    boundaries: set[str],
+) -> list[str]:
+    """Split text at punctuation boundaries, respecting min/max char limits.
+
+    Used by both streaming chunks and typewriter rendering.
+    """
+    if not text:
+        return []
+    chunks: list[str] = []
+    buf = ""
+    for char in text:
+        buf += char
+        at_boundary = char in boundaries
+        if at_boundary and len(buf) >= min_chars:
+            chunks.append(buf)
+            buf = ""
+        elif len(buf) >= max_chars:
+            chunks.append(buf)
+            buf = ""
+    if buf:
+        # Merge very short trailing chunks
+        if chunks and len(buf) < min_chars:
+            chunks[-1] += buf
+        else:
+            chunks.append(buf)
+    return chunks
+
+
 def _pop_recommendation_stream_chunk(buffer: str, *, final: bool = False) -> tuple[str | None, str]:
+    """Pop the next streaming chunk from buffer, returning (chunk, remaining)."""
     if not buffer:
         return None, buffer
     if final:
         return buffer, ""
-
-    scan_limit = min(len(buffer), RECOMMENDATION_STREAM_MAX_CHARS)
-    for index, char in enumerate(buffer[:scan_limit], start=1):
-        if index >= RECOMMENDATION_STREAM_MIN_CHARS and char in RECOMMENDATION_STREAM_BOUNDARIES:
-            return buffer[:index], buffer[index:]
-    if len(buffer) >= RECOMMENDATION_STREAM_MAX_CHARS:
-        return buffer[:RECOMMENDATION_STREAM_MAX_CHARS], buffer[RECOMMENDATION_STREAM_MAX_CHARS:]
-    return None, buffer
+    chunks = _split_at_boundaries(
+        buffer,
+        min_chars=RECOMMENDATION_STREAM_MIN_CHARS,
+        max_chars=RECOMMENDATION_STREAM_MAX_CHARS,
+        boundaries=RECOMMENDATION_STREAM_BOUNDARIES,
+    )
+    if not chunks:
+        return None, buffer
+    chunk = chunks[0]
+    remaining = buffer[len(chunk):]
+    return chunk, remaining
 
 
 def _text_delta_event(
@@ -1029,22 +1070,12 @@ def _text_delta_event(
 
 def _split_for_typewriter(text: str) -> list[str]:
     """Split text into typewriter-friendly chunks at punctuation boundaries."""
-    if not text:
-        return []
-    chunks: list[str] = []
-    buf = ""
-    for char in text:
-        buf += char
-        if char in TYPEWRITER_PUNCTUATION or len(buf) >= TYPEWRITER_MAX_CHARS:
-            chunks.append(buf)
-            buf = ""
-    if buf:
-        chunks.append(buf)
-    # Merge very short trailing chunks
-    if len(chunks) >= 2 and len(chunks[-1]) < TYPEWRITER_MIN_CHARS:
-        chunks[-2] += chunks[-1]
-        chunks.pop()
-    return chunks
+    return _split_at_boundaries(
+        text,
+        min_chars=TYPEWRITER_MIN_CHARS,
+        max_chars=TYPEWRITER_MAX_CHARS,
+        boundaries=TYPEWRITER_PUNCTUATION,
+    )
 
 
 async def stream_text(

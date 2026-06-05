@@ -10,14 +10,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.runtime.cancel_registry import StreamCancelled, register_turn, unregister_turn
-from src.runtime.handlers import INTENT_HANDLERS, handle_clarification
-from src.runtime.message_rules import (
+from src.runtime.handlers import INTENT_HANDLERS, handle_clarification, _criteria_card_event
+from src.services.intent_resolution import (
+    has_context_value,
+    resolve_intent_constraints,
+)
+from src.services.message_rules import (
     COMMERCIAL_CLAIM_REPLY,
-    extract_adjustment_hints,
-    extract_brand_prefer_from_message,
-    extract_product_lookup_hints,
-    extract_product_type_hint,
-    has_shopping_signal,
     is_compare_phrase,
     is_commercial_claim_question,
     is_replace_deck_phrase,
@@ -33,7 +32,7 @@ from src.runtime.stages.multimodal import run_image_embedding, run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.config import user_messages as msg
-from src.config.domain_terms import KNOWN_CATEGORIES, category_from_text, infer_category_from_product_type, is_known_brand_or_synonym, is_supported_product_type, normalize_category
+from src.config.domain_terms import KNOWN_CATEGORIES, is_known_brand_or_synonym, is_supported_product_type, normalize_category
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
@@ -55,10 +54,6 @@ from src.types.sse_events import (
 
 HEARTBEAT_INTERVAL_SECONDS = 0.8
 PUBLIC_PIPELINE_ERROR_MESSAGE = msg.PIPELINE_ERROR
-
-# Constraint fields that hold list values — must be merged (appended) rather
-# than overwritten when multiple extraction sources contribute values.
-_MERGE_LIST_FIELDS = {"ingredient_avoid", "ingredient_prefer", "brand_avoid", "brand_prefer", "origin_avoid", "dietary"}
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +280,7 @@ async def _resolve_intent(
         prev = await get_previous_criteria(ctx.session_id)
         if prev is not None:
             constraints = {
-                key: value for key, value in prev.constraints.model_dump().items() if _has_context_value(value)
+                key: value for key, value in prev.constraints.model_dump().items() if has_context_value(value)
             }
             synthetic_intent = IntentResult(
                 intent="recommend",
@@ -328,79 +323,8 @@ async def _resolve_intent(
         if intent is None:
             raise RuntimeError("intent stage completed without a result.")
 
-    # Merge natural-language adjustment hints into extracted constraints
-    adjustment = extract_adjustment_hints(pipeline_body.message)
-    if adjustment and intent.intent in {"recommend", "clarify", "feedback"}:
-        merged = dict(intent.extracted_constraints or {})
-        for key, value in adjustment.items():
-            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
-                merged[key] = list(dict.fromkeys([*merged[key], *value]))
-            else:
-                merged[key] = value
-        intent = intent.model_copy(update={"extracted_constraints": merged})
-
-    # Extract brand preference from natural language (铁律3)
-    brand_prefer = extract_brand_prefer_from_message(pipeline_body.message)
-    if brand_prefer and intent.intent in {"recommend", "clarify", "feedback"}:
-        merged = dict(intent.extracted_constraints or {})
-        existing = merged.get("brand_prefer", [])
-        merged["brand_prefer"] = list(dict.fromkeys(
-            existing + brand_prefer if isinstance(existing, list) else brand_prefer
-        ))
-        intent = intent.model_copy(update={"extracted_constraints": merged})
-
-    # Post-LLM safety net: if the LLM classified as chitchat or feedback
-    # but the message contains clear shopping signals, override to clarify.
-    if intent.intent in {"chitchat", "feedback"} and not pipeline_body.image_url:
-        if has_shopping_signal(pipeline_body.message):
-            prev = await get_previous_criteria(ctx.session_id)
-            inferred_category = intent.category or (prev.category if prev else None) or category_from_text(pipeline_body.message)
-            intent = IntentResult(
-                intent="clarify",
-                confidence=intent.confidence,
-                category=inferred_category,
-                extracted_constraints=intent.extracted_constraints or {},
-            )
-
-    # Fallback category inference: when the LLM identified a shopping intent
-    # but left category=null, try to infer from the message text directly.
-    # This catches "我想喝什么" (recommend but no category) and similar.
-    if intent.intent in {"recommend", "clarify"} and not intent.category and not pipeline_body.image_url:
-        inferred = category_from_text(pipeline_body.message)
-        if inferred:
-            if not _is_ambiguous_scene_only_category_inference(pipeline_body.message, inferred):
-                intent = intent.model_copy(update={"category": inferred})
-
-    # Product-lookup extraction: "有鼠标吗" → product_type="鼠标"
-    # Runs for all shopping intents to catch queries the LLM may miss.
-    # When the extracted entity is a brand, lookup returns brand_prefer instead.
-    lookup = extract_product_lookup_hints(pipeline_body.message)
-    if lookup and intent.intent in {"recommend", "clarify", "feedback"}:
-        merged = dict(intent.extracted_constraints or {})
-        for key, value in lookup.items():
-            if key in _MERGE_LIST_FIELDS and isinstance(value, list):
-                existing = merged.get(key, []) or []
-                merged[key] = list(dict.fromkeys([*existing, *value]))
-            else:
-                merged[key] = value
-        intent = intent.model_copy(update={"extracted_constraints": merged})
-
-    # Deterministic product_type extraction: fills LLM gaps for "手机"/"裤子"/"鞋"
-    product_hint = extract_product_type_hint(pipeline_body.message)
-    if product_hint and intent.intent in {"recommend", "clarify", "feedback"}:
-        merged = dict(intent.extracted_constraints or {})
-        if "product_type" not in merged:
-            merged["product_type"] = product_hint
-        # Validate category against product_type: if the LLM hallucinated the wrong
-        # category (e.g. "有裤子吗"→食品 but 裤子→服饰), override with the correct one.
-        expected_cat = infer_category_from_product_type(product_hint)
-        if expected_cat and normalize_category(intent.category) != expected_cat:
-            intent = intent.model_copy(update={
-                "category": expected_cat,
-                "extracted_constraints": merged,
-            })
-        else:
-            intent = intent.model_copy(update={"extracted_constraints": merged})
+    # Apply deterministic post-processing to refine intent constraints
+    intent = resolve_intent_constraints(intent, pipeline_body.message)
 
     # Guard: reclassify unresolvable add_to_cart → recommend
     if intent.intent == "add_to_cart" and not intent.target_product_id:
@@ -425,7 +349,7 @@ async def _emit_clarification(
 ) -> AsyncGenerator[SSEEventBase, None]:
     partial = _intent_to_partial_criteria(intent, pipeline_body.message)
     if _should_emit_partial_criteria(missing_slots, partial):
-        yield _partial_criteria_card_event(ctx, partial)
+        yield _criteria_card_event(ctx, partial)
     async for event in handle_clarification(ctx, missing_slots):
         yield event
     await save_recommendation_turn(ctx.session_id, partial, [], user_message=pipeline_body.message)
@@ -459,7 +383,7 @@ async def _merge_followup_context(session_id: str, resolved: _ResolvedIntent) ->
     topic_switched = _is_topic_switch(intent, previous)
 
     for key, value in previous.constraints.model_dump().items():
-        if key not in constraints and _has_context_value(value):
+        if key not in constraints and has_context_value(value):
             if topic_switched and key in ("brand_prefer", "brand_avoid", "product_type"):
                 continue
             constraints[key] = value
@@ -512,46 +436,9 @@ def _unsupported_product_type(intent: IntentResult) -> bool:
     return bool(product_type and not is_supported_product_type(str(product_type)))
 
 
-_AMBIGUOUS_PHOTO_SCENE_TERMS = ("拍照", "摄影", "拍摄", "自拍")
-_CONCRETE_DIGITAL_PRODUCT_TERMS = (
-    "手机",
-    "相机",
-    "耳机",
-    "电脑",
-    "笔记本",
-    "平板",
-    "微单",
-    "单反",
-    "镜头",
-)
-
-
-def _is_ambiguous_scene_only_category_inference(message: str, category: str) -> bool:
-    """Avoid turning a photo-taking scene into a digital-product category too early."""
-    if category != "数码电子":
-        return False
-    if not any(term in message for term in _AMBIGUOUS_PHOTO_SCENE_TERMS):
-        return False
-    if any(term in message for term in _CONCRETE_DIGITAL_PRODUCT_TERMS):
-        return False
-    return extract_product_type_hint(message) is None
-
 
 def _should_emit_partial_criteria(missing_slots: list[str], criteria: CriteriaPayload) -> bool:
     return "category" not in missing_slots and bool(criteria.category)
-
-
-def _partial_criteria_card_event(ctx: StreamContext, criteria: CriteriaPayload) -> CriteriaCardEvent:
-    return CriteriaCardEvent(
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"criteria_{criteria.criteria_id}",
-        created_at_ms=now_ms(),
-        criteria=criteria,
-        quick_actions=criteria_quick_actions(category=criteria.category or None),
-    )
 
 
 async def _emit_unsupported_product_type(
@@ -574,14 +461,6 @@ async def _emit_unsupported_product_type(
         done=True,
     )
     yield ctx.done()
-
-
-def _has_context_value(value: object) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, list | tuple | set | dict):
-        return bool(value)
-    return True
 
 
 def _current_stages() -> PipelineStages:

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.config.tuning import DECISION_LOW_CONFIDENCE_RATIO, DECISION_MIN_USER_SIGNALS_FOR_HIGH_CONFIDENCE
+from src.types.schemas import DecisionConfidence, DecisionStatus
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
 # ── PRD 06 weights ────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ def score_candidates(
 def decision_confidence(
     scored: list[ScoredCandidate],
     user_signal_count: int = 0,
-) -> tuple[str, str | None]:
+) -> tuple[DecisionStatus, DecisionConfidence | None]:
     """Determine decision_status and confidence from scored candidates.
 
     Returns (decision_status, confidence).

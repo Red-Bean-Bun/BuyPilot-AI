@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from src.repos.products import get_product
 from src.services.chunking import COMPARE_AXES
@@ -34,6 +34,9 @@ _MIN_WINNER_GAP = 5.0
 _PRICE_WEIGHT = 0.8
 _AXIS_WEIGHT = 1.0
 
+CompareMode = Literal["exploratory", "decision"]
+CompareConfidence = Literal["high", "medium", "low"]
+
 
 @dataclass(frozen=True)
 class CompareResult:
@@ -41,14 +44,14 @@ class CompareResult:
 
     compare_id: str
     source_deck_id: str | None
-    mode: str  # "exploratory" | "decision"
+    mode: CompareMode
     products: list[ProductPayload]
     axes: list[CompareAxisPayload]
     winner_product_id: str | None
     winner_reason: str | None
     tradeoffs: list[str]
     risk_notes: list[CompareRiskNotePayload]
-    confidence: str | None  # "high" | "medium" | "low" | None
+    confidence: CompareConfidence | None
     focus: str | None = None
 
 
@@ -86,7 +89,7 @@ async def build_comparison(
     ]
 
     # Determine mode
-    mode = "decision" if has_final_decision else "exploratory"
+    mode: CompareMode = "decision" if has_final_decision else "exploratory"
 
     # Determine winner with degradation
     winner_id, winner_reason, confidence = _determine_winner(axes, products)
@@ -404,7 +407,7 @@ def _normalize_price_scores(axis: CompareAxisPayload) -> CompareAxisPayload:
 def _determine_winner(
     axes: list[CompareAxisPayload],
     products: list[ProductPayload],
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, CompareConfidence | None]:
     """Determine the winner with degradation logic.
 
     Returns (winner_product_id, winner_reason, confidence).
@@ -468,7 +471,7 @@ def _determine_winner(
     # Determine confidence from gap ratio
     gap_ratio = gap / max(top_score, 1.0)
     if gap_ratio >= 0.15:
-        confidence = "high"
+        confidence: CompareConfidence = "high"
     elif gap_ratio >= 0.08:
         confidence = "medium"
     else:

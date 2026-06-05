@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.runtime.message_rules import (
+from src.services.message_rules import (
     _looks_like_brand,
     extract_adjustment_hints,
     extract_brand_prefer_from_message,
@@ -19,7 +19,7 @@ from src.runtime.message_rules import (
 @pytest.fixture(autouse=True)
 def _seed_test_brands(monkeypatch):
     """Provide a controlled brand set for tests, independent of real product data."""
-    from src.runtime import message_rules as mr
+    from src.services import message_rules as mr
 
     monkeypatch.setattr(
         mr,

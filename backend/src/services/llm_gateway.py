@@ -19,6 +19,11 @@ from src.services.observability_llm import schedule_llm_call_recording
 logger = logging.getLogger(__name__)
 
 
+def _provider_from_profile_name(profile_name: str) -> str:
+    """Extract provider name from profile name for observability."""
+    return "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+
+
 @dataclass(frozen=True)
 class ChatProfile:
     name: str
@@ -45,7 +50,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             duration_ms = (time.perf_counter() - started_at) * 1000
 
             # Record successful LLM call
-            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            provider = _provider_from_profile_name(profile_name)
             status = "success" if idx == 0 else "fallback"
             schedule_llm_call_recording(
                 task=task,
@@ -68,7 +73,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             return response
         except LiveLLMUnavailable as exc:
             duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
-            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            provider = _provider_from_profile_name(profile_name)
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
@@ -93,7 +98,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
             continue
         except Exception as exc:
             duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
-            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            provider = _provider_from_profile_name(profile_name)
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
@@ -150,7 +155,7 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
 
             # Stream completed successfully
             duration_ms = (time.perf_counter() - started_at) * 1000
-            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            provider = _provider_from_profile_name(profile_name)
             status = "success" if idx == 0 else "fallback"
             schedule_llm_call_recording(
                 task=task,
@@ -172,7 +177,7 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             return
         except LiveLLMUnavailable as exc:
             duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
-            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            provider = _provider_from_profile_name(profile_name)
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,
@@ -197,7 +202,7 @@ async def _stream_chat_task(task: str, messages: list[dict[str, Any]]) -> AsyncG
             continue
         except Exception as exc:
             duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else 0.0
-            provider = "Doubao" if "doubao" in profile_name.lower() else "Qwen"
+            provider = _provider_from_profile_name(profile_name)
             schedule_llm_call_recording(
                 task=task,
                 profile=profile_name,

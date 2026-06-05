@@ -413,10 +413,6 @@ def _chunk_document_text(hit: ProductHit) -> str:
     return product_document_text(hit.product, extra_text=chunk_text)
 
 
-def _eligible_for_primary_recall(chunk: ChunkDocument) -> bool:
-    return chunk.metadata.get("retrieval_role") != "risk"
-
-
 FilterCheck = Callable[[CriteriaPayload, ProductPayload, RetrievalFilters], bool]
 
 

@@ -58,12 +58,13 @@ def get_raw_product(product_id: str) -> dict[str, Any] | None:
 
 
 def list_products() -> list[ProductPayload]:
-    return [product.model_copy(deep=True) for product in _product_payloads()]
+    """Return cached product list (read-only; do not mutate)."""
+    return list(_product_payloads())
 
 
 def get_product(product_id: str) -> ProductPayload | None:
-    product = _product_index().get(product_id)
-    return product.model_copy(deep=True) if product else None
+    """Return cached product (read-only; do not mutate)."""
+    return _product_index().get(product_id)
 
 
 async def get_product_detail_rows(product_id: str) -> dict[str, Any] | None:

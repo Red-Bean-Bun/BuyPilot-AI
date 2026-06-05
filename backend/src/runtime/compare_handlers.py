@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 from src.config import user_messages as msg
-from src.runtime.message_rules import is_compare_phrase, resolve_compare_targets
+from src.services.message_rules import is_compare_phrase, resolve_compare_targets
 from src.runtime.streaming import StreamContext, now_ms
 from src.services.catalog import get_product
 from src.services.compare import build_comparison
