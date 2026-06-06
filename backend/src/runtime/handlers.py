@@ -110,8 +110,7 @@ async def handle_chitchat(
 ) -> AsyncGenerator[SSEEventBase, None]:
     del body, intent
     yield ctx.thinking("understanding", msg.THINKING_PROCESSING)
-    # Guide user toward shopping: emit a helpful text + category clarification
-    # instead of a dead-end greeting.
+    # Chitchat: friendly redirect to shopping, no clarification widget.
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -122,18 +121,6 @@ async def handle_chitchat(
         message_id=f"msg_{ctx.turn_id}",
         delta=msg.CHITCHAT_HINT,
         done=True,
-    )
-    question, options = build_clarification_question(["category"])
-    yield ClarificationEvent(
-        session_id=ctx.session_id,
-        turn_id=ctx.turn_id,
-        seq=ctx.seq.next(),
-        event_id=ctx.seq.event_id(),
-        node_id=f"clarification_{ctx.turn_id}",
-        created_at_ms=now_ms(),
-        question=question,
-        required_slots=["category"],
-        suggested_options=options,
     )
     yield ctx.done()
 
@@ -952,15 +939,19 @@ async def _product_card_events(
     shopping_strategy: ShoppingStrategyPayload | None = None,
 ) -> AsyncGenerator[ProductCardEvent, None]:
     product_ids = [p.product_id for p in products]
+    _card_start = time.perf_counter()
     risk_notes_map = await fetch_risk_notes_for_products(product_ids)
 
     first_card_recorded = False
     for rank, product in enumerate(products, start=1):
         ctx.ensure_active()
-        # Record first product card timing (wall-clock ms)
+        # Record first product card timing (elapsed ms since entering _product_card_events)
         if not first_card_recorded:
             first_card_recorded = True
-            ctx.stage_timings_ms.setdefault("first_product_card_ms", now_ms())
+            ctx.stage_timings_ms.setdefault(
+                "first_product_card_ms",
+                round((time.perf_counter() - _card_start) * 1000, 2),
+            )
 
         evidence = evidences_by_product.get(product.product_id)
         if evidence is None:

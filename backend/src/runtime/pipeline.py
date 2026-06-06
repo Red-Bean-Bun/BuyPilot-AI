@@ -45,6 +45,7 @@ from src.services.cancellation import clear_chat_turn, register_chat_turn
 from src.services.cart import get_session_cart
 from src.services.conversation_state import get_previous_criteria, get_previous_product_ids, save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
+from src.services.feedback import get_feedback_context
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
@@ -101,6 +102,7 @@ class PipelineStages:
 class _ResolvedIntent:
     body: ChatStreamRequest
     intent: IntentResult
+    skip_slot_check: bool = False
 
 
 async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerator[SSEEventBase, None]:
@@ -225,11 +227,12 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
                 yield event
             return
 
-    missing_slots = _missing_slots(resolved.body, resolved.intent)
-    if missing_slots:
-        async for event in _emit_clarification(ctx, resolved.body, resolved.intent, missing_slots):
-            yield event
-        return
+    if not resolved.skip_slot_check:
+        missing_slots = _missing_slots(resolved.body, resolved.intent)
+        if missing_slots:
+            async for event in _emit_clarification(ctx, resolved.body, resolved.intent, missing_slots):
+                yield event
+            return
 
     async for event in _dispatch_intent_handler(ctx, resolved.body, resolved.intent):
         yield event
@@ -347,25 +350,40 @@ async def _resolve_intent(
     intent = resolve_intent_constraints(intent, pipeline_body.message)
 
     # Guard: reclassify unresolvable add_to_cart → recommend
+    # When no previous products exist, the user said "加到购物车" in a vacuum.
+    # Reclassify to recommend and skip slot_checker to avoid a useless
+    # "which category?" clarification — just show broad candidates.
+    skip_slot_check = False
     if intent.intent == "add_to_cart" and not intent.target_product_id:
         previous_ids = await get_previous_product_ids(ctx.session_id)
         if not previous_ids:
             logger.info("Reclassified add_to_cart → recommend (no product reference)")
             intent = intent.model_copy(update={"intent": "recommend"})
+            skip_slot_check = True
 
     # Guard: reclassify unresolvable compare → recommend
-    # The compare handler requires ≥2 previous products to reference.
-    # When fewer exist (0 or 1), reclassify to recommend so the pipeline
-    # finds products first. Compare can follow after seeing results.
+    # The compare handler requires ≥2 valid product IDs.
+    # Two sources: client sends explicit IDs, or LLM extracted ordinals.
+    # When neither provides ≥2 usable IDs, check if ordinals in the message
+    # resolve against previous recommendations via resolve_compare_targets.
     if intent.intent == "compare":
         client_ids = pipeline_body.compare_product_ids or []
         if len(client_ids) < 2:
             previous_ids = await get_previous_product_ids(ctx.session_id)
-            if len(previous_ids) < 2:
+            if len(previous_ids) >= 2:
+                # resolve_compare_targets 用正则解析消息里的序数词
+                # （"第一个"、"第2个"、"前3款"等），映射为真实 product ID
+                resolved = resolve_compare_targets(pipeline_body.message, previous_ids)
+                if len(resolved) >= 2:
+                    intent = intent.model_copy(update={"compare_product_ids": resolved})
+                else:
+                    logger.info("Reclassified compare → recommend (no ≥2 resolvable IDs)")
+                    intent = intent.model_copy(update={"intent": "recommend"})
+            else:
                 logger.info("Reclassified compare → recommend (need ≥2 previous products, have %d)", len(previous_ids))
                 intent = intent.model_copy(update={"intent": "recommend"})
 
-    yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent))
+    yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent, skip_slot_check=skip_slot_check))
 
 
 def _missing_slots(pipeline_body: ChatStreamRequest, intent: IntentResult) -> list[str]:
@@ -382,9 +400,20 @@ async def _emit_clarification(
     partial = _intent_to_partial_criteria(intent, pipeline_body.message)
     if _should_emit_partial_criteria(missing_slots, partial):
         yield _criteria_card_event(ctx, partial)
+
+    # Pre-retrieve products so subsequent compare/intent turns have candidates
+    # to reference, even when clarification is needed (e.g. budget for phones).
+    product_ids: list[str] = []
+    try:
+        feedback = await get_feedback_context(ctx.session_id)
+        retrieval = await run_retrieval(partial, top_n=5, feedback=feedback)
+        product_ids = [p.product_id for p in (retrieval.products or [])]
+    except Exception:
+        logger.warning("Pre-retrieval in clarification failed", exc_info=True)
+
     async for event in handle_clarification(ctx, missing_slots):
         yield event
-    await save_recommendation_turn(ctx.session_id, partial, [], user_message=pipeline_body.message)
+    await save_recommendation_turn(ctx.session_id, partial, product_ids, user_message=pipeline_body.message)
 
 
 async def _dispatch_intent_handler(

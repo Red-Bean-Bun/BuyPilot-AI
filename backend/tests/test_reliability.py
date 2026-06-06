@@ -260,8 +260,10 @@ async def test_add_to_cart_without_previous_products_sends_clarification(monkeyp
     events = [e async for e in chat_stream("sess_no_prev", ChatStreamRequest(message="把这个加到购物车"))]
     tags = [e.event for e in events]
 
-    assert "clarification" in tags, f"Expected clarification for add_to_cart without product, got: {tags}"
+    assert "clarification" not in tags, f"add_to_cart reclassified to recommend should skip clarification, got: {tags}"
     assert "cart_action" not in tags, "Should not emit cart_action without a valid product"
+    assert "text_delta" in tags, "Should emit text_delta via recommend flow"
+    assert "done" in tags, "Should emit done event"
 
     settings_module._settings = None
 

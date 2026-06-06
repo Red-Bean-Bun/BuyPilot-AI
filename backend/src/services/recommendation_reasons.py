@@ -31,6 +31,7 @@ def build_reason_atoms(
     _append_scenario_atom(atoms, criteria, product, evidence)
     _append_preferred_ingredient_atom(atoms, criteria, product, evidence)
     _append_avoidance_atom(atoms, criteria, product, evidence)
+    _append_brand_avoidance_atom(atoms, criteria)
     _append_storage_atom(atoms, criteria, product, evidence)
     _append_dietary_atom(atoms, criteria, product, evidence)
 
@@ -184,6 +185,25 @@ def _append_avoidance_atom(
             value="、".join(displayed),
             text=f"已避开{'、'.join(displayed)}",
             evidence_id="criteria_filter:ingredient_avoid",
+        )
+    )
+
+
+def _append_brand_avoidance_atom(
+    atoms: list[ReasonAtomPayload],
+    criteria: CriteriaPayload,
+) -> None:
+    """Inform the LLM which brands were hard-filtered, so the narration can mention it."""
+    avoid_brands = criteria.constraints.brand_avoid
+    if not avoid_brands:
+        return
+    displayed = avoid_brands[:2]
+    atoms.append(
+        ReasonAtomPayload(
+            dimension="brand_avoid",
+            value="、".join(displayed),
+            text=f"已排除品牌：{'、'.join(displayed)}",
+            evidence_id="criteria_filter:brand_avoid",
         )
     )
 

@@ -86,16 +86,14 @@ def _missing_preference_slot(message: str, category: str, product_type: object, 
             # Smartphone requests are covered by the budget guard above and
             # otherwise remain product-first to preserve existing acceptance.
             return None
+        # Product-first: generic digital queries (耳机, 平板) go straight to
+        # recommend — broad candidates + criteria_card handle narrowing.
         if _matches_product_request(message, normalized, _DIGITAL_GENERIC_TYPES, _DIGITAL_GENERIC_TERMS):
-            if _has_narrowing_constraints(constraints):
-                return None
-            return (
-                None
-                if _has_preference_signal(message, constraints, _DIGITAL_PREFERENCE_OPTIONS)
-                else "preference_dimension_digital"
-            )
+            return None
+    # Product-first: generic skincare (面霜, 精华) and sport (跑鞋, 运动服)
+    # queries also go straight to recommend without preference clarification.
     if category == "美妆护肤" and _matches_product_request(message, normalized, _SKINCARE_TYPES, _SKINCARE_GENERIC_TERMS):
-        return None if constraints.get("skin_type") or _has_any_term(message, _SKIN_TYPE_OPTIONS) else "skin_type"
+        return None
     if category == "服饰运动" and _matches_product_request(message, normalized, _SPORT_TYPES, _SPORT_GENERIC_TERMS):
         # Running shoes / sportswear are accepted product-first in existing
         # regression tests; do not block them with a soft clarification.

@@ -89,10 +89,10 @@ def test_clarification_asks_audio_preference_for_vague_headphones():
     )
 
     missing = check_required_slots("推荐一款耳机", intent)
-    _, options = build_clarification_question(missing)
 
-    assert missing == ["preference_dimension_digital"]
-    assert options == ["音质", "续航", "轻便", "性价比"]
+    # Product-first: generic digital queries no longer block on preference dimension.
+    # Broad candidates + criteria_card handle narrowing.
+    assert missing == []
 
 
 def test_budgeted_headphones_do_not_block_existing_judge_query():
@@ -113,11 +113,10 @@ def test_clarification_asks_skin_type_for_vague_skincare():
     )
 
     missing = check_required_slots("推荐一款面霜", intent)
-    question, options = build_clarification_question(missing)
 
-    assert missing == ["skin_type"]
-    assert "肤质" in question
-    assert options == ["油性", "干性", "混合", "敏感"]
+    # Product-first: generic skincare queries no longer block on skin_type.
+    # Broad candidates + criteria_card handle narrowing.
+    assert missing == []
 
 
 def test_oily_skin_cleanser_does_not_trigger_preference_clarification():

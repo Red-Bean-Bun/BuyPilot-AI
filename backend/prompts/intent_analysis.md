@@ -222,11 +222,10 @@ Output:
   "intent": "compare",
   "confidence": 0.95,
   "category": "数码电子",
-  "extracted_constraints": {
-    "compare_product_ids": ["第一个", "第二个"]
-  },
+  "extracted_constraints": {},
   "soft_preferences": ["用户想对比之前推荐的手机"],
-  "target_product_id": null
+  "target_product_id": null,
+  "compare_product_ids": ["第一个", "第二个"]
 }
 ```
 
