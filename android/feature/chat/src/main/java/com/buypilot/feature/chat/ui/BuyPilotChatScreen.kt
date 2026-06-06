@@ -2303,9 +2303,6 @@ internal fun ProductRecommendationStrip(
                             nodeKey = "inline_compare_narration_${payload.compareId}",
                             content = compareNarrationContent,
                             done = compareNarrationDone,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
                     if (compareConclusionContent.isNotBlank()) {
@@ -2313,9 +2310,6 @@ internal fun ProductRecommendationStrip(
                             nodeKey = "inline_compare_conclusion_${payload.compareId}",
                             content = compareConclusionContent,
                             done = compareConclusionDone,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
                 }
