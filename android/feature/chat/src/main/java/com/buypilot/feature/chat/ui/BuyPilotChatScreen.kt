@@ -7718,7 +7718,7 @@ private fun ScrollableQuickActionRow(
     actions: List<QuickActionPayload>,
     compareProducts: List<ProductCardPayload> = emptyList(),
     modifier: Modifier = Modifier,
-    onCompareProducts: (List<Int>, List<String>?) -> Unit = {},
+    onCompareProducts: (List<Int>, List<String>?) -> Unit = { _, _ -> },
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val listState = rememberLazyListState()
