@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
 
@@ -18,7 +18,7 @@ class MessageLite(BaseModel):
 
 
 class ChatStreamRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000)
+    message: str = Field(default="", min_length=0, max_length=2000)
     session_id: str | None = None
     history: list[MessageLite] = Field(default_factory=list)
     image_url: str | None = None
@@ -27,6 +27,12 @@ class ChatStreamRequest(BaseModel):
     client_turn_id: str | None = None
     client_trace_id: str | None = None
     converge: bool = False
+
+    @model_validator(mode="after")
+    def _require_message_or_image(self) -> "ChatStreamRequest":
+        if not self.message.strip() and not self.image_url:
+            raise ValueError("message 和 image_url 至少需要一个")
+        return self
 
 
 class CancelRequest(BaseModel):

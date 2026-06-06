@@ -118,7 +118,7 @@ cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `message` | string | 是 | 用户输入文本（1-2000 字符） |
+| `message` | string | 是* | 用户输入文本（0-2000 字符）。*当 `image_url` 非空时 message 可为空串；至少需要 message 或 image_url 之一 |
 | `session_id` | string \| null | 否 | 会话 ID，为空时自动生成 `sess_<uuid>` |
 | `history` | MessageLite[] | 否 | 历史消息，每条含 `role` + `content` |
 | `image_url` | string \| null | 否 | 图片 URL（来自 `/upload/image` 返回的 `image_url`） |

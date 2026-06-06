@@ -11,7 +11,7 @@
 
 | # | 功能 | 状态 | PRD 章节 | 代码路径 | 备注 |
 |---|------|------|---------|---------|------|
-| 1 | SSE 流式对话端点 `/chat/stream` | ✅ 已完成 | 5.1, 5.2 | `api/chat.py` | StreamingResponse + format_sse，已验证可跑通；`ChatStreamRequest.message` 已加 `min_length=1, max_length=2000` 校验，空串/超长在请求层直接 422 |
+| 1 | SSE 流式对话端点 `/chat/stream` | ✅ 已完成 | 5.1, 5.2 | `api/chat.py` | StreamingResponse + format_sse，已验证可跑通；`ChatStreamRequest.message` 允许空串（拍照场景），`model_validator` 确保 message 和 image_url 至少有一个非空；超长 >2000 字符在请求层直接 422 |
 | 2 | SSE 事件协议（9 种事件类型） | ✅ 已完成 | 5.1 | `types/sse_events.py` | SSEEventBase + 9 个子类 + EventSeq + Constraints DSL，JSON Schema 已对齐；2026-05-28 增加 `DoneEvent.finish_reason` 与 `CriteriaPayload.field_sources`，支持分阶段导购契约 |
 | 3 | 意图识别（7 种意图） | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `services/llm_fallbacks.py` `stages/intent.py` | LLM primary + 关键词规则 fallback，含 `continue`/`view_cart`/`add_to_cart`/`feedback`；`continue` 用于识别标准确认和候选后收敛；`STRICT_RUNTIME=1` 下坏 JSON/无 provider 会显性失败 |
 | 4 | 购买标准生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `stages/criteria.py` | LLM + 规则 fallback，含 `criteria_patch` 合并（列表约束如 ingredient_avoid/brand_avoid 累积去重）+ feedback 注入；strict 下不再静默兜底 |
