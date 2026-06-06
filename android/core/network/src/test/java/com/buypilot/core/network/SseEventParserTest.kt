@@ -5,6 +5,7 @@ import com.buypilot.core.common.sse.SseFrameParser
 import com.buypilot.core.common.sse.SseFrame
 import com.buypilot.core.model.AgentEventType
 import com.buypilot.core.model.CompareCardPayload
+import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.ProductCardPayload
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -130,6 +131,136 @@ class SseEventParserTest {
         assertEquals("p1", payload.winnerProductId)
         assertEquals("影像", payload.axes.single().name)
         assertEquals(86.0, payload.axes.single().values.first().score)
+    }
+
+    @Test
+    fun parsesScenarioCriteriaCardWithShoppingStrategy() {
+        val event = parser.parse(
+            SseFrame(
+                event = "criteria_card",
+                data = """
+                    {
+                      "event": "criteria_card",
+                      "session_id": "sess_1",
+                      "turn_id": "turn_scene",
+                      "seq": 3,
+                      "criteria": {
+                        "criteria_id": "criteria_scene",
+                        "category": "数码电子",
+                        "summary": "送男朋友生日礼物，对方喜欢电子产品"
+                      },
+                      "shopping_strategy": {
+                        "strategy_id": "scene_001",
+                        "scene_type": "gift",
+                        "scene_summary": "送男朋友礼物",
+                        "user_problem": "用户不确定这个场景下送什么更体面、更不容易踩雷",
+                        "decision_barrier": {
+                          "barrier_type": "fear_wrong_choice",
+                          "label": "怕送错、怕不够体面",
+                          "reason": "核心设备容易踩型号偏好",
+                          "conversion_strategy": "先推荐低偏好依赖的小件"
+                        },
+                        "primary_direction": {
+                          "title": "低踩雷的黑科技小件",
+                          "summary": "优先考虑音频配件",
+                          "why": "有新鲜感，不强依赖具体型号偏好",
+                          "search_strategy": {
+                            "category": "数码电子",
+                            "product_type": "真无线耳机",
+                            "use_scenario": "日常使用"
+                          },
+                          "available_in_catalog": true,
+                          "supporting_product_count": 2
+                        },
+                        "avoid_risks": ["不要盲买手机、电脑这类强型号偏好的大件"],
+                        "assumptions": ["暂时不知道预算"],
+                        "confidence": "medium"
+                      }
+                    }
+                """.trimIndent(),
+            ),
+            fallbackSeq = 3,
+        )
+
+        assertEquals(AgentEventType.CriteriaCard, event.event)
+        assertEquals("summary_card", event.displayMode)
+        assertEquals("criteria_criteria_scene", event.nodeId)
+        val payload = event.payload as CriteriaCardPayload
+        val strategy = requireNotNull(payload.shoppingStrategy)
+        assertEquals("gift", strategy.sceneType)
+        assertEquals("怕送错、怕不够体面", strategy.decisionBarrier?.label)
+        assertEquals("低踩雷的黑科技小件", strategy.primaryDirection.title)
+        assertEquals("真无线耳机", strategy.primaryDirection.searchStrategy.productType)
+        assertEquals(listOf("暂时不知道预算"), strategy.assumptions)
+    }
+
+    @Test
+    fun parsesPlainCriteriaCardWithoutShoppingStrategy() {
+        val event = parser.parse(
+            SseFrame(
+                event = "criteria_card",
+                data = """
+                    {
+                      "event": "criteria_card",
+                      "session_id": "sess_1",
+                      "turn_id": "turn_plain",
+                      "seq": 4,
+                      "criteria": {
+                        "criteria_id": "criteria_plain",
+                        "category": "美妆护肤",
+                        "summary": "油皮洁面，200 元以内"
+                      }
+                    }
+                """.trimIndent(),
+            ),
+            fallbackSeq = 4,
+        )
+
+        val payload = event.payload as CriteriaCardPayload
+        assertEquals("美妆护肤", payload.criteria.category)
+        assertEquals(null, payload.shoppingStrategy)
+    }
+
+    @Test
+    fun parsesPayloadWrappedCriteriaCardWithTopLevelShoppingStrategy() {
+        val event = parser.parse(
+            SseFrame(
+                event = "criteria_card",
+                data = """
+                    {
+                      "event": "criteria_card",
+                      "session_id": "sess_1",
+                      "turn_id": "turn_scene",
+                      "seq": 5,
+                      "payload": {
+                        "editable": true,
+                        "criteria": {
+                          "criteria_id": "criteria_wrapped",
+                          "category": "数码电子",
+                          "summary": "送男朋友生日礼物"
+                        }
+                      },
+                      "shopping_strategy": {
+                        "strategy_id": "scene_wrapped",
+                        "scene_type": "gift",
+                        "primary_direction": {
+                          "title": "低踩雷的黑科技小件",
+                          "search_strategy": {
+                            "product_type": "真无线耳机"
+                          }
+                        }
+                      }
+                    }
+                """.trimIndent(),
+            ),
+            fallbackSeq = 5,
+        )
+
+        assertEquals("criteria_criteria_wrapped", event.nodeId)
+        val payload = event.payload as CriteriaCardPayload
+        assertEquals("criteria_wrapped", payload.criteria.criteriaId)
+        assertEquals("scene_wrapped", payload.shoppingStrategy?.strategyId)
+        assertEquals("真无线耳机", payload.shoppingStrategy?.primaryDirection?.searchStrategy?.productType)
     }
 
     private fun parseExample(fileName: String) =

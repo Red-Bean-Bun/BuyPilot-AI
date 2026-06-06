@@ -54,6 +54,11 @@ private data class CriteriaReceiptProperty(
     val value: String,
 )
 
+private data class ScenarioFilterReceipt(
+    val summary: String,
+    val riskHint: String,
+)
+
 @Immutable
 internal data class CriteriaLabels(
     val summary: String,
@@ -137,81 +142,229 @@ internal fun CriteriaSummaryCard(
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                StaggeredRevealMotion(
-                    key = "${motionKey}_criteria_header",
+                CriteriaReceiptSummary(
+                    headline = headline,
+                    editLabel = editLabel,
+                    properties = properties,
+                    motionKey = motionKey,
                     motionEnabled = motionEnabled,
                     alreadyEntered = alreadyEntered,
-                    delayMillis = 0,
-                    durationMillis = 240,
-                    initialOffsetY = 6.dp,
+                    onEdit = onEdit,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ScenarioFilterReceiptCard(
+    motionKey: String,
+    payload: CriteriaCardPayload,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    onEntered: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    val receipt = remember(payload) { payload.scenarioFilterReceipt() }
+
+    StructuredCardMotion(
+        key = motionKey,
+        motionEnabled = motionEnabled,
+        alreadyEntered = alreadyEntered,
+        durationMillis = 320,
+        initialOffsetY = 6.dp,
+        initialScale = 1f,
+        onEntered = onEntered,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
+                .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StaggeredRevealMotion(
+                key = "${motionKey}_scenario_filter_header",
+                motionEnabled = motionEnabled,
+                alreadyEntered = alreadyEntered,
+                delayMillis = 0,
+                durationMillis = 210,
+                initialOffsetY = 4.dp,
+            ) {
+                ScenarioFilterHeader(
+                    onEdit = onEdit,
+                )
+            }
+            if (receipt.summary.isNotBlank()) {
+                StaggeredRevealMotion(
+                    key = "${motionKey}_scenario_filter_summary",
+                    motionEnabled = motionEnabled,
+                    alreadyEntered = alreadyEntered,
+                    delayMillis = 45,
+                    durationMillis = 230,
+                    initialOffsetY = 4.dp,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .background(BuyPilotColors.Primary, CircleShape),
-                            )
-                            Text(
-                                text = "筛选条件",
-                                color = BuyPilotColors.TextSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                letterSpacing = 0.5.sp,
-                            )
-                        }
-                        Text(
-                            text = editLabel,
-                            color = BuyPilotColors.Primary.copy(alpha = 0.85f),
-                            fontSize = 12.sp,
-                            lineHeight = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(role = Role.Button, onClick = onEdit)
-                                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                        )
-                    }
+                    Text(
+                        text = receipt.summary,
+                        color = BuyPilotColors.TextPrimary.copy(alpha = 0.92f),
+                        fontSize = 16.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                if (headline.isNotBlank()) {
-                    StaggeredRevealMotion(
-                        key = "${motionKey}_criteria_headline",
-                        motionEnabled = motionEnabled,
-                        alreadyEntered = alreadyEntered,
-                        delayMillis = 70,
-                        durationMillis = 260,
-                        initialOffsetY = 5.dp,
-                    ) {
-                        Text(
-                            text = headline,
-                            color = BuyPilotColors.TextPrimary,
-                            fontSize = 17.sp,
-                            lineHeight = 24.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                if (properties.isNotEmpty()) {
-                    CriteriaReceiptTags(
-                        properties = properties,
-                        motionKey = motionKey,
-                        motionEnabled = motionEnabled,
-                        alreadyEntered = alreadyEntered,
+            }
+            if (receipt.riskHint.isNotBlank()) {
+                StaggeredRevealMotion(
+                    key = "${motionKey}_scenario_filter_risk",
+                    motionEnabled = motionEnabled,
+                    alreadyEntered = alreadyEntered,
+                    delayMillis = 90,
+                    durationMillis = 220,
+                    initialOffsetY = 3.dp,
+                ) {
+                    Text(
+                        text = receipt.riskHint,
+                        color = BuyPilotColors.TextMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CriteriaReceiptSummary(
+    headline: String,
+    editLabel: String,
+    properties: List<CriteriaReceiptProperty>,
+    motionKey: String,
+    motionEnabled: Boolean,
+    alreadyEntered: Boolean,
+    onEdit: () -> Unit,
+) {
+    StaggeredRevealMotion(
+        key = "${motionKey}_criteria_header",
+        motionEnabled = motionEnabled,
+        alreadyEntered = alreadyEntered,
+        delayMillis = 0,
+        durationMillis = 240,
+        initialOffsetY = 6.dp,
+    ) {
+        CriteriaCardHeader(
+            title = "筛选条件",
+            editLabel = editLabel,
+            onEdit = onEdit,
+        )
+    }
+    if (headline.isNotBlank()) {
+        StaggeredRevealMotion(
+            key = "${motionKey}_criteria_headline",
+            motionEnabled = motionEnabled,
+            alreadyEntered = alreadyEntered,
+            delayMillis = 70,
+            durationMillis = 260,
+            initialOffsetY = 5.dp,
+        ) {
+            Text(
+                text = headline,
+                color = BuyPilotColors.TextPrimary,
+                fontSize = 17.sp,
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    if (properties.isNotEmpty()) {
+        CriteriaReceiptTags(
+            properties = properties,
+            motionKey = motionKey,
+            motionEnabled = motionEnabled,
+            alreadyEntered = alreadyEntered,
+        )
+    }
+}
+
+@Composable
+private fun ScenarioFilterHeader(
+    onEdit: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "本轮筛选",
+            color = BuyPilotColors.TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "调整",
+            color = BuyPilotColors.PrimaryDark.copy(alpha = 0.74f),
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button, onClick = onEdit)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun CriteriaCardHeader(
+    title: String,
+    editLabel: String,
+    onEdit: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(BuyPilotColors.Primary, CircleShape),
+            )
+            Text(
+                text = title,
+                color = BuyPilotColors.TextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.5.sp,
+            )
+        }
+        Text(
+            text = editLabel,
+            color = BuyPilotColors.Primary.copy(alpha = 0.85f),
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button, onClick = onEdit)
+                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        )
     }
 }
 
@@ -221,6 +374,7 @@ private fun CriteriaReceiptTags(
     motionKey: String,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
+    baseDelayMillis: Int = 120,
 ) {
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
@@ -235,7 +389,7 @@ private fun CriteriaReceiptTags(
                 key = "${motionKey}_criteria_tag_${property.label}_${property.value}",
                 motionEnabled = motionEnabled,
                 alreadyEntered = alreadyEntered,
-                delayMillis = 120 + index.coerceAtMost(3) * 34,
+                delayMillis = baseDelayMillis + index.coerceAtMost(3) * 34,
                 durationMillis = 240,
                 initialOffsetY = 4.dp,
             ) {
@@ -262,6 +416,54 @@ private fun CriteriaReceiptTag(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
+}
+
+private fun CriteriaCardPayload.scenarioFilterReceipt(): ScenarioFilterReceipt {
+    val strategy = shoppingStrategy
+    val searchStrategy = strategy?.primaryDirection?.searchStrategy
+    val criteria = criteria
+    val summary = listOf(
+        searchStrategy?.category.cleanScenarioText().ifBlank { criteria.category.cleanScenarioText() },
+        searchStrategy?.productType.cleanScenarioText().ifBlank { criteria.productTypeLabel().cleanScenarioText() },
+        searchStrategy?.useScenario.cleanScenarioText().ifBlank { criteria.useScenarioLabel().cleanScenarioText() },
+    )
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(2)
+        .joinToString(" · ")
+        .ifBlank { strategy?.primaryDirection?.title.cleanScenarioText() }
+        .ifBlank { criteria.criteriaReceiptHeadline().cleanScenarioText() }
+        .compactScenarioText(18)
+    val riskHint = strategy?.avoidRisks.orEmpty()
+        .firstOrNull()
+        .cleanScenarioText()
+        .toScenarioRiskHint()
+    return ScenarioFilterReceipt(
+        summary = summary,
+        riskHint = riskHint,
+    )
+}
+
+private fun String?.cleanScenarioText(): String =
+    orEmpty()
+        .withoutMarkdownMarkup()
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+private fun String.compactScenarioText(maxLength: Int): String =
+    if (length <= maxLength) this else take(maxLength).trimEnd() + "..."
+
+private fun String.toScenarioRiskHint(): String {
+    val compact = removePrefix("不要盲买")
+        .removePrefix("不要")
+        .removePrefix("避免")
+        .removePrefix("避开")
+        .removePrefix("防止")
+        .replace("这类", "")
+        .replace("这一类", "")
+        .trim(' ', '，', ',', '。')
+        .compactScenarioText(10)
+    return compact.takeIf { it.isNotBlank() }?.let { "已避开 $it" }.orEmpty()
 }
 internal fun CriteriaPayload.budgetLabel(): String {
     val max = budgetMax ?: constraints?.budgetMax

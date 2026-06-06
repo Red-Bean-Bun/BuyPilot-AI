@@ -309,14 +309,15 @@ async def handle_recommendation(
     spec_criteria = criteria_from_intent(intent, summary=_speculative_summary(intent))
 
     # ── Stream intro text while DB queries complete ──
-    intro_text = _build_intro_text(intent, body.message)
-    async for event in stream_text(
-        ctx,
-        intro_text,
-        message_id=f"intro_{ctx.turn_id}",
-        node_id=f"intro_{ctx.turn_id}",
-    ):
-        yield event
+    intro_text = _build_intro_text(intent, body)
+    if intro_text:
+        async for event in stream_text(
+            ctx,
+            intro_text,
+            message_id=f"intro_{ctx.turn_id}",
+            node_id=f"intro_{ctx.turn_id}",
+        ):
+            yield event
 
     # ── Collect DB results (already done by now) ──
     feedback = await feedback_task
@@ -1117,8 +1118,16 @@ async def stream_text(
     )
 
 
-def _build_intro_text(intent: IntentResult, _message: str) -> str:
+def _build_intro_text(intent: IntentResult, body: ChatStreamRequest) -> str:
     """Construct the product-first intro text from intent data."""
+    try:
+        from src.services.shopping_strategy import is_likely_shopping_strategy_request
+
+        if is_likely_shopping_strategy_request(body, intent):
+            return ""
+    except Exception:
+        logger.debug("shopping strategy intro check failed; using normal intro", exc_info=True)
+
     parts: list[str] = []
     if intent.category:
         parts.append(intent.category)

@@ -1998,23 +1998,35 @@ class TimelineRevealStoreTest {
     fun streamedTextKeepsPlainRendererAfterCompletion() {
         assertTrue(
             shouldKeepPlainTextRendererAfterStreaming(
-                stablePlainAfterLiveReveal = false,
+                content = "普通正文",
                 hasSeenLiveStream = true,
-                animateInitialCompleted = false,
-            ),
-        )
-        assertTrue(
-            shouldKeepPlainTextRendererAfterStreaming(
-                stablePlainAfterLiveReveal = false,
-                hasSeenLiveStream = false,
-                animateInitialCompleted = true,
             ),
         )
         assertFalse(
             shouldKeepPlainTextRendererAfterStreaming(
-                stablePlainAfterLiveReveal = false,
+                content = "**重点**\n\n- 条目",
+                hasSeenLiveStream = true,
+            ),
+        )
+        assertFalse(
+            shouldKeepPlainTextRendererAfterStreaming(
+                content = "普通正文",
                 hasSeenLiveStream = false,
-                animateInitialCompleted = false,
+            ),
+        )
+    }
+
+    @Test
+    fun simpleMarkdownUsesNativeRendererDuringStreaming() {
+        assertTrue(shouldUseNativeMarkdownDuringStreaming("**重点**\n\n- 条目"))
+        assertFalse(shouldUseNativeMarkdownDuringStreaming("普通正文"))
+        assertFalse(
+            shouldUseNativeMarkdownDuringStreaming(
+                """
+                |商品 | 价格 |
+                |---|---|
+                |A | 100 |
+                """.trimIndent(),
             ),
         )
     }

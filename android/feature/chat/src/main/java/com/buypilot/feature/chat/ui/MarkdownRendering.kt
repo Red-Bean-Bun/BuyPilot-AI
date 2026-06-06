@@ -233,6 +233,14 @@ internal fun String.toNativeMarkdownAnnotatedString(): AnnotatedString {
         }
     }
 
+    fun appendParagraphGap() {
+        if (written == 0) return
+        if (lastChar != '\n') {
+            appendChar('\n')
+        }
+        appendChar('\n')
+    }
+
     fun push(style: SpanStyle, block: () -> Unit) {
         builder.pushStyle(style)
         block()
@@ -289,10 +297,20 @@ internal fun String.toNativeMarkdownAnnotatedString(): AnnotatedString {
         }
 
         override fun visit(heading: Heading) {
-            appendBlockSeparator()
-            push(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+            appendParagraphGap()
+            push(
+                SpanStyle(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = when (heading.level) {
+                        1 -> 20.sp
+                        2 -> 18.sp
+                        else -> 17.sp
+                    },
+                ),
+            ) {
                 visitChildren(heading)
             }
+            appendChar('\n')
         }
 
         override fun visit(thematicBreak: ThematicBreak) {
@@ -321,7 +339,7 @@ internal fun String.toNativeMarkdownAnnotatedString(): AnnotatedString {
 
         override fun visit(listItem: ListItem) {
             appendBlockSeparator()
-            appendText("  ".repeat((listDepth - 1).coerceAtLeast(0)))
+            appendText("    ".repeat((listDepth - 1).coerceAtLeast(0)))
             val prefix = if (orderedCounters.isEmpty()) {
                 "• "
             } else {
@@ -486,13 +504,7 @@ internal fun StreamingAssistantText(
                 if (done) onRevealComplete?.invoke()
             }
         }
-        if (
-            shouldKeepPlainTextRendererAfterStreaming(
-                stablePlainAfterLiveReveal = stablePlainAfterLiveReveal,
-                hasSeenLiveStream = hasSeenLiveStream,
-                animateInitialCompleted = animateInitialCompleted,
-            )
-        ) {
+        if (shouldKeepPlainTextRendererAfterStreaming(content = content, hasSeenLiveStream = hasSeenLiveStream)) {
             PlainStreamingTextBlock(content = content, style = style)
         } else {
             AssistantText(content = content, style = style)
@@ -577,6 +589,15 @@ internal fun StreamingAssistantText(
     if (visibleLength <= 0) return
 
     val visibleContent = content.take(visibleLength.coerceAtMost(content.length))
+    val streamUsesNativeMarkdown = remember(content) { shouldUseNativeMarkdownDuringStreaming(content) }
+    if (streamUsesNativeMarkdown) {
+        NativeMarkdownTextBlock(
+            content = visibleContent,
+            modifier = Modifier.fillMaxWidth(),
+            style = style,
+        )
+        return
+    }
     PlainStreamingTextBlock(
         content = visibleContent,
         modifier = Modifier.fillMaxWidth(),
@@ -585,10 +606,12 @@ internal fun StreamingAssistantText(
 }
 
 internal fun shouldKeepPlainTextRendererAfterStreaming(
-    stablePlainAfterLiveReveal: Boolean,
+    content: String,
     hasSeenLiveStream: Boolean,
-    animateInitialCompleted: Boolean,
-): Boolean = stablePlainAfterLiveReveal || hasSeenLiveStream || animateInitialCompleted
+): Boolean = hasSeenLiveStream && !content.needsFinalMarkdownRender()
+
+internal fun shouldUseNativeMarkdownDuringStreaming(content: String): Boolean =
+    content.needsFinalMarkdownRender() && !content.requiresAndroidMarkdownRender()
 
 internal fun initialStreamingVisibleLength(
     contentLength: Int,

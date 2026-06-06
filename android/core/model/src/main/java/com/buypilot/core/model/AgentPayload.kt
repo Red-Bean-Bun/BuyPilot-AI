@@ -57,8 +57,47 @@ data class CriteriaPayload(
 data class CriteriaCardPayload(
     val editable: Boolean = true,
     val criteria: CriteriaPayload = CriteriaPayload(),
+    @SerialName("shopping_strategy") val shoppingStrategy: ShoppingStrategyPayload? = null,
     @SerialName("quick_actions") val quickActions: List<QuickActionPayload> = emptyList(),
 ) : AgentPayload
+
+@Serializable
+data class DecisionBarrierPayload(
+    @SerialName("barrier_type") val barrierType: String = "",
+    val label: String = "",
+    val reason: String = "",
+    @SerialName("conversion_strategy") val conversionStrategy: String = "",
+)
+
+@Serializable
+data class SearchStrategyPayload(
+    val category: String? = null,
+    @SerialName("product_type") val productType: String? = null,
+    @SerialName("use_scenario") val useScenario: String? = null,
+)
+
+@Serializable
+data class PrimaryDirectionPayload(
+    val title: String = "",
+    val summary: String = "",
+    val why: String = "",
+    @SerialName("search_strategy") val searchStrategy: SearchStrategyPayload = SearchStrategyPayload(),
+    @SerialName("available_in_catalog") val availableInCatalog: Boolean = false,
+    @SerialName("supporting_product_count") val supportingProductCount: Int = 0,
+)
+
+@Serializable
+data class ShoppingStrategyPayload(
+    @SerialName("strategy_id") val strategyId: String = "",
+    @SerialName("scene_type") val sceneType: String = "",
+    @SerialName("scene_summary") val sceneSummary: String = "",
+    @SerialName("user_problem") val userProblem: String = "",
+    @SerialName("decision_barrier") val decisionBarrier: DecisionBarrierPayload? = null,
+    @SerialName("primary_direction") val primaryDirection: PrimaryDirectionPayload = PrimaryDirectionPayload(),
+    @SerialName("avoid_risks") val avoidRisks: List<String> = emptyList(),
+    val assumptions: List<String> = emptyList(),
+    val confidence: String = "medium",
+)
 
 @Serializable
 data class TextDeltaPayload(

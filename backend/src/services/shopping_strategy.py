@@ -49,7 +49,7 @@ class ShoppingStrategyPlan(BaseModel):
     """Output of `build_shopping_strategy_plan`.
 
     - `route`: scenario_strategy (full) or scenario_filter (preserve explicit constraints)
-    - `scene_judgement_text`: 1~2 sentence scene judgement (emitted as text_delta)
+    - `scene_judgement_text`: natural strategy narration emitted as text_delta
     - `criteria`: input criteria + strategy-filled unspecified fields
     - `shopping_strategy`: structured payload for criteria_card.shopping_strategy
     - `reason_hint`: optional hint for downstream recommendation text
@@ -300,27 +300,148 @@ def _build_direction(
 
 
 # ---------------------------------------------------------------------------
-# Scene judgement text
+# Strategy narration text
 # ---------------------------------------------------------------------------
 
 
-def _scene_judgement_text(scene_type: str, barrier: DecisionBarrierPayload | None, direction_title: str) -> str:
-    barrier_key = barrier.barrier_type if barrier else ""
-    if scene_type == "gift":
-        if barrier_key == "fear_wrong_choice":
-            return f"这不是单纯买商品，而是送礼物。核心设备容易踩型号偏好，我会先避开强型号依赖的大件，优先看{direction_title}方向。"
-        if barrier_key == "price_sensitive":
-            return f"礼物要体面也要控预算。我会在预算内优先看{direction_title}方向，让性价比和礼物感都站得住。"
-        if barrier_key == "fit_uncertainty":
-            return f"送护肤品最怕踩肤质雷。我会优先看{direction_title}方向，降低不适用风险。"
-        return f"我会优先看{direction_title}方向，让礼物更稳。"
+def _strategy_narration_text(strategy: ShoppingStrategyPayload, route: str) -> str:
+    """Turn structured scenario strategy into user-facing assistant narration.
 
-    if scene_type == "interest":
-        if barrier_key == "choice_overload":
-            return f"围绕这个兴趣，我先收敛到{direction_title}方向，减少选择成本。"
-        return f"围绕这个兴趣，我会优先看{direction_title}方向。"
+    P0 keeps the strategy deterministic, but the visible response should still
+    read like a buying judgement rather than a field dump. The structured
+    payload stays available for clients/debugging; this text is the primary UI.
+    """
+    direction = strategy.primary_direction
+    barrier = strategy.decision_barrier
+    risk_items = [item.strip(" 。") for item in strategy.avoid_risks if item.strip()]
+    risk = _risk_as_object_text(risk_items[0]) if risk_items else ""
+    search = direction.search_strategy
+    search_parts = [
+        value
+        for value in (search.product_type, search.use_scenario)
+        if value
+    ]
+    search_text = " / ".join(search_parts)
 
-    return f"我会优先看{direction_title}方向。"
+    if barrier and barrier.reason:
+        barrier_text = barrier.reason.rstrip("。")
+    elif strategy.user_problem:
+        barrier_text = strategy.user_problem.rstrip("。")
+    else:
+        barrier_text = ""
+
+    direction_reason = (direction.why or direction.summary or "").rstrip("。")
+    route_hint = "你已经给了明确条件，我会保留这些约束。" if route == "scenario_filter" else ""
+
+    search_sentence = ""
+    if search_text:
+        search_sentence = f"我会先按「{search_text}」找具体候选。"
+    elif search.category:
+        search_sentence = f"我会先在「{search.category}」里找具体候选。"
+
+    if strategy.scene_type == "gift":
+        opening, caution = _gift_strategy_opening(strategy)
+        paragraphs = [opening, caution]
+        if risk:
+            paragraphs.append(f"所以我会先避开：{risk}。")
+        if route_hint:
+            paragraphs.append(route_hint)
+        paragraphs.append(_gift_direction_text(direction, direction_reason))
+    elif strategy.scene_type == "interest":
+        paragraphs = [
+            "这个需求不应该马上变成商品列表。更稳的做法是先找到一个明确的使用入口，再用商品去承接它。",
+        ]
+        if barrier_text:
+            paragraphs.append(barrier_text + "。")
+        if route_hint:
+            paragraphs.append(route_hint)
+        paragraphs.extend(
+            [
+                f"我会先看「{direction.title}」。",
+                f"原因是：{direction_reason}。" if direction_reason else "这个方向能减少选择成本，也更容易判断买得是否合适。",
+            ],
+        )
+    else:
+        paragraphs = [
+            "我会先把这个场景里的取舍说清楚，再看具体商品。",
+            f"我会先看「{direction.title}」。",
+            f"原因是：{direction_reason}。" if direction_reason else "",
+        ]
+
+    if search_sentence:
+        paragraphs.append(search_sentence)
+    paragraphs.append("下面先给你几款候选，之后可以再按预算、品牌或使用场景继续收窄。")
+    return "\n\n".join(part for part in paragraphs if part.strip())
+
+
+def _gift_strategy_opening(strategy: ShoppingStrategyPayload) -> tuple[str, str]:
+    """Narrative opening for gift scenes, specialized by supported catalog direction."""
+    search = strategy.primary_direction.search_strategy
+    category = search.category or ""
+    title = strategy.primary_direction.title
+    if category == "数码电子" or "黑科技" in title:
+        return (
+            "如果他平时喜欢电子产品，我不建议一上来送手机、电脑这类核心设备。",
+            "原因很简单：这类东西他自己通常更懂，也更容易有固定品牌或型号偏好。买错了，礼物感会被“是不是刚好合适”这件事抵消。",
+        )
+    if category == "美妆护肤" or "护肤" in title:
+        return (
+            "如果是送护肤品，我不建议一上来追求猛功效或网红爆款。",
+            "护肤品最容易踩雷的地方不是“看起来高级”，而是肤质、刺激性和使用习惯。送礼要先把不适用风险降下来。",
+        )
+    if category == "服饰运动" or "运动" in title:
+        return (
+            "如果他喜欢运动，我不建议一上来送专业器材或强偏好的球队周边。",
+            "这类礼物容易卡在尺码、品牌、运动习惯和审美偏好上。更稳的是选日常也能用、偏好依赖没那么强的单品。",
+        )
+    return (
+        "送礼不适合只按关键词找商品。",
+        "真正要避免的是看起来符合兴趣，但对方不一定用得上。更稳的做法是先选低偏好依赖、日常能用的方向。",
+    )
+
+
+def _gift_direction_text(direction: PrimaryDirectionPayload, direction_reason: str) -> str:
+    category = direction.search_strategy.category or ""
+    title = direction.title
+    if category == "数码电子" or "黑科技" in title:
+        bullets = [
+            "· 有新鲜感，比手机电脑更不容易买错",
+            "· 不强绑定具体型号或品牌生态",
+            "· 日常使用频率高，不容易闲置",
+        ]
+    elif category == "美妆护肤" or "护肤" in title:
+        bullets = [
+            "· 先控刺激风险，不追猛功效",
+            "· 适用面更广，礼物容错更高",
+            "· 后续可以按肤质和预算继续收窄",
+        ]
+    elif category == "服饰运动" or "运动" in title:
+        bullets = [
+            "· 有运动相关性，但不强绑定球队或专业器材偏好",
+            "· 日常也能穿，不容易闲置",
+            "· 尺码和风格更容易继续收窄",
+        ]
+    else:
+        bullets = [
+            "· 有礼物感，但不过度依赖对方的具体偏好",
+            "· 日常能用，不容易闲置",
+            "· 后续还能按预算和品牌继续收窄",
+        ]
+    lines = [f"更稳的方向：{title}"] + bullets
+    body = "\n".join(lines)
+    if direction_reason:
+        body += f"\n\n这个方向站得住，因为{direction_reason}。"
+    return body
+
+
+def _risk_as_object_text(risk: str) -> str:
+    """Normalize risk copy so visible narration does not read as duplicated commands."""
+    cleaned = risk.strip(" 。")
+    for prefix in ("不要盲买", "不要优先买", "不要在", "不要"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip(" ，,、。")
+            break
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -353,18 +474,38 @@ def _category_hint_present(intent: IntentResult) -> bool:
     return bool(intent.category)
 
 
-def _avoid_risks_for_barrier(barrier: DecisionBarrierPayload | None) -> list[str]:
+def _avoid_risks_for_barrier(
+    barrier: DecisionBarrierPayload | None,
+    direction: PrimaryDirectionPayload,
+) -> list[str]:
     if barrier is None:
         return []
     if barrier.barrier_type == "fear_wrong_choice":
+        category = direction.search_strategy.category or ""
+        title = direction.title
+        if category == "数码电子" or "黑科技" in title:
+            return [
+                "手机、电脑这类强型号偏好的大件",
+                "需要提前知道常用品牌和生态的小件",
+            ]
+        if category == "美妆护肤" or "护肤" in title:
+            return [
+                "猛功效、强刺激或对肤质要求很高的产品",
+                "只靠网红热度判断的护肤品",
+            ]
+        if category == "服饰运动" or "运动" in title:
+            return [
+                "专业器材、强球队偏好的周边或尺码风险很高的单品",
+                "需要非常了解运动习惯才能买准的装备",
+            ]
         return [
-            "不要盲买手机、电脑这类强型号偏好的大件",
-            "不知道常用品牌时，优先选兼容性更强的小件",
+            "强偏好依赖、需要非常了解对方习惯的礼物",
+            "只看关键词但日常未必用得上的商品",
         ]
     if barrier.barrier_type == "price_sensitive":
-        return ["不要在预算外硬推高配，避免用户后续反悔"]
+        return ["预算外高配，避免后续反悔"]
     if barrier.barrier_type == "fit_uncertainty":
-        return ["不确定肤质/尺码时，优先选低风险温和方向"]
+        return ["不确定肤质或尺码时风险偏高的选择"]
     return []
 
 
@@ -410,6 +551,25 @@ def _user_problem(scene_type: str, barrier: DecisionBarrierPayload | None) -> st
     if scene_type == "interest":
         return "用户希望在兴趣相关品类里找到更贴合偏好的选择"
     return "用户希望做出更稳妥的购买决策"
+
+
+def is_likely_shopping_strategy_request(body: ChatStreamRequest, intent: IntentResult) -> bool:
+    """Cheap pre-check for scenario-style intro copy.
+
+    Full strategy routing still happens in `build_shopping_strategy_plan` because
+    it needs generated criteria and catalog feasibility. This helper only keeps
+    the first visible assistant line from sounding like plain keyword filtering.
+    """
+    if intent.intent != "recommend":
+        return False
+    text = body.message
+    extracted = intent.extracted_constraints or {}
+    scene_type = _classify_scene_type(text)
+    if scene_type not in {"gift", "interest"}:
+        return False
+    scene_score = _compute_scene_score(text)
+    filter_score = _compute_filter_score(text, extracted)
+    return scene_score >= 4 and not (filter_score >= 5 and scene_score <= 2)
 
 
 def build_scenario_reason_hint(strategy: ShoppingStrategyPayload) -> str:
@@ -529,7 +689,6 @@ async def build_shopping_strategy_plan(
     confidence: Literal["low", "medium", "high"] = (
         "high" if scene_score >= 6 else "medium" if scene_score >= 4 else "low"
     )
-    judgement = _scene_judgement_text(scene_type, barrier, direction.title)
     final_criteria = _merge_strategy_criteria(criteria, direction)
 
     strategy = ShoppingStrategyPayload(
@@ -539,10 +698,11 @@ async def build_shopping_strategy_plan(
         user_problem=_user_problem(scene_type, barrier),
         decision_barrier=barrier,
         primary_direction=direction,
-        avoid_risks=_avoid_risks_for_barrier(barrier),
+        avoid_risks=_avoid_risks_for_barrier(barrier, direction),
         assumptions=_assumptions_for_scene(extracted),
         confidence=confidence,
     )
+    judgement = _strategy_narration_text(strategy, route)
 
     return ShoppingStrategyPlan(
         route=route,

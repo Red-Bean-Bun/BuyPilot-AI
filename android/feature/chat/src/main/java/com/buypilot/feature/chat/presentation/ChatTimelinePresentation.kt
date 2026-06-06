@@ -144,6 +144,8 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
     var latestFinalDecisionPayload: FinalDecisionPayload? = null
     var hasTimelineError = false
     var hasStructuredContent = false
+    val deferredStrategyCriteriaByTurn = linkedMapOf<String, MutableList<CriteriaNode>>()
+    val productDeckSeenTurnIds = linkedSetOf<String>()
 
     fun flushAssistantTurn() {
         if (assistantNodes.isNotEmpty()) {
@@ -158,12 +160,31 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
         }
     }
 
+    fun revealNode(node: ChatUiNode) {
+        revealKeys += node.key
+        node.revealTextKey()?.let { revealKeys += it }
+    }
+
+    fun appendDeferredStrategyCriteria(turnId: String) {
+        deferredStrategyCriteriaByTurn.remove(turnId)?.forEach { criteria ->
+            revealNode(criteria)
+            assistantNodes += criteria
+        }
+    }
+
     for (node in nodes) {
         if (node is CriteriaNode && node.key in staleCriteriaNodeKeys) {
             continue
         }
-        revealKeys += node.key
-        node.revealTextKey()?.let { revealKeys += it }
+        if (node is CriteriaNode && node.payload.shoppingStrategy != null) {
+            hasStructuredContent = true
+            val turnId = node.turnId.takeIf { it.isNotBlank() }
+            if (turnId != null && turnId !in productDeckSeenTurnIds) {
+                deferredStrategyCriteriaByTurn.getOrPut(turnId) { mutableListOf() } += node
+                continue
+            }
+        }
+        revealNode(node)
         when (node) {
             is ProductDeckNode -> {
                 hasStructuredContent = true
@@ -220,6 +241,10 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
             }
             assistantTurnId = turnId
             assistantNodes += node
+            if (node is ProductDeckNode) {
+                productDeckSeenTurnIds += turnId
+                appendDeferredStrategyCriteria(turnId)
+            }
         } else {
             flushAssistantTurn()
             items += when (node) {

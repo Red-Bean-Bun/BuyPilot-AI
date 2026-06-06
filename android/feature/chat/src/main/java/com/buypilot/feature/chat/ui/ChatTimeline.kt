@@ -2156,14 +2156,27 @@ private fun TimelineNodeContent(
             onCardEntered = { onStructuredEntered(node.key) },
             onCardDismissed = onClarificationCardDismissed,
         )
-        is CriteriaNode -> CriteriaSummaryCard(
-            motionKey = node.key,
-            payload = node.payload,
-            motionEnabled = structuredMotionEnabled,
-            alreadyEntered = structuredAlreadyEntered,
-            onEntered = { onStructuredEntered(node.key) },
-            onEdit = { onCriteriaEdit(node.payload) },
-        )
+        is CriteriaNode -> {
+            if (node.payload.shoppingStrategy != null) {
+                ScenarioFilterReceiptCard(
+                    motionKey = node.key,
+                    payload = node.payload,
+                    motionEnabled = structuredMotionEnabled,
+                    alreadyEntered = structuredAlreadyEntered,
+                    onEntered = { onStructuredEntered(node.key) },
+                    onEdit = { onCriteriaEdit(node.payload) },
+                )
+            } else {
+                CriteriaSummaryCard(
+                    motionKey = node.key,
+                    payload = node.payload,
+                    motionEnabled = structuredMotionEnabled,
+                    alreadyEntered = structuredAlreadyEntered,
+                    onEntered = { onStructuredEntered(node.key) },
+                    onEdit = { onCriteriaEdit(node.payload) },
+                )
+            }
+        }
         is ProductDeckNode -> Box(
             modifier = Modifier.onGloballyPositioned { coordinates ->
                 onNodePositioned(node.key, coordinates.positionInRoot().y.roundToInt())

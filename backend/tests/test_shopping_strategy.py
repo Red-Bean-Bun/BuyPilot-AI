@@ -19,6 +19,7 @@ from src.services.shopping_strategy import (
     _detect_barrier,
     build_scenario_reason_hint,
     build_shopping_strategy_plan,
+    is_likely_shopping_strategy_request,
 )
 from src.types.schemas import ChatStreamRequest, IntentResult
 from src.types.sse_events import Constraints, CriteriaPayload
@@ -252,6 +253,26 @@ class TestBuildShoppingStrategyPlan:
         assert plan.reason_hint == build_scenario_reason_hint(plan.shopping_strategy)
         assert len(plan.reason_hint) <= 28
 
+    async def test_plan_emits_natural_strategy_narration_not_field_dump(self):
+        plan = await build_shopping_strategy_plan(
+            _request("男朋友生日，喜欢电子产品"),
+            _intent(category="数码电子"),
+            _criteria(),
+            retrieval_probe=_probe_factory(2),
+        )
+        assert plan is not None
+        assert "不建议一上来送手机、电脑这类核心设备" in plan.scene_judgement_text
+        assert "更稳的方向：低踩雷的黑科技小件" in plan.scene_judgement_text
+        assert "· 日常使用频率高，不容易闲置" in plan.scene_judgement_text
+        assert "所以我会先避开" in plan.scene_judgement_text
+        assert "下面先给你几款候选" in plan.scene_judgement_text
+        assert "低踩雷的黑科技小件" in plan.scene_judgement_text
+        assert "真无线耳机" in plan.scene_judgement_text
+        assert "**" not in plan.scene_judgement_text
+        assert "顾虑" not in plan.scene_judgement_text
+        assert "假设" not in plan.scene_judgement_text
+        assert "###" not in plan.scene_judgement_text
+
     async def test_avoid_risks_present_for_gift(self):
         plan = await build_shopping_strategy_plan(
             _request("男朋友生日，喜欢电子产品"),
@@ -261,6 +282,30 @@ class TestBuildShoppingStrategyPlan:
         )
         assert plan is not None
         assert len(plan.shopping_strategy.avoid_risks) >= 1
+
+    @pytest.mark.parametrize(
+        ("message", "category", "expected", "forbidden"),
+        [
+            ("男朋友喜欢足球，生日送什么", "服饰运动", "专业器材", "手机、电脑"),
+            ("送妈妈一款护肤品，不知道怎么选", "美妆护肤", "猛功效", "手机、电脑"),
+        ],
+    )
+    async def test_gift_risk_copy_matches_direction(
+        self,
+        message: str,
+        category: str,
+        expected: str,
+        forbidden: str,
+    ):
+        plan = await build_shopping_strategy_plan(
+            _request(message),
+            _intent(category=category),
+            _criteria(),
+            retrieval_probe=_probe_factory(2),
+        )
+        assert plan is not None
+        assert expected in plan.scene_judgement_text
+        assert forbidden not in plan.scene_judgement_text
 
     async def test_without_probe_direction_marked_available(self):
         """When no probe is provided (offline mode), direction is still marked available."""
@@ -272,3 +317,13 @@ class TestBuildShoppingStrategyPlan:
         )
         assert plan is not None
         assert plan.shopping_strategy.primary_direction.available_in_catalog is True
+
+    def test_intro_precheck_distinguishes_scenario_from_plain_filter(self):
+        assert is_likely_shopping_strategy_request(
+            _request("男朋友生日，喜欢电子产品"),
+            _intent(category="数码电子"),
+        )
+        assert not is_likely_shopping_strategy_request(
+            _request("2000 内蓝牙耳机有哪些"),
+            _intent(category="数码电子", product_type="蓝牙耳机", budget_max=2000),
+        )

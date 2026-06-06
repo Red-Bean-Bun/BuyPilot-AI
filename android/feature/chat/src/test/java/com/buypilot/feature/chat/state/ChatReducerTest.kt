@@ -15,8 +15,12 @@ import com.buypilot.core.model.CriteriaPayload
 import com.buypilot.core.model.DonePayload
 import com.buypilot.core.model.ErrorPayload
 import com.buypilot.core.model.FinalDecisionPayload
+import com.buypilot.core.model.DecisionBarrierPayload
+import com.buypilot.core.model.PrimaryDirectionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
+import com.buypilot.core.model.SearchStrategyPayload
+import com.buypilot.core.model.ShoppingStrategyPayload
 import com.buypilot.core.model.TextDeltaPayload
 import com.buypilot.core.model.ThinkingPayload
 import com.buypilot.feature.chat.model.CartActionNode
@@ -29,6 +33,8 @@ import com.buypilot.feature.chat.model.FinalDecisionNode
 import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.ThinkingNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import com.buypilot.feature.chat.presentation.AssistantTurnTimelineItem
+import com.buypilot.feature.chat.presentation.containsNodeKey
 import com.buypilot.feature.chat.presentation.toTimelinePresentationState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -1004,6 +1010,141 @@ class ChatReducerTest {
         assertEquals(1, state.nodes.filterIsInstance<AiStreamNode>().size)
         assertEquals("我会先整理标准。", (state.nodes[0] as AiStreamNode).content)
         assertTrue(state.nodes[1] is CriteriaNode)
+    }
+
+    @Test
+    fun scenarioCriteriaCardStoresShoppingStrategyWithoutReducerInjectedText() {
+        val payload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_scene",
+                category = "数码电子",
+                summary = "送男朋友生日礼物，对方喜欢电子产品",
+            ),
+            shoppingStrategy = ShoppingStrategyPayload(
+                strategyId = "scene_001",
+                sceneType = "gift",
+                sceneSummary = "送男朋友礼物",
+                userProblem = "用户不确定这个场景下送什么更体面、更不容易踩雷",
+                decisionBarrier = DecisionBarrierPayload(
+                    barrierType = "fear_wrong_choice",
+                    label = "怕送错、怕不够体面",
+                    reason = "核心设备容易踩型号偏好",
+                    conversionStrategy = "先推荐低偏好依赖的小件",
+                ),
+                primaryDirection = PrimaryDirectionPayload(
+                    title = "低踩雷的黑科技小件",
+                    summary = "优先考虑音频配件",
+                    why = "有新鲜感，不强依赖具体型号偏好",
+                    searchStrategy = SearchStrategyPayload(
+                        category = "数码电子",
+                        productType = "真无线耳机",
+                        useScenario = "日常使用",
+                    ),
+                    availableInCatalog = true,
+                    supportingProductCount = 2,
+                ),
+                avoidRisks = listOf("不要盲买手机、电脑这类强型号偏好的大件"),
+                assumptions = listOf("暂时不知道预算"),
+                confidence = "medium",
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.CriteriaCard,
+                nodeId = "criteria_scene",
+                turnId = "turn_scene",
+                payload = payload,
+            ),
+        )
+
+        assertFalse(state.nodes.any { it is AiStreamNode })
+        val node = state.nodes.single() as CriteriaNode
+        assertEquals("turn_scene", node.turnId)
+        assertEquals("gift", node.payload.shoppingStrategy?.sceneType)
+        assertEquals("怕送错、怕不够体面", node.payload.shoppingStrategy?.decisionBarrier?.label)
+        assertEquals("真无线耳机", node.payload.shoppingStrategy?.primaryDirection?.searchStrategy?.productType)
+
+        val presentation = state.toTimelinePresentationState()
+        assertFalse(presentation.revealKeys.contains("criteria_scene"))
+        assertFalse(
+            presentation.items.any {
+                it.containsNodeKey("criteria_scene")
+            },
+        )
+    }
+
+    @Test
+    fun scenarioCriteriaCardRendersAfterProductDeckInSameAssistantTurn() {
+        val strategyPayload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_scene",
+                category = "数码电子",
+                summary = "送男朋友生日礼物，对方喜欢电子产品",
+            ),
+            shoppingStrategy = ShoppingStrategyPayload(
+                strategyId = "scene_001",
+                sceneType = "gift",
+                sceneSummary = "送男朋友礼物",
+                decisionBarrier = DecisionBarrierPayload(label = "怕送错、怕不够体面"),
+                primaryDirection = PrimaryDirectionPayload(
+                    title = "低踩雷的黑科技小件",
+                    searchStrategy = SearchStrategyPayload(
+                        category = "数码电子",
+                        productType = "真无线耳机",
+                        useScenario = "日常使用",
+                    ),
+                    availableInCatalog = true,
+                    supportingProductCount = 2,
+                ),
+                avoidRisks = listOf("不要盲买手机、电脑这类强型号偏好的大件"),
+            ),
+        )
+        val productPayload = ProductCardPayload(
+            rank = 1,
+            product = ProductPayload(
+                productId = "p1",
+                name = "真无线耳机",
+                category = "数码电子",
+            ),
+        )
+        val presentation = ChatUiState(
+            nodes = listOf(
+                AiStreamNode(
+                    key = "intro",
+                    messageId = "intro",
+                    content = "先按低踩雷礼物方向找。",
+                    done = true,
+                    turnId = "turn_scene",
+                ),
+                CriteriaNode(
+                    key = "criteria_scene",
+                    payload = strategyPayload,
+                    turnId = "turn_scene",
+                ),
+                ProductDeckNode(
+                    key = "deck_scene",
+                    deckId = "deck_scene",
+                    products = listOf(productPayload),
+                    turnId = "turn_scene",
+                ),
+                AiStreamNode(
+                    key = "analysis",
+                    messageId = "analysis",
+                    content = "这些候选更适合日常送礼。",
+                    done = true,
+                    turnId = "turn_scene",
+                ),
+            ),
+        ).toTimelinePresentationState()
+
+        val assistantTurn = presentation.items.single() as AssistantTurnTimelineItem
+        assertEquals(
+            listOf("intro", "deck_scene", "criteria_scene", "analysis"),
+            assistantTurn.nodes.map { it.key },
+        )
+        assertTrue(presentation.revealKeys.contains("criteria_scene"))
     }
 
     @Test

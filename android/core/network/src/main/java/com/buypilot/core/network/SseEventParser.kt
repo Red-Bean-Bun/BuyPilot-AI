@@ -33,7 +33,7 @@ class SseEventParser @Inject constructor(
         val root = json.parseToJsonElement(frame.data).jsonObject
         val eventValue = root.string("event") ?: frame.event ?: AgentEventType.Unknown.wireValue
         val event = AgentEventType.fromWireValue(eventValue)
-        val payloadSource = root["payload"]?.jsonObject ?: root
+        val payloadSource = root["payload"]?.jsonObject?.let { JsonObject(root + it) } ?: root
         val sessionId = root.string("session_id")
         val turnId = root.string("turn_id") ?: "turn_${sessionId ?: "unknown"}"
         val seq = root.int("seq") ?: fallbackSeq
