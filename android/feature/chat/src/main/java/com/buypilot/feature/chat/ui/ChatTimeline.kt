@@ -1268,6 +1268,8 @@ internal fun ChatTimeline(
                                 node = item.node,
                                 renderContext = renderContext,
                                 inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                                inlineCompareTurnIds = inlineCompareTurnIds,
+                                allNodes = state.nodes,
                                 timelineMotionEnabled = timelineMotionEnabled,
                                 hiddenUserMessage = hiddenUserMessage,
                                 activeFlightMessageKey = activeFlightMessageKey,
@@ -1315,6 +1317,8 @@ internal fun ChatTimeline(
                                     item = item,
                                     renderContext = renderContext,
                                     inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                                    inlineCompareTurnIds = inlineCompareTurnIds,
+                                    allNodes = state.nodes,
                                     timelineMotionEnabled = timelineMotionEnabled,
                                     revealStore = revealStore,
                                     activeFlightMessageKey = activeFlightMessageKey,
@@ -1362,6 +1366,8 @@ internal fun ChatTimeline(
                             node = item.node,
                             renderContext = renderContext,
                             inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                            inlineCompareTurnIds = inlineCompareTurnIds,
+                            allNodes = state.nodes,
                             timelineMotionEnabled = timelineMotionEnabled,
                             structuredMotionEnabled = timelineMotionEnabled &&
                                 !revealStore.hasStartedStructuredNode(item.node.key),
@@ -1476,6 +1482,8 @@ private fun AssistantTurnBlock(
     item: AssistantTurnTimelineItem,
     renderContext: TimelineRenderContext,
     inlineComparePayloadByDeckId: Map<String, CompareCardPayload>,
+    inlineCompareTurnIds: Set<String>,
+    allNodes: List<ChatUiNode>,
     timelineMotionEnabled: Boolean,
     revealStore: TimelineRevealStore,
     activeFlightMessageKey: String?,
@@ -1685,6 +1693,8 @@ private fun AssistantTurnBlock(
                                 node = node,
                                 renderContext = renderContext,
                                 inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                                inlineCompareTurnIds = inlineCompareTurnIds,
+                                allNodes = allNodes,
                                 timelineMotionEnabled = timelineMotionEnabled,
                                 productConvergeActionReady = productConvergeActionReady,
                                 structuredMotionEnabled = !turnSettled &&
@@ -2037,6 +2047,8 @@ private fun TimelineNodeContent(
     node: ChatUiNode,
     renderContext: TimelineRenderContext,
     inlineComparePayloadByDeckId: Map<String, CompareCardPayload>,
+    inlineCompareTurnIds: Set<String>,
+    allNodes: List<ChatUiNode>,
     timelineMotionEnabled: Boolean,
     productConvergeActionReady: Boolean = true,
     structuredMotionEnabled: Boolean = timelineMotionEnabled,
@@ -2184,7 +2196,7 @@ private fun TimelineNodeContent(
         ) {
             val deckIsLatest = node.key == renderContext.latestProductDeckKey
             val deckConverged = node.key in renderContext.convergedProductDeckKeys
-            val inlineCompareNode = state.nodes
+            val inlineCompareNode = allNodes
                 .filterIsInstance<CompareCardNode>()
                 .lastOrNull { it.payload.sourceDeckId == node.deckId && it.turnId in inlineCompareTurnIds }
             ProductRecommendationStrip(

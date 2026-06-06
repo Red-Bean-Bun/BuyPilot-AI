@@ -234,8 +234,10 @@ async def _resolve_compare_product_ids(
     """Resolve which products to compare from intent, message, or previous deck."""
 
     # Priority 0: Explicit product_ids from client (no ordinal resolution needed)
-    if request_product_ids and len(request_product_ids) >= 2:
-        return request_product_ids[:_MAX_COMPARE_PRODUCTS]
+    if request_product_ids:
+        deduped = list(dict.fromkeys(request_product_ids))
+        if len(deduped) >= 2:
+            return deduped[:_MAX_COMPARE_PRODUCTS]
 
     # Priority 1: LLM-extracted compare_product_ids
     if intent.compare_product_ids:
