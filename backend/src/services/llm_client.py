@@ -454,7 +454,7 @@ async def stream_comparison_conclusion(
     )
     emitted = False
     try:
-        async for delta in _stream_chat_task("generate_comparison", messages):
+        async for delta in _stream_chat_task("generate_comparison_conclusion", messages):
             if not delta:
                 continue
             emitted = True

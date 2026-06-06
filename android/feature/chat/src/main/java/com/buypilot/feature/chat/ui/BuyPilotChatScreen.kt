@@ -2289,30 +2289,35 @@ internal fun ProductRecommendationStrip(
                 shrinkTowards = Alignment.Top,
             ),
         ) {
-            comparePayload?.let { payload ->
-                ProductDeckMarkdownCompareTable(
-                    payload = payload,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (compareNarrationContent.isNotBlank()) {
-                    StreamingAssistantText(
-                        nodeKey = "inline_compare_narration_${payload.compareId}",
-                        content = compareNarrationContent,
-                        done = compareNarrationDone,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                comparePayload?.let { payload ->
+                    ProductDeckMarkdownCompareTable(
+                        payload = payload,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                }
-                if (compareConclusionContent.isNotBlank()) {
-                    StreamingAssistantText(
-                        nodeKey = "inline_compare_conclusion_${payload.compareId}",
-                        content = compareConclusionContent,
-                        done = compareConclusionDone,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
+                    if (compareNarrationContent.isNotBlank()) {
+                        StreamingAssistantText(
+                            nodeKey = "inline_compare_narration_${payload.compareId}",
+                            content = compareNarrationContent,
+                            done = compareNarrationDone,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                    if (compareConclusionContent.isNotBlank()) {
+                        StreamingAssistantText(
+                            nodeKey = "inline_compare_conclusion_${payload.compareId}",
+                            content = compareConclusionContent,
+                            done = compareConclusionDone,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             }
         }
