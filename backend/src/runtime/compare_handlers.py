@@ -48,7 +48,7 @@ async def handle_compare(
     ctx.ensure_active()
 
     # 2. Resolve product IDs to compare
-    product_ids = await _resolve_compare_product_ids(ctx.session_id, intent, body.message)
+    product_ids = await _resolve_compare_product_ids(ctx.session_id, intent, body.message, body.compare_product_ids)
     if len(product_ids) < 2:
         yield ClarificationEvent(
             session_id=ctx.session_id,
@@ -229,16 +229,19 @@ async def _resolve_compare_product_ids(
     session_id: str,
     intent: IntentResult,
     message: str,
+    request_product_ids: list[str] | None = None,
 ) -> list[str]:
     """Resolve which products to compare from intent, message, or previous deck."""
+
+    # Priority 0: Explicit product_ids from client (no ordinal resolution needed)
+    if request_product_ids and len(request_product_ids) >= 2:
+        return request_product_ids[:_MAX_COMPARE_PRODUCTS]
 
     # Priority 1: LLM-extracted compare_product_ids
     if intent.compare_product_ids:
         previous_ids = await get_previous_product_ids(session_id)
         if previous_ids:
-            resolved = resolve_compare_targets(
-                " ".join(intent.compare_product_ids), previous_ids
-            )
+            resolved = resolve_compare_targets(" ".join(intent.compare_product_ids), previous_ids)
             if len(resolved) >= 2:
                 return resolved
 

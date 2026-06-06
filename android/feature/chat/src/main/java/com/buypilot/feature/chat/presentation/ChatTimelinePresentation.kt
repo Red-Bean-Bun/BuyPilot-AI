@@ -147,6 +147,14 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
     val deferredStrategyCriteriaByTurn = linkedMapOf<String, MutableList<CriteriaNode>>()
     val productDeckSeenTurnIds = linkedSetOf<String>()
 
+    // Pre-scan: identify turns that contain product decks.
+    // Strategy criteria are deferred until ProductDeckNode only when the turn
+    // actually has products. For 0-hit scenario turns, render immediately.
+    val turnsWithProductDecks = nodes
+        .filterIsInstance<ProductDeckNode>()
+        .mapNotNull { it.turnId.takeIf { id -> id.isNotBlank() } }
+        .toSet()
+
     fun flushAssistantTurn() {
         if (assistantNodes.isNotEmpty()) {
             items += AssistantTurnTimelineItem(
@@ -179,7 +187,7 @@ internal fun ChatUiState.toTimelinePresentationState(): TimelinePresentationStat
         if (node is CriteriaNode && node.payload.shoppingStrategy != null) {
             hasStructuredContent = true
             val turnId = node.turnId.takeIf { it.isNotBlank() }
-            if (turnId != null && turnId !in productDeckSeenTurnIds) {
+            if (turnId != null && turnId in turnsWithProductDecks && turnId !in productDeckSeenTurnIds) {
                 deferredStrategyCriteriaByTurn.getOrPut(turnId) { mutableListOf() } += node
                 continue
             }

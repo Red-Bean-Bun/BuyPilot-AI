@@ -27,10 +27,11 @@ class ChatStreamRequest(BaseModel):
     client_turn_id: str | None = None
     client_trace_id: str | None = None
     converge: bool = False
+    compare_product_ids: list[str] | None = None
 
     @model_validator(mode="after")
     def _require_message_or_image(self) -> "ChatStreamRequest":
-        if not self.message.strip() and not self.image_url:
+        if not self.message.strip() and not (self.image_url and self.image_url.strip()):
             raise ValueError("message 和 image_url 至少需要一个")
         return self
 

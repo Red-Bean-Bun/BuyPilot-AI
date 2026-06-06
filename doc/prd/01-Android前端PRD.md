@@ -386,7 +386,7 @@ data class AgentUiEnvelope<T>(
 )
 
 @Serializable data class ChatStreamRequest(
-    val message: String,
+    val message: String = "",  // 拍照场景可为空串；message 与 image_url 至少一个非空
     @SerialName("session_id") val sessionId: String? = null,
     @SerialName("client_turn_id") val clientTurnId: String? = null,
     val history: List<MessageLite> = emptyList(),

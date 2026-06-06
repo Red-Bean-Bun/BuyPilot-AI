@@ -315,8 +315,8 @@ internal fun ChatTimeline(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?) -> Unit,
-    onCompareProducts: (List<Int>) -> Unit,
-    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareProducts: (List<Int>, List<String>?) -> Unit,
+    onInlineCompareProducts: (String, List<Int>, List<String>?) -> Unit,
     onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
@@ -1490,8 +1490,8 @@ private fun AssistantTurnBlock(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?, String?) -> Unit,
-    onCompareProducts: (List<Int>) -> Unit,
-    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareProducts: (List<Int>, List<String>?) -> Unit,
+    onInlineCompareProducts: (String, List<Int>, List<String>?) -> Unit,
     onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
@@ -2058,8 +2058,8 @@ private fun TimelineNodeContent(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?, String?) -> Unit,
-    onCompareProducts: (List<Int>) -> Unit,
-    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareProducts: (List<Int>, List<String>?) -> Unit,
+    onInlineCompareProducts: (String, List<Int>, List<String>?) -> Unit,
     onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onDecisionEvidence: (FinalDecisionPayload, String?) -> Unit,
@@ -2184,6 +2184,9 @@ private fun TimelineNodeContent(
         ) {
             val deckIsLatest = node.key == renderContext.latestProductDeckKey
             val deckConverged = node.key in renderContext.convergedProductDeckKeys
+            val inlineCompareNode = state.nodes
+                .filterIsInstance<CompareCardNode>()
+                .lastOrNull { it.payload.sourceDeckId == node.deckId && it.turnId in inlineCompareTurnIds }
             ProductRecommendationStrip(
                 node = node,
                 backendBaseUrl = renderContext.backendBaseUrl,
@@ -2195,6 +2198,10 @@ private fun TimelineNodeContent(
                 deckConverged = deckConverged,
                 deckStillStreaming = renderContext.isStreaming && renderContext.currentTurnId == node.turnId,
                 comparePayload = inlineComparePayloadByDeckId[node.deckId],
+                compareNarrationContent = inlineCompareNode?.narrationContent.orEmpty(),
+                compareNarrationDone = inlineCompareNode?.narrationDone == true,
+                compareConclusionContent = inlineCompareNode?.conclusionContent.orEmpty(),
+                compareConclusionDone = inlineCompareNode?.conclusionDone == true,
                 convergeActionReady = productConvergeActionReady,
                 compactHistory = shouldCompactProductDeckHistory(
                     node = node,
@@ -2208,7 +2215,12 @@ private fun TimelineNodeContent(
                 onEntered = { onStructuredEntered(node.key) },
                 onOpen = { deckId, productId -> onProductOpen(deckId, productId, node.key) },
                 onOpenDetail = { deckId, productId -> onProductDetailOpen(deckId, productId, node.key, node.key) },
-                onCompare = { ranks -> onInlineCompareProducts(node.deckId, ranks) },
+                onCompare = { ranks ->
+                    val productIds = ranks.mapNotNull { rank ->
+                        node.products.getOrNull(rank - 1)?.product?.productId
+                    }.takeIf { it.size >= 2 }
+                    onInlineCompareProducts(node.deckId, ranks, productIds)
+                },
                 onConverge = { onConvergeRecommendation(node.deckId) },
             )
         }

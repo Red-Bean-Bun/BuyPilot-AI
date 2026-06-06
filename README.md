@@ -139,7 +139,7 @@ cp .env.example .env
 # 编辑 .env，填写 BAILIAN_API_KEY=sk-your-real-key
 
 # 2) 启动 Postgres/pgvector + FastAPI
-#    首次启动会自动：建表 → 入库 100 商品 → 生成 1292 个 text embedding
+#    首次启动会自动：建表 → 入库 100 商品 → 生成运行态 text embedding
 #    启动日志会显示 API Key 配置状态
 make rebuild
 
@@ -148,9 +148,11 @@ make rebuild
 make seed-image
 
 # 4) 验证启动成功
-make db-stats     # 应显示 products:100, chunks:1292, image_embeddings:100
+make db-stats     # 应显示 products:100, chunks:<运行态数量>, image_embeddings:100
 make smoke        # 运行 live RAG 门禁测试
 ```
+
+说明：`data/processed/chunks.json` 是入库前清洗产物；答辩和运行态验收以 `make db-stats` / `make smoke` 输出为准。2026-06-06 Docker live smoke 记录为 `products=100`、`chunks=1292`、`image_embeddings=100`。
 
 #### 启动日志说明
 
@@ -163,7 +165,7 @@ make smoke        # 运行 live RAG 门禁测试
 | 问题 | 解决方案 |
 |------|---------|
 | `BAILIAN_API_KEY 未配置` | 编辑 `.env` 文件，填写 `BAILIAN_API_KEY=sk-xxx` |
-| `make rebuild` 卡在 embedding | 首次生成 1292 个 embedding 需 2-5 分钟，请耐心等待 |
+| `make rebuild` 卡在 embedding | 首次会生成运行态 embedding，数量以 `make db-stats` 为准，通常需 2-5 分钟 |
 | `image_embeddings: 0` | 运行 `make seed-image` 构建图片索引 |
 | 端口 5432/8000 被占用 | 修改 `deploy/docker-compose.yml` 端口映射 |
 

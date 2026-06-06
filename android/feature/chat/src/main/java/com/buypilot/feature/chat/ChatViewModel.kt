@@ -617,6 +617,7 @@ class ChatViewModel @Inject constructor(
         converge: Boolean = false,
         backgroundCartAction: Boolean = false,
         suppressComposerStreaming: Boolean = false,
+        compareProductIds: List<String>? = null,
     ) {
         val nowMs = System.currentTimeMillis()
         val clientTurnId = forcedClientTurnId ?: Ids.clientTurnId()
@@ -680,6 +681,7 @@ class ChatViewModel @Inject constructor(
                     clientTurnId = clientTurnId,
                     clientTraceId = Ids.clientTraceId(),
                     converge = converge,
+                    compareProductIds = compareProductIds,
                 )
                 var convergenceProducedDecision = false
                 var convergenceFinished = false
@@ -967,7 +969,7 @@ class ChatViewModel @Inject constructor(
         sendMessage(message)
     }
 
-    fun compareProductsByRank(ranks: List<Int>) {
+    fun compareProductsByRank(ranks: List<Int>, productIds: List<String>? = null) {
         val normalizedRanks = ranks
             .filter { it > 0 }
             .distinct()
@@ -978,6 +980,7 @@ class ChatViewModel @Inject constructor(
             message = "对比${normalizedRanks.joinToString("、") { it.toChineseOrdinalLabel() }}",
             showUserMessage = false,
             suppressComposerStreaming = true,
+            compareProductIds = productIds,
         )
     }
 

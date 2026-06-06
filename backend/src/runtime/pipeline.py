@@ -32,7 +32,12 @@ from src.runtime.stages.multimodal import run_image_embedding, run_multimodal
 from src.runtime.stages.recommendation import run_recommendation_text, run_recommendation_text_stream, run_retrieval
 from src.runtime.stages.slot_checker import check_required_slots
 from src.config import user_messages as msg
-from src.config.domain_terms import KNOWN_CATEGORIES, is_known_brand_or_synonym, is_supported_product_type, normalize_category
+from src.config.domain_terms import (
+    KNOWN_CATEGORIES,
+    is_known_brand_or_synonym,
+    is_supported_product_type,
+    normalize_category,
+)
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
@@ -291,17 +296,27 @@ async def _resolve_intent(
             synthetic_intent = IntentResult(intent="recommend")
 
     # Compare: deterministic pre-check for "对比第一个和第二个" style requests
-    if synthetic_intent is None and is_compare_phrase(pipeline_body.message):
-        previous_ids = await get_previous_product_ids(ctx.session_id)
-        if previous_ids:
-            resolved = resolve_compare_targets(pipeline_body.message, previous_ids)
-            if len(resolved) >= 2:
-                prev = await get_previous_criteria(ctx.session_id)
-                synthetic_intent = IntentResult(
-                    intent="compare",
-                    category=prev.category or None if prev else None,
-                    compare_product_ids=resolved,
-                )
+    # or explicit compare_product_ids from the client
+    if synthetic_intent is None:
+        client_ids = pipeline_body.compare_product_ids or []
+        if len(client_ids) >= 2:
+            prev = await get_previous_criteria(ctx.session_id)
+            synthetic_intent = IntentResult(
+                intent="compare",
+                category=prev.category or None if prev else None,
+                compare_product_ids=client_ids[:4],
+            )
+        elif is_compare_phrase(pipeline_body.message):
+            previous_ids = await get_previous_product_ids(ctx.session_id)
+            if previous_ids:
+                resolved = resolve_compare_targets(pipeline_body.message, previous_ids)
+                if len(resolved) >= 2:
+                    prev = await get_previous_criteria(ctx.session_id)
+                    synthetic_intent = IntentResult(
+                        intent="compare",
+                        category=prev.category or None if prev else None,
+                        compare_product_ids=resolved,
+                    )
 
     if synthetic_intent is not None:
         intent = synthetic_intent
@@ -338,10 +353,12 @@ async def _resolve_intent(
     # When fewer exist (0 or 1), reclassify to recommend so the pipeline
     # finds products first. Compare can follow after seeing results.
     if intent.intent == "compare":
-        previous_ids = await get_previous_product_ids(ctx.session_id)
-        if len(previous_ids) < 2:
-            logger.info("Reclassified compare → recommend (need ≥2 previous products, have %d)", len(previous_ids))
-            intent = intent.model_copy(update={"intent": "recommend"})
+        client_ids = pipeline_body.compare_product_ids or []
+        if len(client_ids) < 2:
+            previous_ids = await get_previous_product_ids(ctx.session_id)
+            if len(previous_ids) < 2:
+                logger.info("Reclassified compare → recommend (need ≥2 previous products, have %d)", len(previous_ids))
+                intent = intent.model_copy(update={"intent": "recommend"})
 
     yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent))
 
@@ -444,7 +461,6 @@ def _unsupported_product_type(intent: IntentResult) -> bool:
     if normalize_category(product_type) in KNOWN_CATEGORIES:
         return False
     return bool(product_type and not is_supported_product_type(str(product_type)))
-
 
 
 def _should_emit_partial_criteria(missing_slots: list[str], criteria: CriteriaPayload) -> bool:

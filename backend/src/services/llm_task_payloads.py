@@ -66,6 +66,19 @@ def _sanitize_user_message(message: str) -> str:
     return _SANITIZE_RE.sub("", message)
 
 
+def _sanitize_history(history: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """清洗 history 中所有 user 消息，防止控制字符经历史轮次绕过当轮 sanitize。"""
+    if not history:
+        return []
+    sanitized = []
+    for msg in history:
+        if isinstance(msg, dict) and msg.get("role") == "user" and isinstance(msg.get("content"), str):
+            sanitized.append({**msg, "content": _sanitize_user_message(msg["content"])})
+        else:
+            sanitized.append(msg)
+    return sanitized
+
+
 def intent_messages(
     message: str,
     history: list[dict[str, Any]] | None,
@@ -73,6 +86,8 @@ def intent_messages(
     conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     message = _sanitize_user_message(message)
+    history = _sanitize_history(history)
+    conversation_context = _sanitize_user_message(conversation_context)
     return [
         {
             "role": "system",
@@ -80,7 +95,7 @@ def intent_messages(
                 "intent_analysis",
                 {
                     "user_message": message,
-                    "history": history or [],
+                    "history": history,
                     "conversation_context": conversation_context,
                 },
                 _schema_override("analyze_intent"),
@@ -98,6 +113,7 @@ def criteria_messages(
     conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     message = _sanitize_user_message(message)
+    conversation_context = _sanitize_user_message(conversation_context)
     payload = {
         "message": message,
         "intent": intent_dump,

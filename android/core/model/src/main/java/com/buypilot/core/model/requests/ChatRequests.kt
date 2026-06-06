@@ -15,6 +15,7 @@ data class ChatStreamRequest(
     @SerialName("skip_stages") val skipStages: List<String> = emptyList(),
     @SerialName("client_trace_id") val clientTraceId: String? = null,
     val converge: Boolean = false,
+    @SerialName("compare_product_ids") val compareProductIds: List<String>? = null,
 )
 
 @Serializable

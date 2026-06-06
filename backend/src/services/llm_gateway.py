@@ -28,7 +28,7 @@ _RETRYABLE_EXCEPTIONS = (
     httpx.ReadError,
 )
 _MAX_ATTEMPTS = 3  # 1 initial + 2 retries per profile
-_RETRY_DELAYS = (0.2, 0.4, 0.8)  # 200ms → 400ms → 800ms (1.4 s total)
+_RETRY_DELAYS = (0.2, 0.4)  # 200ms → 400ms (0.6 s total backoff)
 
 if len(_RETRY_DELAYS) < _MAX_ATTEMPTS - 1:
     raise RuntimeError(

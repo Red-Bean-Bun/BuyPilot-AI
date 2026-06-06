@@ -35,7 +35,7 @@ cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 **健康检查：** `GET /health`
 
 **兼容性规则（铁律 1）：**
-- SSE event type 共 9 种（thinking / clarification / criteria_card / text_delta / product_card / cart_action / final_decision / done / error），**禁止新增**。这是全集。
+- SSE event type 共 10 种（thinking / clarification / criteria_card / text_delta / product_card / cart_action / compare_card / final_decision / done / error），**禁止新增**。这是全集。
 - 后端字段只增不删，event 类型不改名。
 - 前端必须忽略未知字段。
 - 前端用 `event` 字段分发 SSE，不依赖 JSON 字段顺序。
@@ -86,7 +86,7 @@ cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 
 > **Android 客户端注意：** 如果部署环境配置了 `ADMIN_API_KEY`，所有 API 请求都必须携带 `Authorization: Bearer <key>` 头。客户端已内置 `AdminAuthInterceptor` 自动注入，但需要确保项目根目录 `.env` 文件包含：
 > ```env
-> ADMIN_API_KEY=b72d57075018654b8d7ad1ab6e71fb0be3f2ec02fc300015
+> ADMIN_API_KEY=<your-admin-api-key>
 > ```
 > 构建时 Gradle 会自动读取并注入 `BuildConfig.ADMIN_API_KEY`，运行时所有请求自动携带 Bearer token。本地开发若不需要鉴权，留空或不配置即可。
 
@@ -378,14 +378,14 @@ Content-Type: image/jpeg
 
 ---
 
-## 4. SSE 事件类型（9 种）
+## 4. SSE 事件类型（10 种）
 
 所有事件共享基础字段（`SSEEventBase`）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `schema_version` | string | 固定 `"2026-05-20"` |
-| `event` | string | 事件类型（9 种之一） |
+| `event` | string | 事件类型（10 种之一） |
 | `session_id` | string | 会话 ID |
 | `turn_id` | string | 回合 ID |
 | `seq` | int | 回合内递增序号 |
@@ -605,7 +605,45 @@ Content-Type: image/jpeg
 
 `cart` 为本次操作后的购物车快照，**可以为 null**（如操作失败时）。`view` 事件也会返回该字段，空购物车时 `items=[]`、`total_items=0`、`total_price=0.0`。
 
-### 4.7 `final_decision` — 最终决策
+### 4.7 `compare_card` — 多商品对比
+
+```json
+{
+  "event": "compare_card",
+  "display_mode": "summary_card",
+  "compare_id": "cmp_001",
+  "source_deck_id": "deck_003",
+  "mode": "decision",
+  "focus": "油皮适用性",
+  "products": [
+    { "product_id": "p_beauty_001", "name": "氨基酸洁面乳", "price": 89.0 }
+  ],
+  "axes": [
+    { "label": "温和度", "description": "氨基酸配方 vs 皂基", "winner_product_id": "p_beauty_001" }
+  ],
+  "winner_product_id": "p_beauty_001",
+  "winner_reason": "氨基酸配方温和不刺激，更适合油皮长期使用",
+  "tradeoffs": ["质地偏稀，泡沫感不如皂基"],
+  "risk_notes": [],
+  "confidence": "high"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `compare_id` | string | 本次对比唯一 ID |
+| `source_deck_id` | string \| null | 触发对比的商品 deck |
+| `mode` | string | `exploratory`（探索）/ `decision`（决策） |
+| `focus` | string \| null | 对比关注维度 |
+| `products` | list[ProductPayload] | 参与对比的商品列表 |
+| `axes` | list[CompareAxisPayload] | 对比轴（维度） |
+| `winner_product_id` | string \| null | 推荐胜出商品 ID |
+| `winner_reason` | string \| null | 胜出原因 |
+| `tradeoffs` | list[string] | 权衡取舍说明 |
+| `risk_notes` | list[CompareRiskNotePayload] | 风险提示 |
+| `confidence` | string \| null | `high` / `medium` / `low` |
+
+### 4.8 `final_decision` — 最终决策
 
 ```json
 {
@@ -634,7 +672,7 @@ Content-Type: image/jpeg
 | `confidence` | string \| null | `high` / `medium` / `low` |
 | `next_step` | string \| null | `adjust_criteria` / `replace_deck` / `continue_current_deck` / `accept_recommendation` |
 
-### 4.8 `done` — 流结束信号
+### 4.9 `done` — 流结束信号
 
 ```json
 {
@@ -655,7 +693,7 @@ Content-Type: image/jpeg
 
 收到 `done` 后前端关闭 loading 状态，本次 SSE 流完整结束。
 
-### 4.9 `error` — 错误事件
+### 4.10 `error` — 错误事件
 
 ```json
 {

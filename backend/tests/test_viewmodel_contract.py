@@ -41,10 +41,39 @@ class TestAPIInputValidation:
 
     @pytest.mark.asyncio
     async def test_empty_message_returns_422(self, test_client, _seed_for_api):
-        """ChatStreamRequest.message min_length=1 → empty string rejected."""
+        """Empty message without image_url → model_validator rejects."""
         async with test_client as c:
             resp = await c.post("/chat/stream", json={"message": ""})
         assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_empty_message_with_image_url_passes(self, test_client, _seed_for_api):
+        """Empty message + valid image_url → accepted (photo-only request)."""
+        async with test_client as c:
+            async with c.stream(
+                "POST",
+                "/chat/stream",
+                json={"message": "", "image_url": "/uploads/test.png"},
+            ) as resp:
+                assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_whitespace_image_url_returns_422(self, test_client, _seed_for_api):
+        """Whitespace-only image_url without message → model_validator rejects."""
+        async with test_client as c:
+            resp = await c.post("/chat/stream", json={"message": "", "image_url": "  "})
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_message_omitted_with_image_url_passes(self, test_client, _seed_for_api):
+        """message key omitted + valid image_url → accepted (default='')."""
+        async with test_client as c:
+            async with c.stream(
+                "POST",
+                "/chat/stream",
+                json={"image_url": "/uploads/test.png"},
+            ) as resp:
+                assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_overlong_message_returns_422(self, test_client, _seed_for_api):

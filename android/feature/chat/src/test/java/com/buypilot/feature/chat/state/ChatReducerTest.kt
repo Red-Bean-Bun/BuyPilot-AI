@@ -1076,6 +1076,60 @@ class ChatReducerTest {
     }
 
     @Test
+    fun scenarioCriteriaCardRendersImmediatelyWhenNoProducts() {
+        // 0-hit scenario: criteria_card with shopping_strategy is followed by
+        // no-match text and done(awaiting_criteria_adjustment), but no ProductDeckNode.
+        // The criteria card must render immediately instead of being deferred forever.
+        val strategyPayload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_no_match",
+                category = "美妆护肤",
+                summary = "敏感肌防晒，无酒精",
+            ),
+            shoppingStrategy = ShoppingStrategyPayload(
+                strategyId = "scene_no_match",
+                sceneType = "sensitive",
+                sceneSummary = "敏感肌防晒需求",
+                decisionBarrier = DecisionBarrierPayload(label = "怕刺激"),
+                primaryDirection = PrimaryDirectionPayload(
+                    title = "物理防晒优先",
+                    searchStrategy = SearchStrategyPayload(
+                        category = "美妆护肤",
+                        productType = "防晒霜",
+                        useScenario = "日常通勤",
+                    ),
+                    availableInCatalog = false,
+                    supportingProductCount = 0,
+                ),
+                avoidRisks = listOf("避开酒精、香精"),
+            ),
+        )
+        val presentation = ChatUiState(
+            nodes = listOf(
+                CriteriaNode(
+                    key = "criteria_no_match",
+                    payload = strategyPayload,
+                    turnId = "turn_no_match",
+                ),
+                AiStreamNode(
+                    key = "no_match_text",
+                    messageId = "no_match_text",
+                    content = "当前商品库没有符合要求的防晒霜，试试放宽条件？",
+                    done = true,
+                    turnId = "turn_no_match",
+                ),
+            ),
+        ).toTimelinePresentationState()
+
+        assertTrue(presentation.revealKeys.contains("criteria_no_match"))
+        assertTrue(
+            presentation.items.any {
+                it.containsNodeKey("criteria_no_match")
+            },
+        )
+    }
+
+    @Test
     fun scenarioCriteriaCardRendersAfterProductDeckInSameAssistantTurn() {
         val strategyPayload = CriteriaCardPayload(
             criteria = CriteriaPayload(

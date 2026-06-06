@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import pytest_asyncio
 
 from src.api.app import app
 
@@ -73,7 +74,7 @@ def mock_external_ai(monkeypatch):
     monkeypatch.setattr(reranker, "_rerank_request", fake_rerank_request)
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def reset_database_engine():
     loop_ticker = asyncio.create_task(_tick_event_loop())
     try:

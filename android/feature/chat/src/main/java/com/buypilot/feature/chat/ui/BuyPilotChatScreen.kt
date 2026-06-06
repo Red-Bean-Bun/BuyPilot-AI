@@ -338,7 +338,7 @@ internal fun BuyPilotChatScreen(
     onCriteriaPatch: (JsonObject) -> Unit,
     onCancel: () -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
-    onCompareProducts: (List<Int>) -> Unit,
+    onCompareProducts: (List<Int>, List<String>?) -> Unit,
     onCartOpen: () -> Unit,
     onCartSheetRequestHandled: (Long) -> Unit,
     onCartQuantityChange: (String, Int) -> Unit,
@@ -791,9 +791,9 @@ internal fun BuyPilotChatScreen(
                     onProductOpen = onOpenProductDeck,
                     onProductDetailOpen = onOpenProductDetail,
                     onCompareProducts = onCompareProducts,
-                    onInlineCompareProducts = { deckId, ranks ->
+                    onInlineCompareProducts = { deckId, ranks, productIds ->
                         pendingInlineCompareDeckId = deckId
-                        onCompareProducts(ranks)
+                        onCompareProducts(ranks, productIds)
                     },
                     onCompareDetailOpen = { payload -> compareDetailPayload = payload },
                     onConvergeRecommendation = onConvergeProductDeck,
@@ -1174,8 +1174,8 @@ private fun ConversationStage(
     onCriteriaEdit: (CriteriaCardPayload) -> Unit,
     onProductOpen: (String, String?, String?) -> Unit,
     onProductDetailOpen: (String, String, String?) -> Unit,
-    onCompareProducts: (List<Int>) -> Unit,
-    onInlineCompareProducts: (String, List<Int>) -> Unit,
+    onCompareProducts: (List<Int>, List<String>?) -> Unit,
+    onInlineCompareProducts: (String, List<Int>, List<String>?) -> Unit,
     onCompareDetailOpen: (CompareCardPayload) -> Unit,
     onConvergeRecommendation: (String) -> Unit,
     onWelcomePromptClick: (String) -> Unit,
@@ -2025,6 +2025,10 @@ internal fun ProductRecommendationStrip(
     deckConverged: Boolean,
     deckStillStreaming: Boolean,
     comparePayload: CompareCardPayload?,
+    compareNarrationContent: String = "",
+    compareNarrationDone: Boolean = false,
+    compareConclusionContent: String = "",
+    compareConclusionDone: Boolean = false,
     convergeActionReady: Boolean,
     compactHistory: Boolean,
     motionEnabled: Boolean,
@@ -2290,6 +2294,26 @@ internal fun ProductRecommendationStrip(
                     payload = payload,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (compareNarrationContent.isNotBlank()) {
+                    StreamingAssistantText(
+                        nodeKey = "inline_compare_narration_${payload.compareId}",
+                        content = compareNarrationContent,
+                        done = compareNarrationDone,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                if (compareConclusionContent.isNotBlank()) {
+                    StreamingAssistantText(
+                        nodeKey = "inline_compare_conclusion_${payload.compareId}",
+                        content = compareConclusionContent,
+                        done = compareConclusionDone,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
             }
         }
     }
@@ -3380,7 +3404,7 @@ internal fun DecisionSummaryCard(
     onEvidence: () -> Unit,
     onProductDetailOpen: (String, String, String?) -> Unit,
     compareProducts: List<ProductCardPayload>,
-    onCompareProducts: (List<Int>) -> Unit,
+    onCompareProducts: (List<Int>, List<String>?) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val winnerProductId = payload.winnerProductId?.takeIf { it.isNotBlank() }
@@ -7695,7 +7719,7 @@ private fun ScrollableQuickActionRow(
     actions: List<QuickActionPayload>,
     compareProducts: List<ProductCardPayload> = emptyList(),
     modifier: Modifier = Modifier,
-    onCompareProducts: (List<Int>) -> Unit = {},
+    onCompareProducts: (List<Int>, List<String>?) -> Unit = {},
     onQuickAction: (QuickActionPayload) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -7766,8 +7790,11 @@ private fun ScrollableQuickActionRow(
             onConfirm = {
                 if (selectedCompareRanks.size >= 2) {
                     val ranks = selectedCompareRanks.sorted()
+                    val productIds = ranks.mapNotNull { rank ->
+                        compareProductsForPicker.getOrNull(rank - 1)?.product?.productId
+                    }.takeIf { it.size >= 2 }
                     expandedCompareActionId = null
-                    onCompareProducts(ranks)
+                    onCompareProducts(ranks, productIds)
                 }
             },
         )

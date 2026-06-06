@@ -659,7 +659,7 @@ T3s:     thinking → "正在检索匹配商品..."
 
 P0 客户端接收 8 种业务事件（去掉 retrieval，trace 写后台），但所有事件必须使用统一 SSEEvent envelope。后端不能只返回业务 JSON 让前端猜渲染方式；必须提供排序、幂等、稳定 key、分组和展示语义。
 
-**所有 Pydantic 模型定义在 `src/types/sse_events.py`，以 `SSEEventBase` 为 envelope 基类，9 种业务事件继承自 `SSEEventBase` 并通过 `SSEEvent = Union[...]` 联合类型聚合。`EventSeq(turn_id)` 辅助类负责同一 turn 内 seq 递增和 event_id 生成。**
+**所有 Pydantic 模型定义在 `src/types/sse_events.py`，以 `SSEEventBase` 为 envelope 基类，10 种业务事件继承自 `SSEEventBase` 并通过 `SSEEvent = Union[...]` 联合类型聚合。`EventSeq(turn_id)` 辅助类负责同一 turn 内 seq 递增和 event_id 生成。**
 
 **统一 envelope（SSEEventBase）：**
 
