@@ -207,6 +207,16 @@ Runtime 只做编排；业务规则优先放 Service。
 | `backend/src/services/eval/` | 评测 runner、指标、LLM judge、admin helper。 | 评测域。 |
 | `backend/src/services/request_context.py`、`audit.py`、`observability.py` | 请求上下文、审计、调试观测。 | 横切能力。 |
 | `backend/src/services/image_upload.py`、`startup.py`、`http_client.py` | 图片落盘/URL、启动 seed、共享 HTTP client。 | 基础设施型 service。 |
+| `backend/src/services/catalog.py` | 商品目录读服务边界；product detail 组合。 | |
+| `backend/src/services/compare.py` | 多商品对比轴构建、narration、conclusion。 | |
+| `backend/src/services/criteria_sanitizer.py` | product_type 跨品类归一化与无效约束清理。 | |
+| `backend/src/services/decision_scoring.py` | 多候选确定性评分与决策置信度。 | |
+| `backend/src/services/intent_resolution.py` | 意图后处理：约束提取、品牌/品类解析。 | 从 pipeline 中抽离，降低耦合。 |
+| `backend/src/services/message_rules.py` | 用户消息确定性规则：品牌识别、slot 提取、替换检测。 | 从 runtime 迁移至 service。 |
+| `backend/src/services/observability_llm.py` | LLM 调用可观测性：异步调度记录。 | |
+| `backend/src/services/recommendation_reasons.py` | 推荐理由原子构建与风险提示。 | |
+| `backend/src/services/retrieval_cache.py` | 检索结果 TTL 缓存。 | |
+| `backend/src/services/shopping_strategy.py` | 场景化选购策略：场景分类、障碍检测、方向推荐。 | |
 
 ### 后端仓储层
 
@@ -228,7 +238,7 @@ Repo 不能 import service。
 | --- | --- | --- |
 | `backend/src/types/sse_events.py` | Python SSE event model、`CriteriaPayload`、`ProductPayload`、`Constraints`、`format_sse`、`parse_sse_event`。 | 必须对齐 `contracts/sse-events.schema.json`。 |
 | `backend/src/types/schemas.py` | HTTP 与 service DTO。 | API/service 数据边界。 |
-| `backend/src/types/slot_defs.py`、`pipeline_state.py` | 槽位定义与 pipeline 状态类型。 | Runtime 类型支撑。 |
+| `backend/src/types/slot_defs.py` | 槽位定义。 | Runtime 类型支撑。 |
 | `backend/src/config/settings.py` | 环境变量集中入口。 | 不要在业务代码散落 `os.getenv()`。 |
 | `backend/src/config/tuning.py`、`domain_terms.py`、`llm_profiles.yaml` | 调参、领域词、LLM profile。 | 规则/参数优先配置化。 |
 
@@ -359,7 +369,7 @@ Android Compose + LazyColumn 卡片渲染
 
 ### 铁律 1：SSE 事件协议封闭性
 
-- SSE event type 禁止新增。现有的 8+1 个 type（thinking / clarification / criteria_card / text_delta / product_card / cart_action / final_decision / done + error）是全集。新功能无法映射到现有 type 时，先改业务设计，不是加新 type。
+- SSE event type 的 10 种（thinking / clarification / criteria_card / text_delta / product_card / cart_action / final_decision / done / error / compare_card）是全集。新增 type 必须走完整流程：先更新 `contracts/` JSON Schema → Python 端 `sse_events.py` → Android 端 `AgentPayload.kt` + `SseEventParser.kt` + `ChatUiNode.kt` → golden trace → 更新本文档的铁律 1 列表。未经三端对齐的 type 禁止合并。
 - 每个 event 的 field 变更必须同步更新 `contracts/` 目录的 JSON Schema 和 Android ChatUiNode。单边修改即架构错误。
 
 **SSE 变更流程**（改 event 字段时必走）：

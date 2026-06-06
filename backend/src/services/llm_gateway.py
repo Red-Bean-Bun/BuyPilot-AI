@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
+
+import httpx
 
 from src.config.settings import get_settings
 from src.config.tuning import DEFAULT_SERVICE_TIMEOUT_SECONDS, LLM_TEMPERATURE
@@ -17,6 +20,21 @@ from src.services.llm_profiles import task_profile_names as _task_profile_names
 from src.services.observability_llm import schedule_llm_call_recording
 
 logger = logging.getLogger(__name__)
+
+# ── Retry: transient network errors only (not timeouts, not HTTP semantics) ──
+_RETRYABLE_EXCEPTIONS = (
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+)
+_MAX_ATTEMPTS = 3  # 1 initial + 2 retries per profile
+_RETRY_DELAYS = (0.2, 0.4, 0.8)  # 200ms → 400ms → 800ms (1.4 s total)
+
+if len(_RETRY_DELAYS) < _MAX_ATTEMPTS - 1:
+    raise RuntimeError(
+        f"_RETRY_DELAYS has {len(_RETRY_DELAYS)} entries, "
+        f"need at least {_MAX_ATTEMPTS - 1}"
+    )
 
 
 def _provider_from_profile_name(profile_name: str) -> str:
@@ -46,7 +64,7 @@ async def _call_chat_task(task: str, messages: list[dict[str, Any]], json_object
         try:
             profile = _resolve_chat_profile(profile_name)
             started_at = time.perf_counter()
-            response = await _chat_completion(profile, messages, json_object=json_object)
+            response = await _retry_chat_completion(profile, messages, json_object=json_object)
             duration_ms = (time.perf_counter() - started_at) * 1000
 
             # Record successful LLM call
@@ -257,6 +275,25 @@ def _resolve_chat_profile(profile_name: str) -> ChatProfile:
         api_key=api_key,
         timeout_seconds=float(raw.get("timeout_seconds", DEFAULT_SERVICE_TIMEOUT_SECONDS)),
     )
+
+
+async def _retry_chat_completion(
+    profile: ChatProfile, messages: list[dict[str, Any]], json_object: bool = False
+) -> str:
+    """Profile 内快速重试，仅针对网络瞬态错误。
+
+    ConnectError / RemoteProtocolError / ReadError 是毫秒级失败，
+    快速重试有概率在服务重启窗口内恢复。
+    TimeoutException 不重试——每次重试要等完整 timeout_seconds，
+    对用户体验影响太大。直接让外层 fallback 到下一个 profile。
+    """
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return await _chat_completion(profile, messages, json_object=json_object)
+        except _RETRYABLE_EXCEPTIONS:
+            if attempt == _MAX_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(_RETRY_DELAYS[attempt])
 
 
 async def _chat_completion(profile: ChatProfile, messages: list[dict[str, Any]], json_object: bool = False) -> str:

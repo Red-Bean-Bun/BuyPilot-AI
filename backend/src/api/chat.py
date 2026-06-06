@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -13,7 +14,7 @@ from src.types.sse_events import SSEEventBase, format_sse
 chat_router = APIRouter(tags=["chat"])
 
 
-def _extract_sse_event_fields(event: SSEEventBase) -> dict:
+def _extract_sse_event_fields(event: SSEEventBase) -> dict[str, Any]:
     """Extract relevant fields from an SSE event for observability recording."""
     fields: dict = {
         "event_type": event.event,

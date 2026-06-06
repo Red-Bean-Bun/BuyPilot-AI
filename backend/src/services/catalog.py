@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from src.repos.products import get_product as repo_get_product
 from src.repos.products import get_product_detail_rows
 from src.types.schemas import FaqItem, ProductDetailResponse, ReviewItem
 from src.types.sse_events import ProductPayload
+
+logger = logging.getLogger(__name__)
 
 
 def get_product(product_id: str) -> ProductPayload | None:
@@ -38,6 +42,7 @@ def _safe_faq(d: dict) -> FaqItem | None:
     try:
         return FaqItem(**d)
     except Exception:
+        logger.warning("Malformed FAQ entry skipped", exc_info=True)
         return None
 
 
@@ -45,4 +50,5 @@ def _safe_review(d: dict) -> ReviewItem | None:
     try:
         return ReviewItem(**d)
     except Exception:
+        logger.warning("Malformed review entry skipped", exc_info=True)
         return None

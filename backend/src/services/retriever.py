@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
@@ -39,6 +40,8 @@ from src.services.retrieval_cache import get_retrieval_cache
 from src.services.retrieval_features import criteria_query_text, product_document_text, product_match_score
 from src.services.reranker import rerank_texts
 from src.types.sse_events import CriteriaPayload, EvidencePayload, ProductPayload
+
+logger = logging.getLogger(__name__)
 
 TRACE_VECTOR_TOP_K_LIMIT = 50
 
@@ -146,6 +149,7 @@ async def retrieve_with_evidence(
             visual_hits, visual_recall_stats = _build_visual_hits(image_hits, criteria, filters)
         except Exception:
             # Visual recall failure is non-fatal — degrade to text-only
+            logger.warning("Visual recall failed, degraded to text-only", exc_info=True)
             visual_recall_stats = {"error": "visual recall failed, degraded to text-only"}
 
     # Merge text and visual hits

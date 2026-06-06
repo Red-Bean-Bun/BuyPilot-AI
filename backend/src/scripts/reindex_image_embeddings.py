@@ -73,7 +73,7 @@ async def _load_existing_hashes() -> dict[str, str]:
     return {pid: h for pid, h in rows}
 
 
-async def reindex_image_embeddings() -> dict:
+async def reindex_image_embeddings() -> dict[str, Any]:
     _check_prerequisites()
     await create_db_and_tables()
 

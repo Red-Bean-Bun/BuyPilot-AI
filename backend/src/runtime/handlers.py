@@ -357,6 +357,7 @@ async def handle_recommendation(
     try:
         precomputed = await retrieval_task.task
     except Exception:
+        logger.warning("Speculative retrieval failed, falling back to serial retrieval", exc_info=True)
         precomputed = None
 
     # ── Try shopping strategy for scenario-based recommendations ──

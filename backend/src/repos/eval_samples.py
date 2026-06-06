@@ -64,7 +64,7 @@ async def get_by_id(sample_id: str) -> EvalSample | None:
         return await session.get(EvalSample, sample_id)
 
 
-def normalize_ground_truth(ground_truth: dict) -> dict:
+def normalize_ground_truth(ground_truth: dict) -> dict[str, Any]:
     """Migrate legacy eval constraint names into the current Constraints DSL."""
 
     if not isinstance(ground_truth, dict):
@@ -83,7 +83,7 @@ def normalize_ground_truth(ground_truth: dict) -> dict:
     }
 
 
-def _normalize_constraints(constraints: dict) -> dict:
+def _normalize_constraints(constraints: dict) -> dict[str, Any]:
     migrated: dict = {}
     for key, value in constraints.items():
         if key == "max_price":

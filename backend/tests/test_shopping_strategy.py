@@ -92,6 +92,12 @@ class TestScoring:
         # product_type(+3) + budget(+2) = 5
         assert score == 5
 
+    def test_negated_terms_not_counted(self):
+        text = "不要护肤品"
+        score = _compute_scene_score(text)
+        # "护肤" matched by _INTEREST_ALL but negated by "不要" → no score
+        assert score == 0
+
     def test_classify_gift(self):
         assert _classify_scene_type("男朋友生日，喜欢电子产品") == "gift"
 

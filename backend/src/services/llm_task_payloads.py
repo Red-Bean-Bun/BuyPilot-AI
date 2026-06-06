@@ -53,6 +53,18 @@ CONFIDENCE_LABELS = {
     "低": 0.5,
 }
 
+# ── Input sanitization ──────────────────────────────────────────────────────
+# Strips ASCII control characters (except \t \n \r) from user-facing input
+# before injection into LLM system prompts.  This is defense-in-depth layer-1;
+# layer-2 is the Pydantic output validation and layer-3 is deterministic
+# post-processing in intent_resolution.py.
+
+_SANITIZE_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _sanitize_user_message(message: str) -> str:
+    return _SANITIZE_RE.sub("", message)
+
 
 def intent_messages(
     message: str,
@@ -60,6 +72,7 @@ def intent_messages(
     image_url: str | None,
     conversation_context: str = "",
 ) -> list[dict[str, Any]]:
+    message = _sanitize_user_message(message)
     return [
         {
             "role": "system",
@@ -84,6 +97,7 @@ def criteria_messages(
     existing_dump: dict[str, Any] | None,
     conversation_context: str = "",
 ) -> list[dict[str, Any]]:
+    message = _sanitize_user_message(message)
     payload = {
         "message": message,
         "intent": intent_dump,

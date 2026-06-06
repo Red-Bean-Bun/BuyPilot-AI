@@ -24,7 +24,7 @@ async def list_eval_runs(limit: int = 20) -> list[dict]:
     ]
 
 
-async def get_eval_run(run_id: str) -> dict:
+async def get_eval_run(run_id: str) -> dict[str, Any]:
     run = await get_by_id(run_id)
     if not run:
         return {"error": "not_found", "run_id": run_id}
