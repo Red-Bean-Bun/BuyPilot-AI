@@ -102,6 +102,9 @@ class IntentResult(BaseModel):
         "remove_from_cart",
         "update_cart_quantity",
         "view_cart",
+        "checkout_preview",
+        "checkout_confirm",
+        "checkout_cancel",
         "chitchat",
     ]
     confidence: float = 1.0

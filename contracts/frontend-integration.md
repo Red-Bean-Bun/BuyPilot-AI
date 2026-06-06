@@ -126,6 +126,7 @@ cd backend && uv run uvicorn src.api.app:app --reload --port 8000
 | `skip_stages` | string[] | 否 | 跳过的 pipeline stage |
 | `client_turn_id` | string \| null | 否 | 客户端回合 ID |
 | `client_trace_id` | string \| null | 否 | 客户端追踪 ID |
+| `compare_product_ids` | string[] \| null | 否 | 客户端显式指定参与对比的商品 ID 列表（去重后至少 2 个，上限 4 个）。传入时跳过意图/序号解析，直接进入显式对比流 |
 
 **响应：** `Content-Type: text/event-stream`
 

@@ -1,8 +1,8 @@
 # BuyPilot-AI 后端完成状态
 
-> 最后核实：2026-06-02（图片 embedding 索引 + Makefile 运维 + bug 修复）
+> 最后核实：2026-06-06（PRD 08 P0：criteria history + 主动偏好反问 + 购买意向闭环）
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 本次改动摘要：**前后端收敛协议修复** — 新增 `converge: bool` 字段显式传递收敛信号，跳过 LLM 意图分类，强制 `continue` 路由
+> 本次改动摘要：**PRD 08 P0 后端补齐** — criteria LLM payload 注入完整 request history；slot_checker 增加手机/数码/护肤/运动偏好反问；购物车新增 checkout_preview/confirm/cancel 轻量购买意向闭环
 > 历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过
 
 ---
@@ -13,8 +13,8 @@
 |---|------|------|---------|---------|------|
 | 1 | SSE 流式对话端点 `/chat/stream` | ✅ 已完成 | 5.1, 5.2 | `api/chat.py` | StreamingResponse + format_sse，已验证可跑通；`ChatStreamRequest.message` 允许空串（拍照场景），`model_validator` 确保 message 和 image_url 至少有一个非空；超长 >2000 字符在请求层直接 422 |
 | 2 | SSE 事件协议（9 种事件类型） | ✅ 已完成 | 5.1 | `types/sse_events.py` | SSEEventBase + 9 个子类 + EventSeq + Constraints DSL，JSON Schema 已对齐；2026-05-28 增加 `DoneEvent.finish_reason` 与 `CriteriaPayload.field_sources`，支持分阶段导购契约 |
-| 3 | 意图识别（7 种意图） | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `services/llm_fallbacks.py` `stages/intent.py` | LLM primary + 关键词规则 fallback，含 `continue`/`view_cart`/`add_to_cart`/`feedback`；`continue` 用于识别标准确认和候选后收敛；`STRICT_RUNTIME=1` 下坏 JSON/无 provider 会显性失败 |
-| 4 | 购买标准生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `stages/criteria.py` | LLM + 规则 fallback，含 `criteria_patch` 合并（列表约束如 ingredient_avoid/brand_avoid 累积去重）+ feedback 注入；strict 下不再静默兜底 |
+| 3 | 意图识别（13 种意图） | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `services/llm_fallbacks.py` `stages/intent.py` | LLM primary + 关键词规则 fallback，含 `continue`/`view_cart`/`add_to_cart`/`feedback`/`checkout_preview`/`checkout_confirm`/`checkout_cancel`；`continue` 用于识别标准确认和候选后收敛，短句确认在无购物车时不劫持 checkout；`STRICT_RUNTIME=1` 下坏 JSON/无 provider 会显性失败 |
+| 4 | 购买标准生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `services/llm_gateway.py` `stages/criteria.py` | LLM + 规则 fallback，含完整 request `history` + conversation summary + `criteria_patch` 合并（列表约束如 ingredient_avoid/brand_avoid 累积去重）+ feedback 注入；strict 下不再静默兜底 |
 | 5 | 推荐解释生成 | ✅ 已完成 | 4.1 | `services/llm_client.py` `stages/recommendation.py` | LLM + 规则 fallback，流式 text_delta；strict 下要求有效 live 响应 |
 | 6 | 最终决策生成 | ✅ 已完成 | 4.1, PRD 06 | `services/llm_client.py` `stages/decision.py` `services/decision_scoring.py` | **2026-05-28：接入决策评分算法**（retrieval×0.35 + criteria_match×0.25 + user_signal×0.25 + evidence×0.10 - risk×0.05）。LLM 只解释不挑选。三种决策不足态。FinalDecisionEvent 新增 decision_status/confidence/next_step。商业 claims 校验。 |
 | 7 | 数据入库（100 商品 × 1292 semantic chunk） | ✅ 已完成 | 3.5 | `services/product_ingest.py` `services/chunking.py` `scripts/reindex_embeddings.py` | seed 已按 profile/marketing/faq/review/warning/compare 语义 chunk 入库，并在 product_metadata 写入 `knowledge_package`；Postgres reindex 已通过；旧派生表清理必须显式传 `--drop-derived-tables` |
@@ -31,11 +31,11 @@
 | 13 | Rerank 服务 | ✅ 已完成 | 2 | `services/reranker.py` | qwen3-rerank 接入，API 失败时 deterministic rerank；strict 下禁用 deterministic rerank |
 | 14 | 证据绑定 | ⚠️ 部分完成 | 4.2 | `services/evidence.py` `repos/documents.py` `services/llm_task_payloads.py` | product_card 带 evidence；DB/pgvector chunk 命中时 source_id 可关联真实 chunk；recommendation/decision LLM prompt 已注入 evidence snippets（`_format_evidence_context`）；fallback source_id 不可关联 `product_chunks` |
 | 15 | 检索追踪 + 证据链接 | ✅ 已完成 | 6.1 | `repos/traces.py` `services/fallbacks.py` | retrieval_traces + evidence_links 写入 SQLite，filters_applied 内记录 intent/criteria/retrieve/recommendation/decision 阶段耗时和 `_fallbacks` 降级事件 |
-| 16 | 多轮上下文 | ⚠️ 部分完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids/deck_id 已持久化到 Conversations 表；澄清/继续轮会合并上一轮 criteria，避免短回答或“继续”丢槽位；完整消息历史尚未用于 LLM |
+| 16 | 多轮上下文 | ✅ 已完成 | 4.3 | `services/conversation_state.py` `repos/conversations.py` `runtime/pipeline.py` | 最新 criteria/product_ids/deck_id 已持久化到 Conversations 表；澄清/继续轮会合并上一轮 criteria，避免短回答或“继续”丢槽位；intent 与 criteria 阶段均接收完整 request history，同时保留压缩 conversation summary |
 | 17 | 反馈闭环 | ✅ 已完成 | 7 | `services/feedback.py` `repos/feedbacks.py` `services/retriever.py` | Feedbacks 表已持久化，avoid_products/avoid_traits 已进入 retrieval 硬过滤；2026-05-28 增加 `deck_id` 绑定，候选后最终决策会读取当前 deck 反馈并排除不喜欢商品 |
 | 18 | 反选排除（⭐⭐） | ✅ 已完成 | — | `stages/criteria.py` | criteria_patch + ingredient_avoid + DB 会话恢复已覆盖 Demo 3 |
 | 19 | 图片上传 + Qwen-VL-Plus 理解 | ✅ 已完成 | 5.2 | `api/upload.py` `services/image_upload.py` `runtime/pipeline.py` | multipart 上传、静态 `/uploads`（bind mount 到宿主机 `backend/uploads/`）、本地图片 data URL 转 VL、multimodal analysis 注入 criteria；JSON legacy mock 已移除，非 multipart 请求返回 415 |
-| 20 | 对话式加购（⭐入门） | ✅ 已完成 | — | `services/cart.py` `repos/cart_items.py` `api/cart.py` `runtime/handlers.py` | add/view/remove/update 已持久化到 cart_items 表并覆盖 Demo 4；内存兜底为显式 dev adapter（默认关闭）；无可指代商品时发 ClarificationEvent 而非静默兜底；quantity=0 在 intent 解析层视为无效输入（返回 default），不走 repo 层隐式删除；product_id 不存在时返回 status=failed |
+| 20 | 对话式加购 + 购买意向闭环（⭐入门） | ✅ 已完成 | PRD 08 §3.3 | `services/cart.py` `repos/cart_items.py` `api/cart.py` `runtime/cart_handlers.py` `runtime/handlers.py` | add/view/remove/update 已持久化到 cart_items 表并覆盖 Demo 4；checkout_preview/checkout_confirm/checkout_cancel 复用 `cart_action`，不接真实支付、不生成订单、不清空购物车；空购物车 preview/confirm 返回 status=failed，cancel 始终 success；成功路径写 `cart.checkout_*` audit 且 metadata 含 source/total_items/total_price/product_ids/real_payment=false |
 | 20.1 | 图片 VL embedding 索引 | ✅ 已完成 | — | `scripts/reindex_image_embeddings.py` `services/embedding.py` `repos/models.py` | qwen3-vl-embedding 1024 维；`make seed-image` 手动触发（hash 幂等）；payload 格式 `input.contents[{image:...}]`；与 text seed 分离，不拖慢启动 |
 
 ## P2：打磨与稳定性

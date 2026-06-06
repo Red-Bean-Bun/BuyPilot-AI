@@ -35,7 +35,12 @@ async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentR
     feedback = await feedback_task
     ctx_summary = await summary_task
     criteria = await generate_criteria(
-        body.message, intent, feedback=feedback, existing=existing, conversation_context=ctx_summary
+        body.message,
+        intent,
+        feedback=feedback,
+        existing=existing,
+        conversation_context=ctx_summary,
+        history=[item.model_dump() for item in body.history],
     )
     final = annotate_criteria_sources(criteria, intent, existing)
     # When the user explicitly specifies a product_type (via lookup hints or

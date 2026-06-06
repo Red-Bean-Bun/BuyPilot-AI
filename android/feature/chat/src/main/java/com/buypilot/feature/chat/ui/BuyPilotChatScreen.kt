@@ -348,6 +348,8 @@ internal fun BuyPilotChatScreen(
     onEditLastMessage: (String) -> Unit,
     onClearConversation: () -> Unit,
     onConvergeProductDeck: (String) -> Unit,
+    ttsEnabled: Boolean = false,
+    onTtsToggle: () -> Unit = {},
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var showAttachmentMenu by rememberSaveable { mutableStateOf(false) }
@@ -890,6 +892,8 @@ internal fun BuyPilotChatScreen(
                             showAttachmentMenu = false
                             cameraLauncher.launch(null)
                         },
+                        ttsEnabled = ttsEnabled,
+                        onTtsToggle = onTtsToggle,
                     )
                 }
             }
@@ -5356,10 +5360,25 @@ internal fun CartActionCard(
     payload: CartActionPayload,
     productsById: Map<String, ProductCardPayload>,
     onRetryAddToCart: (String) -> Unit,
+    onCheckoutAction: (String) -> Unit = {},
 ) {
+    val isCheckoutPreview = payload.action == "checkout_preview"
+    val isCheckoutConfirm = payload.action == "checkout_confirm"
+    val isCheckoutCancel = payload.action == "checkout_cancel"
+    val isCheckoutAction = isCheckoutPreview || isCheckoutConfirm || isCheckoutCancel
+    val failed = payload.status == "failed"
+
+    if (isCheckoutPreview && !failed && payload.cart != null) {
+        CheckoutPreviewCard(
+            payload = payload,
+            productsById = productsById,
+            onCheckoutAction = onCheckoutAction,
+        )
+        return
+    }
+
     val cart = payload.cart
     val productId = payload.productId.takeIf { it.isNotBlank() }
-    val failed = payload.status == "failed"
     val cartItem = productId
         ?.let { id -> cart?.items?.firstOrNull { it.productId == id } }
         ?: if (failed) null else cart?.items?.firstOrNull()
@@ -5370,7 +5389,10 @@ internal fun CartActionCard(
         ?: product?.displayName("商品")
         ?: if (failed) "这件商品" else "商品"
     val title = when {
+        failed && isCheckoutAction -> "购物车为空，先把商品加入购物车"
         failed -> "没有加成功"
+        isCheckoutConfirm && !failed -> "购买意向已确认"
+        isCheckoutCancel && !failed -> "已取消购买意向"
         payload.action == "add" -> "已加入购物车"
         payload.action == "remove" -> "已移出购物车"
         payload.action == "update_quantity" -> "已更新数量"
@@ -5378,14 +5400,20 @@ internal fun CartActionCard(
         else -> "购物车已更新"
     }
     val itemLine = when {
+        failed && isCheckoutAction -> "还没有商品，先挑几件心仪的商品吧"
         failed -> "${productName}还没有加入购物车"
+        isCheckoutConfirm -> "不涉及真实支付、订单或物流"
+        isCheckoutCancel -> "购物车商品保留不变，可以继续挑选"
         cartItem != null -> "$productName x${cartItem.quantity}"
         cart?.items.isNullOrEmpty() -> "购物车为空"
         else -> productName
     }
-    val totalLine = cart
-        ?.takeIf { it.totalItems > 0 }
-        ?.let { "共${it.totalItems}件 · ¥${it.totalPrice.clean()}" }
+    val totalLine = when {
+        isCheckoutConfirm || isCheckoutCancel -> null
+        else -> cart
+            ?.takeIf { it.totalItems > 0 }
+            ?.let { "共${it.totalItems}件 · ¥${it.totalPrice.clean()}" }
+    }
     val retryableAdd = failed && payload.action == "add" && !productId.isNullOrBlank()
     val subtitle = listOfNotNull(itemLine, totalLine)
         .filter { it.isNotBlank() }
@@ -5399,8 +5427,16 @@ internal fun CartActionCard(
         durationMillis = 180,
         delayMillis = 70,
     )
-    val accent = if (failed) BuyPilotColors.Warning else BuyPilotColors.Success
-    val tintSurface = if (failed) BuyPilotColors.WarningSoft else BuyPilotColors.SuccessSoft
+    val accent = when {
+        failed -> BuyPilotColors.Warning
+        isCheckoutConfirm -> BuyPilotColors.PrimaryDark
+        else -> BuyPilotColors.Success
+    }
+    val tintSurface = when {
+        failed -> BuyPilotColors.WarningSoft
+        isCheckoutConfirm -> BuyPilotColors.PrimarySoft
+        else -> BuyPilotColors.SuccessSoft
+    }
 
     Surface(
         modifier = Modifier
@@ -5474,6 +5510,160 @@ internal fun CartActionCard(
                         color = BuyPilotColors.PrimaryDark,
                         fontSize = BuyPilotType.Label,
                         lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CheckoutPreviewCard(
+    payload: CartActionPayload,
+    productsById: Map<String, ProductCardPayload>,
+    onCheckoutAction: (String) -> Unit,
+) {
+    val cart = payload.cart ?: return
+    val progressState = rememberRouteEnterProgress(
+        key = "checkout_preview_${payload.status}",
+        durationMillis = 280,
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                val progress = progressState.value
+                alpha = progress
+                translationY = (1f - progress) * 8.dp.toPx()
+            },
+        color = BuyPilotColors.SurfaceCard,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BuyPilotColors.Border.copy(alpha = 0.68f)),
+        shadowElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(BuyPilotColors.PrimarySoft, CircleShape)
+                        .border(1.dp, BuyPilotColors.Primary.copy(alpha = 0.22f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_payments_24),
+                        contentDescription = null,
+                        tint = BuyPilotColors.PrimaryDark,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "确认购买意向",
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "不涉及真实支付、订单或物流",
+                        color = BuyPilotColors.TextSecondary,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 17.sp,
+                    )
+                }
+            }
+
+            if (cart.items.isNotEmpty()) {
+                HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.5f))
+                cart.items.forEach { item ->
+                    val name = item.name
+                        ?.withoutInternalDebugTokens()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: item.productId
+                            .takeIf { productsById.containsKey(it) }
+                            ?.let { productsById[it]?.product?.displayName("商品") }
+                        ?: "商品"
+                    val price = item.price?.let { "¥${it.clean()}" } ?: ""
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "$name × ${item.quantity}",
+                            color = BuyPilotColors.TextPrimary,
+                            fontSize = BuyPilotType.Label,
+                            lineHeight = 17.sp,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (price.isNotBlank()) {
+                            Text(
+                                text = price,
+                                color = BuyPilotColors.TextSecondary,
+                                fontSize = BuyPilotType.Label,
+                                lineHeight = 17.sp,
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.5f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "共${cart.totalItems}件",
+                        color = BuyPilotColors.TextSecondary,
+                        fontSize = BuyPilotType.Label,
+                        lineHeight = 17.sp,
+                    )
+                    Text(
+                        text = "¥${cart.totalPrice.clean()}",
+                        color = BuyPilotColors.TextPrimary,
+                        fontSize = BuyPilotType.Body,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(
+                    onClick = { onCheckoutAction("checkout_cancel") },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "取消",
+                        color = BuyPilotColors.TextSecondary,
+                        fontSize = BuyPilotType.Label,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                FilledTonalButton(
+                    onClick = { onCheckoutAction("checkout_confirm") },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = BuyPilotColors.PrimarySoft,
+                    ),
+                ) {
+                    Text(
+                        text = "确认购买",
+                        color = BuyPilotColors.PrimaryDark,
+                        fontSize = BuyPilotType.Label,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -6070,6 +6260,8 @@ private fun AttachmentMenu(
     modifier: Modifier = Modifier,
     onImageInput: () -> Unit,
     onCameraInput: () -> Unit,
+    ttsEnabled: Boolean = false,
+    onTtsToggle: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -6087,7 +6279,32 @@ private fun AttachmentMenu(
     ) {
         AttachmentAction(R.drawable.ic_image_24, "商品图识别", enabled = true, onClick = onImageInput)
         AttachmentAction(R.drawable.ic_add_photo_24, "拍照/截图识别", enabled = true, onClick = onCameraInput)
-        AttachmentAction(R.drawable.ic_mic_24, "语音输入", enabled = false, onClick = {})
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button, onClick = onTtsToggle)
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(
+                    if (ttsEnabled) R.drawable.ic_volume_up_24
+                    else R.drawable.ic_volume_off_24
+                ),
+                contentDescription = null,
+                tint = if (ttsEnabled) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (ttsEnabled) "语音播报：开" else "语音播报：关",
+                color = if (ttsEnabled) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
+                fontSize = BuyPilotType.Body,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 20.sp,
+            )
+        }
     }
 }
 

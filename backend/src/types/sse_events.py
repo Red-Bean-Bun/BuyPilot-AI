@@ -189,7 +189,7 @@ class PrimaryDirectionPayload(BaseModel):
 
 class ShoppingStrategyPayload(BaseModel):
     strategy_id: str
-    scene_type: Literal["gift", "interest", "usage", "risk_sensitive", "goal_oriented"]
+    scene_type: Literal["gift", "interest", "travel", "usage", "risk_sensitive", "goal_oriented"]
     scene_summary: str = ""
     user_problem: str = ""
     decision_barrier: DecisionBarrierPayload | None = None

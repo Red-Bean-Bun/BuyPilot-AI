@@ -17,11 +17,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.config.domain_terms import contains_any, has_negation_prefix
 from src.types.schemas import ChatStreamRequest, IntentResult
 from src.types.sse_events import (
+    Constraints,
     CriteriaPayload,
     DecisionBarrierPayload,
     PrimaryDirectionPayload,
@@ -53,6 +54,7 @@ class ShoppingStrategyPlan(BaseModel):
     - `criteria`: input criteria + strategy-filled unspecified fields
     - `shopping_strategy`: structured payload for criteria_card.shopping_strategy
     - `reason_hint`: optional hint for downstream recommendation text
+    - `combo_criteria`: cross-category criteria for combo retrieval (e.g. travel)
     """
 
     route: Literal["scenario_strategy", "scenario_filter"]
@@ -60,6 +62,7 @@ class ShoppingStrategyPlan(BaseModel):
     criteria: CriteriaPayload
     shopping_strategy: ShoppingStrategyPayload
     reason_hint: str | None = None
+    combo_criteria: list[CriteriaPayload] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +70,36 @@ class ShoppingStrategyPlan(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-_GIFT_RECIPIENTS = ("男朋友", "女朋友", "老公", "老婆", "妈妈", "爸爸", "父亲", "母亲", "儿子", "女儿", "朋友", "同事", "长辈", "孩子")
-_GIFT_OCCASIONS = ("生日", "礼物", "送礼", "送礼物", "纪念日", "情人节", "母亲节", "父亲节", "圣诞节", "新年", "春节", "七夕")
+_GIFT_RECIPIENTS = (
+    "男朋友",
+    "女朋友",
+    "老公",
+    "老婆",
+    "妈妈",
+    "爸爸",
+    "父亲",
+    "母亲",
+    "儿子",
+    "女儿",
+    "朋友",
+    "同事",
+    "长辈",
+    "孩子",
+)
+_GIFT_OCCASIONS = (
+    "生日",
+    "礼物",
+    "送礼",
+    "送礼物",
+    "纪念日",
+    "情人节",
+    "母亲节",
+    "父亲节",
+    "圣诞节",
+    "新年",
+    "春节",
+    "七夕",
+)
 _GIFT_VERBS = ("送给", "送个", "送一款", "送一件", "送一份")
 
 _INTEREST_GENERIC = ("电子产品", "数码", "美妆", "护肤", "运动", "健身", "跑步", "拍照", "摄影", "游戏", "穿搭")
@@ -103,9 +134,52 @@ _UNCERTAINTY = (
     "不知道买",
 )
 
-_FILTER_PRODUCT_TYPES = ("耳机", "蓝牙耳机", "手机", "平板", "电脑", "相机", "手表", "音箱", "音响", "防晒霜", "洗面奶", "面膜", "口红", "精华", "跑鞋", "运动鞋", "T恤")
+_FILTER_PRODUCT_TYPES = (
+    "耳机",
+    "蓝牙耳机",
+    "手机",
+    "平板",
+    "电脑",
+    "相机",
+    "手表",
+    "音箱",
+    "音响",
+    "防晒霜",
+    "洗面奶",
+    "面膜",
+    "口红",
+    "精华",
+    "跑鞋",
+    "运动鞋",
+    "T恤",
+)
 _BUDGET_TERMS = ("元内", "以内", "预算", "块以内", "块钱", "元左右")
-_BRAND_TERMS = ("小米", "华为", "OPPO", "vivo", "三星", "苹果", "iPhone", "索尼", "尼康", "佳能", "兰蔻", "雅诗兰黛", "SK-II", "资生堂", "Nike", "Adidas", "耐克", "阿迪达斯")
+_BRAND_TERMS = (
+    "小米",
+    "华为",
+    "OPPO",
+    "vivo",
+    "三星",
+    "苹果",
+    "iPhone",
+    "索尼",
+    "尼康",
+    "佳能",
+    "兰蔻",
+    "雅诗兰黛",
+    "SK-II",
+    "资生堂",
+    "Nike",
+    "Adidas",
+    "耐克",
+    "阿迪达斯",
+)
+
+# Travel scene keywords
+_TRAVEL_DESTINATIONS = ("三亚", "海边", "沙滩", "雪山", "雪山滑雪", "海岛", "东南亚", "日本", "泰国", "云南", "西藏")
+_TRAVEL_ACTIONS = ("度假", "旅行", "出差", "出游", "出去玩", "旅游", "自由行", "跟团")
+_TRAVEL_ITEMS = ("防晒", "泳衣", "泳裤", "墨镜", "行李箱", "旅行箱", "穿搭", "户外", "露营")
+_TRAVEL_ALL = _TRAVEL_DESTINATIONS + _TRAVEL_ACTIONS + _TRAVEL_ITEMS
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +202,10 @@ def _compute_scene_score(text: str) -> int:
         score += 2
     if _count_hits(text, _INTEREST_ALL) >= 1:
         score += 1
-    return min(score, 8)
+    if _is_travel_scene(text):
+        travel_hits = _count_hits(text, _TRAVEL_ALL)
+        score += 4 if travel_hits >= 2 else 2
+    return min(score, 10)
 
 
 def _compute_filter_score(text: str, extracted: dict) -> int:
@@ -145,7 +222,16 @@ def _compute_filter_score(text: str, extracted: dict) -> int:
         score += 2
     elif _count_hits(text, _BRAND_TERMS) >= 1:
         score += 2
-    hard_fields = {"storage", "screen_size", "skin_type", "sport_type", "season", "dietary", "ingredient_avoid", "origin_avoid"}
+    hard_fields = {
+        "storage",
+        "screen_size",
+        "skin_type",
+        "sport_type",
+        "season",
+        "dietary",
+        "ingredient_avoid",
+        "origin_avoid",
+    }
     if any(extracted.get(f) for f in hard_fields):
         score += 2
     return score
@@ -159,9 +245,25 @@ def _compute_filter_score(text: str, extracted: dict) -> int:
 def _classify_scene_type(text: str) -> str | None:
     if _count_hits(text, _GIFT_RECIPIENTS + _GIFT_OCCASIONS + _GIFT_VERBS) >= 1:
         return "gift"
+    if _is_travel_scene(text):
+        return "travel"
     if _count_hits(text, _INTEREST_ALL) >= 1:
         return "interest"
     return None
+
+
+def _is_travel_scene(text: str) -> bool:
+    """Return true for explicit travel/combo scenes.
+
+    Standalone travel items such as "防晒" are normal product filters, not
+    travel scenes. Requiring destination/action markers prevents sunscreen
+    judge queries from being routed into cross-category combo decks.
+    """
+    if _count_hits(text, _TRAVEL_DESTINATIONS + _TRAVEL_ACTIONS) >= 1:
+        return True
+    item_hits = _count_hits(text, _TRAVEL_ITEMS)
+    combo_markers = ("搭配", "方案", "一套", "从", "到")
+    return item_hits >= 2 and any(marker in text for marker in combo_markers)
 
 
 # ---------------------------------------------------------------------------
@@ -242,12 +344,41 @@ def _pick_interest_direction(text: str) -> tuple[str, str | None, str | None]:
     return "场景相关单品", None, None
 
 
+def _build_travel_direction(text: str, category: str | None) -> PrimaryDirectionPayload:
+    """Build direction payload for travel scene with destination-aware copy."""
+    destination = ""
+    for dest in _TRAVEL_DESTINATIONS:
+        if dest in text:
+            destination = dest
+            break
+
+    if destination:
+        title = f"{destination}度假搭配方案"
+        summary = f"围绕{destination}度假场景，从防晒到穿搭的组合推荐"
+    else:
+        title = "出行搭配方案"
+        summary = "围绕出行场景，从防晒到穿搭的组合推荐"
+
+    return PrimaryDirectionPayload(
+        title=title,
+        summary=summary,
+        why="出行场景涉及多个品类协同，单一品类无法满足全部需求，组合方案更实用",
+        search_strategy=SearchStrategyPayload(
+            category=category or "美妆护肤",
+            use_scenario="出行搭配",
+        ),
+    )
+
+
 def _build_direction(
     scene_type: str,
     text: str,
     category: str | None,
     criteria: CriteriaPayload,
 ) -> PrimaryDirectionPayload:
+    if scene_type == "travel":
+        return _build_travel_direction(text, category)
+
     if scene_type == "gift":
         if _has_interest(text, ("电子产品", "数码", "耳机", "手机", "平板", "电脑", "相机", "手表")):
             return PrimaryDirectionPayload(
@@ -316,11 +447,7 @@ def _strategy_narration_text(strategy: ShoppingStrategyPayload, route: str) -> s
     risk_items = [item.strip(" 。") for item in strategy.avoid_risks if item.strip()]
     risk = _risk_as_object_text(risk_items[0]) if risk_items else ""
     search = direction.search_strategy
-    search_parts = [
-        value
-        for value in (search.product_type, search.use_scenario)
-        if value
-    ]
+    search_parts = [value for value in (search.product_type, search.use_scenario) if value]
     search_text = " / ".join(search_parts)
 
     if barrier and barrier.reason:
@@ -358,9 +485,32 @@ def _strategy_narration_text(strategy: ShoppingStrategyPayload, route: str) -> s
         paragraphs.extend(
             [
                 f"我会先看「{direction.title}」。",
-                f"原因是：{direction_reason}。" if direction_reason else "这个方向能减少选择成本，也更容易判断买得是否合适。",
+                f"原因是：{direction_reason}。"
+                if direction_reason
+                else "这个方向能减少选择成本，也更容易判断买得是否合适。",
             ],
         )
+    elif strategy.scene_type == "travel":
+        destination = ""
+        for dest in _TRAVEL_DESTINATIONS:
+            if dest in (strategy.scene_summary or ""):
+                destination = dest
+                break
+        opening = (
+            f"出行不是只带一件东西。{destination}的场景涉及防晒、穿搭、配件多个维度，"
+            f"我会按搭配方案帮你找候选，而不是只搜单品类。"
+            if destination
+            else "出行涉及多个品类协同，我会按搭配方案帮你找候选，而不是只搜单品类。"
+        )
+        paragraphs = [opening]
+        if barrier_text:
+            paragraphs.append(barrier_text + "。")
+        paragraphs.append(f"主方向：「{direction.title}」。")
+        if direction_reason:
+            paragraphs.append(f"原因是：{direction_reason}。")
+        if risk_items:
+            risk_text = "、".join(risk_items[:2])
+            paragraphs.append(f"需要注意：{risk_text}。")
     else:
         paragraphs = [
             "我会先把这个场景里的取舍说清楚，再看具体商品。",
@@ -439,7 +589,7 @@ def _risk_as_object_text(risk: str) -> str:
     cleaned = risk.strip(" 。")
     for prefix in ("不要盲买", "不要优先买", "不要在", "不要"):
         if cleaned.startswith(prefix):
-            cleaned = cleaned[len(prefix):].strip(" ，,、。")
+            cleaned = cleaned[len(prefix) :].strip(" ，,、。")
             break
     return cleaned
 
@@ -520,6 +670,20 @@ def _assumptions_for_scene(extracted: dict) -> list[str]:
     return assumptions
 
 
+def _travel_risks(text: str) -> list[str]:
+    """Generate travel-specific risk items."""
+    risks: list[str] = []
+    if any(kw in text for kw in ("三亚", "海边", "沙滩", "海岛", "东南亚", "泰国")):
+        risks.append("暴晒导致防晒不足")
+        risks.append("海边穿搭不适配场景")
+    if any(kw in text for kw in ("滑雪", "雪山")):
+        risks.append("低温保暖不足")
+        risks.append("户外装备不适配")
+    if not risks:
+        risks.append("出行场景品类多，单品可能不适配具体目的地")
+    return risks
+
+
 def _scene_summary(scene_type: str, text: str) -> str:
     if scene_type == "gift":
         if "男朋友" in text:
@@ -533,6 +697,11 @@ def _scene_summary(scene_type: str, text: str) -> str:
         if "朋友" in text:
             return "送朋友礼物"
         return "送礼物场景"
+    if scene_type == "travel":
+        for dest in _TRAVEL_DESTINATIONS:
+            if dest in text:
+                return f"{dest}出行搭配"
+        return "出行搭配场景"
     if scene_type == "interest":
         for term in _INTEREST_ALL:
             if term in text:
@@ -550,6 +719,8 @@ def _user_problem(scene_type: str, barrier: DecisionBarrierPayload | None) -> st
         return "用户希望在礼物场景下做出稳妥选择"
     if scene_type == "interest":
         return "用户希望在兴趣相关品类里找到更贴合偏好的选择"
+    if scene_type == "travel":
+        return "用户希望为出行场景搭配一套跨品类的实用方案"
     return "用户希望做出更稳妥的购买决策"
 
 
@@ -565,7 +736,7 @@ def is_likely_shopping_strategy_request(body: ChatStreamRequest, intent: IntentR
     text = body.message
     extracted = intent.extracted_constraints or {}
     scene_type = _classify_scene_type(text)
-    if scene_type not in {"gift", "interest"}:
+    if scene_type not in {"gift", "interest", "travel"}:
         return False
     scene_score = _compute_scene_score(text)
     filter_score = _compute_filter_score(text, extracted)
@@ -591,6 +762,86 @@ def build_scenario_reason_hint(strategy: ShoppingStrategyPayload) -> str:
         return "证据更清楚，决策更稳"
     title = strategy.primary_direction.title.strip()
     return title[:12] if title else "场景匹配更稳"
+
+
+# ---------------------------------------------------------------------------
+# Travel combo criteria generation
+# ---------------------------------------------------------------------------
+
+
+def _build_travel_combo_criteria(text: str, base_criteria: CriteriaPayload) -> list[CriteriaPayload]:
+    """Build cross-category criteria for travel scene combo retrieval.
+
+    Returns a list of CriteriaPayload for different product categories needed
+    for a travel scenario. The primary direction (sunscreen) always comes first.
+    Budget constraints from base_criteria are propagated to each sub-criteria
+    because combo retrieval bypasses post-filter re-screening.
+    """
+    combos: list[CriteriaPayload] = []
+    bc = base_criteria.constraints
+
+    # 1. Sunscreen / UV protection (美妆护肤)
+    combos.append(
+        CriteriaPayload(
+            criteria_id=f"travel_combo_{len(combos) + 1}",
+            category="美妆护肤",
+            summary="出行防晒",
+            chips=["防晒"],
+            constraints=Constraints(
+                product_type="防晒霜",
+                use_scenario="户外防晒",
+                budget_min=bc.budget_min,
+                budget_max=bc.budget_max,
+            ),
+        )
+    )
+
+    # 2. Clothing / outfit (服饰运动)
+    combos.append(
+        CriteriaPayload(
+            criteria_id=f"travel_combo_{len(combos) + 1}",
+            category="服饰运动",
+            summary="出行穿搭",
+            chips=["出行穿搭"],
+            constraints=Constraints(
+                product_type="短袖T恤",
+                use_scenario="出行搭配",
+                budget_min=bc.budget_min,
+                budget_max=bc.budget_max,
+            ),
+        )
+    )
+
+    # 3. Optional third category — only if the text hints at it
+    if any(kw in text for kw in ("数码", "相机", "耳机", "充电宝")):
+        combos.append(
+            CriteriaPayload(
+                criteria_id=f"travel_combo_{len(combos) + 1}",
+                category="数码电子",
+                summary="出行数码配件",
+                chips=["出行数码"],
+                constraints=Constraints(
+                    use_scenario="出行使用",
+                    budget_min=bc.budget_min,
+                    budget_max=bc.budget_max,
+                ),
+            )
+        )
+    elif any(kw in text for kw in ("零食", "吃的", "食品", "饮料")):
+        combos.append(
+            CriteriaPayload(
+                criteria_id=f"travel_combo_{len(combos) + 1}",
+                category="食品生活",
+                summary="出行零食饮料",
+                chips=["出行零食"],
+                constraints=Constraints(
+                    budget_min=bc.budget_min,
+                    budget_max=bc.budget_max,
+                ),
+            )
+        )
+
+    return combos
 
 
 # ---------------------------------------------------------------------------
@@ -624,8 +875,8 @@ async def build_shopping_strategy_plan(
     filter_score = _compute_filter_score(text, extracted)
     scene_type = _classify_scene_type(text)
 
-    # P0: only gift / interest enter scenario routing
-    if scene_type not in {"gift", "interest"}:
+    # P0: only gift / interest / travel enter scenario routing
+    if scene_type not in {"gift", "interest", "travel"}:
         return None
 
     # Route determination per PRD §4.2
@@ -648,6 +899,8 @@ async def build_shopping_strategy_plan(
             route = "scenario_strategy" if filter_score <= 3 else "scenario_filter"
         else:
             return None
+    elif scene_type == "travel":
+        route = "scenario_strategy" if filter_score <= 3 else "scenario_filter"
     else:
         return None
 
@@ -680,9 +933,7 @@ async def build_shopping_strategy_plan(
                 supporting_product_count=count,
             )
         else:
-            direction = direction.model_copy(
-                update={"available_in_catalog": True, "supporting_product_count": count}
-            )
+            direction = direction.model_copy(update={"available_in_catalog": True, "supporting_product_count": count})
     else:
         direction = direction.model_copy(update={"available_in_catalog": True, "supporting_product_count": 0})
 
@@ -698,11 +949,16 @@ async def build_shopping_strategy_plan(
         user_problem=_user_problem(scene_type, barrier),
         decision_barrier=barrier,
         primary_direction=direction,
-        avoid_risks=_avoid_risks_for_barrier(barrier, direction),
+        avoid_risks=_avoid_risks_for_barrier(barrier, direction) or _travel_risks(text),
         assumptions=_assumptions_for_scene(extracted),
         confidence=confidence,
     )
     judgement = _strategy_narration_text(strategy, route)
+
+    # Travel scene generates cross-category combo criteria
+    combo: list[CriteriaPayload] = []
+    if scene_type == "travel":
+        combo = _build_travel_combo_criteria(text, final_criteria)
 
     return ShoppingStrategyPlan(
         route=route,
@@ -710,4 +966,5 @@ async def build_shopping_strategy_plan(
         criteria=final_criteria,
         shopping_strategy=strategy,
         reason_hint=build_scenario_reason_hint(strategy),
+        combo_criteria=combo,
     )

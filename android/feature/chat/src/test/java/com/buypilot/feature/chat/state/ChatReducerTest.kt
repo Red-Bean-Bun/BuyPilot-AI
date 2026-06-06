@@ -38,6 +38,7 @@ import com.buypilot.feature.chat.presentation.containsNodeKey
 import com.buypilot.feature.chat.presentation.toTimelinePresentationState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -1067,8 +1068,8 @@ class ChatReducerTest {
         assertEquals("真无线耳机", node.payload.shoppingStrategy?.primaryDirection?.searchStrategy?.productType)
 
         val presentation = state.toTimelinePresentationState()
-        assertFalse(presentation.revealKeys.contains("criteria_scene"))
-        assertFalse(
+        assertTrue(presentation.revealKeys.contains("criteria_scene"))
+        assertTrue(
             presentation.items.any {
                 it.containsNodeKey("criteria_scene")
             },
@@ -2132,6 +2133,123 @@ class ChatReducerTest {
         assertEquals("没有加成功", next.cartState.error)
         assertEquals("failed", node.payload.status)
         assertEquals("p1", node.payload.productId)
+    }
+
+    @Test
+    fun checkoutPreviewCreatesCartActionNodeWithCartPreserved() {
+        val state = ChatUiState(
+            cartState = ChatCartUiState(
+                items = listOf(CartItemPayload(productId = "p1", name = "洁面A", price = 52.0, quantity = 1)),
+                totalItems = 1,
+                totalPrice = 52.0,
+            ),
+        )
+
+        val next = ChatReducer.reduce(
+            state,
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "checkout_preview_turn_1",
+                payload = CartActionPayload(
+                    action = "checkout_preview",
+                    status = "success",
+                    cart = CartSummaryPayload(
+                        items = listOf(CartItemPayload(productId = "p1", name = "洁面A", price = 52.0, quantity = 1)),
+                        totalItems = 1,
+                        totalPrice = 52.0,
+                    ),
+                ),
+            ),
+        )
+
+        val node = next.nodes.filterIsInstance<CartActionNode>().last()
+        assertEquals("checkout_preview", node.payload.action)
+        assertEquals(1, next.cartState.totalItems)
+        assertEquals(52.0, next.cartState.totalPrice, 0.01)
+    }
+
+    @Test
+    fun checkoutConfirmKeepsCartWhenBackendReturnsItems() {
+        val state = ChatUiState(
+            cartState = ChatCartUiState(
+                items = listOf(CartItemPayload(productId = "p1", name = "洁面A", quantity = 1)),
+                totalItems = 1,
+                totalPrice = 52.0,
+            ),
+        )
+
+        val next = ChatReducer.reduce(
+            state,
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "checkout_confirm_turn_1",
+                payload = CartActionPayload(
+                    action = "checkout_confirm",
+                    status = "success",
+                    cart = CartSummaryPayload(
+                        items = listOf(CartItemPayload(productId = "p1", name = "洁面A", quantity = 1)),
+                        totalItems = 1,
+                        totalPrice = 52.0,
+                    ),
+                ),
+            ),
+        )
+
+        val node = next.nodes.filterIsInstance<CartActionNode>().last()
+        assertEquals("checkout_confirm", node.payload.action)
+        assertEquals(1, next.cartState.totalItems)
+    }
+
+    @Test
+    fun checkoutCancelPreservesCart() {
+        val state = ChatUiState(
+            cartState = ChatCartUiState(
+                items = listOf(CartItemPayload(productId = "p1", name = "洁面A", quantity = 2)),
+                totalItems = 2,
+                totalPrice = 104.0,
+            ),
+        )
+
+        val next = ChatReducer.reduce(
+            state,
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "checkout_cancel_turn_1",
+                payload = CartActionPayload(
+                    action = "checkout_cancel",
+                    status = "success",
+                    cart = CartSummaryPayload(
+                        items = listOf(CartItemPayload(productId = "p1", name = "洁面A", quantity = 2)),
+                        totalItems = 2,
+                        totalPrice = 104.0,
+                    ),
+                ),
+            ),
+        )
+
+        val node = next.nodes.filterIsInstance<CartActionNode>().last()
+        assertEquals("checkout_cancel", node.payload.action)
+        assertEquals(2, next.cartState.totalItems)
+        assertEquals(104.0, next.cartState.totalPrice, 0.01)
+    }
+
+    @Test
+    fun checkoutFailedSetsCartError() {
+        val next = ChatReducer.reduce(
+            ChatUiState(),
+            envelope(
+                event = AgentEventType.CartAction,
+                nodeId = "checkout_failed_turn_1",
+                payload = CartActionPayload(
+                    action = "checkout_preview",
+                    status = "failed",
+                ),
+            ),
+        )
+
+        val node = next.nodes.filterIsInstance<CartActionNode>().last()
+        assertEquals("failed", node.payload.status)
+        assertNotNull(next.cartState.error)
     }
 
     private fun product(

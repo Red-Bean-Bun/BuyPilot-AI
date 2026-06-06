@@ -155,6 +155,7 @@ async def generate_criteria(
     feedback: dict[str, list[str]] | None = None,
     existing: CriteriaPayload | None = None,
     conversation_context: str = "",
+    history: list[dict[str, Any]] | None = None,
 ) -> CriteriaPayload:
     live = await _call_chat_task(
         "generate_criteria",
@@ -164,6 +165,7 @@ async def generate_criteria(
             feedback,
             existing.model_dump() if existing else None,
             conversation_context,
+            history=history,
         ),
         json_object=True,
     )

@@ -24,7 +24,7 @@
 
 ```json
 {
-  "intent": "recommend | clarify | continue | feedback | compare | add_to_cart | remove_from_cart | update_cart_quantity | view_cart | chitchat",
+  "intent": "recommend | clarify | continue | feedback | compare | add_to_cart | remove_from_cart | update_cart_quantity | view_cart | checkout_preview | checkout_confirm | checkout_cancel | chitchat",
   "confidence": 0.9,
   "category": "美妆护肤 | 数码电子 | 服饰运动 | 食品生活 | null",
   "extracted_constraints": {
@@ -81,6 +81,9 @@
    - remove_from_cart: 用户要从购物车删除/移出商品
    - update_cart_quantity: 用户要修改购物车里商品数量
    - view_cart: 用户要查看购物车
+   - checkout_preview: 用户表达"就买这个/买它/下单/确认购买/确认下单"，需要预览轻量购买意向
+   - checkout_confirm: 用户在购买意向预览后用短句确认，如"确认/确认了/就这样"
+   - checkout_cancel: 用户取消购买意向，如"取消购买/算了不买/不买了"
    - chitchat: 非购物咨询
 4. 不要猜测用户没有明确表达的约束，未提及的字段保持 null 或空数组
 5. confidence 必须是 0-1 的数字，不要输出 "high"/"medium"/"low"

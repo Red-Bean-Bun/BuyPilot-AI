@@ -2293,6 +2293,20 @@ private fun TimelineNodeContent(
                     ),
                 )
             },
+            onCheckoutAction = { action ->
+                val message = when (action) {
+                    "checkout_confirm" -> "确认购买"
+                    "checkout_cancel" -> "取消购买"
+                    else -> return@CartActionCard
+                }
+                onQuickAction(
+                    QuickActionPayload(
+                        actionId = action,
+                        label = message,
+                        action = action,
+                    ),
+                )
+            },
         )
         is ErrorNode -> ErrorCard(
             node = node,

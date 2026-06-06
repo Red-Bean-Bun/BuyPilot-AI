@@ -8,6 +8,7 @@ from typing import Any
 from src.config import user_messages as msg
 from src.config.domain_terms import (
     BRAND_SYNONYMS,
+    INTENT_TERMS,
     PRODUCT_TYPE_ALIASES,
     PRODUCT_TYPE_HIERARCHY,
     category_from_text,
@@ -72,8 +73,17 @@ _BUDGET_REDUCTION_MARKERS = (
 )
 
 _CHEAPER_MARKERS = (
-    "便宜点", "便宜一点", "再便宜点", "再便宜一点", "便宜些", "降价",
-    "降低预算", "压低预算", "预算低一点", "预算降一点", "预算低一些",
+    "便宜点",
+    "便宜一点",
+    "再便宜点",
+    "再便宜一点",
+    "便宜些",
+    "降价",
+    "降低预算",
+    "压低预算",
+    "预算低一点",
+    "预算降一点",
+    "预算低一些",
 )
 
 _BUDGET_CAP_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -218,9 +228,34 @@ def _looks_like_brand(term: str) -> bool:
     # Heuristic fallback for brands not in current product data.
     # CJK terms that look like ingredient/feature words are excluded.
     _INGREDIENT_LIKE = {
-        "油", "糖", "精", "素", "醇", "酸", "碱", "粉", "剂", "胶",
-        "脂", "酶", "香", "钠", "钙", "铁", "锌", "维", "胺", "酚",
-        "醛", "乳", "蜜", "霜", "露", "液", "膏", "膜",
+        "油",
+        "糖",
+        "精",
+        "素",
+        "醇",
+        "酸",
+        "碱",
+        "粉",
+        "剂",
+        "胶",
+        "脂",
+        "酶",
+        "香",
+        "钠",
+        "钙",
+        "铁",
+        "锌",
+        "维",
+        "胺",
+        "酚",
+        "醛",
+        "乳",
+        "蜜",
+        "霜",
+        "露",
+        "液",
+        "膏",
+        "膜",
     }
     if re.match(r"^[A-Z][A-Za-z0-9\- ]{1,20}$", term):
         return True
@@ -365,18 +400,59 @@ def _parse_budget_min_from_message(message: str) -> float | None:
 # ── Shopping-intent deterministic pre-check ──────────────────────────
 
 _SHORT_GREETING_PATTERNS: tuple[str, ...] = (
-    "你好", "hi", "hello", "嗨", "在吗", "在不在",
+    "你好",
+    "hi",
+    "hello",
+    "嗨",
+    "在吗",
+    "在不在",
 )
 
 _CAPABILITY_QUESTION_MARKERS: tuple[str, ...] = (
-    "你能做什么", "有什么功能", "能帮我做什么", "会做什么",
-    "你是做什么的", "怎么用",
+    "你能做什么",
+    "有什么功能",
+    "能帮我做什么",
+    "会做什么",
+    "你是做什么的",
+    "怎么用",
 )
 
 _SHOPPING_SIGNAL_MARKERS: tuple[str, ...] = (
-    "想喝", "想吃", "想买", "想要", "想用", "推荐", "帮我选",
-    "找一下", "有没有", "买个", "求推荐",
+    "想喝",
+    "想吃",
+    "想买",
+    "想要",
+    "想用",
+    "推荐",
+    "帮我选",
+    "找一下",
+    "有没有",
+    "买个",
+    "求推荐",
 )
+
+
+_CHECKOUT_QUESTION_MARKERS = ("怎么", "如何", "哪里", "链接", "状态", "物流", "订单")
+_CONFIRM_TRAILING_PUNCT = "。！？!?,，~啊呢哦额嗯"
+
+
+def maybe_checkout_intent(message: str) -> IntentResult | None:
+    text = message.strip()
+    if not text:
+        return None
+    if any(term in text for term in INTENT_TERMS["checkout_cancel"]):
+        return IntentResult(intent="checkout_cancel", confidence=1.0)
+    # Exact match after stripping trailing punctuation — avoids hijacking
+    # "确认标准" while accepting "确认了。" or "就这样吧".
+    normalized = text.rstrip(_CONFIRM_TRAILING_PUNCT)
+    if normalized in INTENT_TERMS["checkout_confirm"] or text in INTENT_TERMS["checkout_confirm"]:
+        return IntentResult(intent="checkout_confirm", confidence=1.0)
+    if any(marker in text for marker in _CHECKOUT_QUESTION_MARKERS):
+        return None
+    if any(term in text for term in INTENT_TERMS["checkout_preview"]):
+        return IntentResult(intent="checkout_preview", confidence=1.0)
+    return None
+
 
 def maybe_shopping_intent(message: str) -> IntentResult | None:
     """Deterministic pre-check for clearly non-shopping inputs only.
@@ -489,8 +565,17 @@ def extract_product_lookup_hints(message: str) -> dict[str, Any] | None:
             if len(product) < 2:
                 return None
             if product in {
-                "什么", "哪些", "哪个", "那种", "好的", "便宜",
-                "贵的", "新的", "旧的", "大的", "小的",
+                "什么",
+                "哪些",
+                "哪个",
+                "那种",
+                "好的",
+                "便宜",
+                "贵的",
+                "新的",
+                "旧的",
+                "大的",
+                "小的",
             }:
                 return None
             # Pure brand query: "有阿迪达斯吗" → brand_prefer
@@ -530,13 +615,13 @@ def _try_split_compound_entity(entity: str) -> dict[str, Any] | None:
         if len(match_key) >= len(entity_lower):
             continue
         if entity_lower.startswith(match_key):
-            remainder = entity[len(match_key):].strip()
+            remainder = entity[len(match_key) :].strip()
             if len(remainder) >= 1:
                 normalized = normalize_product_type(remainder)
                 if normalized:
                     return {"brand_prefer": [catalog_brand], "product_type": normalized}
         if entity_lower.endswith(match_key):
-            remainder = entity[:len(entity) - len(match_key)].strip()
+            remainder = entity[: len(entity) - len(match_key)].strip()
             if len(remainder) >= 1:
                 normalized = normalize_product_type(remainder)
                 if normalized:
@@ -545,6 +630,7 @@ def _try_split_compound_entity(entity: str) -> dict[str, Any] | None:
 
 
 # ── Deterministic product_type extraction ────────────────────────────
+
 
 def extract_product_type_hint(message: str) -> str | None:
     """Deterministic product_type extraction from user message.
@@ -594,7 +680,11 @@ _COMPARE_MARKERS = (
 # Patterns for extracting multiple ordinal references: "第一个和第二个"
 _ORDINAL_PATTERN = re.compile(r"第\s*(\d+)\s*(?:个|款|件|项)")
 _CN_ORDINAL_MAP = {
-    "一": 0, "二": 1, "三": 2, "四": 3, "五": 4,
+    "一": 0,
+    "二": 1,
+    "三": 2,
+    "四": 3,
+    "五": 4,
     "两": 1,  # "前两个"
 }
 _CN_ORDINAL_PATTERN = re.compile(r"第([一二三四五])")

@@ -21,6 +21,9 @@ from src.config.tuning import (
 )
 from src.runtime.cart_handlers import (
     handle_add_to_cart,
+    handle_checkout_cancel,
+    handle_checkout_confirm,
+    handle_checkout_preview,
     handle_remove_from_cart,
     handle_update_cart_quantity,
     handle_view_cart,
@@ -236,6 +239,16 @@ def _ensure_brand_products(
     return inject_brand_preference_products(products, criteria, feedback)
 
 
+def _is_combo_retrieval(result: RetrievalResult) -> bool:
+    """True for multi-criteria combo retrieval results.
+
+    Combo retrieval already applies each sub-criteria before merging. Re-running
+    the merged list through one final criteria would collapse the intended
+    cross-category deck back to a single category.
+    """
+    return bool(result.trace_details.get("combo_retrieval"))
+
+
 async def _try_build_shopping_strategy_plan(
     ctx: StreamContext,
     body: ChatStreamRequest,
@@ -243,10 +256,10 @@ async def _try_build_shopping_strategy_plan(
     criteria: CriteriaPayload,
     feedback: dict,
     image_embedding: list[float] | None,
-) -> tuple[CriteriaPayload, ShoppingStrategyPayload | None, str | None, str | None] | None:
+) -> tuple[CriteriaPayload, ShoppingStrategyPayload | None, str | None, str | None, list[CriteriaPayload]] | None:
     """Try to build shopping strategy plan for scenario-based recommendations.
 
-    Returns (updated_criteria, shopping_strategy, scene_judgement_text, reason_hint) if successful.
+    Returns (updated_criteria, shopping_strategy, scene_judgement_text, reason_hint, combo_criteria) if successful.
     Returns None if normal filter_recommend flow should be used.
     """
     try:
@@ -278,7 +291,51 @@ async def _try_build_shopping_strategy_plan(
         return None
 
     reason_hint = build_scenario_reason_hint(plan.shopping_strategy)
-    return (plan.criteria, plan.shopping_strategy, plan.scene_judgement_text, reason_hint)
+    return (plan.criteria, plan.shopping_strategy, plan.scene_judgement_text, reason_hint, plan.combo_criteria)
+
+
+async def _run_combo_retrieval(
+    ctx: StreamContext,
+    combo_criteria: list[CriteriaPayload],
+    feedback: dict,
+    image_embedding: list[float] | None,
+) -> RetrievalResult:
+    """Run parallel retrieval for each combo criteria and merge results.
+
+    Used for travel scene to get cross-category products. Each sub-retrieval
+    is independent; failures don't block others.
+    """
+    if not combo_criteria:
+        return RetrievalResult(products=[], evidence_by_product={}, trace_details={})
+
+    async def _retrieve_one(crit: CriteriaPayload) -> RetrievalResult:
+        try:
+            return await ctx.stages.run_retrieval(
+                crit, top_n=3, feedback=feedback, image_embedding=image_embedding
+            )
+        except Exception:
+            logger.warning("Combo retrieval failed for category=%s", crit.category, exc_info=True)
+            return RetrievalResult(products=[], evidence_by_product={}, trace_details={})
+
+    results = await asyncio.gather(*[_retrieve_one(c) for c in combo_criteria])
+
+    # Merge products and evidence, dedup by product_id
+    merged_products: list[ProductPayload] = []
+    merged_evidence: dict[str, list] = {}
+    seen_ids: set[str] = set()
+    for result in results:
+        for product in result.products:
+            if product.product_id not in seen_ids:
+                seen_ids.add(product.product_id)
+                merged_products.append(product)
+                if product.product_id in result.evidence_by_product:
+                    merged_evidence[product.product_id] = result.evidence_by_product[product.product_id]
+
+    return RetrievalResult(
+        products=merged_products,
+        evidence_by_product=merged_evidence,
+        trace_details={"combo_retrieval": True, "combo_categories": [c.category for c in combo_criteria]},
+    )
 
 
 async def handle_recommendation(
@@ -367,12 +424,19 @@ async def handle_recommendation(
     shopping_strategy: ShoppingStrategyPayload | None = None
     scene_judgement_text: str | None = None
     reason_hint: str | None = None
+    combo_criteria: list[CriteriaPayload] = []
     if strategy_result is not None:
-        criteria, shopping_strategy, scene_judgement_text, reason_hint = strategy_result
+        criteria, shopping_strategy, scene_judgement_text, reason_hint, combo_criteria = strategy_result
         # Discard speculative retrieval — strategy may have changed criteria
         precomputed = None
 
-    if precomputed is not None:
+    # ── Travel combo: multi-category parallel retrieval ──
+    if shopping_strategy is not None and combo_criteria:
+        combo_results = await _run_combo_retrieval(ctx, combo_criteria, feedback, image_embedding)
+        if combo_results.products:
+            precomputed = combo_results
+
+    if precomputed is not None and not _is_combo_retrieval(precomputed):
         # Always re-screen with full criteria. The speculative retrieval used
         # a CriteriaPayload built from intent (which may lack brand_avoid,
         # product_type, or a tighter budget that the LLM criteria adds).
@@ -576,6 +640,9 @@ async def continue_recommendation_from_criteria(
             evidence_by_product=evidences_by_product,
             trace_details=retrieval.trace_details,
         )
+
+    # Signal ranking stage before product cards
+    yield ctx.thinking("ranking", msg.THINKING_RANKING)
 
     # Emit product cards with pacing delay (built into _product_card_events)
     async for event in _product_card_events(
@@ -887,8 +954,14 @@ async def _product_card_events(
     product_ids = [p.product_id for p in products]
     risk_notes_map = await fetch_risk_notes_for_products(product_ids)
 
+    first_card_recorded = False
     for rank, product in enumerate(products, start=1):
         ctx.ensure_active()
+        # Record first product card timing (wall-clock ms)
+        if not first_card_recorded:
+            first_card_recorded = True
+            ctx.stage_timings_ms.setdefault("first_product_card_ms", now_ms())
+
         evidence = evidences_by_product.get(product.product_id)
         if evidence is None:
             evidence = await get_evidence(product)
@@ -1303,6 +1376,9 @@ INTENT_HANDLERS: dict[str, IntentHandler] = {
     "feedback": handle_recommendation,
     "compare": handle_compare,
     "view_cart": handle_view_cart,
+    "checkout_preview": handle_checkout_preview,
+    "checkout_confirm": handle_checkout_confirm,
+    "checkout_cancel": handle_checkout_cancel,
     "add_to_cart": handle_add_to_cart,
     "remove_from_cart": handle_remove_from_cart,
     "update_cart_quantity": handle_update_cart_quantity,

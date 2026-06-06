@@ -20,6 +20,9 @@ SLOT_DEFS: dict[str, SlotDef] = {
     "scenario": SlotDef("scenario", "required", "使用场景或购买目的"),
     "budget": SlotDef("budget", "optional", "预算范围"),
     "category_constraint": SlotDef("category_constraint", "optional", "品类相关约束"),
+    "preference_dimension": SlotDef("preference_dimension", "optional", "数码偏好权衡"),
+    "skin_type": SlotDef("skin_type", "optional", "肤质"),
+    "sport_type": SlotDef("sport_type", "optional", "运动类型"),
 }
 
 REQUIRED_SLOTS = tuple(name for name, slot in SLOT_DEFS.items() if slot.requirement == "required")

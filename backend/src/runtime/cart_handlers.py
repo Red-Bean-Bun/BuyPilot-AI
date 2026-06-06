@@ -117,6 +117,43 @@ async def handle_update_cart_quantity(
     yield ctx.done()
 
 
+async def handle_checkout_preview(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    del body, intent
+    yield ctx.thinking("checkout", msg.THINKING_VIEWING_CART)
+    cart = await get_session_cart(ctx.session_id)
+    status = "success" if cart.total_items > 0 else "failed"
+    if status == "success":
+        await _record_checkout_audit(ctx, "cart.checkout_previewed", cart)
+    yield _cart_action_event_from_cart(ctx, "checkout_preview", "", 0, status, cart)
+    yield ctx.done()
+
+
+async def handle_checkout_confirm(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    del body, intent
+    yield ctx.thinking("checkout", msg.THINKING_VIEWING_CART)
+    cart = await get_session_cart(ctx.session_id)
+    status = "success" if cart.total_items > 0 else "failed"
+    if status == "success":
+        await _record_checkout_audit(ctx, "cart.checkout_confirmed", cart)
+    yield _cart_action_event_from_cart(ctx, "checkout_confirm", "", 0, status, cart)
+    yield ctx.done()
+
+
+async def handle_checkout_cancel(
+    ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
+) -> AsyncGenerator[SSEEventBase, None]:
+    del body, intent
+    yield ctx.thinking("checkout", msg.THINKING_VIEWING_CART)
+    cart = await get_session_cart(ctx.session_id)
+    await _record_checkout_audit(ctx, "cart.checkout_cancelled", cart)
+    yield _cart_action_event_from_cart(ctx, "checkout_cancel", "", 0, "success", cart)
+    yield ctx.done()
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -139,6 +176,28 @@ async def _cart_action_event(
     ctx: StreamContext, action: str, product_id: str, quantity: int, status: str
 ) -> CartActionEvent:
     cart = _cart_summary_payload(await get_session_cart(ctx.session_id))
+    return _cart_action_event_from_summary(ctx, action, product_id, quantity, status, cart)
+
+
+def _cart_action_event_from_cart(
+    ctx: StreamContext,
+    action: str,
+    product_id: str,
+    quantity: int,
+    status: str,
+    cart: CartResponse,
+) -> CartActionEvent:
+    return _cart_action_event_from_summary(ctx, action, product_id, quantity, status, _cart_summary_payload(cart))
+
+
+def _cart_action_event_from_summary(
+    ctx: StreamContext,
+    action: str,
+    product_id: str,
+    quantity: int,
+    status: str,
+    cart: CartSummaryPayload,
+) -> CartActionEvent:
     return CartActionEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -152,6 +211,27 @@ async def _cart_action_event(
         status=status,
         cart=cart,
     )
+
+
+async def _record_checkout_audit(ctx: StreamContext, action: str, cart: CartResponse) -> None:
+    await record_audit_event(
+        action,
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        resource_type="cart",
+        resource_id=ctx.session_id,
+        metadata=_checkout_metadata(cart),
+    )
+
+
+def _checkout_metadata(cart: CartResponse) -> dict[str, object]:
+    return {
+        "source": "chat_intent",
+        "total_items": cart.total_items,
+        "total_price": cart.total_price,
+        "product_ids": [item.product_id for item in cart.items],
+        "real_payment": False,
+    }
 
 
 def _cart_summary_payload(cart: CartResponse) -> CartSummaryPayload:

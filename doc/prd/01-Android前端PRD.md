@@ -393,7 +393,8 @@ data class AgentUiEnvelope<T>(
     @SerialName("image_url") val imageUrl: String? = null,
     @SerialName("criteria_patch") val criteriaPatch: JsonElement? = null,
     @SerialName("skip_stages") val skipStages: List<String>? = null,
-    @SerialName("client_trace_id") val clientTraceId: String? = null
+    @SerialName("client_trace_id") val clientTraceId: String? = null,
+    @SerialName("compare_product_ids") val compareProductIds: List<String>? = null
 )
 
 @Serializable data class MessageLite(

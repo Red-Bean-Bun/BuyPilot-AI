@@ -198,7 +198,7 @@
         "strategy_id": { "type": "string" },
         "scene_type": {
           "type": "string",
-          "enum": ["gift", "interest", "usage", "risk_sensitive", "goal_oriented"]
+          "enum": ["gift", "interest", "travel", "usage", "risk_sensitive", "goal_oriented"]
         },
         "scene_summary": { "type": "string" },
         "user_problem": { "type": "string" },

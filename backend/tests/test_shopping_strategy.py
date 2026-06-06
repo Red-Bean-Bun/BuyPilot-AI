@@ -333,3 +333,85 @@ class TestBuildShoppingStrategyPlan:
             _request("2000 内蓝牙耳机有哪些"),
             _intent(category="数码电子", product_type="蓝牙耳机", budget_max=2000),
         )
+
+
+# ---------------------------------------------------------------------------
+# Travel scene tests
+# ---------------------------------------------------------------------------
+
+
+class TestTravelScene:
+    def test_classify_travel(self):
+        assert _classify_scene_type("下周去三亚度假") == "travel"
+        assert _classify_scene_type("出差需要带什么") == "travel"
+        assert _classify_scene_type("去海边玩") == "travel"
+        assert _classify_scene_type("推荐敏感肌可用的防晒霜，300元以内，不含酒精") is None
+
+    def test_travel_scene_score(self):
+        text = "下周去三亚度假，帮我搭配一套从防晒到穿搭的方案"
+        score = _compute_scene_score(text)
+        assert score >= 4  # travel keywords contribute +2
+
+    async def test_travel_scene_generates_strategy(self):
+        plan = await build_shopping_strategy_plan(
+            _request("下周去三亚度假，帮我搭配一套从防晒到穿搭的方案"),
+            _intent(),
+            _criteria(),
+            retrieval_probe=_probe_factory(3),
+        )
+        assert plan is not None
+        assert plan.shopping_strategy.scene_type == "travel"
+        assert "三亚" in plan.shopping_strategy.scene_summary
+        assert (
+            "度假" in plan.shopping_strategy.primary_direction.title
+            or "搭配" in plan.shopping_strategy.primary_direction.title
+        )
+
+    async def test_travel_scene_has_combo_criteria(self):
+        plan = await build_shopping_strategy_plan(
+            _request("下周去三亚度假，帮我搭配方案"),
+            _intent(),
+            _criteria(),
+            retrieval_probe=_probe_factory(3),
+        )
+        assert plan is not None
+        assert len(plan.combo_criteria) >= 2
+        categories = [c.category for c in plan.combo_criteria]
+        assert "美妆护肤" in categories  # sunscreen
+        assert "服饰运动" in categories  # clothing
+
+    async def test_travel_scene_has_risks(self):
+        plan = await build_shopping_strategy_plan(
+            _request("去三亚度假"),
+            _intent(),
+            _criteria(),
+            retrieval_probe=_probe_factory(3),
+        )
+        assert plan is not None
+        assert len(plan.shopping_strategy.avoid_risks) >= 1
+
+    def test_intro_precheck_includes_travel(self):
+        assert is_likely_shopping_strategy_request(
+            _request("下周去三亚度假，帮我搭配方案"),
+            _intent(),
+        )
+
+    async def test_travel_combo_criteria_inherit_budget(self):
+        """Combo sub-criteria must propagate budget_max from the base criteria.
+
+        Combo retrieval bypasses post-filter re-screening, so budget constraints
+        must be embedded directly in each sub-criteria to prevent over-budget products.
+        """
+        plan = await build_shopping_strategy_plan(
+            _request("去三亚度假，帮我搭配方案，预算500以内"),
+            _intent(),
+            _criteria(budget_max=500),
+            retrieval_probe=_probe_factory(3),
+        )
+        assert plan is not None
+        assert plan.shopping_strategy.scene_type == "travel"
+        assert len(plan.combo_criteria) >= 2
+        for combo in plan.combo_criteria:
+            assert combo.constraints.budget_max == 500, (
+                f"combo criteria for {combo.category} lost budget_max constraint"
+            )

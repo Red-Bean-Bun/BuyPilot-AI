@@ -20,12 +20,13 @@ from src.services.message_rules import (
     is_compare_phrase,
     is_commercial_claim_question,
     is_replace_deck_phrase,
+    maybe_checkout_intent,
     maybe_intercept_budget_patch,
     maybe_shopping_intent,
     message_with_image_context,
     resolve_compare_targets,
 )
-from src.runtime.stages.criteria import criteria_from_intent, criteria_quick_actions, run_criteria
+from src.runtime.stages.criteria import criteria_from_intent, run_criteria
 from src.runtime.stages.decision import run_decision
 from src.runtime.stages.intent import run_intent
 from src.runtime.stages.multimodal import run_image_embedding, run_multimodal
@@ -41,13 +42,13 @@ from src.config.domain_terms import (
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
+from src.services.cart import get_session_cart
 from src.services.conversation_state import get_previous_criteria, get_previous_product_ids, save_recommendation_turn
 from src.services.fallbacks import reset_fallback_events
 from src.services.request_context import update_request_context
 from src.types.schemas import ChatStreamRequest, DecisionResult, IntentResult, RecommendationResult
 from src.types.sse_events import (
     CriteriaPayload,
-    CriteriaCardEvent,
     ErrorEvent,
     EventSeq,
     EvidencePayload,
@@ -192,7 +193,7 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
     if pipeline_body is None:
         raise RuntimeError("pipeline body stage completed without a result.")
 
-    if is_commercial_claim_question(pipeline_body.message):
+    if is_commercial_claim_question(pipeline_body.message) and maybe_checkout_intent(pipeline_body.message) is None:
         async for event in _emit_commercial_claim_reply(ctx):
             yield event
         return
@@ -276,7 +277,11 @@ async def _resolve_intent(
     # Only fires when no higher-priority rule has claimed the turn, and
     # only for text-only messages (image uploads carry VL analysis context).
     if synthetic_intent is None and not pipeline_body.image_url and not pipeline_body.criteria_patch:
-        determined = maybe_shopping_intent(pipeline_body.message)
+        determined = maybe_checkout_intent(pipeline_body.message) or maybe_shopping_intent(pipeline_body.message)
+        if determined is not None and determined.intent == "checkout_confirm":
+            cart = await get_session_cart(ctx.session_id)
+            if cart.total_items == 0:
+                determined = maybe_shopping_intent(pipeline_body.message)
         if determined is not None:
             synthetic_intent = determined
 

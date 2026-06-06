@@ -74,4 +74,5 @@ data class ChatUiState(
     val productDetails: Map<String, ProductDetailResponse> = emptyMap(),
     val backendBaseUrl: String = "",
     val useMockChat: Boolean = false,
+    val ttsEnabled: Boolean = false,
 )

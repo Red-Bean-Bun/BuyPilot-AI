@@ -19,6 +19,7 @@ from src.services.observability import (
     list_requests,
     list_retrieval_trace_payloads,
 )
+from src.services.retrieval_cache import get_retrieval_cache
 
 observability_router = APIRouter(
     tags=["observability"],
@@ -130,3 +131,9 @@ async def read_evidence_links(
         product_id=product_id,
         limit=limit,
     )
+
+
+@observability_router.get("/cache")
+async def read_cache_stats() -> dict[str, Any]:
+    """Return retrieval cache statistics including hot keys."""
+    return get_retrieval_cache().stats()

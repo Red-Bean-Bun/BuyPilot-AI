@@ -174,3 +174,41 @@ async def test_request_log_payload_backfills_generated_turn_id_from_audit(observ
     assert len(turn_payloads) == 1
     assert turn_payloads[0]["request_id"] == "req_generated_turn"
     assert turn_payloads[0]["turn_id"] == "turn_generated_obs"
+
+
+@pytest.mark.asyncio
+async def test_cache_stats_endpoint(test_client, observability_database):
+    """Test /admin/observability/cache returns cache stats with admin key."""
+    del observability_database
+
+    from src.services.retrieval_cache import get_retrieval_cache
+    from src.types.sse_events import Constraints, CriteriaPayload
+
+    # Populate cache with some entries
+    cache = get_retrieval_cache()
+    cache.clear()
+    crit = CriteriaPayload(criteria_id="test", category="美妆护肤", constraints=Constraints())
+    cache.set(crit, None, "test_value")
+    cache.get(crit, None)  # hit
+
+    async with test_client as c:
+        # Without admin key → 401/403
+        response_no_key = await c.get("/admin/observability/cache")
+        assert response_no_key.status_code in (401, 403)
+
+        # With admin key → 200 with stats
+        response = await c.get(
+            "/admin/observability/cache",
+            headers={"Authorization": "Bearer test-key"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "total_keys" in data
+        assert "hits" in data
+        assert "misses" in data
+        assert "hit_rate" in data
+        assert "hot_keys" in data
+        assert isinstance(data["hot_keys"], list)
+
+    # Cleanup
+    cache.clear()

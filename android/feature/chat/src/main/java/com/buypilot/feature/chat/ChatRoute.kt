@@ -38,5 +38,7 @@ fun ChatRoute(
         onConvergeProductDeck = { deckId ->
             viewModel.convergeProductDeck(deckId, allowFullyHandled = true)
         },
+        ttsEnabled = uiState.ttsEnabled,
+        onTtsToggle = viewModel::toggleTts,
     )
 }

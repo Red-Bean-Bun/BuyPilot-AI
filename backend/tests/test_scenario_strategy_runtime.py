@@ -408,3 +408,89 @@ def test_shopping_strategy_payload_with_decision_barrier() -> None:
     assert strategy.decision_barrier is not None
     assert strategy.decision_barrier.barrier_type == "fear_wrong_choice"
     assert strategy.decision_barrier.label == "怕送错、怕不够体面"
+
+
+# ── Test 6: Travel scene runtime ─────────────────────────────────────────
+
+
+def test_travel_scene_payload_has_travel_type() -> None:
+    """ShoppingStrategyPayload supports travel scene_type."""
+    strategy = ShoppingStrategyPayload(
+        strategy_id="scene_travel_001",
+        scene_type="travel",
+        scene_summary="三亚度假搭配",
+        primary_direction=PrimaryDirectionPayload(
+            title="三亚度假搭配方案",
+            summary="围绕三亚度假场景，从防晒到穿搭的组合推荐",
+            why="出行场景涉及多个品类协同",
+            search_strategy=SearchStrategyPayload(category="美妆护肤", use_scenario="出行搭配"),
+            available_in_catalog=True,
+            supporting_product_count=3,
+        ),
+        avoid_risks=["暴晒导致防晒不足", "海边穿搭不适配场景"],
+        confidence="high",
+    )
+    assert strategy.scene_type == "travel"
+    assert "三亚" in strategy.scene_summary
+    assert len(strategy.avoid_risks) == 2
+
+
+def test_combo_retrieval_skips_single_criteria_post_filter() -> None:
+    """Combo decks must not be collapsed by final single-criteria filtering."""
+    combo_result = RetrievalResult(
+        products=[
+            ProductPayload(product_id="p_beauty_combo", name="防晒", category="美妆护肤"),
+            ProductPayload(product_id="p_sport_combo", name="穿搭", category="服饰运动"),
+        ],
+        evidence_by_product={},
+        trace_details={"combo_retrieval": True},
+    )
+    normal_result = RetrievalResult(products=[], evidence_by_product={}, trace_details={})
+
+    assert handlers_module._is_combo_retrieval(combo_result)
+    assert not handlers_module._is_combo_retrieval(normal_result)
+
+
+async def test_travel_combo_retrieval_merges_categories() -> None:
+    """_run_combo_retrieval merges products from multiple categories."""
+    from src.runtime.handlers import _run_combo_retrieval
+    from src.types.sse_events import Constraints
+
+    @dataclass
+    class ComboFakeStages:
+        async def run_retrieval(self, criteria, top_n=3, feedback=None, image_embedding=None):
+            products = [
+                ProductPayload(
+                    product_id=f"prod_{criteria.category}_{i}",
+                    name=f"{criteria.category} product {i}",
+                    category=criteria.category,
+                )
+                for i in range(top_n)
+            ]
+            return RetrievalResult(
+                products=products,
+                evidence_by_product={},
+                trace_details={},
+            )
+
+    ctx = StreamContext(
+        session_id="sess_travel",
+        turn_id="turn_travel",
+        deck_id="deck_travel",
+        seq=EventSeq("turn_travel"),
+        cancel_token=CancellationToken(session_id="sess_travel", turn_id="turn_travel"),
+        stages=ComboFakeStages(),
+        heartbeat_interval_seconds=10.0,
+    )
+
+    combo_criteria = [
+        CriteriaPayload(criteria_id="combo_1", category="美妆护肤", constraints=Constraints(product_type="防晒霜")),
+        CriteriaPayload(criteria_id="combo_2", category="服饰运动", constraints=Constraints(product_type="短袖T恤")),
+    ]
+
+    result = await _run_combo_retrieval(ctx, combo_criteria, feedback={}, image_embedding=None)
+    assert len(result.products) == 6  # 3 + 3
+    categories = {p.category for p in result.products}
+    assert "美妆护肤" in categories
+    assert "服饰运动" in categories
+    assert result.trace_details.get("combo_retrieval") is True

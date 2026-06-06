@@ -111,14 +111,17 @@ def criteria_messages(
     feedback: dict[str, list[str]] | None,
     existing_dump: dict[str, Any] | None,
     conversation_context: str = "",
+    history: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     message = _sanitize_user_message(message)
+    history = _sanitize_history(history)
     conversation_context = _sanitize_user_message(conversation_context)
     payload = {
         "message": message,
         "intent": intent_dump,
         "feedback": feedback or {},
         "existing": existing_dump,
+        "history": history,
     }
     return [
         {
@@ -128,7 +131,7 @@ def criteria_messages(
                 {
                     "user_message": message,
                     "intent_result": intent_dump,
-                    "history": [],
+                    "history": history,
                     "feedback_constraints": feedback or {},
                     "existing": existing_dump,
                     "conversation_context": conversation_context,
@@ -471,6 +474,14 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "set_cart_quantity": "update_cart_quantity",
             "view_cart": "view_cart",
             "cart_view": "view_cart",
+            "checkout_preview": "checkout_preview",
+            "checkout": "checkout_preview",
+            "place_order": "checkout_preview",
+            "buy_now": "checkout_preview",
+            "checkout_confirm": "checkout_confirm",
+            "confirm_checkout": "checkout_confirm",
+            "checkout_cancel": "checkout_cancel",
+            "cancel_checkout": "checkout_cancel",
             "feedback": "feedback",
             "dislike": "feedback",
             "not_interested": "feedback",
@@ -499,6 +510,15 @@ def _normalize_intent(value: Any, is_shopping_related: Any) -> str:
             "改数量": "update_cart_quantity",
             "修改数量": "update_cart_quantity",
             "查看购物车": "view_cart",
+            "就买这个": "checkout_preview",
+            "买它": "checkout_preview",
+            "下单": "checkout_preview",
+            "确认购买": "checkout_preview",
+            "确认下单": "checkout_preview",
+            "确认购买意向": "checkout_confirm",
+            "取消购买": "checkout_cancel",
+            "算了不买": "checkout_cancel",
+            "不买了": "checkout_cancel",
             "反馈": "feedback",
             "不喜欢": "feedback",
             "闲聊": "chitchat",

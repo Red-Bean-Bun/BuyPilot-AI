@@ -36,6 +36,8 @@ import com.buypilot.feature.chat.state.ChatCartUiState
 import com.buypilot.feature.chat.state.ChatImageAttachmentState
 import com.buypilot.feature.chat.state.ChatInputState
 import com.buypilot.feature.chat.state.ChatUiState
+import com.buypilot.feature.chat.tts.TtsManager
+import com.buypilot.feature.chat.tts.extractSentenceForTts
 import com.buypilot.feature.chat.presentation.TimelinePresentationState
 import com.buypilot.feature.chat.presentation.toTimelinePresentationState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -322,6 +324,26 @@ class ChatViewModel @Inject constructor(
     private val backendReadyDeckIds = mutableSetOf<String>()
     private val pendingProductDetailIds = mutableSetOf<String>()
     private var nextSendFromEditResubmit = false
+
+    // ── TTS ─────────────────────────────────────────────────────────
+    private val ttsManager = TtsManager(appContext)
+    private var ttsSentenceBuffer = StringBuilder()
+
+    fun toggleTts() {
+        _uiState.update { state ->
+            val next = !state.ttsEnabled
+            if (!next) {
+                ttsManager.stop()
+                ttsSentenceBuffer.clear()
+            }
+            state.copy(ttsEnabled = next)
+        }
+    }
+
+    override fun onCleared() {
+        ttsManager.shutdown()
+        super.onCleared()
+    }
 
     fun sendMessage(message: String, imageUrl: String? = null) {
         if (message.isBlank() && imageUrl == null) return
@@ -1936,6 +1958,44 @@ class ChatViewModel @Inject constructor(
 
     private fun applyEnvelope(envelope: AgentUiEnvelope<AgentPayload>) {
         _uiState.update { ChatReducer.reduce(it, envelope) }
+
+        // ── TTS trigger ───────────────────────────────────────────
+        if (_uiState.value.ttsEnabled) {
+            when (envelope.event) {
+                AgentEventType.TextDelta -> {
+                    (envelope.payload as? TextDeltaPayload)?.let { payload ->
+                        ttsSentenceBuffer.append(payload.delta)
+                        val (sentence, remaining) = extractSentenceForTts(ttsSentenceBuffer.toString())
+                        if (sentence != null) {
+                            ttsManager.speak(sentence)
+                            ttsSentenceBuffer.clear()
+                            ttsSentenceBuffer.append(remaining)
+                        }
+                        if (payload.done && ttsSentenceBuffer.isNotBlank()) {
+                            ttsManager.speak(ttsSentenceBuffer.toString())
+                            ttsSentenceBuffer.clear()
+                        }
+                    }
+                }
+                AgentEventType.FinalDecision -> {
+                    (envelope.payload as? FinalDecisionPayload)?.let { payload ->
+                        ttsSentenceBuffer.clear()
+                        ttsManager.speak(payload.summary)
+                    }
+                }
+                AgentEventType.Clarification -> {
+                    (envelope.payload as? ClarificationPayload)?.let { payload ->
+                        ttsSentenceBuffer.clear()
+                        ttsManager.speak(payload.question)
+                    }
+                }
+                AgentEventType.Done -> {
+                    ttsSentenceBuffer.clear()
+                }
+                else -> Unit
+            }
+        }
+
         val donePayload = envelope.payload as? DonePayload
         val readyDeckId = donePayload
             ?.deckId
