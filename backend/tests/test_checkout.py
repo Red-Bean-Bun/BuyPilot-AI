@@ -122,6 +122,10 @@ def test_checkout_confirm_matches_with_trailing_punctuation():
     assert result_exclaim is not None
     assert result_exclaim.intent == "checkout_confirm"
 
+    result_intent_copy = maybe_checkout_intent("确认购买意向")
+    assert result_intent_copy is not None
+    assert result_intent_copy.intent == "checkout_confirm"
+
     # Bare forms still work
     result_bare = maybe_checkout_intent("确认")
     assert result_bare is not None

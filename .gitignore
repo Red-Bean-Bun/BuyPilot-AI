@@ -56,3 +56,4 @@ doc/BuyPilot-AI-linus-code-review.md
 backend/tests/Linux_review.md
 *.log
 .codegraph/*
+doc/parallel-agents/*

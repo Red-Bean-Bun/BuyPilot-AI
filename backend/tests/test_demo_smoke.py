@@ -67,6 +67,73 @@ def test_demo_smoke_accepts_multi_product_awaiting_feedback_recommendation():
     assert failures == []
 
 
+def test_demo_smoke_evaluate_structural_demo_signals():
+    ok, failures = demo_smoke._evaluate(
+        {
+            "errors": [],
+            "has_criteria": True,
+            "has_decision": False,
+            "product_count": 2,
+            "product_categories": ["服饰运动", "美妆护肤"],
+            "cart_actions": [{"action": "checkout_preview"}],
+            "thinking_stages": ["analyzing_image"],
+            "has_clarification": True,
+            "clarification_required_slots": ["budget"],
+            "shopping_strategy_scene_type": "travel",
+            "has_compare": True,
+        },
+        {
+            "criteria_card": True,
+            "thinking_stage": "analyzing_image",
+            "clarification": True,
+            "required_slot": "budget",
+            "shopping_strategy_scene_type": "travel",
+            "product_category_min": 2,
+            "compare_card": True,
+            "cart_action": "checkout_preview",
+        },
+    )
+
+    assert ok is True
+    assert failures == []
+
+
+def test_demo_smoke_evaluate_reports_missing_structural_demo_signals():
+    ok, failures = demo_smoke._evaluate(
+        {
+            "errors": [],
+            "has_criteria": False,
+            "has_decision": False,
+            "product_count": 1,
+            "product_categories": ["美妆护肤"],
+            "cart_actions": [],
+            "thinking_stages": ["understanding"],
+            "has_clarification": False,
+            "clarification_required_slots": [],
+            "shopping_strategy_scene_type": None,
+            "has_compare": False,
+        },
+        {
+            "thinking_stage": "analyzing_image",
+            "clarification": True,
+            "required_slot": "budget",
+            "shopping_strategy_scene_type": "travel",
+            "product_category_min": 2,
+            "compare_card": True,
+            "cart_action": "checkout_confirm",
+        },
+    )
+
+    assert ok is False
+    assert "missing thinking_stage:analyzing_image" in failures
+    assert "missing clarification" in failures
+    assert "missing required_slot:budget" in failures
+    assert "shopping_strategy_scene_type mismatch: expected travel, got None" in failures
+    assert "product_category_count<2" in failures
+    assert "missing compare_card" in failures
+    assert "missing cart_action:checkout_confirm" in failures
+
+
 async def test_demo_smoke_run_turn_times_out(monkeypatch):
     async def never_returns(_session_id, _request):
         await demo_smoke.asyncio.sleep(3600)

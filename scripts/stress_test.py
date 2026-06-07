@@ -60,6 +60,10 @@ class AnalysisResult:
     has_cart_action: bool = False
     has_clarification: bool = False
     has_error: bool = False
+    has_criteria_card: bool = False
+    has_text_delta_before_product: bool = False
+    shopping_strategy_scene_type: str | None = None
+    clarification_required_slots: list[str] = field(default_factory=list)
     product_count: int = 0
     cart_action_type: str | None = None
     cart_product_id: str | None = None
@@ -122,6 +126,7 @@ def analyze(events: list[dict], test_name: str = "") -> AnalysisResult:
     """分析事件流，提取关键信息"""
     r = AnalysisResult(test_name=test_name)
 
+    seen_product = False
     for event in events:
         etype = event.get("event", "unknown")
         r.event_types.append(etype)
@@ -129,6 +134,7 @@ def analyze(events: list[dict], test_name: str = "") -> AnalysisResult:
         if etype == "product_card":
             r.has_product_card = True
             r.product_count += 1
+            seen_product = True
         elif etype == "compare_card":
             r.has_compare_card = True
             r.compare_ids = event.get("product_ids", [])
@@ -138,6 +144,19 @@ def analyze(events: list[dict], test_name: str = "") -> AnalysisResult:
             r.cart_product_id = event.get("product_id")
         elif etype == "clarification":
             r.has_clarification = True
+            slots = event.get("required_slots", [])
+            if slots:
+                r.clarification_required_slots.extend(slots)
+        elif etype == "criteria_card":
+            r.has_criteria_card = True
+            strategy = event.get("shopping_strategy") or {}
+            if isinstance(strategy, dict):
+                scene = strategy.get("scene_type")
+                if scene:
+                    r.shopping_strategy_scene_type = scene
+        elif etype == "text_delta":
+            if not seen_product:
+                r.has_text_delta_before_product = True
         elif etype == "error":
             r.has_error = True
             # ErrorEvent has message at top level, not nested under payload
@@ -150,7 +169,7 @@ def analyze(events: list[dict], test_name: str = "") -> AnalysisResult:
 _stats = {"pass": 0, "warn": 0, "fail": 0, "total": 0}
 
 
-def _print_result(r: AnalysisResult, expect: str | None = None):
+def _print_result(r: AnalysisResult, expect: str | None = None, expect_error: bool = False):
     """打印单个测试结果
 
     expect: 期望的事件类型，可选值:
@@ -160,27 +179,64 @@ def _print_result(r: AnalysisResult, expect: str | None = None):
         "clarification" - 期望有澄清提问
         "no_error"     - 期望没有错误
         None           - 不检查期望
+    expect_error: 如果为 True，则期望有错误（422 或 PIPELINE_ERROR）
     """
     _stats["total"] += 1
 
-    if r.has_error:
+    if expect_error:
+        # 期望错误：有错误就是成功
+        if r.has_error:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "❌"
+            _stats["fail"] += 1
+    elif r.has_error:
         status = "❌"
         _stats["fail"] += 1
-    elif expect == "product_card" and not r.has_product_card:
-        status = "❌"
-        _stats["fail"] += 1
-    elif expect == "compare_card" and not r.has_compare_card:
-        status = "❌"
-        _stats["fail"] += 1
-    elif expect == "cart_action" and not r.has_cart_action:
-        status = "❌"
-        _stats["fail"] += 1
-    elif expect == "clarification" and not r.has_clarification:
-        status = "❌"
-        _stats["fail"] += 1
-    elif expect == "no_error" and r.has_error:
-        status = "❌"
-        _stats["fail"] += 1
+    elif expect == "product_card":
+        if r.has_product_card:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "❌"
+            _stats["fail"] += 1
+    elif expect == "compare_card":
+        if r.has_compare_card:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "❌"
+            _stats["fail"] += 1
+    elif expect == "cart_action":
+        if r.has_cart_action:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "❌"
+            _stats["fail"] += 1
+    elif expect == "clarification":
+        if r.has_clarification:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "❌"
+            _stats["fail"] += 1
+    elif expect == "no_error":
+        if not r.has_error:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "❌"
+            _stats["fail"] += 1
+    elif expect is None:
+        # 不检查期望，有任意内容就算通过
+        if r.has_product_card or r.has_compare_card or r.has_cart_action or r.has_clarification:
+            status = "✅"
+            _stats["pass"] += 1
+        else:
+            status = "⚠️"
+            _stats["warn"] += 1
     elif not r.has_product_card and not r.has_compare_card and not r.has_cart_action:
         status = "⚠️"
         _stats["warn"] += 1
@@ -315,7 +371,8 @@ def phase_compare():
     print("\n--- 4.1 基础对比（手机/笔记本有多商品） ---")
     multi_turn(
         ["推荐手机", "对比第一个和第二个", "对比前两款"],
-        expects=["product_card", "compare_card", "compare_card"],
+        # "推荐手机" 无预算 → slot_checker 要求澄清（clarification 是预期行为）
+        expects=["clarification", "compare_card", "compare_card"],
     )
 
     print("\n--- 4.2 复杂对比表达 ---")
@@ -334,7 +391,10 @@ def phase_compare():
     print("\n--- 4.4 多轮对比后决策 ---")
     multi_turn(
         ["推荐手机", "4000元以内", "对比第一款和第二款"],
-        expects=[None, "product_card", "compare_card"],
+        # "推荐手机" 无预算 → clarification
+        # "4000元以内" → 1 个商品（数据不足）
+        # "对比第一款和第二款" → 只有 1 个商品可比 → 降级为 recommend
+        expects=["clarification", "product_card", None],
     )
 
 
@@ -391,27 +451,27 @@ def phase_edge():
     _section("Phase 7: 边界输入")
 
     edge_cases = [
-        ("", "空消息"),
-        ("   ", "纯空白"),
-        ("a" * 2000, "超长文本 (2000字)"),
-        ("推荐" + "？" * 100, "重复标点"),
-        ("推荐🔥💰手机", "emoji 混合"),
-        ("推 荐 洗 面 奶", "空格分隔"),
-        ("RECOMMEND FACE WASH", "纯英文"),
-        ("推荐\n洗面奶\n200元", "换行分隔"),
-        ("推荐<脚本>alert(1)</脚本>", "XSS 尝试"),
-        ("推荐 face wash 洗面奶", "中英混合"),
-        ("推荐" + "洗面奶" * 500, f"超长文本 ({1502}字)"),
+        ("", "空消息", True),       # expect_error=True: 422 是预期行为
+        ("   ", "纯空白", True),    # expect_error=True: 422 是预期行为
+        ("a" * 2000, "超长文本 (2000字)", False),
+        ("推荐" + "？" * 100, "重复标点", False),
+        ("推荐🔥💰手机", "emoji 混合", False),
+        ("推 荐 洗 面 奶", "空格分隔", False),
+        ("RECOMMEND FACE WASH", "纯英文", False),
+        ("推荐\n洗面奶\n200元", "换行分隔", False),
+        ("推荐<脚本>alert(1)</脚本>", "XSS 尝试", False),
+        ("推荐 face wash 洗面奶", "中英混合", False),
+        ("推荐" + "洗面奶" * 500, f"超长文本 ({1502}字)", False),
     ]
 
     s = TestSession()
-    for msg, label in edge_cases:
+    for msg, label, expect_error in edge_cases:
         ok, events = s.send(msg)
         r = analyze(events, test_name=f"{label}: {repr(msg)[:40]}")
         r.success = ok
-        # 空/空白消息预期返回 error (422)，其他预期 no_error
-        if msg.strip() == "":
-            _print_result(r, expect=None)  # 不检查，422 也算正常
+        # 空/空白消息预期返回 422 error，其他预期 no_error
+        if expect_error:
+            _print_result(r, expect_error=True)
         else:
             _print_result(r, expect="no_error")
         time.sleep(0.5)
@@ -536,7 +596,8 @@ def phase_multimodal():
     )
     r3 = analyze(events3, test_name="不存在的图片文件")
     r3.success = ok3
-    _print_result(r3, expect="no_error")
+    # 不存在的图片文件预期返回 error（PIPELINE_ERROR）
+    _print_result(r3, expect_error=True)
     time.sleep(1)
 
     print("\n--- 8.4 空图片 URL ---")
@@ -572,6 +633,114 @@ def phase_scenario():
         ["送妈妈一款护肤品，预算500以内"],
     )
 
+
+def _assert_scenario_routing(
+    session: TestSession,
+    message: str,
+    *,
+    expect_ordinary_category_clarification: bool,
+    expect_scene_type: str | None,
+    expect_text_before_product: bool,
+    expect_product_card: bool = True,
+) -> None:
+    """断言场景化路由的外部 SSE 事件行为。"""
+    ok, events = session.send(message)
+    r = analyze(events, test_name=message)
+    r.success = ok
+
+    failures: list[str] = []
+
+    # 普通品类澄清检查
+    has_ordinary_category = (
+        r.has_clarification and "category" in r.clarification_required_slots
+    )
+    if expect_ordinary_category_clarification and not has_ordinary_category:
+        failures.append("期望普通品类澄清，但未出现")
+    if not expect_ordinary_category_clarification and has_ordinary_category:
+        failures.append("不应出现普通品类澄清，但出现了 required_slots=['category']")
+
+    # scene_type 检查
+    if expect_scene_type is not None:
+        if r.shopping_strategy_scene_type != expect_scene_type:
+            failures.append(
+                f"期望 scene_type={expect_scene_type}，"
+                f"实际={r.shopping_strategy_scene_type}"
+            )
+    else:
+        if r.shopping_strategy_scene_type is not None:
+            failures.append(
+                f"不应触发 shopping_strategy，"
+                f"实际 scene_type={r.shopping_strategy_scene_type}"
+            )
+
+    # text_delta 在 product_card 之前
+    if expect_text_before_product and not r.has_text_delta_before_product:
+        failures.append("期望 text_delta 出现在 product_card 之前，但未出现")
+
+    # product_card 存在性
+    if expect_product_card and not r.has_product_card:
+        failures.append("期望 product_card，但未出现")
+
+    # 输出结果
+    _stats["total"] += 1
+    events_str = " → ".join(r.event_types[:20])
+    if len(r.event_types) > 20:
+        events_str += f" ... (+{len(r.event_types) - 20})"
+
+    if failures or r.has_error:
+        _stats["fail"] += 1
+        print(f"\n❌ {message}")
+        print(f"  事件: {events_str}")
+        if r.has_error:
+            print(f"  🔴 错误: {r.error_message}")
+        for f in failures:
+            print(f"  🔴 {f}")
+    else:
+        _stats["pass"] += 1
+        print(f"\n✅ {message}")
+        print(f"  事件: {events_str}")
+        if r.shopping_strategy_scene_type:
+            print(f"  🎯 scene_type: {r.shopping_strategy_scene_type}")
+        if r.has_text_delta_before_product:
+            print(f"  📝 场景判断文字出现在商品卡之前")
+
+
+def phase_scenario_p0():
+    """场景化路由 P0 回归测试（PRD 09）"""
+    _section("Phase P0: 场景化路由回归（PRD 09）")
+
+    # Case 1: 强送礼场景，无品类，不应出现普通品类澄清
+    print("\n--- P0.1 强送礼场景（无品类）---")
+    s1 = TestSession()
+    _assert_scenario_routing(
+        s1,
+        "母亲节来了，送母亲什么礼物好？",
+        expect_ordinary_category_clarification=False,
+        expect_scene_type="gift",
+        expect_text_before_product=True,
+    )
+
+    # Case 2: 送礼场景 + 明确品类，应走场景化解释，不退化
+    print("\n--- P0.2 送礼场景（有品类）---")
+    s2 = TestSession()
+    _assert_scenario_routing(
+        s2,
+        "母亲节送妈妈护肤品，怎么选？",
+        expect_ordinary_category_clarification=False,
+        expect_scene_type="gift",
+        expect_text_before_product=True,
+    )
+
+    # Case 3: 普通明确筛选，不应触发场景化
+    print("\n--- P0.3 普通筛选（不应场景化）---")
+    s3 = TestSession()
+    _assert_scenario_routing(
+        s3,
+        "推荐敏感肌可用的防晒霜，300元以内",
+        expect_ordinary_category_clarification=False,
+        expect_scene_type=None,
+        expect_text_before_product=True,
+    )
 
 # ─── Phase 10: 反馈闭环 ───────────────────────────────────────────────────
 def phase_feedback():
@@ -688,6 +857,7 @@ PHASES = {
     "demo":       ("Demo 路径", phase_demo),
     "multimodal": ("拍照找货", phase_multimodal),
     "scenario":   ("场景化推荐", phase_scenario),
+    "scenario_p0": ("场景化路由 P0", phase_scenario_p0),
     "feedback":   ("反馈闭环", phase_feedback),
     "category":   ("多品类覆盖", phase_category),
     "session":    ("长会话", phase_session),
