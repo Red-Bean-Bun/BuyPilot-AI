@@ -16,6 +16,7 @@ from src.types.sse_events import (
     CartSummaryPayload,
     ClarificationEvent,
     SSEEventBase,
+    TextDeltaEvent,
     now_ms,
 )
 
@@ -61,6 +62,12 @@ async def handle_add_to_cart(
 async def handle_remove_from_cart(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
+    cart = await get_session_cart(ctx.session_id)
+    if cart.total_items == 0:
+        yield ctx.thinking("understanding", msg.THINKING_VIEWING_CART)
+        yield _empty_cart_text(ctx)
+        yield ctx.done()
+        return
     product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
         async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_REMOVE):
@@ -90,6 +97,12 @@ async def handle_remove_from_cart(
 async def handle_update_cart_quantity(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
+    cart = await get_session_cart(ctx.session_id)
+    if cart.total_items == 0:
+        yield ctx.thinking("understanding", msg.THINKING_VIEWING_CART)
+        yield _empty_cart_text(ctx)
+        yield ctx.done()
+        return
     product_id = await referenced_product_id(ctx.session_id, intent, body.message)
     if product_id is None:
         async for event in _clarify_cart_target(ctx, msg.CART_CLARIFY_UPDATE):
@@ -155,6 +168,20 @@ async def handle_checkout_cancel(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _empty_cart_text(ctx: StreamContext) -> TextDeltaEvent:
+    return TextDeltaEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"empty_cart_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        message_id=f"empty_cart_{ctx.turn_id}",
+        delta=msg.CART_EMPTY,
+        done=True,
+    )
 
 
 async def _clarify_cart_target(ctx: StreamContext, question: str) -> AsyncGenerator[SSEEventBase, None]:

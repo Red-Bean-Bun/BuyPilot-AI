@@ -15,7 +15,7 @@ from src.services.conversation_state import get_conversation_summary, get_previo
 from src.services.feedback import get_feedback_context
 from src.services.llm_client import generate_criteria
 from src.types.schemas import ChatStreamRequest, IntentResult
-from src.types.sse_events import Constraints, CriteriaPayload, QuickActionPayload
+from src.types.sse_events import Constraints, CriteriaPayload, QuickActionPayload, ShoppingStrategyPayload
 
 
 async def run_criteria(session_id: str, body: ChatStreamRequest, intent: IntentResult) -> CriteriaPayload:
@@ -227,6 +227,8 @@ def _constraint_chips(constraints: Constraints) -> list[str]:
         chips.append(f"{constraints.skin_type}肌肤")
     if constraints.budget_max is not None:
         chips.append(f"{constraints.budget_max:g}元内")
+    if constraints.budget_min is not None:
+        chips.append(f"{constraints.budget_min:g}元以上")
     if constraints.use_scenario:
         chips.append(constraints.use_scenario)
     for item in constraints.ingredient_avoid:
@@ -248,12 +250,18 @@ def _criteria_chips(category: str, constraints: Constraints) -> list[str]:
     return chips
 
 
-def criteria_quick_actions(category: str | None = None) -> list[QuickActionPayload]:
+def criteria_quick_actions(
+    category: str | None = None,
+    shopping_strategy: ShoppingStrategyPayload | None = None,
+) -> list[QuickActionPayload]:
     """Post-hoc filter adjustment actions for criteria_card, per category.
 
     Returns category-specific quick-adjust actions plus a shared "换一组".
     When category is None, defaults to the beauty-skincare set for backward
     compatibility.
+    When shopping_strategy is a travel/combo scene, returns only generic
+    actions (budget + replace) since category-specific filters don't apply
+    to cross-category results.
     """
     budget_action = QuickActionPayload(
         action_id="budget_low",
@@ -267,6 +275,11 @@ def criteria_quick_actions(category: str | None = None) -> list[QuickActionPaylo
         action="criteria_patch",
         criteria_patch={"replace_deck": True, "constraints": {}},
     )
+
+    # Travel/combo scene: only generic actions (budget + replace),
+    # category-specific filters like "敏感肌" don't apply to cross-category results.
+    if shopping_strategy is not None:
+        return [budget_action, replace_action]
 
     if not category:
         # Fallback: generic + beauty defaults

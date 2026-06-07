@@ -228,6 +228,13 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
                 yield event
             return
 
+    # F2: Compare with insufficient candidates — tell the user instead of
+    # silently reclassifying to recommend.
+    if resolved.intent.intent == "recommend" and is_compare_phrase(pipeline_body.message):
+        async for event in _emit_compare_insufficient(ctx):
+            yield event
+        return
+
     if not resolved.skip_slot_check:
         missing_slots = _missing_slots(resolved.body, resolved.intent)
         if missing_slots:
@@ -522,11 +529,12 @@ def _should_emit_partial_criteria(missing_slots: list[str], criteria: CriteriaPa
 async def _emit_unsupported_product_type(
     ctx: StreamContext, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
-    product_type = (
+    raw_pt = (
         (intent.extracted_constraints or {}).get("product_type")
         or intent.category
         or msg.UNSUPPORTED_PRODUCT_TYPE_FALLBACK
     )
+    product_type = str(raw_pt).strip("，。！？；：、,.!?;:")
     yield TextDeltaEvent(
         session_id=ctx.session_id,
         turn_id=ctx.turn_id,
@@ -536,6 +544,24 @@ async def _emit_unsupported_product_type(
         created_at_ms=now_ms(),
         message_id=f"unsupported_{ctx.turn_id}",
         delta=msg.UNSUPPORTED_PRODUCT_TYPE_TEMPLATE.format(product_type=product_type),
+        done=True,
+    )
+    yield ctx.done()
+
+
+async def _emit_compare_insufficient(
+    ctx: StreamContext,
+) -> AsyncGenerator[SSEEventBase, None]:
+    yield ctx.thinking("understanding", msg.THINKING_PROCESSING)
+    yield TextDeltaEvent(
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        seq=ctx.seq.next(),
+        event_id=ctx.seq.event_id(),
+        node_id=f"compare_insufficient_{ctx.turn_id}",
+        created_at_ms=now_ms(),
+        message_id=f"compare_insufficient_{ctx.turn_id}",
+        delta=msg.COMPARE_INSUFFICIENT,
         done=True,
     )
     yield ctx.done()

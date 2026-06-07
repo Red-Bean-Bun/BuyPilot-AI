@@ -977,6 +977,10 @@ class ChatViewModel @Inject constructor(
             "add_to_cart" -> addCurrentRecommendationToCart(action.productId)
             "feedback" -> handleFeedbackQuickAction(action)
             "view_cart" -> refreshCart()
+            "checkout_confirm", "checkout_cancel" -> {
+                val message = action.label.takeIf { it.isNotBlank() } ?: return
+                startRealStream(message = message)
+            }
             else -> sendQuickActionAsUserQuestion(action)
         }
     }

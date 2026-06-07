@@ -439,7 +439,7 @@ def normalize_product_type(value: object) -> str | None:
         value = str(value)
     if not isinstance(value, str):
         return None
-    key = value.strip()
+    key = value.strip().strip("，。！？；：、,.!?;:")
     if not key:
         return None
     if key.casefold() in {"null", "none", "nil", "n/a", "na", "unknown", "undefined"}:

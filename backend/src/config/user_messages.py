@@ -154,6 +154,8 @@ PRODUCT_TYPE_HINTS_BY_CATEGORY: dict[str, str] = {
 
 THINKING_COMPARING = "正在对比商品..."
 COMPARE_CLARIFY = "你想对比哪几个商品？可以说「第一个和第二个」，或者从推荐列表中选择。"
+COMPARE_INSUFFICIENT = "对比需要至少两个候选商品，先看看推荐再对比吧。"
+CART_EMPTY = "购物车是空的，先把商品加入购物车。"
 
 # ── Context-aware clarification analysis ─────────────────────────────
 

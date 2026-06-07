@@ -294,6 +294,108 @@ def _score_price(
     )
 
 
+def _score_digital_specs(
+    product: ProductPayload,
+    evidence: list[EvidencePayload],
+    criteria: CriteriaPayload | None,
+) -> CompareAxisValuePayload:
+    """Score core specs from marketing description (数码电子: 核心参数)."""
+    # Find marketing_description chunk (usually first chunk with full product info)
+    marketing = next(
+        (e for e in evidence if "product_chunk" in e.source_type and len(e.snippet) > 100),
+        None,
+    )
+
+    if marketing:
+        # Extract first sentence or key specs
+        snippet = marketing.snippet
+        detail = snippet[:80] if len(snippet) > 80 else snippet
+        score = 75.0  # has detailed specs
+    else:
+        # Fallback to basic product info
+        detail = f"{product.brand or ''} {product.sub_category or product.category}"
+        score = 50.0  # basic info only
+
+    return CompareAxisValuePayload(
+        product_id=product.product_id,
+        score=score,
+        label=None,
+        detail=detail.strip(),
+        evidence_ids=[marketing.source_id] if marketing and marketing.source_id else [],
+    )
+
+
+def _score_digital_performance(
+    product: ProductPayload,
+    evidence: list[EvidencePayload],
+    criteria: CriteriaPayload | None,
+) -> CompareAxisValuePayload:
+    """Score performance from positive reviews (数码电子: 性能/体验)."""
+    # Find positive review chunks (rating >= 4 or containing positive keywords)
+    reviews = [e for e in evidence if "review" in e.source_type.lower() or "用户" in e.snippet]
+    positive_reviews = [
+        r for r in reviews
+        if any(word in r.snippet for word in ["好评", "推荐", "满意", "出色", "5分", "⭐⭐⭐⭐⭐"])
+    ]
+
+    if positive_reviews:
+        detail = positive_reviews[0].snippet[:80]
+        score = 80.0 if len(positive_reviews) >= 2 else 70.0
+    elif reviews:
+        detail = reviews[0].snippet[:80]
+        score = 60.0  # has reviews but not clearly positive
+    else:
+        detail = "暂无用户评价"
+        score = 50.0
+
+    return CompareAxisValuePayload(
+        product_id=product.product_id,
+        score=score,
+        label=None,
+        detail=detail.strip(),
+        evidence_ids=[r.source_id for r in positive_reviews[:2] if r.source_id],
+    )
+
+
+def _score_digital_battery(
+    product: ProductPayload,
+    evidence: list[EvidencePayload],
+    criteria: CriteriaPayload | None,
+) -> CompareAxisValuePayload:
+    """Score battery/durability from FAQ or review mentions (数码电子: 续航/耐用)."""
+    # Look for battery/durability mentions in FAQ or review
+    battery_keywords = ["续航", "电池", "耐用", "充电", "小时", "电量"]
+
+    for e in evidence:
+        if any(kw in e.snippet for kw in battery_keywords):
+            detail = e.snippet[:80]
+            score = 75.0  # has specific battery info
+            return CompareAxisValuePayload(
+                product_id=product.product_id,
+                score=score,
+                label=None,
+                detail=detail.strip(),
+                evidence_ids=[e.source_id] if e.source_id else [],
+            )
+
+    # No battery info found - use FAQ as fallback
+    faq = next((e for e in evidence if "faq" in e.source_type.lower() or "Q:" in e.snippet), None)
+    if faq:
+        detail = faq.snippet[:80]
+        score = 60.0  # has FAQ but no specific battery info
+    else:
+        detail = "暂无续航数据"
+        score = 50.0
+
+    return CompareAxisValuePayload(
+        product_id=product.product_id,
+        score=score,
+        label=None,
+        detail=detail.strip(),
+        evidence_ids=[faq.source_id] if faq and faq.source_id else [],
+    )
+
+
 def _score_from_evidence(
     axis_name: str,
     product: ProductPayload,
@@ -341,6 +443,9 @@ def _score_from_evidence(
     )
 
 
+
+
+
 # ── Axis scorer dispatch ─────────────────────────────────────────────
 
 _AXIS_SCORERS: dict[str, Any] = {
@@ -350,9 +455,9 @@ _AXIS_SCORERS: dict[str, Any] = {
     "使用场景": _score_use_scenario,
     "价格": _score_price,
     # 数码电子
-    "核心参数": lambda p, e, c: _score_from_evidence("核心参数", p, e),
-    "性能": lambda p, e, c: _score_from_evidence("性能", p, e),
-    "续航": lambda p, e, c: _score_from_evidence("续航", p, e),
+    "核心参数": _score_digital_specs,
+    "性能": _score_digital_performance,
+    "续航": _score_digital_battery,
     # 服饰运动
     "运动场景": _score_use_scenario,
     "材质/脚感": lambda p, e, c: _score_from_evidence("材质", p, e),

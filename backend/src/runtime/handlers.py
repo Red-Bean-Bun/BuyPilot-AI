@@ -945,7 +945,10 @@ def _criteria_card_event(
         created_at_ms=now_ms(),
         criteria=criteria,
         shopping_strategy=shopping_strategy,
-        quick_actions=criteria_quick_actions(category=criteria.category or None),
+        quick_actions=criteria_quick_actions(
+            category=criteria.category or None,
+            shopping_strategy=shopping_strategy,
+        ),
     )
 
 

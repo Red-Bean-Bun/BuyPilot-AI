@@ -14,6 +14,9 @@ task_model_map:
   generate_comparison:
     primary: qwen_turbo
     fallback: doubao_generation
+  generate_comparison_conclusion:
+    primary: qwen_turbo
+    fallback: doubao_generation
   generate_strategy_narration:
     primary: qwen_turbo
     fallback: doubao_generation

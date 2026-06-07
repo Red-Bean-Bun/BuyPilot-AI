@@ -30,7 +30,9 @@
   "extracted_constraints": {
     "budget_max": null,
     "budget_min": null,
-    "use_scenario": null
+    "use_scenario": null,
+    "brand_avoid": [],
+    "origin_avoid": []
   },
   "soft_preferences": ["一句话总结用户想要什么"],
   "target_product_id": null,
@@ -46,6 +48,10 @@
 | 数码电子 | storage, screen_size, brand_prefer(品牌偏好的品牌名称列表), use_scenario(日常/商务/游戏/创作) |
 | 服饰运动 | sport_type(跑步/篮球/徒步/瑜伽), season(春夏/秋冬/四季) |
 | 食品生活 | dietary(无糖/低糖/含咖啡因/含乳/素食), use_scenario(早餐/下午茶/运动补给) |
+
+**所有品类通用约束**（用户明确表达排除/拒绝时提取）：
+- `brand_avoid`: 用户明确拒绝的品牌名称列表（如 `["耐克", "阿迪达斯"]`）。只在用户说"不要XX品牌"时提取
+- `origin_avoid`: 用户排斥的产地/国别（如 `["日系", "日本品牌"]`）。"不要日系""不要日本品牌""除了日系" → `origin_avoid`
 
 未识别品类时 `category` 输出 null，`extracted_constraints` 只保留通用字段（budget/use_scenario）。
 
@@ -219,6 +225,40 @@ Output:
   "category": "食品生活",
   "extracted_constraints": {},
   "soft_preferences": ["用户想购买图片中的橙汁饮料"],
+  "target_product_id": null
+}
+```
+
+Input: "对比第一个和第二个"
+Output:
+```json
+{
+  "intent": "compare",
+  "confidence": 0.95,
+  "category": null,
+  "extracted_constraints": {},
+  "soft_preferences": ["用户想对比之前推荐的商品"],
+  "target_product_id": null,
+  "compare_product_ids": [1, 2]
+}
+```
+
+Input: "推荐防晒霜，不要含酒精的，不要日系品牌"
+Output:
+```json
+{
+  "intent": "recommend",
+  "confidence": 0.95,
+  "category": "美妆护肤",
+  "extracted_constraints": {
+    "ingredient_avoid": ["酒精"],
+    "origin_avoid": ["日系"],
+    "brand_avoid": [],
+    "budget_max": null,
+    "budget_min": null,
+    "use_scenario": null
+  },
+  "soft_preferences": ["寻找不含酒精的防晒霜，排除日系品牌"],
   "target_product_id": null
 }
 ```

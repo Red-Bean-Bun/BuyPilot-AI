@@ -456,7 +456,11 @@ def _passes_brand_filter(criteria: CriteriaPayload, product: ProductPayload, fil
     if not constraints.brand_avoid or not product.brand:
         return True
     product_brand_lower = product.brand.lower()
-    return not any(_brand_matches(brand, product_brand_lower) for brand in constraints.brand_avoid)
+    # Exact match first, then alias-based matching (e.g. "日系" in brand_avoid
+    # should also block Japanese brands via AVOID_TRAIT_MATCH_TERMS).
+    if any(_brand_matches(brand, product_brand_lower) for brand in constraints.brand_avoid):
+        return False
+    return not any(avoid_trait_matches_text(brand, product.brand) for brand in constraints.brand_avoid)
 
 
 def _passes_origin_filter(criteria: CriteriaPayload, product: ProductPayload, filters: RetrievalFilters) -> bool:
