@@ -304,6 +304,9 @@ class ChatViewModel @Inject constructor(
         ),
     )
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+    // timelinePresentationState is a pure derivation from _uiState;
+    // WhileSubscribed(5_000) avoids restarting the map on quick navigation
+    // while releasing the upstream when no collector is active.
     internal val timelinePresentationState: StateFlow<TimelinePresentationState> =
         _uiState
             .map { state -> state.toTimelinePresentationState() }

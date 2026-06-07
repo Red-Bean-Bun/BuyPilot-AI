@@ -792,6 +792,21 @@ object ChatReducer {
         return criteriaCategory !in deckCategories
     }
 
+    private fun String.isKnownCategoryMismatchedFollowup(
+        state: ChatUiState,
+        turnId: String,
+    ): Boolean {
+        val text = trim()
+        if (text.isBlank() || !text.hasBeautySpecificFollowupCopy()) return false
+        val deckCategories = state.turnDeckCategories(turnId)
+        if (deckCategories.isEmpty()) return false
+        return "美妆护肤" !in deckCategories
+    }
+
+    private fun String.hasBeautySpecificFollowupCopy(): Boolean =
+        contains("预算再低一点") ||
+            contains("预算低一点")
+
     private fun String.normalizedCategory(): String =
         trim()
 
