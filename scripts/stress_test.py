@@ -140,7 +140,8 @@ def analyze(events: list[dict], test_name: str = "") -> AnalysisResult:
             r.has_clarification = True
         elif etype == "error":
             r.has_error = True
-            r.error_message = event.get("payload", {}).get("message")
+            # ErrorEvent has message at top level, not nested under payload
+            r.error_message = event.get("message") or event.get("payload", {}).get("message")
 
     return r
 

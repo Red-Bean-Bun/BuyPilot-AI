@@ -348,7 +348,11 @@ async def _resolve_intent(
             raise RuntimeError("intent stage completed without a result.")
 
     # Apply deterministic post-processing to refine intent constraints
-    intent = resolve_intent_constraints(intent, pipeline_body.message)
+    # Skip for replace-deck requests — the synthetic intent already has
+    # the previous criteria's constraints, and post-processing would
+    # incorrectly extract words like "别的" as product_type.
+    if not is_replace_deck_phrase(pipeline_body.message):
+        intent = resolve_intent_constraints(intent, pipeline_body.message)
 
     # Guard: reclassify unresolvable add_to_cart → recommend
     # When no previous products exist, the user said "加到购物车" in a vacuum.
