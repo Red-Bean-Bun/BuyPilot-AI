@@ -438,7 +438,7 @@ def normalize_intent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     compare_ids = normalized.get("compare_product_ids")
     if compare_ids is None and isinstance(normalized.get("extracted_constraints"), dict):
         compare_ids = normalized["extracted_constraints"].pop("compare_product_ids", None)
-    normalized["compare_product_ids"] = _normalize_string_list(compare_ids)
+    normalized["compare_product_ids"] = _normalize_compare_product_ids(compare_ids)
 
     return normalized
 
@@ -581,6 +581,34 @@ def _normalize_string_list(value: Any) -> list[str]:
         return [stripped] if stripped else []
     if isinstance(value, list):
         return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return []
+
+
+def _normalize_compare_product_ids(value: Any) -> list[str | int]:
+    """Normalize compare_product_ids — accepts mixed int indices and string IDs.
+
+    LLM may output integer indices (e.g. [1, 2] for "前两款") or string IDs
+    (e.g. ["p_food_010", "p_food_009"]). Keep both; downstream resolver
+    handles the mixed format.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (str, int)):
+        return [value] if (isinstance(value, str) and value.strip()) or isinstance(value, int) else []
+    if isinstance(value, list):
+        result: list[str | int] = []
+        for item in value:
+            if isinstance(item, int):
+                result.append(item)
+            elif isinstance(item, str):
+                stripped = item.strip()
+                if stripped:
+                    # Strip quotes from JSON-stringified integers like '"1"'
+                    if stripped.isdigit():
+                        result.append(int(stripped))
+                    else:
+                        result.append(stripped)
+        return result
     return []
 
 

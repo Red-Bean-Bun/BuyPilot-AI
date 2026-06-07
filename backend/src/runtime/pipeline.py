@@ -24,6 +24,7 @@ from src.services.message_rules import (
     maybe_intercept_budget_patch,
     maybe_shopping_intent,
     message_with_image_context,
+    resolve_compare_ids_mixed,
     resolve_compare_targets,
 )
 from src.runtime.stages.criteria import criteria_from_intent, run_criteria
@@ -361,27 +362,40 @@ async def _resolve_intent(
             intent = intent.model_copy(update={"intent": "recommend"})
             skip_slot_check = True
 
-    # Guard: reclassify unresolvable compare → recommend
-    # The compare handler requires ≥2 valid product IDs.
-    # Two sources: client sends explicit IDs, or LLM extracted ordinals.
-    # When neither provides ≥2 usable IDs, check if ordinals in the message
-    # resolve against previous recommendations via resolve_compare_targets.
+    # Guard: skip slot check for scenario-based requests (gift/interest/travel).
+    # These requests intentionally lack category — shopping_strategy will determine
+    # the direction. Without this guard, slot_checker blocks with "which category?"
+    # before handle_recommendation can invoke shopping_strategy.
+    if intent.intent in {"recommend", "clarify"} and not skip_slot_check:
+        from src.services.shopping_strategy import is_likely_shopping_strategy_request
+        if is_likely_shopping_strategy_request(pipeline_body, intent):
+            logger.info("Skipping slot check for scenario-based request")
+            skip_slot_check = True
+
+    # Guard: resolve compare product references to actual IDs
+    # Priority: LLM integer indices > string IDs > regex fallback on message
     if intent.intent == "compare":
+        previous_ids = await get_previous_product_ids(ctx.session_id)
         client_ids = pipeline_body.compare_product_ids or []
-        if len(client_ids) < 2:
-            previous_ids = await get_previous_product_ids(ctx.session_id)
-            if len(previous_ids) >= 2:
-                # resolve_compare_targets 用正则解析消息里的序数词
-                # （"第一个"、"第2个"、"前3款"等），映射为真实 product ID
-                resolved = resolve_compare_targets(pipeline_body.message, previous_ids)
-                if len(resolved) >= 2:
-                    intent = intent.model_copy(update={"compare_product_ids": resolved})
-                else:
-                    logger.info("Reclassified compare → recommend (no ≥2 resolvable IDs)")
-                    intent = intent.model_copy(update={"intent": "recommend"})
+        llm_ids = intent.compare_product_ids or []
+
+        # Merge client and LLM IDs (client takes priority)
+        combined_ids = client_ids if client_ids else llm_ids
+
+        if len(previous_ids) >= 2 and combined_ids:
+            # Use mixed resolver: handles int indices, string IDs, and regex fallback
+            resolved = resolve_compare_ids_mixed(combined_ids, pipeline_body.message, previous_ids)
+            if len(resolved) >= 2:
+                intent = intent.model_copy(update={"compare_product_ids": resolved})
             else:
-                logger.info("Reclassified compare → recommend (need ≥2 previous products, have %d)", len(previous_ids))
+                logger.info("Reclassified compare → recommend (no ≥2 resolvable IDs from %s)", combined_ids)
                 intent = intent.model_copy(update={"intent": "recommend"})
+        elif len(previous_ids) < 2:
+            logger.info("Reclassified compare → recommend (need ≥2 previous products, have %d)", len(previous_ids))
+            intent = intent.model_copy(update={"intent": "recommend"})
+        else:
+            logger.info("Reclassified compare → recommend (no compare_product_ids provided)")
+            intent = intent.model_copy(update={"intent": "recommend"})
 
     yield StageResult(_ResolvedIntent(body=pipeline_body, intent=intent, skip_slot_check=skip_slot_check))
 

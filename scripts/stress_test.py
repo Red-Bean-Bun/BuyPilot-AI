@@ -9,13 +9,18 @@ BuyPilot 综合爆破测试脚本
     python scripts/stress_test.py --list           # 列出所有测试阶段
 
 测试阶段:
-    basic    - P1: 单轮推荐、多轮对话、基础购物车
-    compare  - P2: 对比功能专项验证
-    cart     - P3: 购物车深度测试（边界、管理）
-    checkout - P4: 购买流程（确认/取消）
-    edge     - P5: 边界输入（空消息、超长、特殊字符）
-    intent   - P6: 意图边界（闲聊、歧义、混淆）
-    stress   - P7: 并发压力和状态一致性
+    basic      - P1: 单轮推荐、多轮对话、基础购物车
+    compare    - P2: 对比功能专项验证
+    cart       - P3: 购物车深度测试（边界、管理）
+    checkout   - P4: 购买流程（确认/取消）
+    edge       - P5: 边界输入（空消息、超长、特殊字符）
+    intent     - P6: 意图边界（闲聊、歧义、混淆）
+    stress     - P7: 并发压力和状态一致性
+    multimodal - P8: 拍照找货（图片输入，⭐⭐⭐加分项）
+    scenario   - P9: 场景化推荐（礼物/兴趣/旅行）
+    feedback   - P10: 反馈闭环（不喜欢→排除→重推荐）
+    category   - P11: 多品类覆盖（服饰/食品）
+    session    - P12: 长会话上下文持久性
 
 如何添加新测试:
     1. 在对应的 phase 函数中添加新的 multi_turn() 或 single_turn() 调用
@@ -494,16 +499,197 @@ def phase_demo():
     )
 
 
+# ─── Phase 8: 拍照找货（⭐⭐⭐ 多模态） ─────────────────────────────────
+def phase_multimodal():
+    """图片输入 → VL 分析 → 找相似商品"""
+    _section("Phase 8: 拍照找货（多模态）")
+
+    print("\n--- 8.1 商品图片找类似 ---")
+    # 使用已有商品图片
+    s = TestSession()
+    ok, events = s.send(
+        "帮我找找类似的",
+        image_url="/assets/products/1_美妆护肤/images/p_beauty_001_live.jpg"
+    )
+    r = analyze(events, test_name="商品图片 + '帮我找找类似的'")
+    r.success = ok
+    _print_result(r, expect="product_card")
+    time.sleep(1)
+
+    print("\n--- 8.2 图片+文字描述 ---")
+    s2 = TestSession()
+    ok2, events2 = s2.send(
+        "这个适合敏感肌吗？",
+        image_url="/assets/products/1_美妆护肤/images/p_beauty_011_live.jpg"
+    )
+    r2 = analyze(events2, test_name="商品图片 + '适合敏感肌吗'")
+    r2.success = ok2
+    _print_result(r2)
+    time.sleep(1)
+
+    print("\n--- 8.3 无效图片 URL ---")
+    s3 = TestSession()
+    ok3, events3 = s3.send(
+        "这是什么？",
+        image_url="/uploads/nonexistent_file.jpg"
+    )
+    r3 = analyze(events3, test_name="不存在的图片文件")
+    r3.success = ok3
+    _print_result(r3, expect="no_error")
+    time.sleep(1)
+
+    print("\n--- 8.4 空图片 URL ---")
+    s4 = TestSession()
+    ok4, events4 = s4.send("推荐洗面奶", image_url="")
+    r4 = analyze(events4, test_name="空字符串 image_url")
+    r4.success = ok4
+    _print_result(r4, expect="product_card")
+
+
+# ─── Phase 9: 场景化推荐 ──────────────────────────────────────────────────
+def phase_scenario():
+    """礼物/兴趣/旅行场景化推荐（shopping_strategy）"""
+    _section("Phase 9: 场景化推荐")
+
+    print("\n--- 9.1 礼物场景（男朋友生日） ---")
+    multi_turn(
+        ["男朋友过生日，他喜欢电子产品，送什么好？"],
+    )
+
+    print("\n--- 9.2 兴趣场景（我喜欢足球） ---")
+    multi_turn(
+        ["我喜欢足球，推荐一些相关的"],
+    )
+
+    print("\n--- 9.3 旅行场景（三亚度假） ---")
+    multi_turn(
+        ["下周去三亚度假，帮我搭配一套防晒到穿搭的方案"],
+    )
+
+    print("\n--- 9.4 场景+约束叠加 ---")
+    multi_turn(
+        ["送妈妈一款护肤品，预算500以内"],
+    )
+
+
+# ─── Phase 10: 反馈闭环 ───────────────────────────────────────────────────
+def phase_feedback():
+    """用户反馈 → 排除 → 重新推荐"""
+    _section("Phase 10: 反馈闭环")
+
+    print("\n--- 10.1 不喜欢→排除→重推荐 ---")
+    multi_turn(
+        ["推荐洗面奶",
+         "不喜欢第一款",
+         "还有别的吗"],
+        expects=["product_card"] * 3,
+    )
+
+    print("\n--- 10.2 太贵了→降预算 ---")
+    multi_turn(
+        ["推荐手机",
+         "太贵了，便宜点的"],
+    )
+
+    print("\n--- 10.3 明确排除品牌 ---")
+    multi_turn(
+        ["推荐防晒霜",
+         "不要资生堂的"],
+    )
+
+    print("\n--- 10.4 多轮反馈累积 ---")
+    multi_turn(
+        ["推荐耳机",
+         "不喜欢入耳式",
+         "预算再低一点",
+         "有没有索尼的"],
+    )
+
+
+# ─── Phase 11: 多品类覆盖 ─────────────────────────────────────────────────
+def phase_category():
+    """四大品类全覆盖"""
+    _section("Phase 11: 多品类覆盖")
+
+    print("\n--- 11.1 食品生活 ---")
+    multi_turn(
+        ["推荐零食",
+         "有没有无糖的"],
+    )
+
+    print("\n--- 11.2 服饰运动 ---")
+    multi_turn(
+        ["推荐跑鞋",
+         "预算500以内"],
+    )
+
+    print("\n--- 11.3 数码电子（耳机） ---")
+    multi_turn(
+        ["推荐蓝牙耳机",
+         "要降噪的"],
+    )
+
+    print("\n--- 11.4 美妆护肤（面霜） ---")
+    multi_turn(
+        ["推荐面霜",
+         "适合干性皮肤的"],
+    )
+
+    print("\n--- 11.5 跨品类搜索 ---")
+    multi_turn(
+        ["送女朋友的礼物"],  # 跨品类，需要策略
+    )
+
+
+# ─── Phase 12: 长会话上下文 ───────────────────────────────────────────────
+def phase_session():
+    """长对话上下文持久性"""
+    _section("Phase 12: 长会话上下文")
+
+    print("\n--- 12.1 10轮对话后上下文 ---")
+    s = TestSession()
+    # 先建立上下文
+    multi_turn(
+        ["推荐洗面奶", "油皮", "200以内"],
+        session=s,
+    )
+    # 中间穿插其他请求
+    for i in range(5):
+        single_turn(s, f"第{i+1}个怎么样", delay=0.3)
+    # 验证上下文
+    single_turn(s, "再便宜一点", expect="product_card")
+
+    print("\n--- 12.2 切换品类后回退 ---")
+    s2 = TestSession()
+    multi_turn(
+        ["推荐手机", "4000以内"],
+        session=s2,
+    )
+    single_turn(s2, "算了还是看耳机")
+    single_turn(s2, "还是手机吧")
+
+    print("\n--- 12.3 长时间间隔（模拟） ---")
+    s3 = TestSession()
+    single_turn(s3, "推荐洗面奶", expect="product_card")
+    time.sleep(2)  # 模拟间隔
+    single_turn(s3, "要油皮适用的", expect="product_card")
+
+
 # ─── 注册表 ───────────────────────────────────────────────────────────────
 PHASES = {
-    "basic":   ("基础功能", phase_basic),
-    "compare": ("对比功能", phase_compare),
-    "cart":    ("购物车深度", phase_cart),
-    "checkout": ("购买流程", phase_checkout),
-    "edge":    ("边界输入", phase_edge),
-    "intent":  ("意图边界", phase_intent),
-    "stress":  ("并发压力", phase_stress),
-    "demo":    ("Demo 路径", phase_demo),
+    "basic":      ("基础功能", phase_basic),
+    "compare":    ("对比功能", phase_compare),
+    "cart":       ("购物车深度", phase_cart),
+    "checkout":   ("购买流程", phase_checkout),
+    "edge":       ("边界输入", phase_edge),
+    "intent":     ("意图边界", phase_intent),
+    "stress":     ("并发压力", phase_stress),
+    "demo":       ("Demo 路径", phase_demo),
+    "multimodal": ("拍照找货", phase_multimodal),
+    "scenario":   ("场景化推荐", phase_scenario),
+    "feedback":   ("反馈闭环", phase_feedback),
+    "category":   ("多品类覆盖", phase_category),
+    "session":    ("长会话", phase_session),
 }
 
 

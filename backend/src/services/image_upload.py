@@ -95,13 +95,18 @@ def save_uploaded_image(file_name: str, content_type: str, data: bytes) -> Image
 
 
 def image_url_to_provider_url(image_url: str) -> str:
-    if not image_url.startswith(f"{UPLOAD_URL_PREFIX}/"):
+    if image_url.startswith(f"{UPLOAD_URL_PREFIX}/"):
+        file_name = Path(image_url).name
+        path = get_settings().upload_dir / file_name
+    elif image_url.startswith("/assets/products/"):
+        # Static product images mounted at /assets/products → resolve via dataset_dir
+        rel = image_url.removeprefix("/assets/products/")
+        path = get_settings().dataset_dir / rel
+    else:
         return image_url
-    file_name = Path(image_url).name
-    path = get_settings().upload_dir / file_name
     if not path.exists() or not path.is_file():
         raise ImageUploadError(
-            "IMAGE_FILE_NOT_FOUND", f"Uploaded image is not available: {file_name}", status_code=HTTPStatus.NOT_FOUND
+            "IMAGE_FILE_NOT_FOUND", f"Uploaded image is not available: {image_url}", status_code=HTTPStatus.NOT_FOUND
         )
     mime_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")

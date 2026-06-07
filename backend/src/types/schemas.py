@@ -27,7 +27,7 @@ class ChatStreamRequest(BaseModel):
     client_turn_id: str | None = None
     client_trace_id: str | None = None
     converge: bool = False
-    compare_product_ids: list[str] | None = None
+    compare_product_ids: list[str | int] | None = None
 
     @model_validator(mode="after")
     def _require_message_or_image(self) -> "ChatStreamRequest":
@@ -112,7 +112,7 @@ class IntentResult(BaseModel):
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)
     soft_preferences: list[str] = Field(default_factory=list)
     target_product_id: str | None = None
-    compare_product_ids: list[str] = Field(default_factory=list)
+    compare_product_ids: list[str | int] = Field(default_factory=list)
 
 
 class RecommendationResult(BaseModel):

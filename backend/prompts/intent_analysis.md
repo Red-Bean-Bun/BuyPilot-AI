@@ -34,7 +34,7 @@
   },
   "soft_preferences": ["一句话总结用户想要什么"],
   "target_product_id": null,
-  "compare_product_ids": []
+  "compare_product_ids": []  // 数组元素可以是：整数索引（如 1, 2）或商品名字符串
 }
 ```
 
@@ -76,7 +76,15 @@
    - clarify: 用户在澄清需求、回答追问，或信息不足需要追问
    - continue: 用户确认已有标准、要求继续筛选，或已看过候选商品后要求收敛最终建议
    - feedback: 用户表达不喜欢、排除某商品/品牌/特征等反馈
-   - compare: 用户要求对比/比较两个或更多已推荐的商品（如"对比第一个和第二个"、"比较一下这几款"、"A和B哪个好"）。必须提取 compare_product_ids（如果用户用序数词引用商品，如"第一个""第二个"）
+   - compare: 用户要求对比/比较两个或更多已推荐的商品。
+     **重要**：当用户使用序数词引用商品时（如"第一个"、"第二款"、"前三个"），必须：
+     1. 识别 intent 为 "compare"
+     2. 在 `compare_product_ids` 中输出**商品索引数组**（从 1 开始），而非文本
+     例如：
+     - "对比第一个和第二个" → `"compare_product_ids": [1, 2]`
+     - "前两款哪个好" → `"compare_product_ids": [1, 2]`
+     - "第三款和第五款" → `"compare_product_ids": [3, 5]`
+     - "对比 A 和 B"（有明确商品名）→ `"compare_product_ids": ["A", "B"]`
    - add_to_cart: 用户要把系统已推荐或已展示的商品加入购物车。识别条件：
      1. 有明确商品指向（如"把这个加到购物车"、"第一款加购"、"p_food_010加入购物车"）
      2. 或对话上下文显示用户刚看过推荐商品，当前消息包含"加购"、"购物车"、"加入"等关键词（即使有错别字，也应识别为 add_to_cart，默认加购最近推荐的第一个商品）
@@ -225,7 +233,35 @@ Output:
   "extracted_constraints": {},
   "soft_preferences": ["用户想对比之前推荐的手机"],
   "target_product_id": null,
-  "compare_product_ids": ["第一个", "第二个"]
+  "compare_product_ids": [1, 2]
+}
+```
+
+Input: "前两款哪个好"
+Output:
+```json
+{
+  "intent": "compare",
+  "confidence": 0.9,
+  "category": null,
+  "extracted_constraints": {},
+  "soft_preferences": ["用户想对比之前推荐的前两款商品"],
+  "target_product_id": null,
+  "compare_product_ids": [1, 2]
+}
+```
+
+Input: "第三款和第五款对比一下"
+Output:
+```json
+{
+  "intent": "compare",
+  "confidence": 0.95,
+  "category": null,
+  "extracted_constraints": {},
+  "soft_preferences": ["用户想对比第三款和第五款商品"],
+  "target_product_id": null,
+  "compare_product_ids": [3, 5]
 }
 ```
 

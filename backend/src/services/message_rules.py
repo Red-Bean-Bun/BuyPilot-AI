@@ -739,3 +739,59 @@ def resolve_compare_targets(message: str, previous_product_ids: list[str]) -> li
             resolved.append(previous_product_ids[idx])
 
     return resolved
+
+
+def resolve_compare_ids_mixed(
+    compare_product_ids: list,
+    message: str,
+    previous_product_ids: list[str],
+) -> list[str]:
+    """Resolve compare_product_ids (mixed format) to actual product IDs.
+
+    Priority:
+    1. Integer indices from LLM (e.g., [1, 2] → [ids[0], ids[1]])
+    2. String product IDs (pass-through)
+    3. Regex fallback on message (if above fail)
+
+    Args:
+        compare_product_ids: Mixed list of ints (indices) and/or strings (IDs or text)
+        message: Original user message (for regex fallback)
+        previous_product_ids: Previously recommended product IDs
+
+    Returns:
+        List of resolved product IDs
+    """
+    if not previous_product_ids:
+        return []
+
+    resolved: list[str] = []
+    has_unresolved_text = False
+
+    for item in compare_product_ids:
+        if isinstance(item, int):
+            # LLM output index (1-based) → convert to 0-based
+            idx = item - 1
+            if 0 <= idx < len(previous_product_ids):
+                pid = previous_product_ids[idx]
+                if pid not in resolved:
+                    resolved.append(pid)
+        elif isinstance(item, str):
+            # Check if it looks like a product ID (starts with "p_")
+            if item.startswith("p_") and item in previous_product_ids:
+                if item not in resolved:
+                    resolved.append(item)
+            else:
+                # Text reference like "第一个" — needs regex fallback
+                has_unresolved_text = True
+
+    # If we have enough resolved IDs, return them
+    if len(resolved) >= 2:
+        return resolved[:4]  # Cap at 4 products
+
+    # Fallback: regex parse the message
+    if has_unresolved_text or not resolved:
+        regex_resolved = resolve_compare_targets(message, previous_product_ids)
+        if len(regex_resolved) >= 2:
+            return regex_resolved[:4]
+
+    return resolved
