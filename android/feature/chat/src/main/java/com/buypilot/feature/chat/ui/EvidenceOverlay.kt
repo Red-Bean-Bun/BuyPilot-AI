@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +71,8 @@ private val EvidenceInkMuted = Color(0xFF9EA5B4)
 private val EvidenceAccent = Color(0xFFFF6A3D)
 private val EvidenceAccentSoft = Color(0xFFFFF2EE)
 private val EvidenceNumberBg = Color(0xFFF0F1F4)
+private val EvidenceWhitespaceRegex = Regex("""\s+""")
+private val EvidenceLeadingBulletRegex = Regex("""^\s*[·•\-\s]+""")
 
 @Composable
 fun ProductEvidenceOverlayScreen(
@@ -85,7 +88,7 @@ fun ProductEvidenceOverlayScreen(
     if (payload == null) {
         Surface(color = EvidenceBg, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
-                ProductPageTopBar(title = "推荐证据", onBack = onBack)
+                ProductPageTopBar(title = stringResource(R.string.evidence_title), onBack = onBack)
                 ExpiredRecommendationState(onBack = onBack)
             }
         }
@@ -132,7 +135,7 @@ fun ProductEvidenceOverlayScreen(
         ) {
             item("lead") {
                 EvidenceMotionBlock(progress = progress, start = 0.08f, end = 0.58f, offsetY = 18f) {
-                    EvidenceLead()
+        EvidenceLead()
                 }
             }
             item("report") {
@@ -172,7 +175,7 @@ fun ProductEvidenceOverlayScreen(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_arrow_back_24),
-                contentDescription = "返回",
+                contentDescription = stringResource(R.string.common_back),
                 modifier = Modifier.size(22.dp),
             )
         }
@@ -201,8 +204,13 @@ private fun EvidenceMotionBlock(
 }
 
 @Composable
-private fun EvidenceLead() {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun EvidenceLead(
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -213,7 +221,7 @@ private fun EvidenceLead() {
                     .background(EvidenceAccent, RoundedCornerShape(2.dp)),
             )
             Text(
-                text = "为什么推荐它",
+                text = stringResource(R.string.evidence_why_title),
                 color = EvidenceInk,
                 fontSize = 24.sp,
                 lineHeight = 30.sp,
@@ -223,7 +231,7 @@ private fun EvidenceLead() {
             )
         }
         Text(
-            text = "基于筛选条件、商品资料与用户评价交叉校验",
+            text = stringResource(R.string.evidence_lead_subtitle),
             color = EvidenceInkMuted,
             fontSize = BuyPilotType.Label,
             lineHeight = 17.sp,
@@ -241,16 +249,20 @@ private fun EvidenceReportSurface(
     remainingEvidence: List<EvidencePayload>,
     riskNotes: List<String>,
     riskSourceTexts: List<String>,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (reason.isNotBlank()) {
             EvidenceConclusion(reason = reason)
         }
         if (reasonAtoms.isNotEmpty()) {
-            EvidenceSectionCard(title = "命中的购买标准", subtitle = "每条理由均来自真实商品资料") {
+            EvidenceSectionCard(
+                title = stringResource(R.string.evidence_criteria_title),
+                subtitle = stringResource(R.string.evidence_criteria_subtitle),
+            ) {
                 Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     reasonAtoms.forEachIndexed { index, atom ->
                         val evidence = atom.evidenceId
@@ -270,7 +282,10 @@ private fun EvidenceReportSurface(
             EvidenceRiskCard(items = cleanRiskNotes)
         }
         if (remainingEvidence.isNotEmpty()) {
-            EvidenceSectionCard(title = "更多证据", subtitle = "商品资料、官方问答与用户评价") {
+            EvidenceSectionCard(
+                title = stringResource(R.string.evidence_more_title),
+                subtitle = stringResource(R.string.evidence_more_subtitle),
+            ) {
                 Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     remainingEvidence.take(5).forEachIndexed { index, evidence ->
                         EvidenceSnippetCard(evidence = evidence)
@@ -304,7 +319,7 @@ private fun EvidenceConclusion(reason: String) {
                     .background(EvidenceAccent, CircleShape),
             )
             Text(
-                text = "推荐判断",
+                text = stringResource(R.string.evidence_judgement),
                 color = EvidenceAccent,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
@@ -408,7 +423,7 @@ private fun EvidenceInlineQuote(evidence: EvidencePayload) {
             EvidenceSourceLabel(evidence = evidence)
             Spacer(Modifier.weight(1f))
             Text(
-                text = "查看完整 →",
+                text = stringResource(R.string.evidence_view_full_arrow),
                 color = EvidenceAccent,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
@@ -452,8 +467,12 @@ private fun EvidenceInlineQuote(evidence: EvidencePayload) {
         if (parts.size > 1) {
             EvidenceProductDialog(parts = parts, onDismiss = { showDialog = false })
         } else {
+            val sourceLabels = rememberEvidenceSourceLabels()
             EvidenceTextDialog(
-                title = evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"),
+                title = evidence.sourceType.userFacingEvidenceSourceLabel(
+                    stringResource(R.string.evidence_product_info),
+                    sourceLabels,
+                ),
                 body = snippet,
                 onDismiss = { showDialog = false },
             )
@@ -526,7 +545,13 @@ private fun EvidenceProductDialog(parts: List<String>, onDismiss: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text("商品资料", color = EvidenceInk, fontSize = BuyPilotType.Title, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.evidence_product_info),
+                    color = EvidenceInk,
+                    fontSize = BuyPilotType.Title,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                )
                 parts.forEachIndexed { i, part ->
                     val label = ProductPartLabels.getOrElse(i) { "其他" }
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -570,14 +595,14 @@ private fun EvidenceRiskCard(items: List<EvidenceRiskItemUi>) {
                 )
             }
             Text(
-                text = "留意点",
+                text = stringResource(R.string.risk_note_title),
                 color = Color(0xFFD14A20),
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "来自真实评价或商品资料",
+                text = stringResource(R.string.risk_note_subtitle),
                 color = EvidenceInkMuted,
                 fontSize = BuyPilotType.Tiny,
                 lineHeight = 14.sp,
@@ -610,7 +635,7 @@ private fun EvidenceRiskCard(items: List<EvidenceRiskItemUi>) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "查看完整 →",
+                    text = stringResource(R.string.evidence_view_full_arrow),
                     color = Color(0xFFD14A20),
                     fontSize = BuyPilotType.Label,
                     lineHeight = 16.sp,
@@ -626,7 +651,7 @@ private fun EvidenceRiskCard(items: List<EvidenceRiskItemUi>) {
         .takeIf { it in items.indices }
         ?.let { index ->
             EvidenceTextDialog(
-                title = "留意点",
+                title = stringResource(R.string.risk_note_title),
                 body = items[index].text,
                 onDismiss = { selectedIndex = -1 },
             )
@@ -669,11 +694,13 @@ private fun EvidenceSnippetCard(evidence: EvidencePayload) {
 
 @Composable
 private fun EvidenceSourceLabel(evidence: EvidencePayload) {
+    val sourceLabels = rememberEvidenceSourceLabels()
+    val fallbackLabel = stringResource(R.string.evidence_product_info)
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        EvidencePill(evidence.sourceType.userFacingEvidenceSourceLabel("商品资料"))
+        EvidencePill(evidence.sourceType.userFacingEvidenceSourceLabel(fallbackLabel, sourceLabels))
         evidence.trustLabel?.withoutInternalDebugTokens()?.trim()?.takeIf(String::isNotBlank)?.let {
             Text(text = "·", color = EvidenceInkMuted, fontSize = BuyPilotType.Label, lineHeight = 16.sp)
             EvidencePill(it, muted = true)
@@ -748,7 +775,7 @@ private fun String.toEvidenceSnippetParts(): List<String> =
             part
                 .withoutInternalDebugTokens()
                 .trim()
-                .replace(Regex("""\s+"""), " ")
+                .replace(EvidenceWhitespaceRegex, " ")
         }
         .filter { it.isNotBlank() }
         .distinctBy { it.lowercase() }
@@ -767,7 +794,7 @@ private fun List<String>.toEvidenceRiskItems(sourceTexts: List<String>): List<Ev
         val label = marker?.groupValues?.getOrNull(1)?.trim()?.takeIf(String::isNotBlank)
         val text = clean
             .replace(RiskRatingMarkerRegex, "")
-            .replace(Regex("""^\s*[·•\-\s]+"""), "")
+            .replace(EvidenceLeadingBulletRegex, "")
             .trim()
             .expandFromSources(sourceTexts)
             .takeIf(String::isNotBlank)
@@ -793,7 +820,7 @@ private fun String.expandFromSources(sourceTexts: List<String>): String {
 private fun String.compactForEvidenceMatch(): String =
     withoutMarkdownMarkup()
         .withoutInternalDebugTokens()
-        .replace(Regex("""\s+"""), "")
+        .replace(EvidenceWhitespaceRegex, "")
         .trim()
 
 private val RiskRatingMarkerRegex = Regex("""\[([^\]\[:：]{1,16})\s+评分[:：]\s*(\d{1,2})\]""")

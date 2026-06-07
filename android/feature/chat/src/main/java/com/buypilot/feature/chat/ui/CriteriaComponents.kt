@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -29,10 +30,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.buypilot.core.model.DecisionBarrierPayload
 import com.buypilot.core.model.CriteriaCardPayload
 import com.buypilot.core.model.CriteriaPayload
+import com.buypilot.core.model.PrimaryDirectionPayload
+import com.buypilot.core.model.SearchStrategyPayload
+import com.buypilot.core.model.ShoppingStrategyPayload
 import com.buypilot.feature.chat.R
 import kotlin.math.abs
 import kotlinx.serialization.json.JsonObject
@@ -46,6 +52,16 @@ private const val CriteriaCardEnterMs = 560
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
 private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
 private val DigitalBudgetPresets = listOf(800, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000)
+private val CriteriaCardGradientColors = listOf(
+    BuyPilotColors.CriteriaCardTop,
+    BuyPilotColors.CriteriaCardBottom,
+)
+private val CriteriaCardBorderGradientColors = listOf(
+    BuyPilotColors.CriteriaCardBorderTop,
+    BuyPilotColors.CriteriaCardBorderBottom,
+)
+private val CriteriaWhitespaceRegex = Regex("\\s+")
+private val CriteriaNumberRegex = Regex("""\d+(?:\.\d+)?""")
 internal const val DefaultBudgetPreset = 200
 private const val DefaultDigitalBudgetPreset = 3000
 
@@ -88,6 +104,7 @@ internal fun rememberCriteriaLabels(): CriteriaLabels =
 internal fun CriteriaSummaryCard(
     motionKey: String,
     payload: CriteriaCardPayload,
+    modifier: Modifier = Modifier,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     onEntered: () -> Unit,
@@ -110,7 +127,7 @@ internal fun CriteriaSummaryCard(
         onEntered = onEntered,
     ) {
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
                 .shadow(
                     elevation = 2.dp,
@@ -120,20 +137,14 @@ internal fun CriteriaSummaryCard(
                 )
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            BuyPilotColors.CriteriaCardTop,
-                            BuyPilotColors.CriteriaCardBottom,
-                        ),
+                        colors = CriteriaCardGradientColors,
                     ),
                     RoundedCornerShape(16.dp),
                 )
                 .border(
                     1.dp,
                     Brush.verticalGradient(
-                        colors = listOf(
-                            BuyPilotColors.CriteriaCardBorderTop,
-                            BuyPilotColors.CriteriaCardBorderBottom,
-                        ),
+                        colors = CriteriaCardBorderGradientColors,
                     ),
                     RoundedCornerShape(16.dp),
                 ),
@@ -160,6 +171,7 @@ internal fun CriteriaSummaryCard(
 internal fun ScenarioFilterReceiptCard(
     motionKey: String,
     payload: CriteriaCardPayload,
+    modifier: Modifier = Modifier,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     onEntered: () -> Unit,
@@ -177,7 +189,7 @@ internal fun ScenarioFilterReceiptCard(
         onEntered = onEntered,
     ) {
         Column(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
                 .background(BuyPilotColors.SurfaceCard.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
                 .border(1.dp, BuyPilotColors.Border.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
@@ -259,7 +271,7 @@ private fun CriteriaReceiptSummary(
         initialOffsetY = 6.dp,
     ) {
         CriteriaCardHeader(
-            title = "筛选条件",
+            title = stringResource(R.string.criteria_filter_title),
             editLabel = editLabel,
             onEdit = onEdit,
         )
@@ -447,7 +459,7 @@ private fun CriteriaCardPayload.scenarioFilterReceipt(): ScenarioFilterReceipt {
 private fun String?.cleanScenarioText(): String =
     orEmpty()
         .withoutMarkdownMarkup()
-        .replace(Regex("\\s+"), " ")
+        .replace(CriteriaWhitespaceRegex, " ")
         .trim()
 
 private fun String.compactScenarioText(maxLength: Int): String =
@@ -523,7 +535,7 @@ private fun CriteriaReceiptProperty.compactReceiptPropertyOrNull(
 ): CriteriaReceiptProperty? {
     val compactValue = value
         .withoutMarkdownMarkup()
-        .replace(Regex("\\s+"), " ")
+        .replace(CriteriaWhitespaceRegex, " ")
         .trim()
     return copy(value = compactValue).takeIf {
         compactValue.isNotBlank() &&
@@ -629,7 +641,7 @@ internal fun String.withoutSkinSuffix(): String =
         .removeSuffix("肌")
 
 internal fun String.extractFirstNumber(): Double? =
-    Regex("""\d+(?:\.\d+)?""").find(this)?.value?.toDoubleOrNull()
+    CriteriaNumberRegex.find(this)?.value?.toDoubleOrNull()
 
 internal fun budgetSliderOptions(currentBudget: Int?, productContext: String = ""): List<Int> {
     val positiveBudget = currentBudget?.takeIf { it > 0 }
@@ -685,3 +697,70 @@ private fun String.looksLikeOriginAvoidance(): Boolean =
 
 private fun String.looksLikeBrandAvoidance(): Boolean =
     any { it in 'A'..'Z' || it in 'a'..'z' } || contains("-") || contains("·")
+
+@Preview(name = "Criteria summary card")
+@Composable
+private fun CriteriaSummaryCardPreview() {
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        CriteriaSummaryCard(
+            motionKey = "preview_criteria",
+            payload = CriteriaCardPayload(
+                criteria = CriteriaPayload(
+                    category = "目标品类",
+                    summary = "按预算和使用场景筛选",
+                    productType = "候选类型",
+                    budgetMax = 300.0,
+                    useScenario = listOf("核心场景"),
+                    brandAvoid = listOf("不符合偏好"),
+                ),
+            ),
+            motionEnabled = false,
+            alreadyEntered = true,
+            onEntered = {},
+            onEdit = {},
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
+@Preview(name = "Scenario filter receipt")
+@Composable
+private fun ScenarioFilterReceiptCardPreview() {
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        ScenarioFilterReceiptCard(
+            motionKey = "preview_strategy",
+            payload = CriteriaCardPayload(
+                criteria = CriteriaPayload(
+                    category = "目标品类",
+                    productType = "候选类型",
+                    budgetMax = 300.0,
+                    useScenario = listOf("核心场景"),
+                ),
+                shoppingStrategy = ShoppingStrategyPayload(
+                    sceneSummary = "用户只描述了使用场景，还没有明确商品方向",
+                    userProblem = "选择难点在于不知道哪类商品更稳",
+                    decisionBarrier = DecisionBarrierPayload(
+                        label = "降低决策成本",
+                        reason = "先确定购买方向，再看具体候选",
+                    ),
+                    primaryDirection = PrimaryDirectionPayload(
+                        title = "优先选择低风险方向",
+                        summary = "先看匹配场景、预算和偏好的商品类型",
+                        why = "这样可以减少无关候选，让后续对比更清晰",
+                        searchStrategy = SearchStrategyPayload(
+                            category = "目标品类",
+                            productType = "候选类型",
+                            useScenario = "核心场景",
+                        ),
+                    ),
+                    avoidRisks = listOf("不要只按关键词筛选，忽略真实使用约束"),
+                ),
+            ),
+            motionEnabled = false,
+            alreadyEntered = true,
+            onEntered = {},
+            onEdit = {},
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}

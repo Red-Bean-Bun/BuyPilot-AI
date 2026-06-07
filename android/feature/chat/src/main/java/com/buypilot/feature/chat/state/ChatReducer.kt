@@ -398,9 +398,6 @@ object ChatReducer {
         if (state.isActiveConvergenceTurn(envelope)) {
             return state
         }
-        if (payload.delta.isKnownCategoryMismatchedFollowup(state, envelope.turnId)) {
-            return state
-        }
         val rawMessageKey = payload.messageId.ifBlank { envelope.nodeId }
         val existing = state.nodes.filterIsInstance<AiStreamNode>()
             .firstOrNull {
@@ -778,9 +775,6 @@ object ChatReducer {
                     node.payload.criteria.category.normalizedCategory()
                         .takeIf { it.isNotBlank() }
                         ?.let { it !in deckCategories } == true
-                is AiStreamNode -> node.turnId == turnId &&
-                    node.content.hasBeautySpecificFollowupCopy() &&
-                    "美妆护肤" !in deckCategories
                 else -> false
             }
         }
@@ -798,30 +792,13 @@ object ChatReducer {
         return criteriaCategory !in deckCategories
     }
 
-    private fun String.isKnownCategoryMismatchedFollowup(
-        state: ChatUiState,
-        turnId: String,
-    ): Boolean {
-        val text = trim()
-        if (text.isBlank() || !text.hasBeautySpecificFollowupCopy()) return false
-        val deckCategories = state.turnDeckCategories(turnId)
-        if (deckCategories.isEmpty()) return false
-        return "美妆护肤" !in deckCategories
-    }
-
-    private fun String.hasBeautySpecificFollowupCopy(): Boolean =
-        contains("再温和一点") ||
-            contains("不要酒精") ||
-            contains("预算再低一点") ||
-            contains("预算低一点")
-
     private fun String.normalizedCategory(): String =
         trim()
 
     private fun ChatUiState.isDeckFullyHandled(deckId: String): Boolean {
         val products = productIdsForDeck(deckId)
         if (products.size <= 1) return false
-        val handledProductIds = productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
+        val handledProductIds = productSwipeStates[deckId]?.swipedProductIds.orEmpty()
         return products.all { it in handledProductIds }
     }
 

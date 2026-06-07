@@ -59,11 +59,13 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,6 +84,30 @@ import kotlinx.coroutines.delay
 
 private val MarkdownCompareMetricColumnWidth = 86.dp
 private val MarkdownCompareProductColumnWidth = 148.dp
+private val CompareProductFillerWordsRegex =
+    Regex("(?i)\\b(搭载|采用|支持|适合|专为|官方|新品|全新)\\b")
+private val CompareWhitespaceRegex = Regex("\\s+")
+private val CompareNameSplitRegex = Regex("[，,（(\\s]+")
+private val CompareNameTokenSplitRegex = Regex("[，,、（()\\s/｜|·\\-]+")
+private val ComparePriceNumberRegex = Regex("""\d+(?:\.\d+)?""")
+private val CompareAspectPhraseRegex = Regex("在\\s*方面")
+private val CompareAdvantagePhraseRegex = Regex("(方面)?更有优势")
+private val CompareBetterPhraseRegex = Regex("(方面)?表现更好")
+private val CompareGenericCapabilityRegex = Regex("(核心参数|参数|配置|表现|能力)")
+private val CompareTrailingPunctuationRegex = Regex("[。；;，,]+$")
+private val CompareQuestionLineRegex = Regex("(?i)Q[:：].*")
+private val CompareAnswerMarkerRegex = Regex("(?i)A[:：]")
+private val CompareDesignedForRegex = Regex("(是)?专为")
+private val CompareAudienceBuiltRegex = Regex("(爱好者|用户)打造")
+private val CompareMarketingVerbRegex = Regex("(带来|提供|支持|搭配|采用|载全新|全新)")
+private val ComparePunctuationSpacingRegex = Regex("[；;，,。]+")
+private val CompareCellPunctuationRegex = Regex("[；;，,、\\s]")
+private val CompareDimensionAdvantageRegex = Regex("(方面|维度)更有优势")
+private val CompareInAspectRegex = Regex("在(.{1,8})方面")
+private val CompareDedupCharsRegex = Regex("[^\\p{IsHan}A-Za-z0-9]")
+private val CompareDedupWordsRegex = Regex("(更有优势|更占优|更优|表现更好|方面|维度)")
+private val CompareAliasGenericWordsRegex = Regex("(?i)\\b(官方|新品|全新)\\b")
+private val CompareAliasSplitRegex = Regex("[，,（(]")
 
 @Composable
 internal fun CompareSelectionTray(
@@ -127,27 +153,27 @@ internal fun CompareSelectionTray(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "选择要对比的候选",
+                            text = stringResource(R.string.compare_picker_title),
                             color = BuyPilotColors.TextPrimary,
                             fontSize = BuyPilotType.LargeBody,
                             lineHeight = 20.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "选 2 到 4 款，结果由后端生成",
+                            text = stringResource(R.string.compare_picker_subtitle),
                             color = BuyPilotColors.TextMuted,
                             fontSize = BuyPilotType.Label,
                             lineHeight = 16.sp,
                         )
                     }
                     TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                        Text("取消", color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
+                        Text(stringResource(R.string.common_cancel), color = BuyPilotColors.TextSecondary, fontSize = BuyPilotType.Label)
                     }
                 }
 
                 if (deck == null || products.size < 2) {
                     Text(
-                        text = "这组候选暂时不可对比",
+                        text = stringResource(R.string.compare_picker_unavailable),
                         color = BuyPilotColors.TextMuted,
                         fontSize = BuyPilotType.Body,
                         lineHeight = 20.sp,
@@ -178,7 +204,7 @@ internal fun CompareSelectionTray(
                         }
                     }
                     QuietPrimaryButton(
-                        label = "开始对比",
+                        label = stringResource(R.string.compare_start),
                         enabled = selectedRanks.size >= 2,
                         modifier = Modifier.fillMaxWidth(),
                         onClick = { onStartCompare(selectedRanks) },
@@ -462,6 +488,7 @@ internal fun CompareSummaryCard(
     conclusionContent: String,
     conclusionDone: Boolean,
     backendBaseUrl: String,
+    modifier: Modifier = Modifier,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     onEntered: () -> Unit,
@@ -523,7 +550,7 @@ internal fun CompareSummaryCard(
         onEntered = onEntered,
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(13.dp),
         ) {
             if (winnerReason.isNotBlank()) {
@@ -859,13 +886,13 @@ private fun CompareModeTopBar(onDismiss: () -> Unit) {
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_arrow_back_24),
-                    contentDescription = "返回",
+                    contentDescription = stringResource(R.string.common_back),
                     tint = BuyPilotColors.PrimaryDark,
                     modifier = Modifier.size(22.dp),
                 )
             }
             Text(
-                text = "对比依据",
+                text = stringResource(R.string.compare_evidence_title),
                 color = BuyPilotColors.TextPrimary,
                 fontSize = BuyPilotType.Title,
                 lineHeight = 23.sp,
@@ -942,7 +969,7 @@ private fun CompareProductHeaderRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "商品 ${index + 1}",
+                    text = stringResource(R.string.compare_product_index, index + 1),
                     color = if (isWinner) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
                     fontSize = BuyPilotType.Tiny,
                     lineHeight = 13.sp,
@@ -965,7 +992,7 @@ private fun CompareVerdictBlock(payload: CompareCardPayload) {
         )
         payload.focus?.cleanCompareText()?.takeIf { it.isNotBlank() }?.let { focus ->
             Text(
-                text = "关注点：$focus",
+                text = stringResource(R.string.compare_focus_prefix, focus),
                 color = BuyPilotColors.TextMuted,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 18.sp,
@@ -1177,7 +1204,7 @@ private fun CompareScoreBar(
 private fun CompareAxisDetails(payload: CompareCardPayload) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(
-            text = "维度详情",
+            text = stringResource(R.string.compare_dimension_detail),
             color = BuyPilotColors.TextPrimary,
             fontSize = BuyPilotType.Title,
             lineHeight = 23.sp,
@@ -1223,7 +1250,7 @@ private fun CompareEvidenceSummary(payload: CompareCardPayload) {
     Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
         if (takeaways.isNotEmpty()) {
             CompareEvidenceTextGroup(
-                title = "关键差异",
+                title = stringResource(R.string.compare_key_differences),
                 items = takeaways,
             )
         }
@@ -1238,7 +1265,7 @@ private fun CompareAxisEvidenceList(payload: CompareCardPayload) {
     if (axes.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(
-            text = "维度依据",
+            text = stringResource(R.string.compare_dimension_evidence),
             color = BuyPilotColors.TextPrimary,
             fontSize = BuyPilotType.Title,
             lineHeight = 23.sp,
@@ -1343,7 +1370,7 @@ private fun CompareEvidenceTextGroup(
 @Composable
 private fun CompareEvidenceFooter() {
     Text(
-        text = "长证据、商品字段和检索片段用于支撑这些判断，外层表格与雷达只展示摘要。",
+        text = stringResource(R.string.compare_detail_explain),
         color = BuyPilotColors.TextMuted,
         fontSize = BuyPilotType.Label,
         lineHeight = 18.sp,
@@ -1378,7 +1405,7 @@ private fun CompareRiskSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            text = "风险提醒",
+            text = stringResource(R.string.compare_risk_title),
             color = BuyPilotColors.TextPrimary,
             fontSize = BuyPilotType.Title,
             lineHeight = 23.sp,
@@ -1540,19 +1567,31 @@ private fun ProductPayload.shortCompareName(): String {
     } else {
         clean
     }
-    val normalized = withoutBrand
-        .replace(Regex("(?i)\\b(5G|智能手机|手机|大屏|长续航|高性能|超大底|影像|影音|游戏|拍照|旗舰|新品|官方|全网通)\\b"), " ")
-        .replace(Regex("(?i)\\b(搭载|采用|支持|适合|专为|性能|续航|核心参数)\\b"), " ")
-        .replace(Regex("\\s+"), " ")
+    val knownFieldWords = listOfNotNull(brand, category, subCategory)
+        .flatMap { it.compareNameTokens() }
+        .filter { it.length >= 2 }
+        .distinctBy { it.lowercase() }
+    val withoutKnownFields = knownFieldWords.fold(withoutBrand) { text, word ->
+        text.replace(word, " ", ignoreCase = true)
+    }
+    val normalized = withoutKnownFields
+        .replace(CompareProductFillerWordsRegex, " ")
+        .replace(CompareWhitespaceRegex, " ")
         .trim()
         .ifBlank { clean }
     return normalized
-        .split(Regex("[，,（(\\s]+"))
+        .split(CompareNameSplitRegex)
         .take(3)
         .joinToString(" ")
         .take(18)
         .ifBlank { clean }
 }
+
+private fun String.compareNameTokens(): List<String> =
+    cleanCompareText()
+        .split(CompareNameTokenSplitRegex)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
 
 private fun String.isPriceAxis(): Boolean {
     val clean = cleanCompareText()
@@ -1563,7 +1602,7 @@ private fun String.isPriceAxis(): Boolean {
 
 private fun String.priceNumberOnly(): String {
     val clean = cleanCompareText()
-    val match = Regex("""\d+(?:\.\d+)?""").find(clean)
+    val match = ComparePriceNumberRegex.find(clean)
     return match?.value?.let { "$it 元" } ?: clean
 }
 
@@ -1574,12 +1613,12 @@ private fun String.shortCompareNote(axisName: String, productName: String): Stri
         .removePrefix(product)
         .replace(product, "")
         .replace(axis, "")
-        .replace(Regex("在\\s*方面"), "")
-        .replace(Regex("(方面)?更有优势"), "更优")
-        .replace(Regex("(方面)?表现更好"), "表现更好")
-        .replace(Regex("(核心参数|参数|配置|表现|能力)"), "")
-        .replace(Regex("[。；;，,]+$"), "")
-        .replace(Regex("\\s+"), " ")
+        .replace(CompareAspectPhraseRegex, "")
+        .replace(CompareAdvantagePhraseRegex, "更优")
+        .replace(CompareBetterPhraseRegex, "表现更好")
+        .replace(CompareGenericCapabilityRegex, "")
+        .replace(CompareTrailingPunctuationRegex, "")
+        .replace(CompareWhitespaceRegex, " ")
         .trim('：', ':', '，', ',', '。', ' ')
         .ifBlank { cleanCompareText() }
         .take(20)
@@ -1607,24 +1646,17 @@ private fun String.extractCompareReason(axisName: String, productName: String): 
         .replace(productName.cleanCompareText(), "")
         .replace(productName.shortCompareProductAlias(), "")
         .replace(axis, "")
-        .replace(Regex("(?i)Q[:：].*"), "")
-        .replace(Regex("(?i)A[:：]"), "")
-        .replace(Regex("(是)?专为"), "")
-        .replace(Regex("(爱好者|用户)打造"), "")
-        .replace(Regex("(带来|提供|支持|搭配|采用|载全新|全新)"), "")
-        .replace(Regex("[；;，,。]+"), " ")
-        .replace(Regex("\\s+"), " ")
+        .replace(CompareQuestionLineRegex, "")
+        .replace(CompareAnswerMarkerRegex, "")
+        .replace(CompareDesignedForRegex, "")
+        .replace(CompareAudienceBuiltRegex, "")
+        .replace(CompareMarketingVerbRegex, "")
+        .replace(ComparePunctuationSpacingRegex, " ")
+        .replace(CompareWhitespaceRegex, " ")
         .trim('：', ':', '，', ',', '。', '；', ';', ' ')
-    val compact = cleaned
-        .replace(Regex("(大屏)?5G性能旗舰"), "5G 性能")
-        .replace(Regex("影音游戏"), "影音游戏")
-        .trim()
+    val compact = cleaned.trim()
     return when {
         compact.length < 4 -> ""
-        compact.contains("影音游戏") -> "影音游戏更强"
-        compact.contains("A19", ignoreCase = true) -> "芯片性能更强"
-        compact.contains("续航") -> "续航更稳"
-        compact.contains("影像") || compact.contains("拍照") -> "影像更强"
         else -> compact.take(12).trim()
     }
 }
@@ -1634,7 +1666,7 @@ private fun String.cleanInlineCompareCell(productName: String): String {
     val alias = product.shortCompareProductAlias().ifBlank { product }
     return cleanCompareText()
         .replace(product, alias)
-        .replace(Regex("\\s+"), " ")
+        .replace(CompareWhitespaceRegex, " ")
         .trim('：', ':', '，', ',', '。', '；', ';', ' ')
         .let { text ->
             if (text.length > 46) text.take(44).trimEnd('，', ',', '。', '；', ';', ' ') else text
@@ -1645,7 +1677,7 @@ private fun String.isMeaningfulCompareCellText(axisName: String): Boolean {
     val clean = cleanCompareText()
     if (clean.length < 2) return false
     val axis = axisName.cleanCompareText()
-    val punctuationStripped = clean.replace(Regex("[；;，,、\\s]"), "")
+    val punctuationStripped = clean.replace(CompareCellPunctuationRegex, "")
     if (punctuationStripped.isBlank()) return false
     if (punctuationStripped == axis) return false
     val dimensionWords = listOf("核心参数", "性能", "续航", "价格", "影像", "屏幕", "风险", "口碑")
@@ -1663,33 +1695,11 @@ private fun Double.scoreKeyword(): String =
     }
 
 private fun Double.scorePhraseForAxis(axisName: String): String {
-    val axis = axisName.cleanCompareText()
-    val level = when {
-        this >= 86.0 -> "明显更强"
-        this >= 72.0 -> "表现更好"
-        this >= 58.0 -> "基础够用"
-        else -> "相对偏弱"
-    }
     return when {
-        axis.contains("续航") -> when {
-            this >= 86.0 -> "续航优势明显"
-            this >= 72.0 -> "续航更稳"
-            this >= 58.0 -> "续航够用"
-            else -> "续航偏弱"
-        }
-        axis.contains("性能") || axis.contains("核心") -> when {
-            this >= 86.0 -> "性能优势明显"
-            this >= 72.0 -> "性能更稳"
-            this >= 58.0 -> "性能够用"
-            else -> "性能偏弱"
-        }
-        axis.contains("影像") || axis.contains("拍照") -> when {
-            this >= 86.0 -> "影像优势明显"
-            this >= 72.0 -> "影像更稳"
-            this >= 58.0 -> "影像够用"
-            else -> "影像偏弱"
-        }
-        else -> level
+        this >= 86.0 -> "明显占优"
+        this >= 72.0 -> "表现更稳"
+        this >= 58.0 -> "基本够用"
+        else -> "相对偏弱"
     }
 }
 
@@ -1741,24 +1751,24 @@ private fun String.compactCompareSentence(productNames: List<String>): String {
         }
     }
     return text
-        .replace(Regex("(方面|维度)更有优势"), "更优")
-        .replace(Regex("在(.{1,8})方面"), "在$1")
-        .replace(Regex("\\s+"), " ")
+        .replace(CompareDimensionAdvantageRegex, "更优")
+        .replace(CompareInAspectRegex, "在$1")
+        .replace(CompareWhitespaceRegex, " ")
         .trim('：', ':', '，', ',', '。', ' ')
 }
 
 private fun String.compareDedupKey(): String =
     cleanCompareText()
-        .replace(Regex("[^\\p{IsHan}A-Za-z0-9]"), "")
-        .replace(Regex("(更有优势|更占优|更优|表现更好|方面|维度)"), "")
+        .replace(CompareDedupCharsRegex, "")
+        .replace(CompareDedupWordsRegex, "")
         .takeLast(18)
 
 private fun String.shortCompareProductAlias(): String {
     val clean = cleanCompareText()
     return clean
-        .replace(Regex("(?i)\\b(智能手机|手机|官方|全网通|新品)\\b"), " ")
-        .replace(Regex("\\s+"), " ")
-        .split(Regex("[，,（(]"))
+        .replace(CompareAliasGenericWordsRegex, " ")
+        .replace(CompareWhitespaceRegex, " ")
+        .split(CompareAliasSplitRegex)
         .firstOrNull()
         ?.trim()
         ?.take(12)
@@ -1798,3 +1808,62 @@ private fun String.userFacingCompareMode(): String =
         "decision" -> "结论后候选差异"
         else -> "当前候选对比"
     }
+
+@Preview(name = "Compare summary card")
+@Composable
+private fun CompareSummaryCardPreview() {
+    val products = listOf(
+        ProductPayload(
+            productId = "p_preview_a",
+            name = "候选商品 A",
+            price = 299.0,
+            brand = "品牌 A",
+            category = "目标品类",
+        ),
+        ProductPayload(
+            productId = "p_preview_b",
+            name = "候选商品 B",
+            price = 259.0,
+            brand = "品牌 B",
+            category = "目标品类",
+        ),
+    )
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        CompareSummaryCard(
+            payload = CompareCardPayload(
+                compareId = "preview_compare",
+                products = products,
+                axes = listOf(
+                    CompareAxisPayload(
+                        name = "场景匹配",
+                        values = listOf(
+                            CompareAxisValuePayload(productId = "p_preview_a", score = 88.0, detail = "更贴合核心场景"),
+                            CompareAxisValuePayload(productId = "p_preview_b", score = 74.0, detail = "基础需求可覆盖"),
+                        ),
+                    ),
+                    CompareAxisPayload(
+                        name = "预算友好",
+                        values = listOf(
+                            CompareAxisValuePayload(productId = "p_preview_a", score = 76.0, detail = "略高但理由更充分"),
+                            CompareAxisValuePayload(productId = "p_preview_b", score = 86.0, detail = "价格更稳"),
+                        ),
+                    ),
+                ),
+                winnerProductId = "p_preview_a",
+                winnerReason = "如果你更看重场景匹配，优先选 A；如果预算更敏感，B 更稳。",
+                tradeoffs = listOf("场景匹配：A 更强", "预算友好：B 更稳"),
+                confidence = "medium",
+            ),
+            narrationContent = "这两款不是简单谁更便宜谁更好，关键要看核心场景和预算取舍。",
+            narrationDone = true,
+            conclusionContent = "收束建议：重场景匹配选 A，重预算控制选 B。",
+            conclusionDone = true,
+            backendBaseUrl = "",
+            motionEnabled = false,
+            alreadyEntered = true,
+            onEntered = {},
+            onOpenDetail = {},
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}

@@ -47,6 +47,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -118,7 +119,11 @@ fun ProductSwipeModeScreen(
     Surface(color = BuyPilotColors.SurfaceBg, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ProductSwipeTopBar(
-                title = if (products.size > 1) "商品详情" else "唯一候选",
+                title = if (products.size > 1) {
+                    stringResource(R.string.product_detail_title)
+                } else {
+                    stringResource(R.string.product_detail_single_title)
+                },
                 onBack = onBack,
                 canUndo = swipeState.undoStack.isNotEmpty(),
                 onUndo = {
@@ -171,12 +176,13 @@ fun ProductSwipeModeScreen(
 @Composable
 private fun ProductSwipeTopBar(
     title: String,
+    modifier: Modifier = Modifier,
     onBack: () -> Unit,
     canUndo: Boolean,
     onUndo: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(BuyPilotColors.SurfaceCard)
             .statusBarsPadding(),
@@ -185,10 +191,10 @@ private fun ProductSwipeTopBar(
             title = title,
             titleCentered = true,
             navigationIcon = R.drawable.ic_arrow_back_24,
-            navigationDescription = "返回",
+            navigationDescription = stringResource(R.string.common_back),
             navigationTint = BuyPilotColors.PrimaryDark,
             actionIcon = R.drawable.ic_history_24,
-            actionDescription = "撤销上一次选择",
+            actionDescription = stringResource(R.string.swipe_undo_desc),
             actionTint = if (canUndo) BuyPilotColors.TextSecondary.copy(alpha = 0.72f) else BuyPilotColors.TextMuted,
             actionEnabled = canUndo,
             onNavigationClick = onBack,
@@ -221,7 +227,7 @@ private fun ProductSingleCandidateModeContent(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "这轮只有一个匹配商品，不需要左右滑。先看详情，最终建议会判断它是否真的适合你。",
+                text = stringResource(R.string.swipe_single_candidate_body),
                 color = BuyPilotColors.TextSecondary,
                 fontSize = BuyPilotType.LargeBody,
                 lineHeight = 24.sp,
@@ -238,14 +244,14 @@ private fun ProductSingleCandidateModeContent(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             CandidateActionButton(
-                label = "查看详情",
+                label = stringResource(R.string.product_view_detail),
                 leadingIconRes = R.drawable.ic_article_24,
                 primary = false,
                 modifier = Modifier.weight(1f),
                 onClick = onOpenDetail,
             )
             CandidateActionButton(
-                label = "感兴趣",
+                label = stringResource(R.string.feedback_like_desc),
                 leadingIconRes = R.drawable.ic_favorite_24,
                 primary = true,
                 modifier = Modifier.weight(1f),
@@ -368,7 +374,7 @@ private fun ProductSwipeModeContent(
         ) {
             SwipeRoundButton(
                 iconRes = R.drawable.ic_close_24,
-                contentDescription = "不感兴趣",
+                contentDescription = stringResource(R.string.feedback_dislike_desc),
                 active = false,
                 enabled = hasActiveCard,
                 onClick = { cardStackBridge.swipe(Direction.Left) },
@@ -376,7 +382,7 @@ private fun ProductSwipeModeContent(
             Spacer(Modifier.width(22.dp))
             SwipeRoundButton(
                 iconRes = R.drawable.ic_favorite_24,
-                contentDescription = "感兴趣",
+                contentDescription = stringResource(R.string.feedback_like_desc),
                 active = true,
                 enabled = hasActiveCard,
                 onClick = { cardStackBridge.swipe(Direction.Right) },
@@ -390,7 +396,7 @@ internal fun isProductDeckFullyHandled(
     swipeState: ProductSwipeState?,
 ): Boolean {
     if (products.size <= 1) return false
-    val handledProductIds = swipeState?.swipedProductIds.orEmpty().toSet()
+    val handledProductIds = swipeState?.swipedProductIds.orEmpty()
     return products.all { it.product.productId in handledProductIds }
 }
 
@@ -447,6 +453,14 @@ private fun ProductCardStackView(
     val textMutedColor = android.graphics.Color.rgb(138, 145, 159)
     val tagBgColor = android.graphics.Color.rgb(242, 247, 250)
     val tagBorderColor = android.graphics.Color.rgb(220, 232, 240)
+    val leftOverlayLabel = stringResource(R.string.swipe_overlay_dislike)
+    val rightOverlayLabel = stringResource(R.string.swipe_overlay_like)
+    val reasonLabel = stringResource(R.string.product_recommend_reason)
+    val targetUserLabel = stringResource(R.string.detail_label_target_user)
+    val matchTagsLabel = stringResource(R.string.detail_label_match_tags)
+    val scenarioLabel = stringResource(R.string.detail_label_scenario)
+    val latestOnSwiped by rememberUpdatedState(onSwiped)
+    val latestOnStackPositionChanged by rememberUpdatedState(onStackPositionChanged)
 
     AndroidView(
         modifier = modifier,
@@ -464,21 +478,27 @@ private fun ProductCardStackView(
                 textMutedColor = textMutedColor,
                 tagBgColor = tagBgColor,
                 tagBorderColor = tagBorderColor,
+                leftOverlayLabel = leftOverlayLabel,
+                rightOverlayLabel = rightOverlayLabel,
+                reasonLabel = reasonLabel,
+                targetUserLabel = targetUserLabel,
+                matchTagsLabel = matchTagsLabel,
+                scenarioLabel = scenarioLabel,
             )
             val listener = object : CardStackListener {
                 override fun onCardDragging(direction: Direction, ratio: Float) = Unit
                 override fun onCardSwiped(direction: Direction) {
                     val topPosition = bridge.manager?.getTopPosition() ?: return
                     val position = topPosition - 1
-                    onStackPositionChanged(topPosition)
-                    onSwiped(direction, position)
+                    latestOnStackPositionChanged(topPosition)
+                    latestOnSwiped(direction, position)
                 }
                 override fun onCardRewound() {
-                    onStackPositionChanged(bridge.manager?.getTopPosition() ?: 0)
+                    latestOnStackPositionChanged(bridge.manager?.getTopPosition() ?: 0)
                 }
                 override fun onCardCanceled() = Unit
                 override fun onCardAppeared(view: View, position: Int) {
-                    onStackPositionChanged(position)
+                    latestOnStackPositionChanged(position)
                 }
                 override fun onCardDisappeared(view: View, position: Int) = Unit
             }
@@ -526,7 +546,7 @@ private fun ProductCardStackView(
             if (adapter.productIds != nextProductIds) {
                 val changed = adapter.submit(products)
                 stackView.scrollToPosition(0)
-                if (changed) onStackPositionChanged(0)
+                if (changed) latestOnStackPositionChanged(0)
             } else {
                 adapter.submit(products)
             }
@@ -549,6 +569,12 @@ private class ProductCardStackAdapter(
     private val textMutedColor: Int,
     private val tagBgColor: Int,
     private val tagBorderColor: Int,
+    private val leftOverlayLabel: String,
+    private val rightOverlayLabel: String,
+    private val reasonLabel: String,
+    private val targetUserLabel: String,
+    private val matchTagsLabel: String,
+    private val scenarioLabel: String,
 ) : RecyclerView.Adapter<ProductCardStackAdapter.ProductCardViewHolder>() {
     private val items = mutableListOf<ProductCardPayload>()
     val productIds: List<String>
@@ -767,7 +793,7 @@ private class ProductCardStackAdapter(
         )
 
         val reasonLabel = TextView(context).apply {
-            text = "推荐理由"
+            text = this@ProductCardStackAdapter.reasonLabel
             includeFontPadding = false
             setTextColor(primaryDarkColor)
             textSize = 11f
@@ -867,6 +893,9 @@ private class ProductCardStackAdapter(
             payload = payload,
             backendBaseUrl = backendBaseUrl,
             positionLabel = "${position + 1} / ${items.size}",
+            targetUserLabel = targetUserLabel,
+            matchTagsLabel = matchTagsLabel,
+            scenarioLabel = scenarioLabel,
         )
     }
 
@@ -912,13 +941,13 @@ private class ProductCardStackAdapter(
             }
         return overlay(
             id = com.yuyakaido.android.cardstackview.R.id.left_overlay,
-            label = "不合适",
+            label = leftOverlayLabel,
             color = textPrimaryColor,
             gravity = android.view.Gravity.TOP or android.view.Gravity.END,
             rotationDegrees = 8f,
         ) to overlay(
             id = com.yuyakaido.android.cardstackview.R.id.right_overlay,
-            label = "喜欢",
+            label = rightOverlayLabel,
             color = primaryColor,
             gravity = android.view.Gravity.TOP or android.view.Gravity.START,
             rotationDegrees = -8f,
@@ -949,6 +978,9 @@ private class ProductCardStackAdapter(
             payload: ProductCardPayload,
             backendBaseUrl: String,
             positionLabel: String,
+            targetUserLabel: String,
+            matchTagsLabel: String,
+            scenarioLabel: String,
         ) {
             val product = payload.product
             itemView.setOnClickListener(null)
@@ -984,9 +1016,9 @@ private class ProductCardStackAdapter(
             }
             detailRows.removeAllViews()
             val detailItems = listOf(
-                "适用对象" to product.skinTypeMatch.userFacingJoinedOrFallback(),
-                "匹配标签" to product.ingredientTags.userFacingJoinedOrFallback(),
-                "使用场景" to product.useScenario.userFacingJoinedOrFallback(),
+                targetUserLabel to product.skinTypeMatch.userFacingJoinedOrFallback(),
+                matchTagsLabel to product.ingredientTags.userFacingJoinedOrFallback(),
+                scenarioLabel to product.useScenario.userFacingJoinedOrFallback(),
             ).filter { (_, value) -> value.isNotBlank() }
             detailRows.visibility = if (detailItems.isEmpty()) View.GONE else View.VISIBLE
             detailItems.take(3).forEach { (label, value) ->

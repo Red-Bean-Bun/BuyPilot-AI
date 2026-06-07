@@ -79,7 +79,6 @@ private val CART_STOP_WORDS = setOf(
     "购物车",
     "商品",
     "产品",
-    "手机",
     "这个",
     "这件",
     "这款",
@@ -235,7 +234,6 @@ private fun String.extractCartTargetQuery(): String =
         .replace("这款", " ")
         .replace("商品", " ")
         .replace("产品", " ")
-        .replace("手机", " ")
         .replace(Regex("""数量\s*\d+\s*件?"""), " ")
         .cartMatchTokens()
         .joinToString(" ")
@@ -312,7 +310,7 @@ class ChatViewModel @Inject constructor(
             .flowOn(dispatchers.default)
             .stateIn(
                 scope = viewModelScope,
-                started = SharingStarted.Eagerly,
+                started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = _uiState.value.toTimelinePresentationState(),
             )
 
@@ -1619,7 +1617,7 @@ class ChatViewModel @Inject constructor(
             .orEmpty()
             .mapNotNull { it.product.productId.takeIf(String::isNotBlank) }
         if (products.size < 2) return false
-        val handledProductIds = productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
+        val handledProductIds = productSwipeStates[deckId]?.swipedProductIds.orEmpty()
         return products.all { it in handledProductIds }
     }
 

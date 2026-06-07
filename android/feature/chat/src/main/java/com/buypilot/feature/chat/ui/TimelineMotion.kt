@@ -1,6 +1,7 @@
 package com.buypilot.feature.chat.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -49,11 +50,13 @@ internal fun segmentProgress(value: Float, start: Float, end: Float): Float =
 @Composable
 internal fun StructuredCardMotion(
     key: String,
+    modifier: Modifier = Modifier,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     durationMillis: Int,
     initialOffsetY: Dp,
     initialScale: Float,
+    animationSpec: AnimationSpec<Float> = tween(durationMillis = durationMillis, easing = PremiumRevealEase),
     onEntered: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -70,13 +73,13 @@ internal fun StructuredCardMotion(
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = durationMillis, easing = PremiumRevealEase),
+            animationSpec = animationSpec,
         )
         latestOnEntered()
     }
 
     Box(
-        modifier = Modifier.graphicsLayer {
+        modifier = modifier.graphicsLayer {
             val t = progress.value
             alpha = t
             translationY = with(density) { initialOffsetY.toPx() } * (1f - t)
@@ -91,11 +94,17 @@ internal fun StructuredCardMotion(
 @Composable
 internal fun StaggeredRevealMotion(
     key: String,
+    modifier: Modifier = Modifier,
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     delayMillis: Int,
     durationMillis: Int,
     initialOffsetY: Dp,
+    animationSpec: AnimationSpec<Float> = tween(
+        durationMillis = durationMillis,
+        delayMillis = delayMillis,
+        easing = PremiumRevealEase,
+    ),
     content: @Composable () -> Unit,
 ) {
     val progress = remember(key) { Animatable(if (!motionEnabled || alreadyEntered) 1f else 0f) }
@@ -109,16 +118,12 @@ internal fun StaggeredRevealMotion(
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(
-                durationMillis = durationMillis,
-                delayMillis = delayMillis,
-                easing = PremiumRevealEase,
-            ),
+            animationSpec = animationSpec,
         )
     }
 
     Box(
-        modifier = Modifier.graphicsLayer {
+        modifier = modifier.graphicsLayer {
             val t = progress.value
             alpha = t
             translationY = with(density) { initialOffsetY.toPx() } * (1f - t)
@@ -159,12 +164,13 @@ internal fun rememberProductDeckArrivalProgressProvider(
 @Composable
 internal fun ProductDeckArrivalMotion(
     arrivalProgress: () -> Float,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(218.dp),
         contentAlignment = Alignment.TopStart,

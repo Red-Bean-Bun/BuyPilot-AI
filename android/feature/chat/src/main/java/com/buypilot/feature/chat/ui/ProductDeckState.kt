@@ -73,7 +73,7 @@ internal fun preferredProductCarouselPage(
     swipeState: ProductSwipeState?,
 ): Int {
     if (products.isEmpty()) return 0
-    val handledProductIds = swipeState?.swipedProductIds.orEmpty().toSet()
+    val handledProductIds = swipeState?.swipedProductIds.orEmpty()
     val preferredProductId = swipeState?.currentProductId
         ?.takeIf { id ->
             id !in handledProductIds &&

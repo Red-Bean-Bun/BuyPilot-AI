@@ -1624,38 +1624,38 @@ class ChatReducerTest {
     }
 
     @Test
-    fun mismatchedBeautyCriteriaAndFollowupAreRemovedFromDigitalProductTurn() {
-        val withBeautyCriteria = ChatReducer.reduce(
+    fun mismatchedCriteriaIsRemovedWithoutDroppingAssistantText() {
+        val withMismatchedCriteria = ChatReducer.reduce(
             ChatUiState(),
             criteria(
                 nodeId = "criteria_bad",
-                turnId = "turn_phone",
-                category = "美妆护肤",
+                turnId = "turn_category_mismatch",
+                category = "品类A",
             ),
         )
-        val withBeautyFollowup = ChatReducer.reduce(
-            withBeautyCriteria,
+        val withAssistantText = ChatReducer.reduce(
+            withMismatchedCriteria,
             envelope(
                 event = AgentEventType.TextDelta,
-                nodeId = "followup_turn_phone",
-                turnId = "turn_phone",
+                nodeId = "followup_turn_category_mismatch",
+                turnId = "turn_category_mismatch",
                 payload = TextDeltaPayload(
-                    messageId = "followup_turn_phone",
-                    delta = "你先看看这几款候选。如果想调整筛选范围，可以直接说「再温和一点」「不要酒精」「预算再低一点」，也可以点筛选卡修改。",
+                    messageId = "followup_turn_category_mismatch",
+                    delta = "我先保留这段真实返回的说明文字，后续只根据结构化字段修正错配卡片。",
                     done = true,
                 ),
             ),
         )
 
-        val withDigitalProduct = ChatReducer.reduce(
-            withBeautyFollowup,
-            product(rank = 1, productId = "p_phone_1", turnId = "turn_phone", category = "数码电子"),
+        val withProduct = ChatReducer.reduce(
+            withAssistantText,
+            product(rank = 1, productId = "p_category_b_1", turnId = "turn_category_mismatch", category = "品类B"),
         )
 
-        assertTrue(withBeautyFollowup.nodes.any { it is CriteriaNode && it.key == "criteria_bad" })
-        assertTrue(withBeautyFollowup.nodes.any { it is AiStreamNode && it.key == "followup_turn_phone" })
-        assertFalse(withDigitalProduct.nodes.any { it is CriteriaNode && it.key == "criteria_bad" })
-        assertFalse(withDigitalProduct.nodes.any { it is AiStreamNode && it.key == "followup_turn_phone" })
+        assertTrue(withAssistantText.nodes.any { it is CriteriaNode && it.key == "criteria_bad" })
+        assertTrue(withAssistantText.nodes.any { it is AiStreamNode && it.key == "followup_turn_category_mismatch" })
+        assertFalse(withProduct.nodes.any { it is CriteriaNode && it.key == "criteria_bad" })
+        assertTrue(withProduct.nodes.any { it is AiStreamNode && it.key == "followup_turn_category_mismatch" })
     }
 
     @Test
