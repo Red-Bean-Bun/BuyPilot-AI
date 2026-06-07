@@ -46,9 +46,13 @@ private const val TextRestingScale = 0.9f
 private const val SplashHoldMillis = 2850L
 
 @Composable
-fun BuyPilotStartupHost(showStartupSplash: Boolean = true) {
+fun BuyPilotStartupHost(
+    showStartupSplash: Boolean = true,
+    onHomeReadyForDraw: () -> Unit = {},
+) {
     var showSplash by rememberSaveable { mutableStateOf(showStartupSplash) }
     var loadHome by rememberSaveable { mutableStateOf(!showStartupSplash) }
+    val currentOnHomeReadyForDraw by rememberUpdatedState(onHomeReadyForDraw)
     val density = LocalDensity.current
     val appAlpha by animateFloatAsState(
         targetValue = if (showSplash) 0.92f else 1f,
@@ -99,9 +103,18 @@ fun BuyPilotStartupHost(showStartupSplash: Boolean = true) {
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(showStartupSplash) {
+        if (!showStartupSplash) {
+            showSplash = false
+            loadHome = true
+            return@LaunchedEffect
+        }
         delay(if (showStartupSplash) 180 else 0)
         loadHome = true
+    }
+
+    LaunchedEffect(loadHome) {
+        if (loadHome) currentOnHomeReadyForDraw()
     }
 }
 

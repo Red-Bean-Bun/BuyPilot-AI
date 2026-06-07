@@ -77,6 +77,22 @@ private val InternalDebugValueRegex = Regex(
     """(?i)\b(?:not_interested|view_detail|open_evidence|criteria_patch|add_to_cart|show_evidence)\b""",
 )
 private val InternalIdTokenRegex = Regex("""(?i)\b(?:pg|p)_[a-z0-9_-]*\b""")
+private val MarkdownHorizontalRuleLineRegex = Regex("""^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""")
+private val MarkdownHeadingLineRegex = Regex("""^\s{0,3}#{1,6}\s+""")
+private val MarkdownHeadingLineMultilineRegex = Regex("""(?m)^\s{0,3}#{1,6}\s+""")
+private val MarkdownHorizontalRuleMultilineRegex = Regex("""(?m)^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""")
+private val MarkdownListLineRegex = Regex("""(?m)^\s*(?:[-*+]|\d+\.)\s+""")
+private val MarkdownLinkLineRegex = Regex("""\[[^\]]+]\([^)]+\)""")
+private val MarkdownBoldInlineRegex = Regex("""(?<!\*)\*\*[^*\n]+\*\*(?!\*)""")
+private val MarkdownCodeInlineRegex = Regex("""(?<!`)`[^`\n]+`(?!`)""")
+private val MarkdownEmptyParenRegex = Regex("""[（(]\s*[，,、;；:\s]*[）)]""")
+private val MarkdownSpaceBeforePunctuationRegex = Regex("""\s+([，。！？；：、,.!?;:])""")
+private val MarkdownSpaceAfterOpenParenRegex = Regex("""([（(])\s+""")
+private val MarkdownSpaceBeforeCloseParenRegex = Regex("""\s+([）)])""")
+private val MarkdownRepeatedHorizontalSpaceRegex = Regex("""[ \t]{2,}""")
+private val MarkdownEmptyPunctuationLineRegex = Regex("""(?m)^\s*[-•、,，;；:：]+\s*$""")
+private val MarkdownExcessBlankLinesRegex = Regex("""\n{3,}""")
+private val MarkdownTrailingSpacesBeforeNewlineRegex = Regex("""[ \t]+\n""")
 
 private data class MarkdownTextRenderTag(
     val contentHash: Int,
@@ -95,11 +111,11 @@ private fun String.withoutStreamingMarkdownChrome(): String =
     withoutMarkdownBlockQuoteMarkers()
         .lineSequence()
         .joinToString("\n") { line ->
-            if (Regex("""^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""").matches(line)) {
+            if (MarkdownHorizontalRuleLineRegex.matches(line)) {
                 "────────────"
             } else {
                 line
-                    .replace(Regex("""^\s{0,3}#{1,6}\s+"""), "")
+                    .replace(MarkdownHeadingLineRegex, "")
                     .replace("**", "")
                     .replace("`", "")
             }
@@ -110,13 +126,13 @@ internal fun String.withoutInternalDebugTokens(): String =
         .replace(InternalIdTokenRegex, "")
         .replace(InternalDebugValueRegex, "")
         .replace(InternalDebugLabelRegex, "")
-        .replace(Regex("""[（(]\s*[，,、;；:\s]*[）)]"""), "")
-        .replace(Regex("""\s+([，。！？；：、,.!?;:])"""), "$1")
-        .replace(Regex("""([（(])\s+"""), "$1")
-        .replace(Regex("""\s+([）)])"""), "$1")
-        .replace(Regex("""[ \t]{2,}"""), " ")
-        .replace(Regex("""(?m)^\s*[-•、,，;；:：]+\s*$"""), "")
-        .replace(Regex("""\n{3,}"""), "\n\n")
+        .replace(MarkdownEmptyParenRegex, "")
+        .replace(MarkdownSpaceBeforePunctuationRegex, "$1")
+        .replace(MarkdownSpaceAfterOpenParenRegex, "$1")
+        .replace(MarkdownSpaceBeforeCloseParenRegex, "$1")
+        .replace(MarkdownRepeatedHorizontalSpaceRegex, " ")
+        .replace(MarkdownEmptyPunctuationLineRegex, "")
+        .replace(MarkdownExcessBlankLinesRegex, "\n\n")
         .trim()
 
 internal fun String.withoutMarkdownMarkup(): String {
@@ -177,8 +193,8 @@ internal fun String.withoutMarkdownMarkup(): String {
     }
     PlainMarkdownParser.parse(source).accept(visitor)
     return builder.toString()
-        .replace(Regex("""[ \t]+\n"""), "\n")
-        .replace(Regex("""\n{3,}"""), "\n\n")
+        .replace(MarkdownTrailingSpacesBeforeNewlineRegex, "\n")
+        .replace(MarkdownExcessBlankLinesRegex, "\n\n")
         .trim()
 }
 
@@ -189,12 +205,12 @@ internal fun String.needsFinalMarkdownRender(): Boolean {
     val source = trim()
     if (source.isBlank()) return false
     return source.contains("```") ||
-        Regex("""(?m)^\s{0,3}#{1,6}\s+""").containsMatchIn(source) ||
-        Regex("""(?m)^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$""").containsMatchIn(source) ||
-        Regex("""(?m)^\s*(?:[-*+]|\d+\.)\s+""").containsMatchIn(source) ||
-        Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
-        Regex("""(?<!\*)\*\*[^*\n]+\*\*(?!\*)""").containsMatchIn(source) ||
-        Regex("""(?<!`)`[^`\n]+`(?!`)""").containsMatchIn(source) ||
+        MarkdownHeadingLineMultilineRegex.containsMatchIn(source) ||
+        MarkdownHorizontalRuleMultilineRegex.containsMatchIn(source) ||
+        MarkdownListLineRegex.containsMatchIn(source) ||
+        MarkdownLinkLineRegex.containsMatchIn(source) ||
+        MarkdownBoldInlineRegex.containsMatchIn(source) ||
+        MarkdownCodeInlineRegex.containsMatchIn(source) ||
         source.hasCompletedMarkdownTable()
 }
 
@@ -203,7 +219,7 @@ internal fun String.requiresAndroidMarkdownRender(): Boolean {
     if (source.isBlank()) return false
     return source.contains("```") ||
         source.contains("<") ||
-        Regex("""\[[^\]]+]\([^)]+\)""").containsMatchIn(source) ||
+        MarkdownLinkLineRegex.containsMatchIn(source) ||
         source.hasCompletedMarkdownTable()
 }
 
@@ -441,6 +457,7 @@ private fun Char.isTypingPausePunctuation(): Boolean =
 @Composable
 internal fun AssistantText(
     content: String,
+    modifier: Modifier = Modifier,
     style: TextStyle = TextStyle(
         color = BuyPilotColors.TextPrimary,
         fontSize = BuyPilotType.LargeBody,
@@ -450,16 +467,17 @@ internal fun AssistantText(
     if (content.isBlank()) return
     val renderMarkdown = remember(content) { content.needsFinalMarkdownRender() }
     if (!renderMarkdown) {
-        PlainStreamingTextBlock(content = content, style = style)
+        PlainStreamingTextBlock(content = content, modifier = modifier, style = style)
         return
     }
     val useAndroidMarkdown = remember(content) { content.requiresAndroidMarkdownRender() }
     if (!useAndroidMarkdown) {
-        NativeMarkdownTextBlock(content = content, style = style)
+        NativeMarkdownTextBlock(content = content, modifier = modifier, style = style)
         return
     }
     MarkdownTextBlock(
         content = content,
+        modifier = modifier,
         style = style,
     )
 }
@@ -468,6 +486,7 @@ internal fun AssistantText(
 internal fun StreamingAssistantText(
     nodeKey: String,
     content: String,
+    modifier: Modifier = Modifier,
     done: Boolean = false,
     revealState: TextRevealProgress? = null,
     alreadyCompleted: Boolean = false,
@@ -505,9 +524,9 @@ internal fun StreamingAssistantText(
             }
         }
         if (shouldKeepPlainTextRendererAfterStreaming(content = content, hasSeenLiveStream = hasSeenLiveStream)) {
-            PlainStreamingTextBlock(content = content, style = style)
+            PlainStreamingTextBlock(content = content, modifier = modifier, style = style)
         } else {
-            AssistantText(content = content, style = style)
+            AssistantText(content = content, modifier = modifier, style = style)
         }
         return
     }
@@ -593,14 +612,14 @@ internal fun StreamingAssistantText(
     if (streamUsesNativeMarkdown) {
         NativeMarkdownTextBlock(
             content = visibleContent,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             style = style,
         )
         return
     }
     PlainStreamingTextBlock(
         content = visibleContent,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         style = style,
     )
 }
@@ -631,8 +650,34 @@ private fun Int?.orZero(): Int = this ?: 0
 @Composable
 internal fun StreamingAssistantText(
     content: String,
+    modifier: Modifier = Modifier,
 ) {
-    StreamingAssistantText(nodeKey = content, content = content, done = true)
+    StreamingAssistantText(nodeKey = content, content = content, modifier = modifier, done = true)
+}
+
+@Preview(name = "Assistant text plain")
+@Composable
+private fun AssistantTextPreview() {
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        AssistantText(
+            content = "我会先判断这个场景的购买难点，再给出更稳的选择方向。",
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
+@Preview(name = "Streaming assistant text")
+@Composable
+private fun StreamingAssistantTextPreview() {
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        StreamingAssistantText(
+            nodeKey = "preview_streaming_text",
+            content = "如果你更看重稳妥和低踩雷，优先选口碑更稳定、规格不强依赖个人偏好的产品。",
+            modifier = Modifier.padding(16.dp),
+            done = true,
+            animateInitialCompleted = true,
+        )
+    }
 }
 
 @Composable

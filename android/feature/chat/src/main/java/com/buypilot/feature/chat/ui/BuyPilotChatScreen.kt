@@ -18,6 +18,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -126,6 +127,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -163,11 +165,12 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -277,6 +280,12 @@ private const val DecisionReasonBaseDelayMs = 240
 private const val DecisionReasonStaggerMs = 120
 private const val MaxCompareSelectionCount = 4
 private val ProductDeckFooterHeight = 46.dp
+private val DecisionPriceLabelRegex = Regex("""^([¥￥$]?)(\d+(?:\.\d+)?)(.*)$""")
+private val DecisionLeadingDividerRegex = Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*""")
+private val DecisionCompareWhitespaceRegex = Regex("\\s+")
+private val DecisionCompareSplitRegex = Regex("[，,（(]")
+private val TechnicalPathHintRegex = Regex("""\b(?:api|v\d+|chat|stream)\b""")
+private val DecisionRiskLeadingPunctuationRegex = Regex("""^[：:，,、\s]+""")
 
 private data class PendingClarificationAnswer(
     val nodeKey: String,
@@ -285,6 +294,68 @@ private data class PendingClarificationAnswer(
     val awaitsFlight: Boolean = false,
     val previousUserMessageKey: String? = null,
     val flightId: Int? = null,
+)
+
+private val ChatImageAttachmentStateSaver = Saver<ChatImageAttachmentState?, List<Any?>>(
+    save = { attachment ->
+        attachment?.let {
+            listOf(
+                it.localUri,
+                it.imageUrl,
+                it.fileName,
+                it.mimeType,
+                it.width,
+                it.height,
+                it.isUploading,
+                it.error,
+            )
+        }
+    },
+    restore = { saved ->
+        if (saved.size < 8) {
+            null
+        } else {
+            ChatImageAttachmentState(
+                localUri = saved[0] as? String ?: "",
+                imageUrl = saved[1] as? String,
+                fileName = saved[2] as? String ?: "",
+                mimeType = saved[3] as? String ?: "",
+                width = saved[4] as? Int,
+                height = saved[5] as? Int,
+                isUploading = saved[6] as? Boolean ?: false,
+                error = saved[7] as? String,
+            )
+        }
+    },
+)
+
+private val PendingClarificationAnswerSaver = Saver<PendingClarificationAnswer?, List<Any?>>(
+    save = { pending ->
+        pending?.let {
+            listOf(
+                it.nodeKey,
+                it.message,
+                it.selectedOption,
+                it.awaitsFlight,
+                it.previousUserMessageKey,
+                it.flightId,
+            )
+        }
+    },
+    restore = { saved ->
+        if (saved.size < 6) {
+            null
+        } else {
+            PendingClarificationAnswer(
+                nodeKey = saved[0] as? String ?: "",
+                message = saved[1] as? String ?: "",
+                selectedOption = saved[2] as? String,
+                awaitsFlight = saved[3] as? Boolean ?: false,
+                previousUserMessageKey = saved[4] as? String,
+                flightId = saved[5] as? Int,
+            )
+        }
+    },
 )
 
 internal data class ClarificationChipSnapshot(
@@ -296,6 +367,26 @@ private data class ClarificationManualSource(
     val nodeKey: String,
     val snapshot: ClarificationChipSnapshot,
 )
+
+@Stable
+private class ChatScreenTransientState {
+    var timelineExternalRouteFreezeRequestId by mutableIntStateOf(0)
+    var pendingProductDetailAfterTimelineFreeze by mutableStateOf<PendingProductDetailRoute?>(null)
+    var sheetExiting by mutableStateOf(false)
+    var sheetTransitionId by mutableIntStateOf(0)
+    var dismissingClarificationKey by mutableStateOf<String?>(null)
+    var visualActiveTurnKeys by mutableStateOf(emptySet<String>())
+    var userBubbleSnapshots by mutableStateOf(emptyMap<String, ClarificationChipSnapshot>())
+    var clarificationManualSource by mutableStateOf<ClarificationManualSource?>(null)
+    var keyboardFlightSnapshot by mutableStateOf<ClarificationChipSnapshot?>(null)
+    var compareDetailPayload by mutableStateOf<CompareCardPayload?>(null)
+    var inlineComparePayloadByDeckId by mutableStateOf(emptyMap<String, CompareCardPayload>())
+    var flightSequence by mutableIntStateOf(0)
+    var rootSize by mutableStateOf(IntSize.Zero)
+    var timelineTopPx by mutableFloatStateOf(0f)
+    var composerHeightPx by mutableIntStateOf(0)
+    var composerFocused by mutableStateOf(false)
+}
 
 internal fun LayoutCoordinates.toClarificationSnapshot(): ClarificationChipSnapshot {
     val bounds = boundsInRoot()
@@ -318,6 +409,51 @@ private data class ClarificationFlight(
     val messageSent: Boolean = false,
 )
 
+private val ClarificationFlightSaver = Saver<ClarificationFlight?, List<Any?>>(
+    save = { flight ->
+        flight?.let {
+            listOf(
+                it.id,
+                it.nodeKey,
+                it.option,
+                it.message,
+                it.startPosition.x,
+                it.startPosition.y,
+                it.startSize.width,
+                it.startSize.height,
+                it.previousUserMessageKey,
+                it.fromKeyboard,
+                it.targetMessageKey,
+                it.messageSent,
+            )
+        }
+    },
+    restore = { saved ->
+        if (saved.size < 12) {
+            null
+        } else {
+            ClarificationFlight(
+                id = saved[0] as? Int ?: 0,
+                nodeKey = saved[1] as? String ?: "",
+                option = saved[2] as? String ?: "",
+                message = saved[3] as? String ?: "",
+                startPosition = Offset(
+                    x = saved[4] as? Float ?: 0f,
+                    y = saved[5] as? Float ?: 0f,
+                ),
+                startSize = Size(
+                    width = saved[6] as? Float ?: 0f,
+                    height = saved[7] as? Float ?: 0f,
+                ),
+                previousUserMessageKey = saved[8] as? String,
+                fromKeyboard = saved[9] as? Boolean ?: false,
+                targetMessageKey = saved[10] as? String,
+                messageSent = saved[11] as? Boolean ?: false,
+            )
+        }
+    },
+)
+
 private data class DecisionStatusBadge(
     val label: String,
     val accent: Color,
@@ -325,11 +461,22 @@ private data class DecisionStatusBadge(
     val showCardWhenEmpty: Boolean = false,
 )
 
+private data class ProductDetailAttributeLabels(
+    val brand: String,
+    val category: String,
+    val scenario: String,
+    val skinType: String,
+    val ingredientTags: String,
+    val ingredientAvoid: String,
+    val skuOptions: String,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BuyPilotChatScreen(
     state: ChatUiState,
     timelinePresentation: TimelinePresentationState,
+    modifier: Modifier = Modifier,
     onInputChanged: (String, Boolean) -> Unit,
     onSendMessage: (String, String?) -> Unit,
     onImageSelected: (Uri) -> Unit,
@@ -353,20 +500,16 @@ internal fun BuyPilotChatScreen(
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var showAttachmentMenu by rememberSaveable { mutableStateOf(false) }
-    var imagePreviewAttachment by remember { mutableStateOf<ChatImageAttachmentState?>(null) }
+    var imagePreviewAttachment by rememberSaveable(stateSaver = ChatImageAttachmentStateSaver) {
+        mutableStateOf<ChatImageAttachmentState?>(null)
+    }
     var sheetContent by rememberSaveable(stateSaver = ChatSheetContentSaver) {
         mutableStateOf<ChatSheetContent?>(null)
     }
-    var timelineExternalRouteFreezeRequestId by remember { mutableIntStateOf(0) }
-    var pendingProductDetailAfterTimelineFreeze by remember {
-        mutableStateOf<PendingProductDetailRoute?>(null)
-    }
-    var sheetExiting by remember { mutableStateOf(false) }
-    var sheetTransitionId by remember { mutableStateOf(0) }
+    val transientState = remember { ChatScreenTransientState() }
     var dismissedClarificationKeys by rememberSaveable(stateSaver = StringSetSaver) {
         mutableStateOf(emptySet<String>())
     }
-    var dismissingClarificationKey by remember { mutableStateOf<String?>(null) }
     var revealedMessageKeyList by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val revealedMessageKeys = remember(revealedMessageKeyList) { revealedMessageKeyList.toSet() }
     var liveRevealedMessageKeys by rememberSaveable(stateSaver = StringSetSaver) {
@@ -376,26 +519,23 @@ internal fun BuyPilotChatScreen(
         mutableStateOf(emptySet<String>())
     }
     var timelineInstanceId by rememberSaveable { mutableIntStateOf(0) }
-    var visualActiveTurnKeys by remember { mutableStateOf(emptySet<String>()) }
-    var pendingClarificationAnswer by remember { mutableStateOf<PendingClarificationAnswer?>(null) }
-    var activeClarificationFlight by remember { mutableStateOf<ClarificationFlight?>(null) }
-    var hiddenFlightMessageKeys by remember { mutableStateOf(emptySet<String>()) }
-    var userBubbleSnapshots by remember { mutableStateOf(emptyMap<String, ClarificationChipSnapshot>()) }
-    var clarificationManualSource by remember { mutableStateOf<ClarificationManualSource?>(null) }
-    var keyboardFlightSnapshot by remember { mutableStateOf<ClarificationChipSnapshot?>(null) }
-    var compareDetailPayload by remember { mutableStateOf<CompareCardPayload?>(null) }
+    var pendingClarificationAnswer by rememberSaveable(stateSaver = PendingClarificationAnswerSaver) {
+        mutableStateOf<PendingClarificationAnswer?>(null)
+    }
+    var activeClarificationFlight by rememberSaveable(stateSaver = ClarificationFlightSaver) {
+        mutableStateOf<ClarificationFlight?>(null)
+    }
+    var hiddenFlightMessageKeys by rememberSaveable(stateSaver = StringSetSaver) {
+        mutableStateOf(emptySet<String>())
+    }
     var pendingInlineCompareDeckId by rememberSaveable { mutableStateOf<String?>(null) }
     var inlineCompareTurnIds by rememberSaveable(stateSaver = StringSetSaver) {
         mutableStateOf(emptySet<String>())
     }
-    var inlineComparePayloadByDeckId by remember { mutableStateOf(emptyMap<String, CompareCardPayload>()) }
-    var flightSequence by remember { mutableStateOf(0) }
-    var rootSize by remember { mutableStateOf(IntSize.Zero) }
-    var timelineTopPx by remember { mutableStateOf(0f) }
-    var composerHeightPx by remember { mutableIntStateOf(0) }
-    var composerFocused by remember { mutableStateOf(false) }
     var welcomePromptDismissed by rememberSaveable { mutableStateOf(false) }
     val density = LocalDensity.current
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val keyboardVisible = imeBottomPx > 0
     val stableTimelineImeBottomPx = imeBottomPx
@@ -404,6 +544,7 @@ internal fun BuyPilotChatScreen(
     val composerFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
+    val imagePreviewFileName = stringResource(R.string.image_preview_desc)
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -418,7 +559,9 @@ internal fun BuyPilotChatScreen(
             onImageCaptured(bitmap)
         }
     }
-    val defaultSkinTypeOptions = stringArrayResource(R.array.default_skin_type_options).toSet()
+    val defaultSkinTypeOptions = remember(context, configuration) {
+        context.resources.getStringArray(R.array.default_skin_type_options).toSet()
+    }
     val showWelcome = !timelinePresentation.hasNodes && input.isBlank()
     val shouldDismissWelcomeContent = showWelcome &&
         (showAttachmentMenu || keyboardVisible)
@@ -446,8 +589,8 @@ internal fun BuyPilotChatScreen(
     }
     val hiddenUserMessageKeysForFlight = hiddenFlightMessageKeys +
         listOfNotNull(pendingFlightMessageKey, activeFlightMessageKey)
-    val assistantVisualActive = typingMessageKeys.isNotEmpty() || visualActiveTurnKeys.isNotEmpty()
-    val clarificationFlightActive = dismissingClarificationKey != null ||
+    val assistantVisualActive = typingMessageKeys.isNotEmpty() || transientState.visualActiveTurnKeys.isNotEmpty()
+    val clarificationFlightActive = transientState.dismissingClarificationKey != null ||
         pendingClarificationAnswer?.awaitsFlight == true ||
         activeClarificationFlight != null
 
@@ -467,8 +610,9 @@ internal fun BuyPilotChatScreen(
         if (typingMessageKeys.any { it !in currentRevealKeys }) {
             typingMessageKeys = typingMessageKeys.filterTo(mutableSetOf()) { it in currentRevealKeys }
         }
-        if (visualActiveTurnKeys.any { it !in timelineItemKeys }) {
-            visualActiveTurnKeys = visualActiveTurnKeys.filterTo(mutableSetOf()) { it in timelineItemKeys }
+        if (transientState.visualActiveTurnKeys.any { it !in timelineItemKeys }) {
+            transientState.visualActiveTurnKeys =
+                transientState.visualActiveTurnKeys.filterTo(mutableSetOf()) { it in timelineItemKeys }
         }
     }
 
@@ -483,23 +627,23 @@ internal fun BuyPilotChatScreen(
     }
 
     fun openSheet(content: ChatSheetContent) {
-        sheetTransitionId += 1
-        sheetExiting = false
+        transientState.sheetTransitionId += 1
+        transientState.sheetExiting = false
         sheetContent = content
     }
 
     fun dismissSheet(onDismissStarted: () -> Unit = {}) {
-        if (sheetContent == null || sheetExiting) return
+        if (sheetContent == null || transientState.sheetExiting) return
 
-        sheetExiting = true
-        sheetTransitionId += 1
-        val transitionId = sheetTransitionId
+        transientState.sheetExiting = true
+        transientState.sheetTransitionId += 1
+        val transitionId = transientState.sheetTransitionId
         onDismissStarted()
         coroutineScope.launch {
             sheetState.hide()
-            if (sheetTransitionId == transitionId) {
+            if (transientState.sheetTransitionId == transitionId) {
                 sheetContent = null
-                sheetExiting = false
+                transientState.sheetExiting = false
             }
         }
     }
@@ -510,21 +654,21 @@ internal fun BuyPilotChatScreen(
         anchorNodeKey: String? = null,
         deckNodeKey: String? = null,
     ) {
-        pendingProductDetailAfterTimelineFreeze = PendingProductDetailRoute(
-            requestId = timelineExternalRouteFreezeRequestId + 1,
+        transientState.pendingProductDetailAfterTimelineFreeze = PendingProductDetailRoute(
+            requestId = transientState.timelineExternalRouteFreezeRequestId + 1,
             deckId = deckId,
             productId = productId,
             anchorNodeKey = anchorNodeKey.orEmpty(),
             deckNodeKey = deckNodeKey.orEmpty(),
         )
-        timelineExternalRouteFreezeRequestId += 1
+        transientState.timelineExternalRouteFreezeRequestId += 1
     }
 
     fun finishProductDetailFreeze(requestId: Int) {
-        val route = pendingProductDetailAfterTimelineFreeze
+        val route = transientState.pendingProductDetailAfterTimelineFreeze
             ?.takeIf { it.requestId == requestId }
             ?: return
-        pendingProductDetailAfterTimelineFreeze = null
+        transientState.pendingProductDetailAfterTimelineFreeze = null
         onOpenProductDetail(route.deckId, route.productId, route.deckNodeKey.takeIf { it.isNotBlank() })
     }
 
@@ -550,9 +694,10 @@ internal fun BuyPilotChatScreen(
                 node.turnId.isNotBlank() &&
                     node.turnId !in inlineCompareTurnIds &&
                     node.payload.sourceDeckId == deckId
-            }
+        }
         if (compareNode != null) {
-            inlineComparePayloadByDeckId = inlineComparePayloadByDeckId + (deckId to compareNode.payload)
+            transientState.inlineComparePayloadByDeckId =
+                transientState.inlineComparePayloadByDeckId + (deckId to compareNode.payload)
             inlineCompareTurnIds = inlineCompareTurnIds + compareNode.turnId
             pendingInlineCompareDeckId = null
         }
@@ -616,27 +761,27 @@ internal fun BuyPilotChatScreen(
         input = ""
         showAttachmentMenu = false
         sheetContent = null
-        sheetExiting = false
-        sheetTransitionId += 1
-        pendingProductDetailAfterTimelineFreeze = null
+        transientState.sheetExiting = false
+        transientState.sheetTransitionId += 1
+        transientState.pendingProductDetailAfterTimelineFreeze = null
         dismissedClarificationKeys = emptySet()
-        dismissingClarificationKey = null
+        transientState.dismissingClarificationKey = null
         welcomePromptDismissed = false
         revealedMessageKeyList = emptyList()
         liveRevealedMessageKeys = emptySet()
         typingMessageKeys = emptySet()
         timelineInstanceId += 1
-        visualActiveTurnKeys = emptySet()
+        transientState.visualActiveTurnKeys = emptySet()
         pendingClarificationAnswer = null
         activeClarificationFlight = null
         hiddenFlightMessageKeys = emptySet()
-        userBubbleSnapshots = emptyMap()
-        clarificationManualSource = null
-        keyboardFlightSnapshot = null
-        compareDetailPayload = null
+        transientState.userBubbleSnapshots = emptyMap()
+        transientState.clarificationManualSource = null
+        transientState.keyboardFlightSnapshot = null
+        transientState.compareDetailPayload = null
         pendingInlineCompareDeckId = null
         inlineCompareTurnIds = emptySet()
-        inlineComparePayloadByDeckId = emptyMap()
+        transientState.inlineComparePayloadByDeckId = emptyMap()
         focusManager.clearFocus()
         keyboardController?.hide()
         onInputChanged("", false)
@@ -655,7 +800,7 @@ internal fun BuyPilotChatScreen(
         val nodeKey = activeClarificationKey
         if (
             nodeKey != null &&
-            (nodeKey == dismissingClarificationKey || pendingClarificationAnswer?.nodeKey == nodeKey)
+            (nodeKey == transientState.dismissingClarificationKey || pendingClarificationAnswer?.nodeKey == nodeKey)
         ) {
             return
         }
@@ -673,7 +818,7 @@ internal fun BuyPilotChatScreen(
         val shouldFly = sourceSnapshot != null
         val fromKeyboard = selectedOption == null && manualSnapshot != null
         val previousUserMessageKey = state.lastUserMessageKey
-        val flightId = if (shouldFly) ++flightSequence else null
+        val flightId = if (shouldFly) ++transientState.flightSequence else null
         pendingClarificationAnswer = PendingClarificationAnswer(
             nodeKey = nodeKey,
             message = next,
@@ -695,16 +840,16 @@ internal fun BuyPilotChatScreen(
                 fromKeyboard = fromKeyboard,
             )
         }
-        dismissingClarificationKey = nodeKey
+        transientState.dismissingClarificationKey = nodeKey
     }
 
     fun finishClarificationDismissal(nodeKey: String) {
         dismissedClarificationKeys = dismissedClarificationKeys + nodeKey
-        if (clarificationManualSource?.nodeKey == nodeKey) {
-            clarificationManualSource = null
+        if (transientState.clarificationManualSource?.nodeKey == nodeKey) {
+            transientState.clarificationManualSource = null
         }
-        if (dismissingClarificationKey == nodeKey) {
-            dismissingClarificationKey = null
+        if (transientState.dismissingClarificationKey == nodeKey) {
+            transientState.dismissingClarificationKey = null
         }
         val pending = pendingClarificationAnswer
         if (pending?.nodeKey == nodeKey) {
@@ -716,15 +861,15 @@ internal fun BuyPilotChatScreen(
                         sendAndClear(pending.message)
                     }
                 } else {
-                    if (dismissingClarificationKey == nodeKey) {
-                        dismissingClarificationKey = null
+                    if (transientState.dismissingClarificationKey == nodeKey) {
+                        transientState.dismissingClarificationKey = null
                     }
                     pendingClarificationAnswer = null
                     sendAndClear(pending.message)
                 }
             } else {
-                if (dismissingClarificationKey == nodeKey) {
-                    dismissingClarificationKey = null
+                if (transientState.dismissingClarificationKey == nodeKey) {
+                    transientState.dismissingClarificationKey = null
                 }
                 pendingClarificationAnswer = null
                 sendAndClear(pending.message)
@@ -732,18 +877,18 @@ internal fun BuyPilotChatScreen(
         }
     }
 
-    BackHandler(enabled = compareDetailPayload != null || sheetContent != null || composerFocused) {
+    BackHandler(enabled = transientState.compareDetailPayload != null || sheetContent != null || transientState.composerFocused) {
         when {
-            compareDetailPayload != null -> compareDetailPayload = null
+            transientState.compareDetailPayload != null -> transientState.compareDetailPayload = null
             sheetContent != null -> dismissSheet()
-            composerFocused -> focusManager.clearFocus()
+            transientState.composerFocused -> focusManager.clearFocus()
         }
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
-            .onSizeChanged { rootSize = it }
+            .onSizeChanged { transientState.rootSize = it }
             .background(BuyPilotColors.SurfaceBg),
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -763,7 +908,7 @@ internal fun BuyPilotChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .onGloballyPositioned { timelineTopPx = it.positionInRoot().y }
+                    .onGloballyPositioned { transientState.timelineTopPx = it.positionInRoot().y }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -777,9 +922,10 @@ internal fun BuyPilotChatScreen(
                     state = state,
                     timelinePresentation = timelinePresentation,
                     timelineInstanceId = timelineInstanceId,
-                    externalRouteFreezeRequestId = timelineExternalRouteFreezeRequestId,
-                    externalRouteFreezeAnchorNodeKey = pendingProductDetailAfterTimelineFreeze?.anchorNodeKey,
-                    inlineComparePayloadByDeckId = inlineComparePayloadByDeckId,
+                    externalRouteFreezeRequestId = transientState.timelineExternalRouteFreezeRequestId,
+                    externalRouteFreezeAnchorNodeKey =
+                        transientState.pendingProductDetailAfterTimelineFreeze?.anchorNodeKey,
+                    inlineComparePayloadByDeckId = transientState.inlineComparePayloadByDeckId,
                     inlineCompareTurnIds = inlineCompareTurnIds,
                     onExternalRouteFreezeReady = ::finishProductDetailFreeze,
                     onClarificationOption = { label, snapshot ->
@@ -797,7 +943,7 @@ internal fun BuyPilotChatScreen(
                         pendingInlineCompareDeckId = deckId
                         onCompareProducts(ranks, productIds)
                     },
-                    onCompareDetailOpen = { payload -> compareDetailPayload = payload },
+                    onCompareDetailOpen = { payload -> transientState.compareDetailPayload = payload },
                     onConvergeRecommendation = onConvergeProductDeck,
                     onWelcomePromptClick = { loadWelcomePrompt(it) },
                     onDecisionEvidence = { payload, sourceNodeKey ->
@@ -814,21 +960,21 @@ internal fun BuyPilotChatScreen(
                     onUserImagePreview = { imageUrl ->
                         imagePreviewAttachment = ChatImageAttachmentState(
                             imageUrl = imageUrl,
-                            fileName = "图片预览",
+                            fileName = imagePreviewFileName,
                         )
                     },
                     onClarificationManualInput = { focusComposer() },
                     onClarificationManualSource = { nodeKey, snapshot ->
-                        clarificationManualSource = ClarificationManualSource(nodeKey, snapshot)
+                        transientState.clarificationManualSource = ClarificationManualSource(nodeKey, snapshot)
                     },
                     onTimelineDrag = { closeTransientComposerUi() },
-                    composerHeightPx = composerHeightPx,
+                    composerHeightPx = transientState.composerHeightPx,
                     imeBottomPx = imeBottomPx,
                     stableImeBottomPx = stableTimelineImeBottomPx,
-                    isComposerFocused = composerFocused,
+                    isComposerFocused = transientState.composerFocused,
                     isAssistantVisualActive = assistantVisualActive,
                     isClarificationFlightActive = clarificationFlightActive,
-                    dismissingClarificationKey = dismissingClarificationKey,
+                    dismissingClarificationKey = transientState.dismissingClarificationKey,
                     dismissedClarificationKeys = dismissedClarificationKeys,
                     selectedClarificationOption = pendingClarificationAnswer?.selectedOption,
                     hiddenUserMessageKeys = hiddenUserMessageKeysForFlight,
@@ -849,20 +995,21 @@ internal fun BuyPilotChatScreen(
                         }
                     },
                     onAssistantTurnVisualActiveChange = { key, active ->
-                        visualActiveTurnKeys = if (active) {
-                            visualActiveTurnKeys + key
+                        transientState.visualActiveTurnKeys = if (active) {
+                            transientState.visualActiveTurnKeys + key
                         } else {
-                            visualActiveTurnKeys - key
+                            transientState.visualActiveTurnKeys - key
                         }
                     },
                     onUserBubblePositioned = { key, snapshot ->
                         val shouldTrackLiveFlightTarget =
                             key == pendingFlightMessageKey || key == activeFlightMessageKey
                         if (
-                            key !in userBubbleSnapshots ||
-                            (shouldTrackLiveFlightTarget && userBubbleSnapshots[key] != snapshot)
+                            key !in transientState.userBubbleSnapshots ||
+                            (shouldTrackLiveFlightTarget && transientState.userBubbleSnapshots[key] != snapshot)
                         ) {
-                            userBubbleSnapshots = userBubbleSnapshots + (key to snapshot)
+                            transientState.userBubbleSnapshots =
+                                transientState.userBubbleSnapshots + (key to snapshot)
                         }
                     },
                     onClarificationCardDismissed = { finishClarificationDismissal(it) },
@@ -876,7 +1023,7 @@ internal fun BuyPilotChatScreen(
                         .padding(
                             bottom = calculateFloatingPanelBottomPadding(
                                 density = density,
-                                composerHeightPx = composerHeightPx,
+                                composerHeightPx = transientState.composerHeightPx,
                                 imeBottomPx = imeBottomPx,
                             ),
                         ),
@@ -925,10 +1072,10 @@ internal fun BuyPilotChatScreen(
             onTextFocus = {
                 showAttachmentMenu = false
             },
-            onFocusChanged = { composerFocused = it },
-            onHeightChanged = { composerHeightPx = it },
+            onFocusChanged = { transientState.composerFocused = it },
+            onHeightChanged = { transientState.composerHeightPx = it },
             onKeyboardFlightSourceChanged = {
-                keyboardFlightSnapshot = it
+                transientState.keyboardFlightSnapshot = it
             },
             onRemoveImage = onClearImageAttachment,
             onPreviewImage = { imagePreviewAttachment = state.imageAttachment },
@@ -945,21 +1092,21 @@ internal fun BuyPilotChatScreen(
                     if (activeClarificationKey != null) {
                         val keyboardSnapshot = if (
                             imeBottomPx > 0 &&
-                            rootSize.width > 0 &&
-                            rootSize.height > imeBottomPx
+                            transientState.rootSize.width > 0 &&
+                            transientState.rootSize.height > imeBottomPx
                         ) {
                             ClarificationChipSnapshot(
-                                position = Offset(0f, rootSize.height - imeBottomPx.toFloat()),
-                                size = Size(rootSize.width.toFloat(), imeBottomPx.toFloat()),
+                                position = Offset(0f, transientState.rootSize.height - imeBottomPx.toFloat()),
+                                size = Size(transientState.rootSize.width.toFloat(), imeBottomPx.toFloat()),
                             )
                         } else {
                             null
                         }
-                        val manualSnapshot = clarificationManualSource
+                        val manualSnapshot = transientState.clarificationManualSource
                             ?.takeIf { it.nodeKey == activeClarificationKey }
-                            ?.let { keyboardSnapshot ?: keyboardFlightSnapshot ?: it.snapshot }
+                            ?.let { keyboardSnapshot ?: transientState.keyboardFlightSnapshot ?: it.snapshot }
                             ?: keyboardSnapshot
-                            ?: keyboardFlightSnapshot
+                            ?: transientState.keyboardFlightSnapshot
                         answerClarification(next, manualSnapshot = manualSnapshot)
                     } else {
                         sendAndClear(next, imageUrl)
@@ -980,9 +1127,9 @@ internal fun BuyPilotChatScreen(
             flight = activeClarificationFlight,
             targetSnapshot = activeClarificationFlight
                 ?.targetMessageKey
-                ?.let { userBubbleSnapshots[it] },
-            rootSize = rootSize,
-            timelineTopPx = timelineTopPx,
+                ?.let { transientState.userBubbleSnapshots[it] },
+            rootSize = transientState.rootSize,
+            timelineTopPx = transientState.timelineTopPx,
             onFinished = { finished ->
                 if (activeClarificationFlight?.id == finished.id) {
                     activeClarificationFlight = null
@@ -990,18 +1137,18 @@ internal fun BuyPilotChatScreen(
                         hiddenFlightMessageKeys = hiddenFlightMessageKeys - it
                     }
                     pendingClarificationAnswer = null
-                    if (dismissingClarificationKey == finished.nodeKey) {
-                        dismissingClarificationKey = null
+                    if (transientState.dismissingClarificationKey == finished.nodeKey) {
+                        transientState.dismissingClarificationKey = null
                     }
                 }
             },
         )
 
-        compareDetailPayload?.let { payload ->
+        transientState.compareDetailPayload?.let { payload ->
             CompareModeScreen(
                 payload = payload,
                 backendBaseUrl = state.backendBaseUrl,
-                onDismiss = { compareDetailPayload = null },
+                onDismiss = { transientState.compareDetailPayload = null },
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(6f),
@@ -1037,7 +1184,7 @@ internal fun BuyPilotChatScreen(
         ) {
             SmoothSheetBody(
                 sheetContent = content,
-                exiting = sheetExiting,
+                exiting = transientState.sheetExiting,
             ) { targetContent ->
                 when (targetContent) {
                     is ChatSheetContent.Criteria -> CriteriaEditSheet(
@@ -1347,13 +1494,17 @@ private fun TopBar(
             title = if (centered) "BuyPilot AI" else "BuyPilot",
             titleCentered = centered,
             navigationIcon = if (showBack) R.drawable.ic_arrow_back_24 else R.drawable.ic_menu_24,
-            navigationDescription = if (showBack) "返回" else "打开菜单",
+            navigationDescription = if (showBack) {
+                stringResource(R.string.common_back)
+            } else {
+                stringResource(R.string.topbar_open_menu_desc)
+            },
             navigationTint = if (showBack) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
             actionIcon = R.drawable.ic_restart_24.takeIf { showClear },
-            actionDescription = "清空当前对话",
+            actionDescription = stringResource(R.string.topbar_clear_chat_desc),
             actionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.72f),
             secondaryActionIcon = R.drawable.ic_shopping_bag_24.takeIf { showClear },
-            secondaryActionDescription = "查看购物车",
+            secondaryActionDescription = stringResource(R.string.topbar_cart_desc),
             secondaryActionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
             secondaryBadge = cartCount.takeIf { it > 0 }?.coerceAtMost(99)?.toString(),
             onNavigationClick = {},
@@ -1995,7 +2146,7 @@ internal fun ClarificationManualInputRow(
             .then(positionModifier)
             .clickable(
                 enabled = enabled,
-                onClickLabel = "聚焦输入框",
+                onClickLabel = stringResource(R.string.composer_focus_desc),
                 role = Role.Button,
                 onClick = onClick,
             )
@@ -2023,6 +2174,7 @@ internal fun ClarificationManualInputRow(
 internal fun ProductRecommendationStrip(
     node: ProductDeckNode,
     backendBaseUrl: String,
+    modifier: Modifier = Modifier,
     swipeState: ProductSwipeState?,
     awaitingConvergence: Boolean,
     hasPendingDecision: Boolean,
@@ -2104,7 +2256,10 @@ internal fun ProductRecommendationStrip(
         label = "product_deck_converge_button_progress",
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2270,7 +2425,7 @@ internal fun ProductRecommendationStrip(
                 activeIndex = activeIndex,
                 chromeProgress = chromeProgress,
                 buttonProgress = convergeButtonProgress,
-                buttonLabel = "帮我选",
+                buttonLabel = stringResource(R.string.converge_choose_button),
                 enabled = true,
                 onConverge = onConverge,
             )
@@ -2425,7 +2580,11 @@ private fun ProductDeckModeIconButton(
         ) { active ->
             Icon(
                 painter = painterResource(if (active) R.drawable.ic_close_24 else R.drawable.ic_compare_arrows_24),
-                contentDescription = if (active) "取消对比选择" else "选择商品对比",
+                contentDescription = if (active) {
+                    stringResource(R.string.compare_select_cancel_desc)
+                } else {
+                    stringResource(R.string.compare_select_open_desc)
+                },
                 tint = tint.copy(alpha = if (enabled) 1f else 0.38f),
                 modifier = Modifier
                     .size(if (active) 16.dp else 17.dp)
@@ -2551,11 +2710,11 @@ private fun ProductDeckComparePicker(
                     delayMillis = if (compactGrid) 135 else 95,
                 )
             } else {
-                rememberUpdatedState(1f)
+                remember { mutableFloatStateOf(1f) }
             }
             val confirmProgress = confirmProgressState.value
             ProductDeckConvergeMiniButton(
-                label = "确认",
+                label = stringResource(R.string.compare_confirm),
                 visibleProgress = confirmProgress,
                 enabled = confirmEnabled,
                 onClick = onConfirm,
@@ -2630,7 +2789,7 @@ private fun ProductDeckCompareCandidateCard(
             delayMillis = entryDelayMs,
         )
     } else {
-        rememberUpdatedState(1f)
+        remember { mutableFloatStateOf(1f) }
     }
     val entryProgress = entryProgressState.value
     val stagedModifier = modifier.graphicsLayer {
@@ -2920,7 +3079,7 @@ private fun ProductRecommendationHistorySummary(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "上一轮候选",
+                text = stringResource(R.string.previous_candidates),
                 color = BuyPilotColors.TextMuted,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 17.sp,
@@ -2949,7 +3108,7 @@ private fun ProductRecommendationHistorySummary(
             }
             if (products.size > visibleProducts.size) {
                 Text(
-                    text = "查看全部 ${products.size} 个候选",
+                    text = stringResource(R.string.view_all_candidates, products.size),
                     color = BuyPilotColors.TextMuted,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 17.sp,
@@ -3258,7 +3417,7 @@ private fun ProductPriceLabel(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val match = remember(price) { Regex("""^([¥￥$]?)(\d+(?:\.\d+)?)(.*)$""").find(price) }
+    val match = remember(price) { DecisionPriceLabelRegex.find(price) }
     if (match == null) {
         Text(
             text = price,
@@ -3399,6 +3558,7 @@ internal fun DecisionSummaryCard(
     productsById: Map<String, ProductCardPayload>,
     productDeckIdByProductId: Map<String, String>,
     sourceDeckNodeKey: String? = null,
+    modifier: Modifier = Modifier,
     cartState: ChatCartUiState,
     backendBaseUrl: String,
     motionEnabled: Boolean,
@@ -3417,10 +3577,12 @@ internal fun DecisionSummaryCard(
         { onProductDetailOpen(deckId, winnerProductId.orEmpty(), sourceDeckNodeKey) }
     }
     val product = winner?.product
-    val whyItems = payload.why
-        .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
-        .filter { it.isNotBlank() }
-        .take(3)
+    val whyItems = remember(payload.why) {
+        payload.why
+            .map { it.withoutMarkdownMarkup().withoutInternalDebugTokens().trim() }
+            .filter { it.isNotBlank() }
+            .take(3)
+    }
     val statusBadge = payload.decisionStatusBadge()
     val canAddWinnerToCart = winner != null && !winnerProductId.isNullOrBlank()
     val nextActions = payload.nextActions.filter { action ->
@@ -3430,6 +3592,7 @@ internal fun DecisionSummaryCard(
     }
     val winnerAlreadyInCart = winnerProductId?.let { id -> cartState.items.any { it.productId == id } } == true
     val winnerAddPending = winnerProductId?.let { it in cartState.pendingAddProductIds } == true
+    val addToCartLabel = stringResource(R.string.add_to_cart)
     val hasDecisionBody = winner != null ||
         !winnerProductId.isNullOrBlank() ||
         whyItems.isNotEmpty() ||
@@ -3444,7 +3607,10 @@ internal fun DecisionSummaryCard(
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
         DecisionSummaryIntro(
             motionKey = motionKey,
             summary = payload.decisionSummaryText(),
@@ -3576,7 +3742,7 @@ internal fun DecisionSummaryCard(
                                 horizontalArrangement = Arrangement.End,
                             ) {
                                 TextButton(onClick = onEvidence, contentPadding = PaddingValues(0.dp)) {
-                                    Text("查看决策依据 ›", color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
+                                    Text(stringResource(R.string.decision_view_evidence), color = BuyPilotColors.Info, fontSize = BuyPilotType.Label)
                                 }
                             }
                             if (canAddWinnerToCart) {
@@ -3589,7 +3755,7 @@ internal fun DecisionSummaryCard(
                                         onQuickAction(
                                             QuickActionPayload(
                                                 actionId = "add_to_cart_${winnerProductId.orEmpty()}",
-                                                label = "加入购物车",
+                                                label = addToCartLabel,
                                                 action = "add_to_cart",
                                                 productId = winnerProductId,
                                             ),
@@ -3811,7 +3977,7 @@ private fun FinalDecisionPayload.decisionSummaryText(): String {
 }
 
 private fun String.withoutLeadingMarkdownDivider(): String =
-    replaceFirst(Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*"""), "").trimStart()
+    replaceFirst(DecisionLeadingDividerRegex, "").trimStart()
 
 private fun List<String>.toDecisionNotForItems(productsById: Map<String, ProductCardPayload>): List<String> =
     mapNotNull { raw ->
@@ -3909,10 +4075,10 @@ private fun DecisionStateMetaRow(
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         payload.confidence?.takeIf { it.isNotBlank() }?.let {
-            DecisionMetaPill("置信度：${it.confidenceLabel()}", accent)
+            DecisionMetaPill(it.confidenceLabelText(), accent)
         }
         payload.nextStep?.takeIf { it.isNotBlank() }?.let {
-            DecisionMetaPill(it.nextStepLabel(), BuyPilotColors.TextSecondary)
+            DecisionMetaPill(it.nextStepLabelText(), BuyPilotColors.TextSecondary)
         }
     }
 }
@@ -3955,10 +4121,14 @@ fun ProductHeroDetailScreen(
     val payload = state.findProduct(deckId, activeProductId, deckNodeKey)
     val haptics = LocalHapticFeedback.current
     val latestOnBack by rememberUpdatedState(onBack)
+    val latestOnRequestProductDetail by rememberUpdatedState(onRequestProductDetail)
     var submittedFeedback by rememberSaveable(deckId, deckNodeKey, activeProductId) { mutableStateOf<String?>(null) }
     var pendingAdvanceProductId by rememberSaveable(deckId, deckNodeKey, activeProductId) { mutableStateOf<String?>(null) }
     val productInSourceDeck = state.isProductInDeck(deckId, activeProductId, deckNodeKey)
-    val handledProductIds = state.productSwipeStates[deckId]?.swipedProductIds.orEmpty().toSet()
+    val swipedProductIds = state.productSwipeStates[deckId]?.swipedProductIds.orEmpty()
+    val handledProductIds = remember(swipedProductIds) {
+        swipedProductIds.toSet()
+    }
     val deckCanConverge = state.canOpenDeckForConvergence(deckId, deckNodeKey)
     val readOnlyByState = !productInSourceDeck ||
         !deckCanConverge ||
@@ -3999,7 +4169,7 @@ fun ProductHeroDetailScreen(
     if (payload == null) {
         Surface(color = BuyPilotColors.SurfaceBg, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
-                ProductPageTopBar(title = "商品详情", onBack = onBack)
+                ProductPageTopBar(title = stringResource(R.string.product_detail_title), onBack = onBack)
                 ExpiredRecommendationState(onBack = onBack)
             }
         }
@@ -4074,7 +4244,7 @@ fun ProductHeroDetailScreen(
     )
 
     LaunchedEffect(product.productId) {
-        onRequestProductDetail(product.productId)
+        latestOnRequestProductDetail(product.productId)
     }
 
     LaunchedEffect(product.productId) {
@@ -4158,7 +4328,7 @@ fun ProductHeroDetailScreen(
         )
         ImmersiveCircleButton(
             iconRes = R.drawable.ic_arrow_back_24,
-            contentDescription = "返回",
+            contentDescription = stringResource(R.string.common_back),
             onClick = onBack,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -4175,7 +4345,7 @@ fun ProductHeroDetailScreen(
         )
         ImmersiveCircleButton(
             iconRes = R.drawable.ic_article_24,
-            contentDescription = "推荐证据",
+            contentDescription = stringResource(R.string.product_evidence_desc),
             onClick = { onOpenEvidence(deckId, activeProductId, deckNodeKey) },
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -4265,7 +4435,7 @@ fun ProductHeroDetailScreen(
                 ) {
                     SwipeRoundButton(
                         iconRes = R.drawable.ic_close_24,
-                        contentDescription = "不感兴趣",
+                        contentDescription = stringResource(R.string.feedback_dislike_desc),
                         active = false,
                         enabled = actionsEnabled,
                         onClick = {
@@ -4275,7 +4445,7 @@ fun ProductHeroDetailScreen(
                     Spacer(Modifier.width(58.dp))
                     SwipeRoundButton(
                         iconRes = R.drawable.ic_favorite_24,
-                        contentDescription = "感兴趣",
+                        contentDescription = stringResource(R.string.feedback_like_desc),
                         active = true,
                         enabled = actionsEnabled,
                         onClick = {
@@ -4415,6 +4585,18 @@ private fun ImmersiveCircleButton(
 }
 
 @Composable
+private fun productDetailAttributeLabels(): ProductDetailAttributeLabels =
+    ProductDetailAttributeLabels(
+        brand = stringResource(R.string.detail_label_brand),
+        category = stringResource(R.string.detail_label_category),
+        scenario = stringResource(R.string.detail_label_scenario),
+        skinType = stringResource(R.string.detail_label_skin_type),
+        ingredientTags = stringResource(R.string.detail_label_ingredient_tags),
+        ingredientAvoid = stringResource(R.string.detail_label_ingredient_avoid),
+        skuOptions = stringResource(R.string.detail_label_sku_options),
+    )
+
+@Composable
 private fun CinematicProductDetailPanel(
     payload: ProductCardPayload,
     detail: ProductDetailResponse?,
@@ -4424,12 +4606,16 @@ private fun CinematicProductDetailPanel(
 ) {
     val product = detail.productOrFallback(payload.product)
     val tags = product.detailTags().take(4)
+    val attributeLabels = productDetailAttributeLabels()
     val highlights = detail
         ?.highlights
         ?.map(String::trim)
         ?.filter(String::isNotBlank)
         .orEmpty()
-    val attributeRows = product.detailAttributeRows(includeSkuSummary = showCommerceControls)
+    val attributeRows = product.detailAttributeRows(
+        labels = attributeLabels,
+        includeSkuSummary = showCommerceControls,
+    )
     val description = detail?.marketingDescription?.trim()?.takeIf(String::isNotBlank)
     val faqs = detail
         ?.faqs
@@ -4726,7 +4912,7 @@ private fun ProductFaqSection(faqs: List<FaqItem>) {
             val faq = faqs[index]
             ProductTextPreviewDialog(
                 title = faq.question,
-                eyebrow = "官方问答",
+                eyebrow = stringResource(R.string.faq_eyebrow),
                 body = faq.answer,
                 onDismiss = { selectedIndex = -1 },
             )
@@ -4772,7 +4958,7 @@ private fun ProductFaqPreviewCard(
                 )
             }
             Text(
-                text = "查看完整",
+                text = stringResource(R.string.view_full),
                 color = BuyPilotColors.Info,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
@@ -4804,9 +4990,10 @@ private fun ProductReviewsSection(reviews: List<ReviewItem>) {
         .takeIf { it in reviews.indices }
         ?.let { index ->
             val review = reviews[index]
+            val reviewEyebrow = stringResource(R.string.review_eyebrow)
             ProductTextPreviewDialog(
-                title = review.nickname.ifBlank { "用户评价" },
-                eyebrow = "用户评价",
+                title = review.nickname.ifBlank { reviewEyebrow },
+                eyebrow = reviewEyebrow,
                 body = review.content,
                 rating = review.rating,
                 onDismiss = { selectedIndex = -1 },
@@ -4835,7 +5022,7 @@ private fun ProductReviewPreviewCard(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = review.nickname.ifBlank { "用户评价" },
+                    text = review.nickname.ifBlank { stringResource(R.string.review_eyebrow) },
                     color = BuyPilotColors.TextMuted,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 17.sp,
@@ -4854,7 +5041,7 @@ private fun ProductReviewPreviewCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "查看完整",
+                text = stringResource(R.string.view_full),
                 color = BuyPilotColors.Info,
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
@@ -5159,7 +5346,7 @@ private fun ImmersiveWarningBox(text: String) {
             verticalAlignment = Alignment.Top,
         ) {
             Text(
-                text = "注意：",
+                text = stringResource(R.string.warning_title),
                 color = BuyPilotColors.PrimaryDark,
                 fontSize = BuyPilotType.Body,
                 lineHeight = 22.sp,
@@ -5217,14 +5404,17 @@ private fun ProductPayload.detailTags(): List<String> =
         .distinct()
         .take(6)
 
-private fun ProductPayload.detailAttributeRows(includeSkuSummary: Boolean = true): List<Pair<String, String>> {
+private fun ProductPayload.detailAttributeRows(
+    labels: ProductDetailAttributeLabels,
+    includeSkuSummary: Boolean = true,
+): List<Pair<String, String>> {
     val rows = mutableListOf<Pair<String, String>>()
     brand
         ?.withoutMarkdownMarkup()
         ?.withoutInternalDebugTokens()
         ?.trim()
         ?.takeIf(String::isNotBlank)
-        ?.let { rows += "品牌" to it }
+        ?.let { rows += labels.brand to it }
 
     listOfNotNull(
         category.withoutMarkdownMarkup().withoutInternalDebugTokens().trim().takeIf(String::isNotBlank),
@@ -5233,14 +5423,14 @@ private fun ProductPayload.detailAttributeRows(includeSkuSummary: Boolean = true
         .distinct()
         .joinToString(" / ")
         .takeIf(String::isNotBlank)
-        ?.let { rows += "品类" to it }
+        ?.let { rows += labels.category to it }
 
-    useScenario.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "使用场景" to it }
-    skinTypeMatch.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "适用肤质" to it }
-    ingredientTags.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "成分标签" to it }
-    ingredientAvoid.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += "避开成分" to it }
+    useScenario.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += labels.scenario to it }
+    skinTypeMatch.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += labels.skinType to it }
+    ingredientTags.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += labels.ingredientTags to it }
+    ingredientAvoid.userFacingJoinedOrFallback().takeIf(String::isNotBlank)?.let { rows += labels.ingredientAvoid to it }
     if (includeSkuSummary) {
-        skuOptions.skuPropertySummary().takeIf(String::isNotBlank)?.let { rows += "可选规格" to it }
+        skuOptions.skuPropertySummary().takeIf(String::isNotBlank)?.let { rows += labels.skuOptions to it }
     }
 
     return rows.distinctBy { (label, value) -> label to value }.take(7)
@@ -5312,7 +5502,7 @@ internal fun ProductPageTopBar(
             title = title,
             titleCentered = true,
             navigationIcon = R.drawable.ic_arrow_back_24,
-            navigationDescription = "返回",
+            navigationDescription = stringResource(R.string.common_back),
             navigationTint = BuyPilotColors.TextPrimary.copy(alpha = 0.92f),
             onNavigationClick = onBack,
         )
@@ -5334,7 +5524,7 @@ internal fun ExpiredRecommendationState(onBack: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "推荐已过期，请返回聊天重新生成",
+            text = stringResource(R.string.product_expired),
             color = BuyPilotColors.TextPrimary,
             fontSize = BuyPilotType.Title,
             lineHeight = 24.sp,
@@ -5350,7 +5540,7 @@ internal fun ExpiredRecommendationState(onBack: () -> Unit) {
                 contentColor = BuyPilotColors.OnPrimary,
             ),
         ) {
-            Text("返回聊天")
+            Text(stringResource(R.string.chat_return))
         }
     }
 }
@@ -5359,6 +5549,7 @@ internal fun ExpiredRecommendationState(onBack: () -> Unit) {
 internal fun CartActionCard(
     payload: CartActionPayload,
     productsById: Map<String, ProductCardPayload>,
+    modifier: Modifier = Modifier,
     onRetryAddToCart: (String) -> Unit,
     onCheckoutAction: (String) -> Unit = {},
 ) {
@@ -5386,33 +5577,33 @@ internal fun CartActionCard(
     val productName = cartItem?.name
         ?.withoutInternalDebugTokens()
         ?.takeIf { it.isNotBlank() }
-        ?: product?.displayName("商品")
-        ?: if (failed) "这件商品" else "商品"
+        ?: product?.displayName(stringResource(R.string.product_generic))
+        ?: if (failed) stringResource(R.string.product_this_item) else stringResource(R.string.product_generic)
     val title = when {
-        failed && isCheckoutAction -> "购物车为空，先把商品加入购物车"
-        failed -> "没有加成功"
-        isCheckoutConfirm && !failed -> "购买意向已确认"
-        isCheckoutCancel && !failed -> "已取消购买意向"
-        payload.action == "add" -> "已加入购物车"
-        payload.action == "remove" -> "已移出购物车"
-        payload.action == "update_quantity" -> "已更新数量"
-        payload.action == "view" -> "购物车已同步"
-        else -> "购物车已更新"
+        failed && isCheckoutAction -> stringResource(R.string.cart_empty_add_first)
+        failed -> stringResource(R.string.cart_add_failed)
+        isCheckoutConfirm && !failed -> stringResource(R.string.cart_checkout_confirmed)
+        isCheckoutCancel && !failed -> stringResource(R.string.cart_checkout_cancelled)
+        payload.action == "add" -> stringResource(R.string.cart_added)
+        payload.action == "remove" -> stringResource(R.string.cart_removed)
+        payload.action == "update_quantity" -> stringResource(R.string.cart_quantity_updated)
+        payload.action == "view" -> stringResource(R.string.cart_synced)
+        else -> stringResource(R.string.cart_updated)
     }
     val itemLine = when {
-        failed && isCheckoutAction -> "还没有商品，先挑几件心仪的商品吧"
-        failed -> "${productName}还没有加入购物车"
-        isCheckoutConfirm -> "不涉及真实支付、订单或物流"
-        isCheckoutCancel -> "购物车商品保留不变，可以继续挑选"
+        failed && isCheckoutAction -> stringResource(R.string.cart_empty_hint)
+        failed -> stringResource(R.string.cart_add_failed_item, productName)
+        isCheckoutConfirm -> stringResource(R.string.checkout_disclaimer)
+        isCheckoutCancel -> stringResource(R.string.cart_checkout_cancelled_item)
         cartItem != null -> "$productName x${cartItem.quantity}"
-        cart?.items.isNullOrEmpty() -> "购物车为空"
+        cart?.items.isNullOrEmpty() -> stringResource(R.string.cart_empty)
         else -> productName
     }
     val totalLine = when {
         isCheckoutConfirm || isCheckoutCancel -> null
         else -> cart
             ?.takeIf { it.totalItems > 0 }
-            ?.let { "共${it.totalItems}件 · ¥${it.totalPrice.clean()}" }
+            ?.let { stringResource(R.string.cart_total_line, it.totalItems, it.totalPrice.clean()) }
     }
     val retryableAdd = failed && payload.action == "add" && !productId.isNullOrBlank()
     val subtitle = listOfNotNull(itemLine, totalLine)
@@ -5439,7 +5630,7 @@ internal fun CartActionCard(
     }
 
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 val progress = progressState.value
@@ -5506,7 +5697,7 @@ internal fun CartActionCard(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                 ) {
                     Text(
-                        text = "重试",
+                        text = stringResource(R.string.retry),
                         color = BuyPilotColors.PrimaryDark,
                         fontSize = BuyPilotType.Label,
                         lineHeight = 16.sp,
@@ -5567,14 +5758,14 @@ private fun CheckoutPreviewCard(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "确认购买意向",
+                        text = stringResource(R.string.checkout_intent_title),
                         color = BuyPilotColors.TextPrimary,
                         fontSize = BuyPilotType.Body,
                         lineHeight = 19.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "不涉及真实支付、订单或物流",
+                        text = stringResource(R.string.checkout_disclaimer),
                         color = BuyPilotColors.TextSecondary,
                         fontSize = BuyPilotType.Label,
                         lineHeight = 17.sp,
@@ -5590,8 +5781,8 @@ private fun CheckoutPreviewCard(
                         ?.takeIf { it.isNotBlank() }
                         ?: item.productId
                             .takeIf { productsById.containsKey(it) }
-                            ?.let { productsById[it]?.product?.displayName("商品") }
-                        ?: "商品"
+                            ?.let { productsById[it]?.product?.displayName(stringResource(R.string.product_generic)) }
+                        ?: stringResource(R.string.product_generic)
                     val price = item.price?.let { "¥${it.clean()}" } ?: ""
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -5623,7 +5814,7 @@ private fun CheckoutPreviewCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = "共${cart.totalItems}件",
+                        text = stringResource(R.string.cart_total_items, cart.totalItems),
                         color = BuyPilotColors.TextSecondary,
                         fontSize = BuyPilotType.Label,
                         lineHeight = 17.sp,
@@ -5647,7 +5838,7 @@ private fun CheckoutPreviewCard(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 ) {
                     Text(
-                        text = "取消",
+                        text = stringResource(R.string.common_cancel),
                         color = BuyPilotColors.TextSecondary,
                         fontSize = BuyPilotType.Label,
                         fontWeight = FontWeight.SemiBold,
@@ -5661,7 +5852,7 @@ private fun CheckoutPreviewCard(
                     ),
                 ) {
                     Text(
-                        text = "确认购买",
+                        text = stringResource(R.string.checkout_confirm),
                         color = BuyPilotColors.PrimaryDark,
                         fontSize = BuyPilotType.Label,
                         fontWeight = FontWeight.SemiBold,
@@ -5693,7 +5884,7 @@ private fun String.looksLikeTechnicalErrorText(): Boolean {
     if (TechnicalErrorCodeRegex.containsMatchIn(text)) return true
     if (GenericBackendFailureRegex.containsMatchIn(text)) return true
     if ('{' in text || '}' in text || '[' in text || ']' in text) return true
-    if ("://" in text || "/" in text && Regex("""\b(?:api|v\d+|chat|stream)\b""").containsMatchIn(text)) return true
+    if ("://" in text || "/" in text && TechnicalPathHintRegex.containsMatchIn(text)) return true
     val hasCjk = text.any { it.isCjk() }
     val asciiLetters = text.count { it in 'A'..'Z' || it in 'a'..'z' }
     return !hasCjk && asciiLetters >= 8
@@ -5725,6 +5916,7 @@ private fun String.looksLikeTechnicalStatusText(): Boolean {
 @Composable
 internal fun ErrorCard(
     node: ErrorNode,
+    modifier: Modifier = Modifier,
 ) {
     if (node.message.isBlank() && node.code.isBlank()) return
     Text(
@@ -5733,8 +5925,24 @@ internal fun ErrorCard(
         fontSize = BuyPilotType.Body,
         lineHeight = 20.sp,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = modifier.padding(horizontal = 4.dp, vertical = 2.dp),
     )
+}
+
+@Preview(name = "Minimal error card")
+@Composable
+private fun ErrorCardPreview() {
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        ErrorCard(
+            node = ErrorNode(
+                key = "preview_error",
+                code = "NETWORK",
+                message = MinimalErrorText,
+                retryable = true,
+            ),
+            modifier = Modifier.padding(16.dp),
+        )
+    }
 }
 
 @Composable
@@ -5798,7 +6006,7 @@ private fun ImageAttachmentPreview(
             ) {
                 AsyncImage(
                     model = attachment.localUri.takeIf { it.isNotBlank() } ?: attachment.imageUrl,
-                    contentDescription = "已选择的图片，点按预览",
+                    contentDescription = stringResource(R.string.image_selected_preview_desc),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
@@ -5818,7 +6026,7 @@ private fun ImageAttachmentPreview(
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_close_24),
-                        contentDescription = "移除图片",
+                        contentDescription = stringResource(R.string.image_remove_desc),
                         tint = BuyPilotColors.TextSecondary,
                         modifier = Modifier.size(14.dp),
                     )
@@ -5947,7 +6155,7 @@ private fun ImageAttachmentPreviewDialog(
                 ) {
                     AsyncImage(
                         model = previewModel,
-                        contentDescription = "图片预览",
+                        contentDescription = stringResource(R.string.image_preview_desc),
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
@@ -5966,7 +6174,7 @@ private fun ImageAttachmentPreviewDialog(
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_close_24),
-                    contentDescription = "关闭图片预览",
+                    contentDescription = stringResource(R.string.image_preview_close_desc),
                     tint = Color.White.copy(alpha = 0.92f),
                     modifier = Modifier.size(18.dp),
                 )
@@ -6011,13 +6219,13 @@ private fun BottomComposer(
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val placeholder = when {
-        inputState == ChatInputState.Clarifying -> "请回答上面的问题"
-        inputState == ChatInputState.Streaming -> "正在生成，可随时停止"
-        imageAttachment.isUploading -> "图片上传中..."
-        imageAttachment.error != null -> "移除图片后重试，或重新选择"
-        isTextRevealing -> "正在显示回复，可继续查看"
-        awaitingCriteriaAdjustment -> "放宽预算、换品类或继续描述需求..."
-        else -> "继续追问或描述需求..."
+        inputState == ChatInputState.Clarifying -> stringResource(R.string.composer_placeholder_clarifying)
+        inputState == ChatInputState.Streaming -> stringResource(R.string.composer_placeholder_streaming)
+        imageAttachment.isUploading -> stringResource(R.string.composer_placeholder_image_uploading)
+        imageAttachment.error != null -> stringResource(R.string.composer_placeholder_image_error)
+        isTextRevealing -> stringResource(R.string.composer_placeholder_revealing)
+        awaitingCriteriaAdjustment -> stringResource(R.string.composer_placeholder_adjusting)
+        else -> stringResource(R.string.composer_placeholder_default)
     }
     val attachmentBlocksSubmit = imageAttachment.hasImage && !imageAttachment.canSend
     val canSubmit = isStreaming || (!attachmentBlocksSubmit && (text.isNotBlank() || imageAttachment.canSend))
@@ -6526,7 +6734,7 @@ private fun CartLoadingState() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         UploadingDot()
-        Text("正在同步购物车", color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Label)
+        Text(stringResource(R.string.cart_syncing), color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Label)
     }
 }
 
@@ -6688,7 +6896,7 @@ private fun CartQuantityStepper(
                 modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(4.dp))
-            Text("移除", color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Tiny)
+            Text(stringResource(R.string.cart_remove), color = BuyPilotColors.TextMuted, fontSize = BuyPilotType.Tiny)
         }
     }
 }
@@ -6784,7 +6992,7 @@ private fun DecisionEvidenceSheet(
 
         if (whyItems.isNotEmpty()) {
             DecisionEvidenceListSection(
-                title = "为什么选它",
+                title = stringResource(R.string.why_choose_it),
                 items = whyItems,
                 numbered = true,
                 accentColor = BuyPilotColors.Primary,
@@ -6811,7 +7019,7 @@ private fun DecisionEvidenceSheet(
 
         if (notForItems.isNotEmpty()) {
             DecisionEvidenceListSection(
-                title = "不适合这些情况",
+                title = stringResource(R.string.not_for_cases),
                 items = notForItems,
                 numbered = false,
                 accentColor = BuyPilotColors.Warning,
@@ -7472,14 +7680,14 @@ private fun BudgetSliderBlock(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "预算",
+                    text = stringResource(R.string.budget_title),
                     color = BuyPilotColors.TextSecondary,
                     fontSize = BuyPilotType.Label,
                     lineHeight = 16.sp,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    text = "${selectedBudget}元以内",
+                    text = stringResource(R.string.budget_under, selectedBudget),
                     color = BuyPilotColors.PrimaryDark,
                     fontSize = BuyPilotType.LargeBody,
                     lineHeight = 22.sp,
@@ -7746,7 +7954,7 @@ private fun CriteriaSuggestionSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            text = "快速微调建议",
+            text = stringResource(R.string.quick_tune_suggestions),
             color = BuyPilotColors.TextSecondary,
             fontSize = BuyPilotType.Label,
             lineHeight = 16.sp,
@@ -7796,6 +8004,8 @@ private fun EvidenceSection(title: String, items: List<String>, numbered: Boolea
 private fun EvidenceBlock(evidence: EvidencePayload) {
     val snippet = evidence.snippet.withoutInternalDebugTokens().trim()
     if (snippet.isBlank()) return
+    val evidenceSourceFallback = stringResource(R.string.evidence_source_default)
+    val evidenceSourceLabels = rememberEvidenceSourceLabels()
     Surface(
         color = BuyPilotColors.SurfaceBg,
         shape = RoundedCornerShape(16.dp),
@@ -7803,7 +8013,7 @@ private fun EvidenceBlock(evidence: EvidencePayload) {
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillLabel(evidence.sourceType.userFacingEvidenceSourceLabel("证据"))
+                PillLabel(evidence.sourceType.userFacingEvidenceSourceLabel(evidenceSourceFallback, evidenceSourceLabels))
                 evidence.trustLabel?.withoutInternalDebugTokens()?.takeIf { it.isNotBlank() }?.let { PillLabel(it) }
             }
             MarkdownTextBlock(
@@ -7838,7 +8048,7 @@ private fun WarningBox(text: String) {
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(
-                text = "注意：",
+                text = stringResource(R.string.warning_title),
                 color = BuyPilotColors.PrimaryDark,
                 fontSize = BuyPilotType.Body,
                 lineHeight = 18.sp,
@@ -8027,6 +8237,7 @@ private fun CompareActionPickerDialog(
 ) {
     var visible by remember { mutableStateOf(false) }
     var dismissRequested by remember { mutableStateOf(false) }
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
     LaunchedEffect(Unit) {
         visible = true
     }
@@ -8034,7 +8245,7 @@ private fun CompareActionPickerDialog(
         if (dismissRequested) {
             visible = false
             kotlinx.coroutines.delay(170L)
-            onDismiss()
+            latestOnDismiss()
         }
     }
     fun requestDismiss() {
@@ -8134,7 +8345,7 @@ private fun CompareActionPickerDialog(
                         ) {
                             TextButton(onClick = ::requestDismiss, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)) {
                                 Text(
-                                    text = "取消",
+                                    text = stringResource(R.string.common_cancel),
                                     color = BuyPilotColors.TextMuted,
                                     fontSize = BuyPilotType.Label,
                                     lineHeight = 16.sp,
@@ -8146,7 +8357,7 @@ private fun CompareActionPickerDialog(
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
                             ) {
                                 Text(
-                                    text = "开始对比",
+                                    text = stringResource(R.string.compare_start),
                                     color = if (selectedRanks.size >= 2) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
                                     fontSize = BuyPilotType.Label,
                                     lineHeight = 16.sp,
@@ -8229,8 +8440,8 @@ private fun ProductPayload.shortDecisionCompareName(): String {
         clean
     }
     return withoutBrand
-        .replace(Regex("\\s+"), " ")
-        .split(Regex("[，,（(]"))
+        .replace(DecisionCompareWhitespaceRegex, " ")
+        .split(DecisionCompareSplitRegex)
         .firstOrNull()
         ?.trim()
         ?.take(16)
@@ -8558,7 +8769,7 @@ private fun DecisionLightRiskNote(text: String) {
         )
         if (preview.body.length > 42) {
             Text(
-                text = "全文",
+                text = stringResource(R.string.full_text),
                 color = BuyPilotColors.PrimaryDark.copy(alpha = 0.82f),
                 fontSize = BuyPilotType.Label,
                 lineHeight = 16.sp,
@@ -8601,7 +8812,7 @@ private fun String.toDecisionRiskPreview(): DecisionRiskPreview {
     }
 
     clean = clean
-        .replace(Regex("""^[：:，,、\s]+"""), "")
+        .replace(DecisionRiskLeadingPunctuationRegex, "")
         .trim()
 
     val badge = if (rating != null) "低分反馈" else "留意点"
@@ -8758,6 +8969,8 @@ internal fun SwipeRoundButton(
     @DrawableRes iconRes: Int,
     contentDescription: String,
     active: Boolean,
+    modifier: Modifier = Modifier,
+    pressAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 140, easing = MenuEaseOut),
     enabled: Boolean = true,
     onClick: () -> Unit = {},
 ) {
@@ -8765,7 +8978,7 @@ internal fun SwipeRoundButton(
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.96f else 1f,
-        animationSpec = tween(durationMillis = 140, easing = MenuEaseOut),
+        animationSpec = pressAnimationSpec,
         label = "swipe_round_button_press",
     )
     val containerColor = when {
@@ -8784,7 +8997,7 @@ internal fun SwipeRoundButton(
         else -> BuyPilotColors.Border.copy(alpha = 0.74f)
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(58.dp)
             .scale(scale)
             .shadow(3.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.04f))
@@ -8806,6 +9019,28 @@ internal fun SwipeRoundButton(
             tint = contentColor,
             modifier = Modifier.size(24.dp),
         )
+    }
+}
+
+@Preview(name = "Swipe round buttons")
+@Composable
+private fun SwipeRoundButtonPreview() {
+    Surface(color = BuyPilotColors.SurfaceBg) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            SwipeRoundButton(
+                iconRes = R.drawable.ic_close_24,
+                contentDescription = stringResource(R.string.feedback_dislike_desc),
+                active = false,
+            )
+            SwipeRoundButton(
+                iconRes = R.drawable.ic_favorite_24,
+                contentDescription = stringResource(R.string.feedback_like_desc),
+                active = true,
+            )
+        }
     }
 }
 
@@ -8911,7 +9146,7 @@ private fun Mascot(
     ) {
         Image(
             painter = painterResource(R.drawable.redbean_bun_mascot_white),
-            contentDescription = "BuyPilot mascot",
+            contentDescription = stringResource(R.string.mascot_desc),
             modifier = imageModifier.size(imageSize.dp),
             contentScale = ContentScale.Fit,
         )
@@ -8951,12 +9186,35 @@ private fun FinalDecisionPayload.decisionStatusBadge(): DecisionStatusBadge? =
         else -> null
     }
 
+@Composable
+internal fun String.confidenceLabelText(): String =
+    stringResource(R.string.confidence_prefix, stringResource(confidenceLabelResId()))
+
+@Composable
+private fun String.confidenceLabelResId(): Int =
+    when (trim().lowercase()) {
+        "high" -> R.string.confidence_high
+        "medium" -> R.string.confidence_medium
+        "low" -> R.string.confidence_low
+        else -> R.string.confidence_unknown
+    }
+
 internal fun String.confidenceLabel(): String =
     when (trim().lowercase()) {
         "high" -> "高"
         "medium" -> "中"
         "low" -> "低"
         else -> "待确认"
+    }
+
+@Composable
+internal fun String.nextStepLabelText(): String =
+    when (trim().lowercase()) {
+        "adjust_criteria" -> stringResource(R.string.next_step_adjust_criteria)
+        "replace_deck" -> stringResource(R.string.next_step_replace_deck)
+        "continue_current_deck" -> stringResource(R.string.next_step_continue_current_deck)
+        "accept_recommendation" -> stringResource(R.string.next_step_accept_recommendation)
+        else -> stringResource(R.string.next_step_default)
     }
 
 internal fun String.nextStepLabel(): String =
@@ -8968,13 +9226,37 @@ internal fun String.nextStepLabel(): String =
         else -> "下一步：继续补充偏好"
     }
 
-internal fun String.userFacingEvidenceSourceLabel(fallback: String): String {
+@Immutable
+internal data class EvidenceSourceLabels(
+    val officialFaq: String,
+    val userReview: String,
+    val productInfo: String,
+    val recommendationReason: String,
+)
+
+@Composable
+internal fun rememberEvidenceSourceLabels(): EvidenceSourceLabels {
+    val officialFaq = stringResource(R.string.faq_eyebrow)
+    val userReview = stringResource(R.string.review_eyebrow)
+    val productInfo = stringResource(R.string.evidence_product_info)
+    val recommendationReason = stringResource(R.string.product_recommend_reason)
+    return remember(officialFaq, userReview, productInfo, recommendationReason) {
+        EvidenceSourceLabels(
+            officialFaq = officialFaq,
+            userReview = userReview,
+            productInfo = productInfo,
+            recommendationReason = recommendationReason,
+        )
+    }
+}
+
+internal fun String.userFacingEvidenceSourceLabel(fallback: String, labels: EvidenceSourceLabels): String {
     val clean = withoutMarkdownMarkup().withoutInternalDebugTokens().trim()
     return when (clean.lowercase().replace("-", "_")) {
-        "official_faq", "faq" -> "官方问答"
-        "user_review", "review", "reviews" -> "用户评价"
-        "marketing_description", "description", "product_description", "product_chunk", "chunk" -> "商品资料"
-        "recommendation_reason", "reason" -> "推荐理由"
+        "official_faq", "faq" -> labels.officialFaq
+        "user_review", "review", "reviews" -> labels.userReview
+        "marketing_description", "description", "product_description", "product_chunk", "chunk" -> labels.productInfo
+        "recommendation_reason", "reason" -> labels.recommendationReason
         else -> clean.ifBlank { fallback }
     }
 }
