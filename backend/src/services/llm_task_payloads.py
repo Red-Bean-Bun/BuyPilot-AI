@@ -383,6 +383,20 @@ def comparison_conclusion_messages(
     ]
 
 
+def strategy_narration_messages(strategy_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build messages for strategy narration LLM task.
+
+    Takes a structured ShoppingStrategyPayload and generates natural language
+    narration text for the user. This is a text-generation task (not JSON).
+    """
+    rendered = get_prompt_store().render("strategy_narration", {})
+    system_content = rendered
+    return [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": json.dumps(strategy_payload, ensure_ascii=False)},
+    ]
+
+
 def parse_json_object(text: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text)

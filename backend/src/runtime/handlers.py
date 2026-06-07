@@ -125,12 +125,25 @@ async def handle_chitchat(
     yield ctx.done()
 
 
-async def handle_clarification(ctx: StreamContext, missing_slots: list[str]) -> AsyncGenerator[SSEEventBase, None]:
+def _build_clarify_text(missing_slots: list[str], category: str | None = None) -> str:
+    """Build context-specific clarification analysis text."""
+    if "category" in missing_slots:
+        return msg.CLARIFICATION_CATEGORY_HINT
+    if "budget" in missing_slots and category:
+        return msg.CLARIFICATION_BUDGET_HINT_TEMPLATE.format(category=category)
+    return msg.CLARIFICATION_ANALYSIS
+
+
+async def handle_clarification(
+    ctx: StreamContext,
+    missing_slots: list[str],
+    category: str | None = None,
+) -> AsyncGenerator[SSEEventBase, None]:
     question, options = build_clarification_question(missing_slots)
     yield ctx.thinking("clarifying", msg.THINKING_NEEDS_INFO)
     async for event in stream_text(
         ctx,
-        CLARIFICATION_ANALYSIS_TEXT,
+        _build_clarify_text(missing_slots, category),
         message_id=f"clarification_analysis_{ctx.turn_id}",
         node_id=f"clarification_analysis_{ctx.turn_id}",
     ):
@@ -397,7 +410,9 @@ async def handle_recommendation(
 
     # ── Await speculative retrieval + post-filter, then delegate ──
     if not retrieval_task.task.done():
-        yield ctx.thinking("searching", msg.THINKING_SEARCHING)
+        yield ctx.thinking("searching", _thinking_with_category(
+            msg.THINKING_SEARCHING, msg.THINKING_SEARCHING_CATEGORY_TEMPLATE, intent.category,
+        ))
     try:
         precomputed = await retrieval_task.task
     except Exception:
@@ -519,7 +534,9 @@ async def continue_recommendation_from_criteria(
     if precomputed_retrieval is not None:
         retrieval = precomputed_retrieval
     else:
-        yield ctx.thinking("searching", msg.THINKING_SEARCHING)
+        yield ctx.thinking("searching", _thinking_with_category(
+            msg.THINKING_SEARCHING, msg.THINKING_SEARCHING_CATEGORY_TEMPLATE, criteria.category,
+        ))
         retrieval_capture = CapturedStage()
         ctx.ensure_active()
         async for event in _capture_stage_result(
@@ -528,7 +545,7 @@ async def continue_recommendation_from_criteria(
                 ctx,
                 ctx.stages.run_retrieval(criteria, feedback=feedback, image_embedding=image_embedding),
                 "searching",
-                msg.THINKING_SEARCHING,
+                _thinking_with_category(msg.THINKING_SEARCHING, msg.THINKING_SEARCHING_CATEGORY_TEMPLATE, criteria.category),
                 timing_key="retrieve",
             ),
         ):
@@ -555,7 +572,7 @@ async def continue_recommendation_from_criteria(
                     ctx,
                     ctx.stages.run_retrieval(relaxed, feedback=feedback, image_embedding=image_embedding),
                     "searching",
-                    msg.THINKING_SEARCHING,
+                    _thinking_with_category(msg.THINKING_SEARCHING, msg.THINKING_SEARCHING_CATEGORY_TEMPLATE, criteria.category),
                     timing_key="retrieve",
                 ),
             ):
@@ -629,7 +646,9 @@ async def continue_recommendation_from_criteria(
         )
 
     # Signal ranking stage before product cards
-    yield ctx.thinking("ranking", msg.THINKING_RANKING)
+    yield ctx.thinking("ranking", _thinking_with_category(
+        msg.THINKING_RANKING, msg.THINKING_RANKING_CATEGORY_TEMPLATE, criteria.category,
+    ))
 
     # Emit product cards with pacing delay (built into _product_card_events)
     async for event in _product_card_events(
@@ -653,7 +672,9 @@ async def continue_recommendation_from_criteria(
 
         if not is_scenario_flow:
             yield _criteria_card_event(ctx, criteria)
-        yield ctx.thinking("decision", msg.THINKING_DECISION)
+        yield ctx.thinking("decision", _thinking_with_category(
+            msg.THINKING_DECISION, msg.THINKING_DECISION_CATEGORY_TEMPLATE, criteria.category,
+        ))
         winner = scored[0]
         decision = await _run_decision_with_context(
             ctx,
@@ -1183,6 +1204,11 @@ async def stream_text(
     )
 
 
+def _thinking_with_category(base: str, template: str, category: str | None) -> str:
+    """Return category-aware thinking message; falls back to base when category is None."""
+    return template.format(category=category) if category else base
+
+
 def _build_intro_text(intent: IntentResult, body: ChatStreamRequest) -> str:
     """Construct the product-first intro text from intent data."""
     try:
@@ -1343,20 +1369,20 @@ def _no_match_followup_text(criteria: CriteriaPayload) -> str:
     )
     has_product_type = bool(constraints.product_type)
     if criteria.category and not has_budget and not has_exclusions and not has_product_type:
-        examples = msg.PRODUCT_TYPE_HINTS_BY_CATEGORY.get(criteria.category, "具体商品类型")
+        examples = msg.PRODUCT_TYPE_HINTS_BY_CATEGORY.get(criteria.category, msg.NO_MATCH_FALLBACK_PRODUCT_TYPE_HINT)
         return msg.FOLLOWUP_NO_MATCH_NEED_PRODUCT_TYPE_TEMPLATE.format(category=criteria.category, examples=examples)
 
     suggestions: list[str] = []
     if has_budget:
-        suggestions.append("放宽预算")
+        suggestions.append(msg.NO_MATCH_SUGGEST_RELAX_BUDGET)
     if has_product_type:
-        suggestions.append("换一个具体商品类型")
+        suggestions.append(msg.NO_MATCH_SUGGEST_CHANGE_PRODUCT_TYPE)
     else:
-        suggestions.append("补充具体商品类型")
+        suggestions.append(msg.NO_MATCH_SUGGEST_ADD_PRODUCT_TYPE)
     if has_exclusions:
-        suggestions.append("去掉部分排除条件")
+        suggestions.append(msg.NO_MATCH_SUGGEST_REMOVE_EXCLUSIONS)
     if criteria.category:
-        suggestions.append("换一个品类")
+        suggestions.append(msg.NO_MATCH_SUGGEST_CHANGE_CATEGORY)
     return msg.FOLLOWUP_NO_MATCH_ADJUST_TEMPLATE.format(suggestions="、".join(dict.fromkeys(suggestions)))
 
 

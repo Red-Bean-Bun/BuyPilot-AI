@@ -429,7 +429,7 @@ async def _emit_clarification(
     except Exception:
         logger.warning("Pre-retrieval in clarification failed", exc_info=True)
 
-    async for event in handle_clarification(ctx, missing_slots):
+    async for event in handle_clarification(ctx, missing_slots, intent.category):
         yield event
     await save_recommendation_turn(ctx.session_id, partial, product_ids, user_message=pipeline_body.message)
 

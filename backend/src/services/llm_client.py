@@ -37,6 +37,7 @@ from src.services.llm_task_payloads import (
     parse_json_object as _parse_json_object,
     recommendation_messages,
     recommendation_stream_messages,
+    strategy_narration_messages,
 )
 from src.services.recommendation_reasons import build_reason_atoms
 from src.services.request_context import get_request_context
@@ -117,6 +118,7 @@ __all__ = [
     "generate_criteria",
     "generate_decision",
     "generate_recommendation",
+    "generate_strategy_narration",
     "stream_comparison_conclusion",
     "stream_comparison_narration",
     "stream_recommendation",
@@ -404,6 +406,24 @@ def _sanitize_decision(
         confidence=decision.confidence,
         next_step=decision.next_step,
     )
+
+
+async def generate_strategy_narration(strategy_payload: dict[str, Any]) -> str:
+    """Generate natural language narration from a structured shopping strategy.
+
+    Args:
+        strategy_payload: Serialized ShoppingStrategyPayload containing
+            scene_type, decision_barrier, primary_direction, avoid_risks, etc.
+
+    Returns:
+        Natural language narration text for the user.
+
+    Raises:
+        LiveLLMUnavailable: If no LLM provider is available.
+    """
+    messages = strategy_narration_messages(strategy_payload)
+    raw = await _call_chat_task("generate_strategy_narration", messages, json_object=False)
+    return raw.strip()
 
 
 async def stream_comparison_narration(

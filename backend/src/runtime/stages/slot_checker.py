@@ -10,10 +10,6 @@ from src.types.schemas import IntentResult
 _NARROWING_CONSTRAINT_KEYS = frozenset(
     {"budget_max", "budget_min", "skin_type", "dietary", "use_scenario", "sport_type"}
 )
-_PHONE_PREFERENCE_OPTIONS = ["拍照", "续航", "性价比", "游戏"]
-_DIGITAL_PREFERENCE_OPTIONS = ["音质", "续航", "轻便", "性价比"]
-_SKIN_TYPE_OPTIONS = ["油性", "干性", "混合", "敏感"]
-_SPORT_TYPE_OPTIONS = ["跑步", "健身", "户外", "日常通勤"]
 
 _PHONE_TYPES = frozenset({"智能手机"})
 _DIGITAL_GENERIC_TYPES = frozenset({"耳机", "平板电脑"})
@@ -130,13 +126,13 @@ def build_clarification_question(missing_slots: list[str]) -> tuple[str, list[st
     if "budget" in missing_slots:
         return msg.CLARIFY_BUDGET_QUESTION, list(msg.CLARIFY_BUDGET_OPTIONS)
     if "preference_dimension_digital" in missing_slots:
-        return "请问您更看重哪个方面？", list(_DIGITAL_PREFERENCE_OPTIONS)
+        return msg.CLARIFY_PREFERENCE_QUESTION, list(msg.DIGITAL_PREFERENCE_OPTIONS)
     if "preference_dimension" in missing_slots:
-        return "请问您更看重哪个方面？", list(_PHONE_PREFERENCE_OPTIONS)
+        return msg.CLARIFY_PREFERENCE_QUESTION, list(msg.PHONE_PREFERENCE_OPTIONS)
     if "skin_type" in missing_slots:
-        return "请问您的肤质更接近哪一种？", list(_SKIN_TYPE_OPTIONS)
+        return msg.CLARIFY_SKIN_TYPE_QUESTION, list(msg.SKIN_TYPE_OPTIONS)
     if "sport_type" in missing_slots:
-        return "主要用于哪类运动或穿着场景？", list(_SPORT_TYPE_OPTIONS)
+        return msg.CLARIFY_SPORT_TYPE_QUESTION, list(msg.SPORT_TYPE_OPTIONS)
     if "product_type" in missing_slots:
         return msg.CLARIFY_PRODUCT_TYPE_QUESTION, list(msg.CLARIFY_PRODUCT_TYPE_OPTIONS)
     return msg.CLARIFY_FALLBACK_QUESTION, []

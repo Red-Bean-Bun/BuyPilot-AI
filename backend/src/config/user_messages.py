@@ -154,3 +154,40 @@ PRODUCT_TYPE_HINTS_BY_CATEGORY: dict[str, str] = {
 
 THINKING_COMPARING = "正在对比商品..."
 COMPARE_CLARIFY = "你想对比哪几个商品？可以说「第一个和第二个」，或者从推荐列表中选择。"
+
+# ── Context-aware clarification analysis ─────────────────────────────
+
+CLARIFICATION_CATEGORY_HINT = (
+    "我先看了一下你的需求，目前还不确定你想买哪个品类。"
+    "告诉我品类后，推荐会更精准。"
+)
+CLARIFICATION_BUDGET_HINT_TEMPLATE = (
+    "我已经定位到{category}方向，但还需要知道你的预算范围。"
+    "不同价位的商品差异比较大，补齐预算后推荐会更稳。"
+)
+
+# ── Clarification preference questions (centralised from slot_checker) ─
+
+CLARIFY_PREFERENCE_QUESTION = "请问您更看重哪个方面？"
+CLARIFY_SKIN_TYPE_QUESTION = "请问您的肤质更接近哪一种？"
+CLARIFY_SPORT_TYPE_QUESTION = "主要用于哪类运动或穿着场景？"
+
+PHONE_PREFERENCE_OPTIONS: tuple[str, ...] = ("拍照", "续航", "性价比", "游戏")
+DIGITAL_PREFERENCE_OPTIONS: tuple[str, ...] = ("音质", "续航", "轻便", "性价比")
+SKIN_TYPE_OPTIONS: tuple[str, ...] = ("油性", "干性", "混合", "敏感")
+SPORT_TYPE_OPTIONS: tuple[str, ...] = ("跑步", "健身", "户外", "日常通勤")
+
+# ── No-match suggestion fragments (centralised from handlers) ────────
+
+NO_MATCH_SUGGEST_RELAX_BUDGET = "放宽预算"
+NO_MATCH_SUGGEST_CHANGE_PRODUCT_TYPE = "换一个具体商品类型"
+NO_MATCH_SUGGEST_ADD_PRODUCT_TYPE = "补充具体商品类型"
+NO_MATCH_SUGGEST_REMOVE_EXCLUSIONS = "去掉部分排除条件"
+NO_MATCH_SUGGEST_CHANGE_CATEGORY = "换一个品类"
+NO_MATCH_FALLBACK_PRODUCT_TYPE_HINT = "具体商品类型"
+
+# ── Thinking category-aware templates ────────────────────────────────
+
+THINKING_SEARCHING_CATEGORY_TEMPLATE = "正在{category}品类中检索匹配商品..."
+THINKING_RANKING_CATEGORY_TEMPLATE = "正在{category}候选中排序和筛选..."
+THINKING_DECISION_CATEGORY_TEMPLATE = "正在为你生成{category}适配建议..."
