@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
@@ -356,3 +357,65 @@ def format_sse(event: SSEEventBase) -> str:
     tag = event.event
     data = event.model_dump_json()
     return f"event: {tag}\ndata: {data}\n\n"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Import-time SSE protocol guard (Rust-style compile-time check)
+#
+# This runs at module import. If the JSON Schema and Python models
+# drift apart, the module fails to import → uvicorn refuses to start.
+# This is the Python equivalent of Rust's borrow checker: you cannot
+# run the program with an inconsistent protocol definition.
+#
+# Cross-language check (Schema ↔ Kotlin) lives in:
+#   scripts/check_sse_protocol.py  (run via `make protocol-check`)
+# ═══════════════════════════════════════════════════════════════════════
+
+def _load_schema_event_types() -> frozenset[str]:
+    """Extract event type names from contracts/sse-events.schema.json."""
+    schema_path = Path(__file__).resolve().parents[3] / "contracts" / "sse-events.schema.json"
+    if not schema_path.exists():
+        return frozenset()  # graceful degradation for isolated test envs
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    types: list[str] = []
+    for name, defn in schema.get("$defs", {}).items():
+        for part in defn.get("allOf", []):
+            event_const = part.get("properties", {}).get("event", {}).get("const")
+            if event_const:
+                types.append(event_const)
+    return frozenset(types)
+
+
+def _verify_protocol_consistency() -> None:
+    """Schema ↔ Python drift check. Raises ImportError on mismatch."""
+    schema_types = _load_schema_event_types()
+    if not schema_types:
+        return  # schema file not found (isolated test env), skip
+
+    python_types = frozenset(EVENT_TAG_MAP.keys())
+
+    in_schema_not_python = schema_types - python_types
+    in_python_not_schema = python_types - schema_types
+
+    errors: list[str] = []
+    if in_schema_not_python:
+        errors.append(
+            f"JSON Schema defines event types missing from Python EVENT_TAG_MAP: "
+            f"{sorted(in_schema_not_python)}. "
+            f"Add the corresponding Pydantic class + EVENT_TAG_MAP entry in sse_events.py."
+        )
+    if in_python_not_schema:
+        errors.append(
+            f"Python EVENT_TAG_MAP defines event types not in JSON Schema: "
+            f"{sorted(in_python_not_schema)}. "
+            f"Update contracts/sse-events.schema.json FIRST (铁律1: Schema is source of truth)."
+        )
+    if errors:
+        raise ImportError(
+            "SSE protocol drift detected — server cannot start.\n"
+            + "\n".join(errors)
+            + "\n\nFix: update the out-of-sync source, then restart."
+        )
+
+
+_verify_protocol_consistency()

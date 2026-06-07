@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.cloudflare.yml --env-file .env
 
-.PHONY: help up down rebuild restart logs logs-all ps wipe-db reset seed-image seed-text smoke health db-stats shell db-shell test test-local lint cd-setup cd-status cd-run cd-logs
+.PHONY: help up down rebuild restart logs logs-all ps wipe-db reset seed-image seed-text smoke health db-stats shell db-shell test test-local lint protocol-check cd-setup cd-status cd-run cd-logs cd-uninstall
 
 help: ## 显示帮助
 	@echo "BuyPilot-AI 运维命令"
@@ -105,6 +105,9 @@ test-local: ## 在本地 venv 运行测试
 
 lint: ## 本地 ruff 检查
 	cd backend && uv run ruff check src tests
+
+protocol-check: ## 三端协议一致性校验（Schema ↔ Python ↔ Kotlin）
+	python scripts/check_sse_protocol.py
 
 # ── 自动部署（CD）───────────────────────────────────
 

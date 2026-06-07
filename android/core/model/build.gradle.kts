@@ -23,6 +23,12 @@ android {
     }
 }
 
+// SSE protocol guard: force protocol test to run on every assemble
+// This makes Kotlin-side drift detection as hard as Python's import-time guard
+tasks.matching { it.name.startsWith("assemble") }.configureEach {
+    dependsOn("testDebugUnitTest")
+}
+
 dependencies {
     implementation(project(":core:common"))
     api(libs.kotlinx.serialization.json)
