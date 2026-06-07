@@ -202,7 +202,7 @@ def _is_budget_reduction_phrase(message: str) -> bool:
 
 # ── Natural language adjustment hints (PRD 05 §6.5) ──────────────────────
 
-_ADJUST_SOFTEN_PATTERN = re.compile(r"再(.{1,4})(?:一点|些|点儿)")
+_ADJUST_SOFTEN_PATTERN = re.compile(r"[再更](.{1,4})(?:一点|些|点儿)")
 _ADJUST_NOT_TOO_PATTERN = re.compile(r"不要太(.{1,6})")
 _ADJUST_AVOID_PATTERN = re.compile(r"不要([^，。！？；、,.!?;:\n]{1,8})")
 _ADJUST_BUDGET_CAP_PATTERN = re.compile(r"预算[^0-9]{0,3}(\d+(?:\.\d+)?)")
@@ -563,6 +563,8 @@ def extract_product_lookup_hints(message: str) -> dict[str, Any] | None:
         if m:
             product = m.group(1).strip()
             if len(product) < 2:
+                return None
+            if "一点" in product or "更" in product:
                 return None
             if product in {
                 "什么",
