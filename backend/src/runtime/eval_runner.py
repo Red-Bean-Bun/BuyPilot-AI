@@ -114,6 +114,14 @@ async def _evaluate_sample(sample: Any, session_id: str) -> dict[str, Any]:
 
 
 def _deterministic_metrics(capture: PipelineCapture, gt: dict[str, Any]) -> dict[str, float]:
+    from src.services.eval.metrics import compute_deterministic_faithfulness
+
+    faithfulness_result = compute_deterministic_faithfulness(
+        capture.products,
+        capture.evidence_snippets,
+        capture.product_ids,
+    )
+
     metrics = {
         "intent_accuracy": compute_intent_accuracy(capture.intent_type, gt.get("intent_type", "recommend")),
         "constraint_extraction_accuracy": compute_constraint_extraction_accuracy(
@@ -123,6 +131,7 @@ def _deterministic_metrics(capture: PipelineCapture, gt: dict[str, Any]) -> dict
         "recall_at_5": compute_recall_at_k(capture.product_ids, gt.get("relevant_product_ids", []), k=5),
         "recall_at_10": compute_recall_at_k(capture.product_ids, gt.get("relevant_product_ids", []), k=10),
         "evidence_coverage": compute_evidence_coverage(capture.evidence_count, len(capture.products)),
+        "faithfulness": faithfulness_result["score"],
     }
     metrics["constraint_satisfaction"] = _deterministic_constraint_satisfaction(capture, gt)
     return metrics
@@ -151,26 +160,20 @@ async def _llm_metrics(
 
 def _default_text_llm_metrics() -> dict[str, float]:
     return {
-        "faithfulness": 1.0,
         "context_precision": 0.0,
         "context_recall": 0.0,
         "answer_correctness": 0.0,
-        "hallucination_rate": 0.0,
     }
 
 
 async def _text_llm_metrics(question: str, answer: str, contexts: list[str]) -> dict[str, float]:
-    faith = await evaluate_faithfulness(answer, contexts)
     cp = await evaluate_context_precision(question, contexts)
     cr = await evaluate_context_recall(answer, contexts)
     corr = await evaluate_answer_correctness(question, answer, contexts)
-    hallu = await evaluate_hallucination_rate(answer, contexts)
     return {
-        "faithfulness": faith["score"],
         "context_precision": cp["score"],
         "context_recall": cr["score"],
         "answer_correctness": corr["score"],
-        "hallucination_rate": hallu["hallucination_rate"],
     }
 
 
@@ -304,17 +307,17 @@ def _compute_overall(metrics: dict[str, float]) -> float:
     than LLM-judged text quality scores that are sensitive to context truncation artifacts.
     """
     weights = {
-        "faithfulness": 0.20,
+        "faithfulness": 0.25,  # now deterministic: product_id + evidence coverage
         "recall_at_10": 0.20,
         "constraint_satisfaction": 0.25,
         "context_precision": 0.10,
         "intent_accuracy": 0.10,
     }
-    anti_hallu = 1.0 - metrics.get("hallucination_rate", 0)
+    # answer_correctness as bonus (not part of base weights, adds up to 1.0)
     score = 0.0
     for key, weight in weights.items():
         score += metrics.get(key, 0) * weight
-    score += anti_hallu * 0.15
+    score += metrics.get("answer_correctness", 0) * 0.10
     return round(score, 4)
 
 

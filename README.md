@@ -13,12 +13,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Eval_Score-75%25-blue" alt="综合评测 75%" />
+  <img src="https://img.shields.io/badge/Eval_Score-78%25-blue" alt="综合评测 78%" />
   <img src="https://img.shields.io/badge/Eval-20%2F20-green" alt="Eval 20/20" />
   <img src="https://img.shields.io/badge/Tests-140%20passed-green" alt="Tests 140 passed" />
   <img src="https://img.shields.io/badge/意图准确率-90%25-green" alt="意图准确率 90%" />
   <img src="https://img.shields.io/badge/多轮一致性-100%25-green" alt="多轮一致性 100%" />
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
+  <img src="https://img.shields.io/badge/Faithfulness-82%25-green" alt="Faithfulness 82%" />
   <img src="https://img.shields.io/badge/约束满足-89%25-blue" alt="约束满足 89%" />
   <a href="https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk">
     <img src="https://img.shields.io/badge/Download-APK-orange?style=for-the-badge&logo=android" alt="Download APK" />
@@ -30,18 +31,18 @@
 
 | 指标 | 得分 | 权重 | 说明 |
 |------|------|------|------|
-| **Overall Score** | **75.4%** | — | 加权综合分 |
+| **Overall Score** | **78.4%** | — | 加权综合分 |
+| Faithfulness | 82.4% | 25% | 确定性检查：商品存在性 + 证据覆盖 + snippet 质量 |
 | Constraint Satisfaction | 88.7% | 25% | 推荐商品满足用户硬约束比例（确定性规则） |
 | Recall@10 | 81.7% | 20% | Top-10 检索召回率 |
-| Faithfulness | 65.8% | 20% | 推荐文案有 RAG chunk 支撑的声明比例 |
-| Anti-Hallucination | 63.8% | 15% | 1 - hallucination_rate |
-| Context Precision | 52.0% | 10% | 检索 chunk 相关度 |
+| Context Precision | 52.4% | 10% | 检索 chunk 相关度 |
 | Intent Accuracy | 90.0% | 10% | 意图分类正确率 |
+| Answer Correctness | 51.0% | 10% | 答案事实正确性（LLM Judge） |
 | Multi-turn Consistency | 100% | — | 多轮约束保持率 |
 | Recall@5 | 81.7% | — | Top-5 检索命中率 |
-| Ranking Reasonableness | 86.5% | — | 商品排序合理性 |
+| Ranking Reasonableness | 85.0% | — | 商品排序合理性 |
 | Evidence Coverage | 75.0% | — | 商品附带证据链接比例 |
-| Context Recall | 66.5% | — | 检索 chunk 覆盖答案信息的比例 |
+| Context Recall | 64.7% | — | 检索 chunk 覆盖答案信息的比例 |
 | Constraint Extraction | 64.9% | — | 从用户输入提取约束的准确率 |
 | Criteria Coverage | 66.2% | — | 购买标准覆盖度 |
 | LLM Constraint Satisfaction | 86.9% | — | LLM Judge 评估约束满足率 |

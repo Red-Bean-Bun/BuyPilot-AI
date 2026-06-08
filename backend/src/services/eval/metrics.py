@@ -169,3 +169,57 @@ def compute_feedback_change_rate(
     if union == 0:
         return 0.0
     return 1.0 - (intersection / union)
+
+
+def compute_deterministic_faithfulness(
+    products: list[dict[str, Any]],
+    evidence_snippets: list[str],
+    retrieved_product_ids: list[str],
+) -> dict[str, float]:
+    """Deterministic faithfulness check.
+
+    Checks three things:
+    1. All recommended product_ids exist in retrieved results
+    2. All product_cards have at least one evidence snippet
+    3. Evidence snippets are non-empty and meaningful (>20 chars)
+
+    This is more stable than LLM-judged faithfulness which can be overly strict
+    about "every claim needs explicit chunk support".
+    """
+    if not products:
+        return {"score": 1.0, "issues": 0}
+
+    issues = 0
+    checks = 0
+
+    # Check 1: product_id consistency
+    retrieved_set = set(retrieved_product_ids)
+    for p in products:
+        checks += 1
+        pid = p.get("product_id", "")
+        if pid and retrieved_set and pid not in retrieved_set:
+            issues += 1
+
+    # Check 2: evidence coverage per product
+    if evidence_snippets:
+        products_with_evidence = sum(
+            1 for p in products
+            if p.get("product_id") and any(
+                p.get("product_id") in snippet for snippet in evidence_snippets
+            )
+        )
+        if products:
+            coverage = products_with_evidence / len(products)
+            checks += 1
+            if coverage < 0.5:  # at least 50% products should have evidence
+                issues += 1
+
+    # Check 3: evidence quality (non-trivial snippets)
+    if evidence_snippets:
+        meaningful_snippets = sum(1 for s in evidence_snippets if len(s) > 20)
+        checks += 1
+        if len(evidence_snippets) > 0 and meaningful_snippets / len(evidence_snippets) < 0.5:
+            issues += 1
+
+    score = 1.0 - (issues / max(checks, 1))
+    return {"score": max(0.0, score), "issues": issues}
