@@ -2,7 +2,8 @@
 """
 BuyPilot 失败测试复测脚本
 
-只运行之前失败的 5 个测试，验证修复效果。
+Development tool - not used in production or evaluation.
+Usage: re-run previously failed tests to verify fixes.
 """
 
 import sys

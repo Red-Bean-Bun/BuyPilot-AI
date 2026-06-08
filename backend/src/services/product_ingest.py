@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
+import logging
+import mimetypes
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
-from sqlalchemy import delete, func, text
+from sqlalchemy import delete, text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.domain_terms import normalize_category
 from src.config.settings import get_settings
 from src.repos.database import create_db_and_tables, get_async_engine
-from src.repos.models import Product, ProductChunk, SystemMetadata, utc_now
-from src.repos.products import list_raw_products
+from src.repos.models import Product, ProductChunk, ProductImageEmbedding, SystemMetadata, utc_now
+from src.repos.products import dataset_dir, list_raw_products
+from src.repos.vector import VL_EMBEDDING_DIMENSIONS
 from src.services.chunking import build_product_chunks, build_product_knowledge_package
-from src.services.embedding import embed_texts
+from src.services.embedding import EmbeddingUnavailable, embed_image, embed_texts
+
+logger = logging.getLogger(__name__)
 
 EXPECTED_EMBEDDING_DIMENSIONS = 1024
 DATASET_VERSION = "ecommerce_agent_dataset:v1"
@@ -135,23 +142,43 @@ async def reindex_chunk_embeddings(progress: ProgressCallback | None = None) -> 
 
 
 async def seed_products_if_needed(expected_embedding_dimensions: int | None = None) -> dict[str, int | bool]:
-    """Seed product/chunk tables only when the current database is empty or stale."""
+    """Seed product/chunk tables when the dataset has changed since the last seed.
+
+    Uses hash-based idempotency: compares the current dataset hash against the
+    hash stored in SystemMetadata.  Falls back to count-based check when no
+    stored hash exists (first run after upgrade).
+    """
     await create_db_and_tables()
+    products = list_raw_products()
+    current_hash = _dataset_hash(products)
+
+    # Read stored hash from SystemMetadata
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
-        product_count = (await session.exec(select(func.count(Product.id)))).one()
+        stored = (
+            await session.exec(select(SystemMetadata).where(SystemMetadata.key == "dataset_index"))
+        ).one_or_none()
+    stored_hash = (stored.value_json.get("dataset_hash") if stored else None)
 
     stats = await chunk_embedding_stats()
     chunk_count = stats["chunks"]
     current_dimensions = stats["embedding_dimensions"]
     dimension_ok = expected_embedding_dimensions is None or current_dimensions == expected_embedding_dimensions
-    if product_count > 0 and chunk_count > 0 and dimension_ok:
+
+    # Hash-based skip: dataset unchanged AND dimensions match
+    if stored_hash == current_hash and chunk_count > 0 and dimension_ok:
         return {
             "seeded": False,
-            "products": product_count,
+            "products": len(products),
             "chunks": chunk_count,
             "embedded_chunks": stats["embedded_chunks"],
             "embedding_dimensions": current_dimensions,
+            "reason": "Dataset unchanged",
         }
+
+    # Legacy fallback: no stored hash but DB is populated and dims match
+    if stored_hash is None and chunk_count > 0 and dimension_ok:
+        # First run after upgrade — seed to write the hash
+        pass
 
     result = await seed_products(expected_embedding_dimensions=expected_embedding_dimensions)
     stats = await chunk_embedding_stats()
@@ -244,6 +271,121 @@ def _embedding_model_name() -> str:
         return "unknown"
     raw = settings.llm_profiles.get("profiles", {}).get(profile_name) or {}
     return str(raw.get("model") or profile_name)
+
+
+IMAGE_EMBEDDING_MODEL = "qwen3-vl-embedding"
+IMAGE_BATCH_SIZE = 5
+
+
+def _image_to_data_url(image_path: Path) -> str:
+    mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _image_hash(image_path: Path) -> str:
+    return hashlib.sha256(image_path.read_bytes()).hexdigest()
+
+
+async def _load_existing_image_hashes() -> dict[str, str]:
+    """Return {product_id: image_hash} for existing embeddings with matching model/dimensions."""
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        rows = (
+            await session.exec(
+                select(ProductImageEmbedding.product_id, ProductImageEmbedding.image_hash).where(
+                    ProductImageEmbedding.embedding_model == IMAGE_EMBEDDING_MODEL,
+                    ProductImageEmbedding.embedding_dimensions == VL_EMBEDDING_DIMENSIONS,
+                )
+            )
+        ).all()
+    return {pid: h for pid, h in rows}
+
+
+async def seed_image_embeddings_if_needed() -> dict[str, int | bool]:
+    """Seed image embeddings with content-hash idempotency.
+
+    Compares SHA-256 of each product image against stored hashes.
+    Only re-embeds images whose content has changed.
+    """
+    raw_products = list_raw_products()
+    root = dataset_dir()
+    existing = await _load_existing_image_hashes()
+
+    embedded = 0
+    skipped = 0
+    errors = 0
+    total = len(raw_products)
+
+    for i in range(0, total, IMAGE_BATCH_SIZE):
+        batch = raw_products[i : i + IMAGE_BATCH_SIZE]
+        for raw in batch:
+            product_id = raw.get("product_id", "")
+            image_rel = raw.get("image_path", "")
+            if not product_id or not image_rel:
+                skipped += 1
+                continue
+
+            image_path = root / image_rel
+            if not image_path.exists():
+                logger.warning("Image not found: %s", image_path)
+                skipped += 1
+                continue
+
+            current_hash = _image_hash(image_path)
+            if existing.get(product_id) == current_hash:
+                skipped += 1
+                continue
+
+            try:
+                data_url = _image_to_data_url(image_path)
+                vector = await embed_image(data_url)
+            except (EmbeddingUnavailable, Exception) as exc:
+                logger.error("embed_image failed for %s: %s", product_id, exc)
+                errors += 1
+                continue
+
+            if len(vector) != VL_EMBEDDING_DIMENSIONS:
+                logger.error(
+                    "Dimension mismatch for %s: got %d, expected %d",
+                    product_id, len(vector), VL_EMBEDDING_DIMENSIONS,
+                )
+                errors += 1
+                continue
+
+            async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+                await session.exec(
+                    delete(ProductImageEmbedding).where(
+                        ProductImageEmbedding.product_id == product_id,
+                        ProductImageEmbedding.embedding_model == IMAGE_EMBEDDING_MODEL,
+                        ProductImageEmbedding.embedding_dimensions == VL_EMBEDDING_DIMENSIONS,
+                    )
+                )
+                session.add(
+                    ProductImageEmbedding(
+                        product_id=product_id,
+                        image_path=str(image_rel),
+                        embedding=vector,
+                        embedding_model=IMAGE_EMBEDDING_MODEL,
+                        embedding_dimensions=VL_EMBEDDING_DIMENSIONS,
+                        image_hash=current_hash,
+                        indexed_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+                await session.commit()
+            embedded += 1
+
+    logger.info(
+        "Image seed complete: total=%d embedded=%d skipped=%d errors=%d",
+        total, embedded, skipped, errors,
+    )
+    return {
+        "total": total,
+        "embedded": embedded,
+        "skipped": skipped,
+        "errors": errors,
+        "embedding_model": IMAGE_EMBEDDING_MODEL,
+        "embedding_dimensions": VL_EMBEDDING_DIMENSIONS,
+    }
 
 
 if __name__ == "__main__":

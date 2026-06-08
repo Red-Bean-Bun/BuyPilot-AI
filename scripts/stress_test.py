@@ -2,6 +2,9 @@
 """
 BuyPilot 综合爆破测试脚本
 
+Development tool - not used in production or evaluation.
+Usage: local stress testing before deployment.
+
 用法:
     python scripts/stress_test.py                  # 运行全部测试
     python scripts/stress_test.py --phase basic    # 只运行基础功能测试
@@ -16,7 +19,7 @@ BuyPilot 综合爆破测试脚本
     edge       - P5: 边界输入（空消息、超长、特殊字符）
     intent     - P6: 意图边界（闲聊、歧义、混淆）
     stress     - P7: 并发压力和状态一致性
-    multimodal - P8: 拍照找货（图片输入，⭐⭐⭐加分项）
+    multimodal - P8: 拍照找货（图片输入，多模态深度方向）
     scenario   - P9: 场景化推荐（礼物/兴趣/旅行）
     feedback   - P10: 反馈闭环（不喜欢→排除→重推荐）
     category   - P11: 多品类覆盖（服饰/食品）
@@ -32,17 +35,21 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
 # ─── 配置 ────────────────────────────────────────────────────────────────
 BASE_URL = "http://localhost:8000"
-ADMIN_KEY = "b72d57075018654b8d7ad1ab6e71fb0be3f2ec02fc300015"
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+ADMIN_KEY = os.environ.get("ADMIN_API_KEY", "")
 DEFAULT_DELAY = 0.8  # 请求间隔（秒）
 
 
@@ -186,62 +193,62 @@ def _print_result(r: AnalysisResult, expect: str | None = None, expect_error: bo
     if expect_error:
         # 期望错误：有错误就是成功
         if r.has_error:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "❌"
+            status = "[FAIL]"
             _stats["fail"] += 1
     elif r.has_error:
-        status = "❌"
+        status = "[FAIL]"
         _stats["fail"] += 1
     elif expect == "product_card":
         if r.has_product_card:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "❌"
+            status = "[FAIL]"
             _stats["fail"] += 1
     elif expect == "compare_card":
         if r.has_compare_card:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "❌"
+            status = "[FAIL]"
             _stats["fail"] += 1
     elif expect == "cart_action":
         if r.has_cart_action:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "❌"
+            status = "[FAIL]"
             _stats["fail"] += 1
     elif expect == "clarification":
         if r.has_clarification:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "❌"
+            status = "[FAIL]"
             _stats["fail"] += 1
     elif expect == "no_error":
         if not r.has_error:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "❌"
+            status = "[FAIL]"
             _stats["fail"] += 1
     elif expect is None:
         # 不检查期望，有任意内容就算通过
         if r.has_product_card or r.has_compare_card or r.has_cart_action or r.has_clarification:
-            status = "✅"
+            status = "[PASS]"
             _stats["pass"] += 1
         else:
-            status = "⚠️"
+            status = "[WARN]"
             _stats["warn"] += 1
     elif not r.has_product_card and not r.has_compare_card and not r.has_cart_action:
-        status = "⚠️"
+        status = "[WARN]"
         _stats["warn"] += 1
     else:
-        status = "✅"
+        status = "[PASS]"
         _stats["pass"] += 1
 
     print(f"\n{status} {r.test_name}")

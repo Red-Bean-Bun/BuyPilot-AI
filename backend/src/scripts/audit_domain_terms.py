@@ -1,5 +1,8 @@
 """Audit domain terms against the official ecommerce dataset.
 
+Development tool - not used in production or evaluation.
+Usage: verify domain_terms.py brand aliases and category keywords coverage.
+
 The script is intentionally read-only for production rules. It scans raw JSON
 and generates a report with coverage gaps and candidate updates for human review.
 

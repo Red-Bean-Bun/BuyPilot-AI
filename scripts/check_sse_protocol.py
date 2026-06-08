@@ -2,6 +2,9 @@
 """
 Cross-language SSE protocol consistency check.
 
+Development tool - not used in production or evaluation.
+Usage: verify SSE schema/python/kotlin alignment before release.
+
 Verifies that the three sources of truth are aligned:
   1. contracts/sse-events.schema.json (Schema)
   2. backend/src/types/sse_events.py (Python)

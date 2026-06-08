@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""CLI demo: send a message to /chat/stream and print SSE events."""
+"""CLI demo: send a message to /chat/stream and print SSE events.
+
+Development tool - not used in production or evaluation.
+Usage: local debugging of SSE event stream.
+"""
 
 import json
 import sys

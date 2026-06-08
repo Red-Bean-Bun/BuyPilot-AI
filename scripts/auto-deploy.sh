@@ -2,6 +2,9 @@
 # auto-deploy.sh — 检测 origin/main 是否有新提交，有则拉取并重建后端服务
 # 由 cron 驱动，不要手动交互使用
 #
+# Production CD script - not used in local development or evaluation.
+# Usage: automated deployment on production server via cron.
+#
 # 设计原则：
 #   1. 只 pull 不 force — 工作区脏了就跳过，不覆盖人的改动
 #   2. 只 rebuild 后端相关文件有变更时才重建 — 避免无意义的停机

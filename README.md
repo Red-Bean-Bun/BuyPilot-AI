@@ -139,18 +139,30 @@ cp .env.example .env
 # 编辑 .env，填写 BAILIAN_API_KEY=sk-your-real-key
 
 # 2) 启动 Postgres/pgvector + FastAPI
-#    首次启动会自动：建表 → 入库 100 商品 → 生成运行态 text embedding
+#    首次启动会自动：建表 → 入库 100 商品 → 生成 text embedding → 生成 image embedding
 #    启动日志会显示 API Key 配置状态
 make rebuild
 
-# 3) 构建图片 embedding 索引（拍照找货 Demo 需要）
-#    需要百炼 VL API 权限（同一 Key 通常可用）
-make seed-image
-
-# 4) 验证启动成功
-make db-stats     # 应显示 products:100, chunks:<运行态数量>, image_embeddings:100
+# 3) 验证启动成功
+make db-stats     # 应显示 products:100, chunks:1292, image_embeddings:100
 make smoke        # 运行 live RAG 门禁测试
 ```
+
+#### 预期输出
+
+`make db-stats` 应输出：
+```
+products: 100
+chunks: 1292
+image_embeddings: 100
+```
+
+`make smoke` 应输出：
+```
+✅ All 6 demo scenarios passed
+```
+
+如果数字不对，运行 `make reset` 全量重置后重试。
 
 说明：`data/processed/chunks.json` 是入库前清洗产物；答辩和运行态验收以 `make db-stats` / `make smoke` 输出为准。2026-06-06 Docker live smoke 记录为 `products=100`、`chunks=1292`、`image_embeddings=100`。
 

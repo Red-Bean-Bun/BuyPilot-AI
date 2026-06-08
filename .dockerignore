@@ -1,0 +1,47 @@
+# Sensitive
+.env
+.env.local
+
+# VCS
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+**/*.pyc
+**/*.pyo
+.venv/
+venv/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Project-specific
+.codegraph/
+backend/uploads/
+
+# Test & evaluation (not needed in runtime image)
+backend/tests/
+data/eval/
+
+# Not part of backend runtime
+android/
+deploy/
+doc/
+scripts/
+
+# Data processing artifacts
+data/processed/*.json
+
+# OS
+.DS_Store
+Thumbs.db

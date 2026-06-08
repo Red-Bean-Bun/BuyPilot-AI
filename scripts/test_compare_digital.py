@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """
 对比功能专项验证 - 使用数码电子品类（智能手机 10 个）
+
+Development tool - not used in production or evaluation.
+Usage: local verification of multi-product compare feature.
 """
+
+import os
+from pathlib import Path
 
 import requests
 import json
 import time
 import uuid
 
+from dotenv import load_dotenv
+
 BASE_URL = "http://localhost:8000"
-ADMIN_KEY = "b72d57075018654b8d7ad1ab6e71fb0be3f2ec02fc300015"
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+ADMIN_KEY = os.environ.get("ADMIN_API_KEY", "")
 
 
 def send_message(session_id: str, message: str) -> dict:
