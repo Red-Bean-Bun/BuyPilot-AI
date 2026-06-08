@@ -15,7 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.domain_terms import normalize_category
 from src.config.settings import get_settings
-from src.repos.database import create_db_and_tables, get_async_engine, is_postgres_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import Product, ProductChunk, SystemMetadata, utc_now
 from src.repos.products import list_raw_products
 from src.services.chunking import build_product_chunks, build_product_knowledge_package
@@ -161,37 +161,16 @@ async def seed_products_if_needed(expected_embedding_dimensions: int | None = No
 async def chunk_embedding_stats() -> dict[str, int]:
     await create_db_and_tables()
     engine = get_async_engine()
-    if is_postgres_engine(engine):
-        query = text(
-            """
-            SELECT
-              COUNT(*) AS chunks,
-              COUNT(embedding) AS embedded_chunks,
-              MIN(vector_dims(embedding)) FILTER (WHERE embedding IS NOT NULL) AS min_dimension,
-              MAX(vector_dims(embedding)) FILTER (WHERE embedding IS NOT NULL) AS max_dimension
-            FROM product_chunks
-            """
-        )
-    else:
-        query = text(
-            """
-            SELECT
-              COUNT(*) AS chunks,
-              SUM(CASE
-                    WHEN embedding IS NOT NULL AND json_array_length(embedding) > 0 THEN 1
-                    ELSE 0
-                  END) AS embedded_chunks,
-              MIN(CASE
-                    WHEN embedding IS NOT NULL AND json_array_length(embedding) > 0
-                    THEN json_array_length(embedding)
-                  END) AS min_dimension,
-              MAX(CASE
-                    WHEN embedding IS NOT NULL AND json_array_length(embedding) > 0
-                    THEN json_array_length(embedding)
-                  END) AS max_dimension
-            FROM product_chunks
-            """
-        )
+    query = text(
+        """
+        SELECT
+          COUNT(*) AS chunks,
+          COUNT(embedding) AS embedded_chunks,
+          MIN(vector_dims(embedding)) FILTER (WHERE embedding IS NOT NULL) AS min_dimension,
+          MAX(vector_dims(embedding)) FILTER (WHERE embedding IS NOT NULL) AS max_dimension
+        FROM product_chunks
+        """
+    )
 
     async with engine.connect() as conn:
         row = (await conn.execute(query)).mappings().one()

@@ -19,12 +19,12 @@ def test_env_configures_bailian_profile():
     assert settings.dataset_dir.name == "ecommerce_agent_dataset"
 
 
-def test_runtime_rejects_sqlite_database_url(monkeypatch):
+def test_runtime_rejects_non_postgresql_database_url(monkeypatch):
     monkeypatch.setenv("BAILIAN_API_KEY", "real-key-not-test")
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///./buypilot-dev.db")
+    monkeypatch.setenv("DATABASE_URL", "mysql://localhost/test")
     settings_module._settings = None
 
-    with pytest.raises(SystemExit, match="SQLite is not supported"):
+    with pytest.raises(SystemExit, match="Only PostgreSQL is supported"):
         get_settings()
 
 

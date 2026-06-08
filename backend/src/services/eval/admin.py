@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.config.settings import PROJECT_DIR
 from src.repos.eval_runs import get_by_id, list_all
 from src.repos.eval_samples import list_all as list_all_samples, seed_from_json
@@ -60,3 +62,23 @@ async def seed_eval_samples() -> dict[str, int | str]:
     json_path = PROJECT_DIR / "data" / "eval" / "eval_samples.json"
     count = await seed_from_json(str(json_path))
     return {"status": "ok", "count": count}
+
+
+async def trigger_eval_run(
+    strategy_tag: str = "baseline",
+    run_name: str | None = None,
+    prompt_version: str | None = None,
+) -> dict[str, str]:
+    """Trigger an evaluation run. Returns the run_id for tracking."""
+    from src.runtime.eval_runner import run_eval
+
+    result = await run_eval(
+        strategy_tag=strategy_tag,
+        run_name=run_name,
+        prompt_version=prompt_version,
+    )
+    return {
+        "status": "completed",
+        "run_id": result.get("run_id", ""),
+        "sample_count": str(result.get("sample_count", 0)),
+    }

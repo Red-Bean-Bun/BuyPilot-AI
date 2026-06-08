@@ -1,6 +1,5 @@
 import pytest
 
-import src.config.settings as settings_module
 from src.repos.audit import (
     insert_api_request_log,
     insert_audit_event,
@@ -12,15 +11,14 @@ from tests.conftest import collect_sse_stream
 
 
 @pytest.fixture
-async def observability_database(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'observability.db'}")
+async def observability_database(monkeypatch):
     monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    from src.config import settings as settings_module
     settings_module._settings = None
     from src.services.product_ingest import seed_products_if_needed
 
     await seed_products_if_needed()
     yield
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio

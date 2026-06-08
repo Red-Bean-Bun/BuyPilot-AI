@@ -5,9 +5,8 @@ from __future__ import annotations
 import threading
 
 from sqlalchemy import inspect, text
-from sqlalchemy.engine import Connection, make_url
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -24,14 +23,7 @@ def get_async_engine() -> AsyncEngine:
     database_url = get_settings().database_url
     cached = _ASYNC_ENGINE_CACHE
     if cached is None or cached[0] != database_url:
-        async_url = async_database_url(database_url)
-        engine_kwargs = {}
-        if async_url.startswith("sqlite"):
-            # SQLite needs check_same_thread=False for async access and NullPool
-            # (no connection pooling across threads). ONLY for pytest test isolation;
-            # production requires PostgreSQL + pgvector (enforced by settings._resolve_database_url).
-            engine_kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": NullPool}
-        cached = (database_url, create_async_engine(async_url, **engine_kwargs))
+        cached = (database_url, create_async_engine(database_url))
         _ASYNC_ENGINE_CACHE = cached
     return cached[1]
 
@@ -52,34 +44,15 @@ async def create_db_and_tables() -> None:
         if database_url in _CREATED_DATABASE_URLS:
             return
     engine = get_async_engine()
-    if is_postgres_engine(engine):
-        await ensure_pgvector_extension(engine)
+    await ensure_pgvector_extension(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
         await conn.run_sync(_ensure_model_columns_sync)
         await ensure_runtime_indexes(conn)
-    if is_postgres_engine(engine):
-        await ensure_pgvector_indexes(engine)
+    await ensure_pgvector_indexes(engine)
     with _CREATE_TABLES_LOCK:
         _CREATED_DATABASE_URLS.add(database_url)
 
-
-def async_database_url(database_url: str) -> str:
-    url = make_url(database_url)
-    backend = url.get_backend_name()
-    driver = url.get_driver_name()
-    if backend == "sqlite" and driver != "aiosqlite":
-        return database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
-    return database_url
-
-
-def is_postgres_database_url(database_url: str | None = None) -> bool:
-    url = make_url(database_url or get_settings().database_url)
-    return url.get_backend_name() == "postgresql"
-
-
-def is_postgres_engine(engine: AsyncEngine) -> bool:
-    return engine.dialect.name == "postgresql"
 
 
 async def ensure_pgvector_extension(engine: AsyncEngine) -> None:
@@ -91,8 +64,6 @@ async def drop_stale_pgvector_tables(engine: AsyncEngine | None = None) -> bool:
     """Drop derived chunk/evidence tables when an old JSON embedding column exists."""
 
     engine = engine or get_async_engine()
-    if not is_postgres_engine(engine):
-        return False
 
     async with engine.begin() as conn:
         row = (

@@ -2,7 +2,6 @@
 
 import pytest
 
-import src.config.settings as settings_module
 from src.runtime.stages.criteria import diagnose_criteria_context
 from src.services.audit import list_audit_event_payloads, record_audit_event
 from src.services.observability import get_turn_debug_bundle
@@ -12,15 +11,12 @@ from src.types.sse_events import Constraints, CriteriaPayload
 
 
 @pytest.fixture
-async def diagnostics_database(monkeypatch, tmp_path):
-    """Fresh SQLite database for context diagnostics tests."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'diag.db'}")
-    settings_module._settings = None
+async def diagnostics_database():
+    """Seed test database for context diagnostics tests."""
     from src.services.product_ingest import seed_products_if_needed
 
     await seed_products_if_needed()
     yield
-    settings_module._settings = None
 
 
 @pytest.fixture

@@ -10,6 +10,7 @@
 候选商品: {ranked_products}
 商品证据片段: {evidence_chunks}
 已校验推荐理由事实原子: {reason_atoms_by_product}
+对话历史: {conversation_context}
 
 ## Output Format
 

@@ -148,6 +148,7 @@ def recommendation_messages(
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
     reason_atoms_by_product: dict[str, list[ReasonAtomPayload]] | None = None,
+    conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
@@ -170,6 +171,7 @@ def recommendation_messages(
                         product_id: [atom.model_dump() for atom in atoms]
                         for product_id, atoms in (reason_atoms_by_product or {}).items()
                     },
+                    "conversation_context": conversation_context,
                 },
                 _schema_override("generate_recommendation"),
             ),
@@ -183,6 +185,7 @@ def recommendation_stream_messages(
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
     reason_atoms_by_product: dict[str, list[ReasonAtomPayload]] | None = None,
+    conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
@@ -205,6 +208,7 @@ def recommendation_stream_messages(
                         product_id: [atom.model_dump() for atom in atoms]
                         for product_id, atoms in (reason_atoms_by_product or {}).items()
                     },
+                    "conversation_context": conversation_context,
                 },
                 _schema_override("generate_recommendation_stream"),
             ),
@@ -239,6 +243,7 @@ def decision_messages(
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
     locked_winner_product_id: str | None = None,
     score_breakdown: dict[str, Any] | None = None,
+    conversation_context: str = "",
 ) -> list[dict[str, Any]]:
     payload = {
         "criteria": criteria.model_dump(),
@@ -248,8 +253,9 @@ def decision_messages(
     prompt_vars = {
         "criteria": criteria.model_dump(),
         "recommendations": [product.model_dump() for product in products],
-        "feedback_history": [],
+        "feedback_history": conversation_context,
         "evidence_context": _format_evidence_context(evidence_by_product or {}),
+        "conversation_context": conversation_context,
     }
     if locked_winner_product_id is not None:
         payload["locked_winner_product_id"] = locked_winner_product_id

@@ -29,16 +29,10 @@ def test_product_image_urls_are_frontend_loadable():
 
 
 @pytest.mark.asyncio
-async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'seed.db'}"
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    from src.config import settings as settings_module
-
-    settings_module._settings = None
-
+async def test_seed_products_writes_dataset_to_database():
     result = await seed_products()
 
+    from src.config import settings as settings_module
     engine = settings_module.get_settings()
     assert result["products"] == 100
     assert result["chunks"] >= 100
@@ -52,7 +46,6 @@ async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
         product_count = len(products)
         chunk_count = len(chunks)
 
-    assert engine.database_url == database_url
     assert product_count == 100
     assert chunk_count == result["chunks"]
     assert chunks[0].embedding
@@ -78,17 +71,11 @@ async def test_seed_products_writes_dataset_to_database(monkeypatch, tmp_path):
     assert stats["chunks"] == result["chunks"]
     assert stats["embedded_chunks"] == result["chunks"]
     assert stats["embedding_dimensions"] == 1024
+    del engine  # suppress unused warning
 
 
 @pytest.mark.asyncio
-async def test_seed_products_if_needed_skips_non_empty_database(monkeypatch, tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'seed_if_needed.db'}"
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    from src.config import settings as settings_module
-
-    settings_module._settings = None
-
+async def test_seed_products_if_needed_skips_non_empty_database():
     first = await seed_products_if_needed()
     second = await seed_products_if_needed()
 

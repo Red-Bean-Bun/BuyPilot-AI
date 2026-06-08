@@ -46,6 +46,7 @@ from src.runtime.streaming import (
 from src.services.audit import record_audit_event
 from src.services.catalog import get_product
 from src.services.conversation_state import (
+    get_conversation_summary,
     get_previous_criteria,
     get_previous_deck_id,
     get_previous_product_ids,
@@ -702,10 +703,13 @@ async def continue_recommendation_from_criteria(
     # PRD 05/06: multi-candidate decks must wait for user feedback or an
     # explicit convergence turn before emitting final_decision.
     # Step 1: LLM recommendation explanation ("为什么先给这些")
+    conversation_context = await get_conversation_summary(ctx.session_id)
     try:
         async for event in _stream_recommendation_text_events(
             ctx,
-            ctx.stages.run_recommendation_text_stream(criteria, products, evidences_by_product),
+            ctx.stages.run_recommendation_text_stream(
+                criteria, products, evidences_by_product, conversation_context=conversation_context
+            ),
         ):
             yield event
     except Exception as exc:
@@ -906,6 +910,8 @@ async def _run_decision_with_context(
         kwargs["locked_winner_product_id"] = locked_winner_product_id
     if "score_breakdown" in sig_params and score_breakdown is not None:
         kwargs["score_breakdown"] = score_breakdown
+    if "conversation_context" in sig_params:
+        kwargs["conversation_context"] = await get_conversation_summary(ctx.session_id)
     return await ctx.stages.run_decision(criteria, products, evidences_by_product, **kwargs)
 
 

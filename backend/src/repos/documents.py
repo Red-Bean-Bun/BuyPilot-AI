@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from src.repos.database import create_db_and_tables, get_async_engine, is_postgres_engine
+from src.repos.database import create_db_and_tables, get_async_engine
 from src.repos.models import ProductChunk
 from src.repos.vector import coerce_vector, vector_to_pg_literal
 from src.types.sse_events import EvidencePayload, ProductPayload
@@ -79,7 +79,7 @@ async def list_vector_chunks_by_similarity(
 ) -> list[VectorChunkHit]:
     await create_db_and_tables()
     engine = get_async_engine()
-    if not is_postgres_engine(engine) or not query_embedding:
+    if not query_embedding:
         return []
 
     filters = filters or VectorSearchFilters()
@@ -145,7 +145,7 @@ async def list_products_by_image_similarity(
     """pgvector cosine similarity on product_image_embeddings with SQL hard filters."""
     await create_db_and_tables()
     engine = get_async_engine()
-    if not is_postgres_engine(engine) or not query_embedding:
+    if not query_embedding:
         return []
 
     filters = filters or VectorSearchFilters()

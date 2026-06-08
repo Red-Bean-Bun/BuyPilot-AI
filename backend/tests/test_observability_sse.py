@@ -3,7 +3,6 @@
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-import src.config.settings as settings_module
 from src.repos.observability_llm import (
     insert_sse_event,
     list_sse_events_by_turn,
@@ -13,15 +12,12 @@ from src.services.observability_llm import schedule_sse_event_recording
 
 
 @pytest.fixture
-async def observability_sse_database(monkeypatch, tmp_path):
-    """Fresh SQLite database for SSE observability tests."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'obs_sse.db'}")
-    settings_module._settings = None
+async def observability_sse_database():
+    """Test database for SSE observability tests."""
     from src.services.product_ingest import seed_products_if_needed
 
     await seed_products_if_needed()
     yield
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio
@@ -140,10 +136,8 @@ async def test_list_sse_events_filters_by_turn_id(observability_sse_database):
 
 
 @pytest.mark.asyncio
-async def test_insert_sse_event_returns_none_on_database_error(monkeypatch, tmp_path):
+async def test_insert_sse_event_returns_none_on_database_error(monkeypatch):
     """Verify insert_sse_event gracefully returns None on SQLAlchemyError."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'sse_error.db'}")
-    settings_module._settings = None
 
     class FailingSession:
         def __init__(self, *args, **kwargs):
@@ -175,18 +169,16 @@ async def test_insert_sse_event_returns_none_on_database_error(monkeypatch, tmp_
 
     assert result is None
 
-    settings_module._settings = None
-
 
 @pytest.mark.asyncio
-async def test_schedule_sse_event_recording_fire_and_forget(monkeypatch, tmp_path):
+async def test_schedule_sse_event_recording_fire_and_forget(monkeypatch):
     """Verify schedule_sse_event_recording returns immediately and records asynchronously."""
     import asyncio
     import time
 
     from src.services.request_context import RequestContext, set_request_context
+    from src.config import settings as settings_module
 
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'sse_fire.db'}")
     monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "1")
     settings_module._settings = None
 
@@ -223,17 +215,15 @@ async def test_schedule_sse_event_recording_fire_and_forget(monkeypatch, tmp_pat
     assert rows[0]["turn_id"] == "turn_sse_fire"
     assert rows[0]["criteria_id"] == "crit_fire"
 
-    settings_module._settings = None
-
 
 @pytest.mark.asyncio
-async def test_observability_disabled_skips_sse_recording(monkeypatch, tmp_path):
+async def test_observability_disabled_skips_sse_recording(monkeypatch):
     """Verify OBSERVABILITY_LOCAL_ENABLED=0 prevents SSE event record creation."""
     import asyncio
 
     from src.services.request_context import RequestContext, set_request_context
+    from src.config import settings as settings_module
 
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'sse_disabled.db'}")
     monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "0")
     settings_module._settings = None
 
@@ -259,8 +249,6 @@ async def test_observability_disabled_skips_sse_recording(monkeypatch, tmp_path)
 
     rows = await list_sse_events_by_turn("turn_sse_off")
     assert len(rows) == 0, "No records should be created when OBSERVABILITY_LOCAL_ENABLED=0"
-
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio

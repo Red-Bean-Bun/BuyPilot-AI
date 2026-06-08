@@ -184,6 +184,7 @@ async def generate_recommendation(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    conversation_context: str = "",
 ) -> RecommendationResult:
     if not products:
         return RecommendationResult(text_chunks=[msg.NO_MATCH], products=[])
@@ -201,6 +202,7 @@ async def generate_recommendation(
                 )
                 for product in products
             },
+            conversation_context=conversation_context,
         ),
         json_object=True,
     )
@@ -220,6 +222,7 @@ async def stream_recommendation(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    conversation_context: str = "",
 ) -> AsyncGenerator[str, None]:
     if not products:
         yield msg.NO_MATCH
@@ -237,6 +240,7 @@ async def stream_recommendation(
         products,
         evidence_by_product,
         reason_atoms_by_product,
+        conversation_context=conversation_context,
     )
     emitted = False
     try:
@@ -252,7 +256,7 @@ async def stream_recommendation(
             "Live recommendation stream failed before first delta; falling back to non-stream response.",
             exc_info=True,
         )
-        fallback = await generate_recommendation(criteria, products, evidence_by_product)
+        fallback = await generate_recommendation(criteria, products, evidence_by_product, conversation_context)
         for chunk in fallback.text_chunks:
             if chunk:
                 yield chunk
@@ -278,6 +282,7 @@ async def generate_decision(
     *,
     locked_winner_product_id: str | None = None,
     score_breakdown: dict[str, Any] | None = None,
+    conversation_context: str = "",
 ) -> DecisionResult:
     if not products:
         return DecisionResult(winner_product_id="", summary=msg.NO_MATCH)
@@ -291,6 +296,7 @@ async def generate_decision(
             evidence_by_product,
             locked_winner_product_id=authoritative_winner,
             score_breakdown=score_breakdown,
+            conversation_context=conversation_context,
         ),
         json_object=True,
     )

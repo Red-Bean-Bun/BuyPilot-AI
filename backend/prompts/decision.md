@@ -10,6 +10,7 @@
 推荐商品: {recommendations}
 用户反馈历史: {feedback_history}
 商品证据参考: {evidence_context}
+对话历史: {conversation_context}
 
 ## Output Format
 

@@ -1,8 +1,8 @@
 # BuyPilot-AI 后端完成状态
 
-> 最后核实：2026-06-06（PRD 08 P0：criteria history + 主动偏好反问 + 购买意向闭环）
+> 最后核实：2026-06-08（live RAG smoke + Docker demo smoke 门禁复核）
 > 维护方式：AI 完成后端功能开发后自动更新此文档，见 CLAUDE.md "Agent 工作指引" 第 8 条
-> 本次改动摘要：**PRD 08 P0 后端补齐** — criteria LLM payload 注入完整 request history；slot_checker 增加手机/数码/护肤/运动偏好反问；购物车新增 checkout_preview/confirm/cancel 轻量购买意向闭环
+> 本次改动摘要：**Demo 门禁修复** — `demo_smoke` 的 compare 场景改用稳定多商品旅行搭配结果；checkout preview/confirm 调整到加购成功之后；Docker demo smoke 与 live RAG smoke 已复核通过
 > 历史全量核实：2026-05-26 `uv run pytest -q`（136 passed）；`uv run ruff check src tests` 通过
 
 ---
@@ -46,8 +46,8 @@
 | 22 | 取消生成（Cancel） | ✅ 已完成 | 5.2 | `api/cancel.py` `runtime/cancel_registry.py` `services/cancellation.py` `repos/cancellations.py` | 本进程 token 是快速路径；active turn + cancel request 同步写 DB，多实例共用 DB 时 pipeline heartbeat 可跨进程看到 cancel 并 `done` 收尾 |
 | 23 | 评测模块 | ✅ 已完成 | 6.1 | `services/eval/` | 代码实际包含 7 个确定性指标 + 8 个 LLM Judge 指标 + overall_score，Qwen-Plus 做 Judge，无需额外依赖 |
 | 24 | 评测样本（15 条） | ✅ 已完成 | 6.3 | `data/eval/eval_samples.json` | 15 条覆盖 6 种 scenario_type × 4 品类 × 3 难度 |
-| 25 | 管理后台 API | ⚠️ 部分完成 | 5.2 | `api/admin_eval.py` | 已有 GET /admin/eval/runs、GET /admin/eval/runs/{id}、GET /admin/eval/samples、POST /admin/eval/samples/seed；无 POST /admin/eval/runs 触发评测 |
-| 26 | 4 条 Demo 路径稳定性打磨 | ✅ 已完成 | — | `src/scripts/demo_smoke.py` | **2026-05-28 对齐 product-first 流程**：第一轮验证 product_card+criteria_card+done(awaiting_product_feedback)，第二轮"继续"验证 final_decision。覆盖文字推荐、图片理解、多轮约束、加购、查看购物车 |
+| 25 | 管理后台 API | ✅ 已完成 | 5.2 | `api/admin_eval.py` | GET /admin/eval/runs、GET /admin/eval/runs/{id}、GET /admin/eval/samples、POST /admin/eval/samples/seed、**POST /admin/eval/runs 触发评测**（2026-06-08 新增） |
+| 26 | Demo 路径稳定性打磨 | ✅ 已完成 | — | `src/scripts/demo_smoke.py` | **2026-06-08 复核通过**：Docker demo smoke 覆盖文字推荐、图片理解、主动偏好反问、旅行组合策略、多商品对比、多轮反选/预算调整、加购、checkout preview/confirm、查看购物车；compare 使用旅行搭配的多商品候选，checkout confirm 在非空购物车后验证 |
 | 37 | ChatGPT 式真 SSE 流式 | ✅ 已完成 | 新需求 | `runtime/handlers.py` | `stream_text()` 逐 chunk 流式（25ms 间隔）；`_stream_recommendation_text_events` 低缓冲透传（50ms timeout）；商品卡节奏化（150ms 间隔） |
 | 38 | 自然语言模糊调整 | ✅ 已完成 | PRD 05 §6.5 | `runtime/message_rules.py` | `extract_adjustment_hints()` 识别"再X一点""不要X""预算再低点"等模式，注入 intent |
 | 39 | "换一组"机制 | ✅ 已完成 | PRD 06 §5.2 | `runtime/message_rules.py` | `is_replace_deck_phrase()` 确定性匹配，强制 intent=recommend + feedback 过滤旧候选 |
@@ -86,8 +86,8 @@
 |---|------|------|-----------|
 | A | **首张商品卡仍需等待 intent/criteria/retrieval**：推荐文案与决策已并行，但检索前置依赖仍在 | 用户可见商品卡延迟仍取决于标准生成和检索速度 | P1 |
 | B | ~~Cancel 空壳：无法真正中断正在生成的 SSE 流~~ 已接本进程 token + DB active turn/cancel request，pipeline heartbeat 会跨进程检查取消请求 | ✅ 已解决；长期生产可再加 TTL/lease 清理异常退出残留 active turn | P2 |
-| C | **本地 `.env` 默认仍指向 SQLite**：Postgres/pgvector 已验证通过，但直接运行后端命令如果不显式传 `DATABASE_URL` 仍会使用 `backend/buypilot-dev.db` | 演示环境需使用 compose API 环境变量，或显式传 `DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot` | P1 |
-| D | **状态存储仍不完整**：conversations/feedbacks/cart 已持久化核心状态，feedback 已进入检索硬过滤，澄清轮次已保存部分 CriteriaPayload；完整多轮消息历史尚未用于 LLM | 复杂多轮表达理解仍有限 | P1 |
+| C | ~~**本地 `.env` 默认仍指向 SQLite**~~ | ✅ 已解决；2026-06-08 全面移除 SQLite 支持，强制 PostgreSQL + pgvector。`database.py`/`cart_items.py`/`vector.py`/`documents.py`/`settings.py`/`product_ingest.py` 已清理 SQLite 分支；测试迁移至 Docker PostgreSQL；CI 添加 PG service | P1 |
+| D | **多轮上下文已增强**：recommendation/decision prompt 现在接收 `conversation_context`（最近 4 轮摘要），intent 与 criteria 阶段接收请求 `history` + 服务端摘要 | 核心 Demo 多轮约束已验证通过；复杂长对话的语言细节仍可能被摘要压缩 | P2 |
 | E | **Prompt 覆盖仍未全量统一**：主链路 criteria/recommendation/decision prompt 已重写并严格对齐 Pydantic 模型；intent/image/analyze_intent 已接入运行时；clarification/metadata_extraction 暂未接入 | 核心演示链路 prompt 已对齐模型；剩余文件属于非当前主链路 | P2 |
 | F | **死代码**：PipelineState TypedDict 无人引用 | 维护负担 | P2 |
 | G | **Service 仍是薄门面为主**：cart/feedback/conversation/trace 当前主要做层级隔离，复杂业务不多 | 分层方向已收口，但后续新增业务要继续进 Service，避免 Runtime/API 再次膨胀 | P2 |

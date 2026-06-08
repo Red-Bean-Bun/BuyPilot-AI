@@ -230,8 +230,8 @@ async def test_pipeline_records_fallback_when_recommendation_stream_fails(monkey
             evidence_by_product={product_a.product_id: evidence, product_b.product_id: evidence},
         )
 
-    async def failing_stream(criteria, products, evidence_by_product=None):
-        del criteria, products, evidence_by_product
+    async def failing_stream(criteria, products, evidence_by_product=None, conversation_context=""):
+        del criteria, products, evidence_by_product, conversation_context
         raise RuntimeError("stream failed")
         yield ""
 

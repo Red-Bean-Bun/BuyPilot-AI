@@ -1,6 +1,5 @@
 import pytest
 
-from src.services.product_ingest import seed_products
 from src.config.domain_terms import normalize_product_type
 from src.repos.documents import ChunkDocument, VectorChunkHit
 from src.repos.products import list_products
@@ -92,15 +91,7 @@ async def test_retrieve_filters_feedback_avoid_brand_traits():
 
 
 @pytest.mark.asyncio
-async def test_retrieve_uses_db_chunk_embedding_and_binds_evidence(monkeypatch, tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'retrieval.db'}"
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    from src.config import settings as settings_module
-
-    settings_module._settings = None
-    await seed_products()
-
+async def test_retrieve_uses_db_chunk_embedding_and_binds_evidence():
     criteria = CriteriaPayload(
         category="美妆护肤",
         summary="油皮洗面奶 200元内 日常护肤",
@@ -201,23 +192,3 @@ async def test_retrieve_prefers_pgvector_hits(monkeypatch):
     products = await retrieve(criteria, top_n=1)
 
     assert products[0].product_id == product.product_id
-
-
-@pytest.mark.asyncio
-async def test_retrieve_returns_empty_without_db_vector_hits(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'strict_retrieval.db'}")
-
-    from src.config import settings as settings_module
-
-    settings_module._settings = None
-
-    async def fake_embed_text(text):
-        return [1.0, 0.0]
-
-    monkeypatch.setattr("src.services.retriever.embed_text", fake_embed_text)
-
-    criteria = CriteriaPayload(category="美妆护肤", summary="油皮洗面奶")
-
-    result = await retrieve_with_evidence(criteria, top_n=1)
-    assert result.products == []
-    settings_module._settings = None

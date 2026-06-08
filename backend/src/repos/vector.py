@@ -1,12 +1,11 @@
-"""PostgreSQL pgvector type helpers with SQLite fallback support."""
+"""PostgreSQL pgvector type helpers."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from sqlalchemy import JSON
-from sqlalchemy.types import TypeDecorator, UserDefinedType
+from sqlalchemy.types import UserDefinedType
 
 
 EMBEDDING_DIMENSIONS = 1024
@@ -25,28 +24,26 @@ class PgVector(UserDefinedType):
         return f"VECTOR({self.dimensions})"
 
 
-class EmbeddingType(TypeDecorator):
-    """Use pgvector on PostgreSQL and JSON everywhere else."""
+class EmbeddingType(UserDefinedType):
+    """PostgreSQL pgvector type that handles Python list ↔ pgvector literal conversion."""
 
-    impl = JSON
     cache_ok = True
 
     def __init__(self, dimensions: int = EMBEDDING_DIMENSIONS) -> None:
-        super().__init__()
         self.dimensions = dimensions
 
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            return dialect.type_descriptor(PgVector(self.dimensions))
-        return dialect.type_descriptor(JSON())
+    def get_col_spec(self, **kw: Any) -> str:
+        return f"VECTOR({self.dimensions})"
 
-    def process_bind_param(self, value, dialect):
-        if dialect.name == "postgresql":
+    def bind_processor(self, dialect):
+        def process(value):
             return vector_to_pg_literal(value)
-        return value
+        return process
 
-    def process_result_value(self, value, dialect):
-        return coerce_vector(value)
+    def result_processor(self, dialect, coltype):
+        def process(value):
+            return coerce_vector(value)
+        return process
 
 
 def vector_to_pg_literal(value: Any) -> str | None:

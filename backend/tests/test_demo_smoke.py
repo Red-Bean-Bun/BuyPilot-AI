@@ -134,6 +134,55 @@ def test_demo_smoke_evaluate_reports_missing_structural_demo_signals():
     assert "missing cart_action:checkout_confirm" in failures
 
 
+async def test_demo_smoke_main_uses_stable_compare_and_checkout_order(monkeypatch):
+    calls = []
+
+    async def fake_run_turn(name: str, session_id: str, request: ChatStreamRequest, expect: dict):
+        calls.append(
+            {
+                "name": name,
+                "session_id": session_id,
+                "message": request.message,
+                "compare_product_ids": request.compare_product_ids,
+                "expect": expect,
+            }
+        )
+        result = {
+            "name": name,
+            "ok": True,
+            "product_ids": ["p_beauty_006"],
+        }
+        if name == "travel_combo_strategy":
+            result["product_ids"] = ["p_beauty_006", "p_clothes_001", "p_clothes_002"]
+        return result
+
+    class FakeCart:
+        total_items = 1
+        total_price = 170.0
+        items = []
+
+    async def fake_get_cart(_session_id: str):
+        return FakeCart()
+
+    monkeypatch.setattr(demo_smoke, "_check_live_provider", lambda: None)
+    monkeypatch.setattr(demo_smoke, "_check_postgres", lambda: None)
+    monkeypatch.setattr(demo_smoke, "_demo_image_url", lambda: "/uploads/demo.jpg")
+    monkeypatch.setattr(demo_smoke, "_run_turn", fake_run_turn)
+    monkeypatch.setattr(demo_smoke, "get_cart", fake_get_cart)
+
+    report = await demo_smoke.main_async(write_report=False)
+
+    names = [call["name"] for call in calls]
+    assert report["ok"] is True
+    assert names.index("travel_combo_strategy") < names.index("compare_first_two")
+    assert names.index("cart_add") < names.index("checkout_preview") < names.index("checkout_confirm")
+
+    travel_call = next(call for call in calls if call["name"] == "travel_combo_strategy")
+    compare_call = next(call for call in calls if call["name"] == "compare_first_two")
+    assert compare_call["session_id"] == travel_call["session_id"]
+    assert compare_call["compare_product_ids"] == ["p_beauty_006", "p_clothes_001"]
+
+
 async def test_demo_smoke_run_turn_times_out(monkeypatch):
     async def never_returns(_session_id, _request):
         await demo_smoke.asyncio.sleep(3600)

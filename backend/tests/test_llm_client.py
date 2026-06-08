@@ -106,14 +106,13 @@ async def test_live_llm_strict_mode_raises_when_profile_config_missing(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_schedule_parsed_json_update_retries_until_llm_row_exists(monkeypatch, tmp_path):
+async def test_schedule_parsed_json_update_retries_until_llm_row_exists(monkeypatch):
     import asyncio
 
     from src.repos.observability_llm import insert_llm_call, list_llm_calls_by_turn
     from src.repos.database import create_db_and_tables
     from src.services.request_context import RequestContext, clear_request_context, set_request_context
 
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'parsed_retry.db'}")
     monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "1")
     _reset_settings()
     await create_db_and_tables()

@@ -37,8 +37,9 @@ async def run_recommendation_text(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    conversation_context: str = "",
 ) -> RecommendationResult:
-    result = await generate_recommendation(criteria, products, evidence_by_product)
+    result = await generate_recommendation(criteria, products, evidence_by_product, conversation_context)
     return result.model_copy(update={"products": products})
 
 
@@ -46,8 +47,9 @@ async def run_recommendation_text_stream(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
     evidence_by_product: dict[str, list[EvidencePayload]] | None = None,
+    conversation_context: str = "",
 ) -> AsyncGenerator[str, None]:
-    async for delta in stream_recommendation(criteria, products, evidence_by_product):
+    async for delta in stream_recommendation(criteria, products, evidence_by_product, conversation_context):
         yield delta
 
 

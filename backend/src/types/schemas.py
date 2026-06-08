@@ -159,3 +159,11 @@ class ProductDetailResponse(BaseModel):
     highlights: list[str] = Field(default_factory=list)
     faqs: list[FaqItem] = Field(default_factory=list)
     reviews: list[ReviewItem] = Field(default_factory=list)
+
+
+class EvalRunRequest(BaseModel):
+    """Request to trigger an evaluation run."""
+
+    strategy_tag: str = "baseline"
+    run_name: str | None = None
+    prompt_version: str | None = None

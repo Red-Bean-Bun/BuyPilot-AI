@@ -8,22 +8,10 @@ from src.services.product_ingest import seed_products
 
 
 @pytest.fixture
-async def setup_database(monkeypatch, tmp_path):
+async def setup_database():
     """Setup test database with seeded products."""
-    database_url = f"sqlite:///{tmp_path / 'test.db'}"
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    from src.config import settings as settings_module
-
-    settings_module._settings = None
-
-    # Seed the database
     await seed_products()
-
     yield
-
-    # Cleanup
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio

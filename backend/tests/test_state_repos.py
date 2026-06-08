@@ -1,25 +1,19 @@
 import pytest
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-import src.config.settings as settings_module
 from src.services import cart
 from src.repos import cart_items, conversations, feedbacks
-from src.repos.database import create_db_and_tables, get_async_engine
 from src.runtime.pipeline import chat_stream
 from src.types.schemas import ChatStreamRequest
 from src.types.sse_events import Constraints, CriteriaPayload
 
 
 @pytest.fixture
-async def temp_database(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'state.db'}")
-    settings_module._settings = None
+async def temp_database():
     from src.services.product_ingest import seed_products_if_needed
 
     await seed_products_if_needed()
     yield
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio
@@ -69,49 +63,11 @@ async def test_cart_repo_updates_and_removes_items(temp_database):
 
 
 @pytest.mark.asyncio
-async def test_cart_unique_index_merges_existing_duplicate_rows(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'legacy_cart.db'}")
-    settings_module._settings = None
-    engine = get_async_engine()
-    async with engine.begin() as conn:
-        await conn.execute(
-            text(
-                """
-                CREATE TABLE cart_items (
-                    id VARCHAR PRIMARY KEY,
-                    session_id VARCHAR NOT NULL,
-                    product_id VARCHAR NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    added_at DATETIME NOT NULL
-                )
-                """
-            )
-        )
-        await conn.execute(
-            text(
-                """
-                INSERT INTO cart_items (id, session_id, product_id, quantity, added_at)
-                VALUES
-                    ('legacy_1', 'sess_legacy_cart', 'p_beauty_011', 1, '2026-05-30T00:00:00'),
-                    ('legacy_2', 'sess_legacy_cart', 'p_beauty_011', 2, '2026-05-31T00:00:00')
-                """
-            )
-        )
-
-    await create_db_and_tables()
-    await cart_items.add_to_cart("sess_legacy_cart", "p_beauty_011", quantity=4)
-
-    restored = await cart_items.get_cart("sess_legacy_cart")
-
-    assert len(restored.items) == 1
-    assert restored.items[0].quantity == 7
-    settings_module._settings = None
-
-
-@pytest.mark.asyncio
-async def test_cart_db_error_is_not_hidden(monkeypatch, tmp_path):
+async def test_cart_db_error_is_not_hidden(monkeypatch):
     monkeypatch.delenv("ALLOW_MEMORY_STATE_FALLBACK", raising=False)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'missing' / 'cart.db'}")
+    # Use an invalid database URL to trigger connection error
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://invalid:invalid@nonexistent:5432/nonexistent")
+    import src.config.settings as settings_module
     settings_module._settings = None
 
     with pytest.raises(SQLAlchemyError):
@@ -121,9 +77,11 @@ async def test_cart_db_error_is_not_hidden(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cart_db_error_raises_even_when_legacy_memory_flag_set(monkeypatch, tmp_path):
+async def test_cart_db_error_raises_even_when_legacy_memory_flag_set(monkeypatch):
     monkeypatch.setenv("ALLOW_MEMORY_STATE_FALLBACK", "1")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'missing' / 'cart.db'}")
+    # Use an invalid database URL to trigger connection error
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://invalid:invalid@nonexistent:5432/nonexistent")
+    import src.config.settings as settings_module
     settings_module._settings = None
 
     with pytest.raises(SQLAlchemyError):

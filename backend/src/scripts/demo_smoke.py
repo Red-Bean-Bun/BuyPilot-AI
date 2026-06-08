@@ -96,22 +96,6 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             },
         )
     )
-    compare_ids = text_budget_beauty.get("product_ids", [])[:2]
-    scenarios.append(
-        await _run_turn(
-            name="compare_first_two",
-            session_id=session_id,
-            request=ChatStreamRequest(message="对比第一个和第二个", compare_product_ids=compare_ids),
-            expect={"compare_card": True},
-        )
-        if len(compare_ids) >= 2
-        else _precondition_failed_result(
-            name="compare_first_two",
-            message="对比第一个和第二个",
-            expect={"compare_card": True, "precondition_product_ids_min": 2},
-            failures=["need at least two products from text_budget_beauty"],
-        )
-    )
     scenarios.append(
         await _run_turn(
             name="image_sensitive_skin",
@@ -137,18 +121,34 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             },
         )
     )
+    travel_session_id = f"{session_id}_travel"
+    travel_combo_strategy = await _run_turn(
+        name="travel_combo_strategy",
+        session_id=travel_session_id,
+        request=ChatStreamRequest(message="下周去三亚度假，帮我搭配一套从防晒到穿搭的方案"),
+        expect={
+            "criteria_card": True,
+            "shopping_strategy_scene_type": "travel",
+            "product_card_min": 2,
+            "product_category_min": 2,
+            "recommendation_done_reason": True,
+        },
+    )
+    scenarios.append(travel_combo_strategy)
+    compare_ids = travel_combo_strategy.get("product_ids", [])[:2]
     scenarios.append(
         await _run_turn(
-            name="travel_combo_strategy",
-            session_id=f"{session_id}_travel",
-            request=ChatStreamRequest(message="下周去三亚度假，帮我搭配一套从防晒到穿搭的方案"),
-            expect={
-                "criteria_card": True,
-                "shopping_strategy_scene_type": "travel",
-                "product_card_min": 2,
-                "product_category_min": 2,
-                "recommendation_done_reason": True,
-            },
+            name="compare_first_two",
+            session_id=travel_session_id,
+            request=ChatStreamRequest(message="对比第一个和第二个", compare_product_ids=compare_ids),
+            expect={"compare_card": True},
+        )
+        if len(compare_ids) >= 2
+        else _precondition_failed_result(
+            name="compare_first_two",
+            message="对比第一个和第二个",
+            expect={"compare_card": True, "precondition_product_ids_min": 2},
+            failures=["need at least two products from travel_combo_strategy"],
         )
     )
     scenarios.append(
@@ -161,22 +161,6 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
                 "criteria_card": True,
                 "recommendation_done_reason": True,
             },
-        )
-    )
-    scenarios.append(
-        await _run_turn(
-            name="checkout_preview",
-            session_id=session_id,
-            request=ChatStreamRequest(message="就买这个"),
-            expect={"cart_action": "checkout_preview"},
-        )
-    )
-    scenarios.append(
-        await _run_turn(
-            name="checkout_confirm",
-            session_id=session_id,
-            request=ChatStreamRequest(message="确认"),
-            expect={"cart_action": "checkout_confirm"},
         )
     )
     scenarios.append(
@@ -207,6 +191,22 @@ async def main_async(write_report: bool = True) -> dict[str, Any]:
             session_id=session_id,
             request=ChatStreamRequest(message="把这个加到购物车"),
             expect={"cart_action": "add"},
+        )
+    )
+    scenarios.append(
+        await _run_turn(
+            name="checkout_preview",
+            session_id=session_id,
+            request=ChatStreamRequest(message="就买这个"),
+            expect={"cart_action": "checkout_preview"},
+        )
+    )
+    scenarios.append(
+        await _run_turn(
+            name="checkout_confirm",
+            session_id=session_id,
+            request=ChatStreamRequest(message="确认"),
+            expect={"cart_action": "checkout_confirm"},
         )
     )
     scenarios.append(

@@ -3,7 +3,6 @@
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-import src.config.settings as settings_module
 from src.repos.observability_llm import (
     insert_llm_call,
     list_llm_calls_by_turn,
@@ -14,15 +13,12 @@ from src.services.observability_llm import schedule_llm_call_recording
 
 
 @pytest.fixture
-async def observability_llm_database(monkeypatch, tmp_path):
-    """Fresh SQLite database for LLM observability tests."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'obs_llm.db'}")
-    settings_module._settings = None
+async def observability_llm_database():
+    """Test database for LLM observability tests."""
     from src.services.product_ingest import seed_products_if_needed
 
     await seed_products_if_needed()
     yield
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio
@@ -192,10 +188,8 @@ async def test_update_llm_call_parsed_json_returns_false_for_nonexistent(observa
 
 
 @pytest.mark.asyncio
-async def test_insert_llm_call_returns_none_on_database_error(monkeypatch, tmp_path):
+async def test_insert_llm_call_returns_none_on_database_error(monkeypatch):
     """Verify insert_llm_call gracefully returns None on SQLAlchemyError."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'error_test.db'}")
-    settings_module._settings = None
 
     class FailingSession:
         def __init__(self, *args, **kwargs):
@@ -232,16 +226,14 @@ async def test_insert_llm_call_returns_none_on_database_error(monkeypatch, tmp_p
 
     assert result is None
 
-    settings_module._settings = None
-
 
 @pytest.mark.asyncio
-async def test_schedule_llm_call_recording_fire_and_forget(monkeypatch, tmp_path):
+async def test_schedule_llm_call_recording_fire_and_forget(monkeypatch):
     """Verify schedule_llm_call_recording returns immediately without blocking."""
     import asyncio
     from src.services.request_context import RequestContext, set_request_context
+    from src.config import settings as settings_module
 
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'fire_forget.db'}")
     monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "1")
     settings_module._settings = None
 
@@ -290,16 +282,14 @@ async def test_schedule_llm_call_recording_fire_and_forget(monkeypatch, tmp_path
     assert rows[0]["task"] == "analyze_intent"
     assert rows[0]["turn_id"] == "turn_fire_forget"
 
-    settings_module._settings = None
-
 
 @pytest.mark.asyncio
-async def test_observability_local_enabled_zero_disables_recording(monkeypatch, tmp_path):
+async def test_observability_local_enabled_zero_disables_recording(monkeypatch):
     """Verify OBSERVABILITY_LOCAL_ENABLED=0 prevents record creation."""
     import asyncio
     from src.services.request_context import RequestContext, set_request_context
+    from src.config import settings as settings_module
 
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'disabled.db'}")
     monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "0")
     settings_module._settings = None
 
@@ -338,8 +328,6 @@ async def test_observability_local_enabled_zero_disables_recording(monkeypatch, 
 
     rows = await list_llm_calls_by_turn("turn_disabled")
     assert len(rows) == 0, "No records should be created when OBSERVABILITY_LOCAL_ENABLED=0"
-
-    settings_module._settings = None
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ async def run_decision(
     *,
     locked_winner_product_id: str | None = None,
     score_breakdown: dict | None = None,
+    conversation_context: str = "",
 ) -> DecisionResult:
     return await generate_decision(
         criteria,
@@ -21,4 +22,5 @@ async def run_decision(
         evidence_by_product,
         locked_winner_product_id=locked_winner_product_id,
         score_breakdown=score_breakdown,
+        conversation_context=conversation_context,
     )

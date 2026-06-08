@@ -2,7 +2,6 @@ import base64
 
 import pytest
 
-import src.config.settings as settings_module
 from src.services.image_upload import image_url_to_provider_url
 
 
@@ -13,8 +12,8 @@ PNG_1X1 = base64.b64decode(
 
 @pytest.fixture
 def upload_dir(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'image_upload.db'}")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    import src.config.settings as settings_module
     settings_module._settings = None
     yield tmp_path
     settings_module._settings = None

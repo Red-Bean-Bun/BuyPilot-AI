@@ -19,6 +19,53 @@ if sys.platform == "win32":
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = PROJECT_ROOT / "contracts"
 
+# Test database URL: uses PostgreSQL for testing
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot_test"
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_database():
+    """Ensure the test database exists."""
+    import psycopg
+
+    # Connect to postgres database to create buypilot_test if needed
+    admin_url = TEST_DATABASE_URL.rsplit("/", 1)[0] + "/postgres"
+    db_name = TEST_DATABASE_URL.rsplit("/", 1)[1]
+
+    try:
+        with psycopg.connect(admin_url, autocommit=True) as conn:
+            conn.execute(f"CREATE DATABASE {db_name}")
+    except psycopg.errors.DuplicateDatabase:
+        pass  # Database already exists
+    except Exception:
+        # If we can't create the database, assume it exists
+        pass
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def truncate_tables_after_test():
+    """Truncate all tables after each test for isolation."""
+    yield
+
+    import psycopg
+
+    try:
+        with psycopg.connect(TEST_DATABASE_URL.replace("+psycopg", "").replace("postgresql", "postgresql"), autocommit=True) as conn:
+            conn.execute("""
+                DO $$ DECLARE
+                    r RECORD;
+                BEGIN
+                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = current_schema()) LOOP
+                        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' CASCADE';
+                    END LOOP;
+                END $$;
+            """)
+    except Exception:
+        pass  # Ignore errors if tables don't exist yet
+
 
 @pytest.fixture
 def test_client():
@@ -32,6 +79,7 @@ def mock_external_ai(monkeypatch):
     monkeypatch.setenv("DOUBAO_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("DOUBAO_API_KEY", "test-key")
     monkeypatch.setenv("OBSERVABILITY_LOCAL_ENABLED", "0")
+    monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
 
     import src.config.settings as settings_module
 
@@ -95,73 +143,13 @@ async def _tick_event_loop() -> None:
         await asyncio.sleep(0.001)
 
 
-@pytest.fixture(autouse=True)
-def _patch_vector_search_for_sqlite_tests(monkeypatch, mock_external_ai):
-    """When mock_external_ai is active (BAILIAN_API_KEY=test-key), the database is
-    SQLite and pgvector queries don't work. Patch list_vector_chunks_by_similarity
-    to use list_embedded_chunks + deterministic cosine scoring instead.
-
-    This is a test-only compatibility shim — production code has no SQLite fallback.
-    Must run AFTER mock_external_ai to see BAILIAN_API_KEY=test-key."""
-    del mock_external_ai  # just ensures ordering
-    if os.getenv("BAILIAN_API_KEY") != "test-key":
-        return
-
-    import math
-
-    from src.repos.documents import list_embedded_chunks
-
-    async def _sqlite_vector_similarity(query_embedding, limit, filters=None):
-        del filters
-        chunks = await list_embedded_chunks()
-        if not chunks or not query_embedding:
-            return []
-        hits = []
-        for chunk in chunks:
-            if not chunk.embedding or len(chunk.embedding) != len(query_embedding):
-                continue
-            dim = len(query_embedding)
-            dot = sum(query_embedding[i] * chunk.embedding[i] for i in range(dim))
-            q_norm = math.sqrt(sum(v * v for v in query_embedding))
-            c_norm = math.sqrt(sum(v * v for v in chunk.embedding))
-            if q_norm == 0 or c_norm == 0:
-                continue
-            similarity = dot / (q_norm * c_norm)
-            if similarity > 0:
-                hits.append(
-                    type(
-                        "VectorChunkHit",
-                        (),
-                        {"document": chunk, "distance": 1.0 - similarity},
-                    )
-                )
-        hits.sort(key=lambda h: h.distance)
-        return hits[:limit]
-
-    from src.services import retriever
-
-    monkeypatch.setattr(retriever, "list_vector_chunks_by_similarity", _sqlite_vector_similarity)
-
-
 @pytest.fixture
-async def seeded_products(monkeypatch, tmp_path):
-    """Seed products with mock embeddings. Uses a temp SQLite DB so mock embedding
-    vectors are compared against identically-generated chunk vectors, not against
-    real semantic embeddings in the configured PostgreSQL database."""
-    import os
-
-    from src.config import settings as settings_module
-
-    if os.getenv("BAILIAN_API_KEY") == "test-key":
-        db_path = tmp_path / "test.db"
-        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-        settings_module._settings = None
-
+async def seeded_products():
+    """Seed products with mock embeddings into the test database."""
     from src.services.product_ingest import seed_products
 
     await seed_products()
     yield
-    settings_module._settings = None
 
 
 @pytest.fixture

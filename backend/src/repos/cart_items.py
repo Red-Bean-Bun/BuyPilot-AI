@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -25,28 +24,10 @@ async def add_to_cart(session_id: str, product_id: str, quantity: int = 1) -> Ca
     await create_db_and_tables()
     engine = get_async_engine()
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        if engine.dialect.name in {"postgresql", "sqlite"}:
-            await _upsert_cart_item(session, engine.dialect.name, session_id, product_id, quantity)
-            row = await _get_cart_item_row(session, session_id, product_id)
-            if row is None:
-                raise RuntimeError("Cart upsert succeeded but row lookup failed.")
-            return _payload_from_row(row)
-
-        row = (
-            await session.exec(
-                select(CartItem)
-                .where(CartItem.session_id == session_id)
-                .where(CartItem.product_id == product_id)
-                .limit(1)
-            )
-        ).first()
-        if row:
-            row.quantity += quantity
-        else:
-            row = CartItem(session_id=session_id, product_id=product_id, quantity=quantity)
-            session.add(row)
-        await session.commit()
-        await session.refresh(row)
+        await _upsert_cart_item(session, session_id, product_id, quantity)
+        row = await _get_cart_item_row(session, session_id, product_id)
+        if row is None:
+            raise RuntimeError("Cart upsert succeeded but row lookup failed.")
         return _payload_from_row(row)
 
 
@@ -127,15 +108,13 @@ def _cart_response(items: list[CartItemPayload]) -> CartResponse:
 
 async def _upsert_cart_item(
     session: AsyncSession,
-    dialect_name: str,
     session_id: str,
     product_id: str,
     quantity: int,
 ) -> None:
     table = CartItem.__table__
-    insert_fn = pg_insert if dialect_name == "postgresql" else sqlite_insert
     stmt = (
-        insert_fn(table)
+        pg_insert(table)
         .values(
             id=str(uuid4()),
             session_id=session_id,

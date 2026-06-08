@@ -9,13 +9,7 @@ from src.types.schemas import ChatStreamRequest
 
 
 @pytest.mark.asyncio
-async def test_pipeline_persists_retrieval_trace_and_evidence_links(monkeypatch, tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'trace.db'}"
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    from src.config import settings as settings_module
-
-    settings_module._settings = None
+async def test_pipeline_persists_retrieval_trace_and_evidence_links():
     await seed_products()
 
     events = [

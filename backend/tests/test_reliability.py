@@ -243,12 +243,8 @@ async def test_clarification_saves_pending_state_for_next_turn(monkeypatch, seed
 
 
 @pytest.mark.asyncio
-async def test_add_to_cart_without_previous_products_sends_clarification(monkeypatch, tmp_path):
+async def test_add_to_cart_without_previous_products_sends_clarification(monkeypatch):
     """When user says 'add to cart' but no previous products exist, send clarification."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'cart_check.db'}")
-    import src.config.settings as settings_module
-
-    settings_module._settings = None
 
     async def mock_add_to_cart_intent(_session_id, _body):
         from src.types.schemas import IntentResult
@@ -265,8 +261,6 @@ async def test_add_to_cart_without_previous_products_sends_clarification(monkeyp
     assert "text_delta" in tags, "Should emit text_delta via recommend flow"
     assert "done" in tags, "Should emit done event"
 
-    settings_module._settings = None
-
 
 # ---------------------------------------------------------------------------
 # Prompt injection resilience
@@ -274,12 +268,8 @@ async def test_add_to_cart_without_previous_products_sends_clarification(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_pipeline_handles_sql_like_injection(monkeypatch, tmp_path):
+async def test_pipeline_handles_sql_like_injection(monkeypatch):
     """Pipeline should not crash on SQL-like injection text in user message."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'inject.db'}")
-    import src.config.settings as settings_module
-
-    settings_module._settings = None
 
     async def fake_intent(_session_id, _body):
         from src.types.schemas import IntentResult
@@ -313,16 +303,10 @@ async def test_pipeline_handles_sql_like_injection(monkeypatch, tmp_path):
     assert "error" not in tags, "Injection should not crash pipeline, got error event"
     assert tags[-1] == "done"
 
-    settings_module._settings = None
-
 
 @pytest.mark.asyncio
-async def test_pipeline_handles_system_override_injection(monkeypatch, tmp_path):
+async def test_pipeline_handles_system_override_injection(monkeypatch):
     """Pipeline should not break on prompt-injection-style messages."""
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'inject2.db'}")
-    import src.config.settings as settings_module
-
-    settings_module._settings = None
 
     async def fake_intent(_session_id, _body):
         from src.types.schemas import IntentResult
@@ -362,8 +346,6 @@ async def test_pipeline_handles_system_override_injection(monkeypatch, tmp_path)
     tags = [e.event for e in events]
     assert "error" not in tags, "Prompt override injection should not crash pipeline"
     assert tags[-1] == "done"
-
-    settings_module._settings = None
 
 
 # ---------------------------------------------------------------------------

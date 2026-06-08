@@ -104,11 +104,9 @@ def _resolve_database_url(raw_url: str | None) -> str:
             "Example: DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot\n"
             "Or use: docker-compose -f deploy/docker-compose.yml up"
         )
-    # Test escape hatches: :memory: or temp file paths under pytest
-    if raw_url == "sqlite:///:memory:":
-        return raw_url
-    if os.getenv("BAILIAN_API_KEY") == "test-key" and raw_url.startswith("sqlite:///"):
-        return raw_url
-    if raw_url.startswith("sqlite:///") and not raw_url.startswith("sqlite:////"):
-        raise SystemExit(f"SQLite is not supported for runtime. Use PostgreSQL + pgvector.\nGot: {raw_url}")
+    if not raw_url.startswith("postgresql"):
+        raise SystemExit(
+            f"Only PostgreSQL is supported. Got: {raw_url}\n"
+            "Example: DATABASE_URL=postgresql+psycopg://buypilot:buypilot@localhost:5432/buypilot"
+        )
     return raw_url

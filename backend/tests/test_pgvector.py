@@ -1,7 +1,6 @@
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
-from src.repos.database import is_postgres_database_url
 from src.repos.models import ProductChunk
 from src.repos.vector import coerce_vector, vector_to_pg_literal
 
@@ -17,8 +16,3 @@ def test_vector_literal_roundtrip():
 
     assert literal == "[0.125,1,-2.5]"
     assert coerce_vector(literal) == [0.125, 1.0, -2.5]
-
-
-def test_postgres_database_url_detection():
-    assert is_postgres_database_url("postgresql+psycopg://user:pass@localhost:5432/db")
-    assert not is_postgres_database_url("sqlite:///tmp.db")
