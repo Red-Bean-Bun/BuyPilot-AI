@@ -1,6 +1,12 @@
-# BuyPilot-AI
+<p align="center">
+  <img src="logo.png" alt="BuyPilot Logo" width="280" />
+</p>
 
-多模态电商导购 Agent：把模糊的购物需求转化为可解释的决策路径。
+<h1 align="center">BuyPilot-AI</h1>
+
+<p align="center">
+  多模态电商导购 Agent：把模糊的购物需求转化为可解释的决策路径。
+</p>
 
 <p align="center">
   <img src="doc/ui/demo-path-2.gif" alt="BuyPilot Demo - 拍照找货" width="320" />
@@ -8,11 +14,15 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Eval_Score-75%25-blue" alt="综合评测 75%" />
+  <img src="https://img.shields.io/badge/Eval-20%2F20-green" alt="Eval 20/20" />
+  <img src="https://img.shields.io/badge/Tests-140%20passed-green" alt="Tests 140 passed" />
   <img src="https://img.shields.io/badge/意图准确率-90%25-green" alt="意图准确率 90%" />
   <img src="https://img.shields.io/badge/多轮一致性-100%25-green" alt="多轮一致性 100%" />
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
   <img src="https://img.shields.io/badge/约束满足-89%25-blue" alt="约束满足 89%" />
-  <img src="https://img.shields.io/badge/测试-140 passed-green" alt="测试 140 passed" />
+  <a href="https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk">
+    <img src="https://img.shields.io/badge/Download-APK-orange?style=for-the-badge&logo=android" alt="Download APK" />
+  </a>
 </p>
 
 <details>
@@ -94,7 +104,7 @@ SSE 事件协议是封闭 DSL（10 种 event type），三层自动化守卫（P
 
 直接安装预编译 APK，零配置体验完整功能：
 
-📦 **[BuyPilot-v0.1.0-release.apk](dist/BuyPilot-v0.1.0-release.apk)** (5.7MB)
+📦 **[BuyPilot-v0.1.0-release.apk](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk)** (5.7MB)
 
 - 已内置云端后端地址
 - 支持 Android 8.0+ (API 26+)
