@@ -1,275 +1,266 @@
 # BuyPilot-AI
 
-基于 RAG 的多模态电商智能导购 Agent —— 字节跳动 AI 全栈挑战赛参赛项目
+多模态电商导购 Agent：把模糊的购物需求转化为可解释的决策路径。
 
-**一句话定位**：把用户模糊购物需求转化为可解释决策路径的多品类智能导购决策智能体
+**核心能力**：
+- 多品类检索（美妆/数码/服饰/食品，100 商品）
+- 多模态理解（拍照找货，Qwen-VL-Plus）
+- 对话式交互（意图澄清、标准生成、推荐解释）
+- 混合检索（硬过滤 + 向量召回 + Rerank）
+- 流式响应（SSE，支持多商品对比、购物车加购）
+
+---
 
 ## 技术决策
 
 | 决策项 | 选择 |
 |--------|------|
-| 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），导师提供官方数据 |
+| 品类 | 多品类（美妆护肤/数码电子/服饰运动/食品生活），官方脱敏数据（100 条，4 品类 × 25） |
 | 客户端 | Android 原生（Kotlin + Jetpack Compose + OkHttp SSE 直连） |
-| LLM | **百炼主力 + Doubao 兜底**：qwen-turbo 做意图/标准/推荐/决策主力，Doubao 做 fallback；Qwen-VL-Plus 做图片理解 |
-| 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel（SQLite 仅 pytest 隔离测试） |
-| 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`） |
-| 商品数据 | 导师官方脱敏电商数据（100条，4品类×25） |
-| 图片处理 | 本地 jpg + 上传转 data URL 进入 Qwen-VL 多模态理解 |
-| 前端架构 | 1 人负责，sealed interface + ChatUiNode |
-| 后端架构 | 2 人（主开发 + 算法），AGENTS.md 分层（API → Runtime → Service → Repo → Config/Types） |
-| SSE 管道 | async generator stage 模式（推荐文案与决策后台并行） |
-| 降级策略 | 仅保留 LLM provider fallback；embedding/rerank/retrieval/state/audit 默认显性失败；运行时数据库必须使用 PostgreSQL + pgvector |
-| 图片上传 | multipart `/upload/image` |
+| LLM | **百炼主力 + Doubao 兜底**：Qwen-Turbo 做意图/标准/推荐/决策主力；Qwen-VL-Plus 做图片理解 |
+| 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
+| 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`，10 种事件类型） |
+| Embedding | text-embedding-v3（1024 维，百炼），确定性 fallback 仅用于开发态 |
+| Rerank | qwen3-rerank（百炼 DashScope API） |
+| 降级策略 | 仅保留 LLM provider fallback；embedding/rerank/retrieval 显性失败；运行时必须使用 PostgreSQL + pgvector |
+| SSE 管道 | async generator stage 模式（推荐文案与检索后台并行） |
 | LLM 调用 | task-oriented interface + Profile 配置驱动（YAML）+ PromptStore 运行时加载 |
-| 开发环境 | `.env` 必须配置 PostgreSQL `DATABASE_URL`；推荐使用 `deploy/docker-compose.yml` 启动 Postgres + pgvector |
-| 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/eval_samples/retrieval_traces/evidence_links |
+| 图片上传 | multipart `/upload/image`，本地 jpg + 上传转 data URL 进入 Qwen-VL 多模态理解 |
+| 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/retrieval_traces/evidence_links 等 |
 
-完整决策记录 → [doc/decisions/决策记录.md](doc/decisions/决策记录.md) · 设计决策 → [design-decisions.md](design-decisions.md)
-
----
-
-## 当前状态
-
-| 指标 | 状态 |
-|------|------|
-| 测试 | `136 passed`（2026-05-26） |
-| CI | pytest + ruff check/format（`.github/workflows/backend-tests.yml`） |
-| Demo Smoke | 6/6 场景通过（Postgres/pgvector + 真实模型） |
-| 后端完成度 | P0 完成 / P1 基本完成 / P2 部分完成 → [详细状态](doc/status/backend-completion.md) |
-| 交接文档 | [260524-handoff.md](260524-handoff.md) |
+完整决策记录 → [doc/decisions/](doc/decisions/) · 设计决策 → [design-decisions.md](design-decisions.md)
 
 ---
-
-## 目录结构
-
-### 文档层（`doc/`）
-
-```
-doc/
-├── strategy/          战略与决策          ← 01 为 Pivot 前历史稿；先读 02
-│   ├── 01-比赛背景与战略决策.md
-│   └── 02-策略研究报告.md
-├── prd/               产品需求文档        ← 开工依据，定义"做什么"
-│   ├── 01-Android前端PRD.md
-│   ├── 01-附录-表格内容.md
-│   ├── 02-后端与AgentPRD.md
-│   └── 03-后端同步变更说明.md
-├── decisions/         架构决策记录        ← 开发过程中的关键决策
-│   ├── 决策记录.md
-│   ├── 2026-05-20-官方文档对齐迭代.md
-│   └── 2026-05-20-数据品类Pivot.md
-├── status/            完成状态            ← AI 每次开发后更新
-│   ├── backend-completion.md
-│   └── demo-readiness.md
-├── risk/              风险预判            ← 卡点清单，开发前必读
-│   └── 卡点与风险清单.md
-├── prompts/           提示词工具包        ← DeepResearch / AI Coding 用
-│   ├── 01-DeepResearch提示词.md
-│   ├── 02-DeepResearch提示词拆分.md
-│   └── 03-AI编码助手系统提示词.md
-├── research/          调研参考
-│   └── 队友原始调研-多模态电商导购.md
-└── ui/                设计稿
-    ├── README.md
-    └── *.png           (7 张界面截图)
-```
-
-### 代码层
-
-```
-├── android/                     ← Android 客户端（Kotlin + Compose）
-│   └── app/src/main/java/com/buypilot/
-│       ├── ui/                  ← Compose 组件
-│       │   ├── components/      ← 可复用组件 + cards/
-│       │   └── theme/
-│       ├── viewmodel/           ← ViewModel + StateFlow
-│       ├── network/             ← OkHttp SSE + API 调用
-│       ├── data/                ← Room DAO + Entity
-│       ├── model/               ← ChatUiNode sealed interface
-│       └── util/
-│
-├── backend/                     ← FastAPI 后端
-│   ├── src/
-│   │   ├── types/               ← DTO、SSE 事件、Schema
-│   │   ├── config/              ← settings.py + llm_profiles.yaml + tuning.py + domain_terms.py
-│   │   ├── repos/               ← 数据持久化（SQLModel、pgvector）
-│   │   ├── services/            ← 业务逻辑（LLM gateway/fallbacks/prompts + RAG + eval）
-│   │   ├── runtime/             ← SSE 管道编排 + stages/
-│   │   └── api/                 ← FastAPI routers（chat/cancel/upload/feedback/cart/admin_eval）
-│   ├── prompts/                 ← 运行时 Prompt 模板（7 个 .md，PromptStore 加载）
-│   ├── tests/                   ← 按层对应的测试 + fixtures/
-│   └── reports/                 ← smoke 测试报告
-│
-├── data/                        ← 数据层
-│   ├── raw/ecommerce_agent_dataset/  ← 导师官方 100 条脱敏电商数据（4品类×25）
-│   ├── processed/                    ← products.json + chunks.json（入库前清洗产物）
-│   ├── eval/eval_samples.json        ← 评测样本（15 条）
-│   └── scripts/process_data.py       ← 原始数据加工脚本
-│
-├── contracts/                   ← 接口契约
-│   ├── sse-events.schema.json       ← SSE 事件 JSON Schema（source of truth）
-│   ├── frontend-integration.md      ← 前后端接口对照
-│   └── examples/                    ← Golden trace 示例（3 个 .sse）
-│
-├── deploy/                      ← 部署
-│   ├── docker-compose.yml           ← PG + pgvector + FastAPI
-│   └── docker-compose.cloudflare.yml ← Cloudflare Tunnel
-│
-├── Makefile                     ← 运维命令入口（make help 查看全部）
-│
-└── .github/workflows/           ← CI
-    └── backend-tests.yml             ← pytest + ruff
-```
 
 ## 快速开始
 
-### 验收路径（推荐）
+### 前置要求
 
-#### 前置要求
+- Docker Desktop 已安装并运行
+- 百炼 API Key（访问 https://bailian.console.aliyun.com/ 获取）
+- 项目根目录有写权限
 
-1. **Docker Desktop** 已安装并运行
-2. **百炼 API Key**：访问 https://bailian.console.aliyun.com/ 获取（需阿里云账号）
-3. 项目根目录有写权限
-
-#### 启动步骤
+### 启动步骤
 
 ```bash
-# 1) 准备配置文件
+# 1) 准备配置
 cp .env.example .env
 # 编辑 .env，填写 BAILIAN_API_KEY=sk-your-real-key
 
-# 2) 启动 Postgres/pgvector + FastAPI
-#    首次启动会自动：建表 → 入库 100 商品 → 生成 text embedding → 生成 image embedding
-#    启动日志会显示 API Key 配置状态
+# 2) 启动服务
+#    首次启动会自动：建表 → 入库商品 → 生成 text embedding → 生成 image embedding
+#    启动耗时约 2-5 分钟（取决于网络和 API 响应）
 make rebuild
 
-# 3) 验证启动成功
-make db-stats     # 应显示 products:100, chunks:1292, image_embeddings:100
-make smoke        # 运行 live RAG 门禁测试
+# 3) 验证启动
+make db-stats     # 检查数据完整性
+make smoke        # 运行端到端验证
 ```
 
-#### 预期输出
+### 预期输出
 
-`make db-stats` 应输出：
+**`make db-stats`** 应输出：
 ```
 products: 100
 chunks: 1292
 image_embeddings: 100
 ```
 
-`make smoke` 应输出：
+**`make smoke`** 应输出：
 ```
 [PASS] All 6 demo scenarios passed
 ```
 
-如果数字不对，运行 `make reset` 全量重置后重试。
+如果输出不符合预期，运行 `make reset` 全量重置后重试。
 
-说明：`data/processed/chunks.json` 是入库前清洗产物；答辩和运行态验收以 `make db-stats` / `make smoke` 输出为准。2026-06-06 Docker live smoke 记录为 `products=100`、`chunks=1292`、`image_embeddings=100`。
-
-#### 启动日志说明
-
-启动时会打印配置检查信息：
-- `[PASS] BAILIAN_API_KEY 已配置` — API Key 已填写
-- `[WARN] BAILIAN_API_KEY 未配置或为占位符` — 需要编辑 .env 填写真实 Key
-
-#### 常见问题
+### 常见问题
 
 | 问题 | 解决方案 |
 |------|---------|
-| `BAILIAN_API_KEY 未配置` | 编辑 `.env` 文件，填写 `BAILIAN_API_KEY=sk-xxx` |
-| `make rebuild` 卡在 embedding | 首次会生成运行态 embedding，数量以 `make db-stats` 为准，通常需 2-5 分钟 |
-| `image_embeddings: 0` | 运行 `make seed-image` 构建图片索引 |
+| `BAILIAN_API_KEY 未配置` | 编辑 `.env`，填写 `BAILIAN_API_KEY=sk-xxx` |
+| `make rebuild` 卡住 | 首次启动需要生成 embedding，耐心等待 2-5 分钟 |
+| `image_embeddings: 0` | 运行 `make seed-image` 手动构建图片索引 |
 | 端口 5432/8000 被占用 | 修改 `deploy/docker-compose.yml` 端口映射 |
+| 服务启动超时（unhealthy） | 检查 `.env` 中的 API Key 是否正确，网络是否可达 |
 
-说明：PostgreSQL + pgvector 是后端运行时必需依赖；SQLite 仅作为 pytest 隔离测试路径，不支持日常开发或答辩运行。
+---
 
-### 运维命令（Makefile）
+## 运维命令
 
-所有命令从**项目根目录**执行，已统一 compose 文件和 env-file 配置：
+所有命令从**项目根目录**执行：
 
 ```bash
 make help          # 显示所有命令
-make rebuild       # 重建镜像并启动（自动 seed text embedding）
-make seed-image    # 构建图片 embedding 索引（需要百炼 VL API Key）
-make db-stats      # 查看数据库表行数
-make logs          # 查看 api 日志
+make rebuild       # 重建镜像并启动
+make db-stats      # 查看数据库统计
+make smoke         # 运行端到端验证
 make reset         # 删库 + 重建（全量重置）
-make smoke         # live RAG smoke test
+make seed-image    # 手动构建图片 embedding 索引
+make logs          # 查看 API 日志
 make shell         # 进入容器 shell
 ```
 
-### Cloudflare 部署
+---
 
-后端推荐通过 Cloudflare Tunnel 暴露现有 Docker Compose 服务，避免把 FastAPI + pgvector + SSE 强行迁到 Worker 运行时。配置见 [`deploy/cloudflare.md`](deploy/cloudflare.md)。
+## 项目结构
 
-### 开发路径
+### 文档层（`doc/`）
 
-```bash
-# 后端
-cd backend
-uv run uvicorn src.api.app:app --reload --port 8000
-
-# 测试
-uv run pytest -q
-
-# Live RAG 验真（答辩必过门禁，需 Postgres/pgvector + 真实 API Key）
-uv run -m src.scripts.smoke_live_rag
-
-# Demo smoke（6 条 Demo 路径端到端，需 Postgres/pgvector + 真实 API Key）
-uv run -m src.scripts.demo_smoke
+```
+doc/
+├── strategy/          战略与决策
+├── prd/               产品需求文档（前后端 PRD）
+├── decisions/         架构决策记录
+├── status/            完成状态
+├── risk/              风险预判
+├── prompts/           提示词工具包
+├── research/          调研参考
+└── ui/                设计稿
 ```
 
-## 文档角色定位
+### 代码层
 
-| 文档 | 谁看 | 什么时候看 |
-|------|------|-----------|
-| **CLAUDE.md** | AI 编码工具 + 全员 | 每次开发前 |
-| **260524-handoff.md** | 接手开发者 | 接手时第一份读 |
-| **backend/README.md** | 后端开发者 | 了解后端全景地图 |
-| **doc/status/backend-completion.md** | 全员 | 了解当前完成度 |
-| **doc/status/demo-readiness.md** | 全员 | Demo 准备状态 |
-| **02-策略研究报告** | 全员 | 当前战略与架构选型依据 |
-| **决策记录** | 全员 | 开发前 + 有分歧时对照 |
-| **01-Android前端PRD** | 前端开发 | 开工前 + 联调时对照 |
-| **02-后端与AgentPRD** | 后端/Agent开发 | 开工前 + 联调时对照 |
-| **contracts/sse-events.schema.json** | 前后端 | SSE 事件字段变更时对照 |
-| **卡点与风险清单** | 全员 | 每天开发前扫一眼 |
-| **design-decisions.md** | 全员 | 答辩前自读 |
+```
+├── android/                     # Android 客户端（Kotlin + Compose）
+│   └── app/src/main/java/com/buypilot/
+│       ├── ui/                  # Compose 组件 + cards/
+│       ├── viewmodel/           # ViewModel + StateFlow
+│       ├── network/             # OkHttp SSE + API 调用
+│       ├── data/                # Room DAO + Entity
+│       ├── model/               # ChatUiNode sealed interface
+│       └── util/
+│
+├── backend/                     # FastAPI 后端
+│   ├── src/
+│   │   ├── api/                 # HTTP 路由（chat/cancel/upload/feedback/cart/admin）
+│   │   ├── runtime/             # SSE 管道编排 + stages/
+│   │   ├── services/            # 业务逻辑（LLM gateway/RAG/embedding/retriever/eval）
+│   │   ├── repos/               # 数据持久化（SQLModel + pgvector）
+│   │   ├── types/               # DTO、SSE 事件定义、Schema
+│   │   ├── config/              # settings + llm_profiles.yaml + domain_terms
+│   │   └── middleware/          # 请求上下文中间件
+│   ├── prompts/                 # 运行时 Prompt 模板（7 个 .md，PromptStore 加载）
+│   └── tests/                   # 按层对应的测试 + fixtures/
+│
+├── data/                        # 数据层
+│   ├── raw/ecommerce_agent_dataset/   # 官方 100 条脱敏电商数据（4 品类 × 25）
+│   └── eval/eval_samples.json         # 评测样本
+│
+├── contracts/                   # 接口契约
+│   ├── sse-events.schema.json       # SSE 事件 JSON Schema（source of truth）
+│   ├── frontend-integration.md      # 前后端接口对照
+│   └── examples/                    # Golden trace 示例（.sse）
+│
+├── deploy/                      # 部署配置
+│   ├── docker-compose.yml           # PostgreSQL + pgvector + FastAPI
+│   └── docker-compose.cloudflare.yml # Cloudflare Tunnel
+│
+├── scripts/                     # 开发工具（非运行时组件）
+│   ├── stress_test.py               # 压测脚本
+│   ├── auto-deploy.sh               # 生产 CD 脚本（cron 驱动）
+│   └── check_sse_protocol.py        # SSE 协议一致性检查
+│
+├── Makefile                     # 运维命令入口（make help 查看全部）
+│
+└── .github/workflows/           # CI（pytest + ruff）
+```
 
-## 团队分工
-
-| 角色 | 人数 | 职责 |
-|------|------|------|
-| 前端 Android | 1 | Jetpack Compose + OkHttp SSE + LazyColumn + ChatUiNode |
-| 后端主开发 | 1 | FastAPI 路由 + SSE 管道编排 + 接口契约 + 全链路串联 |
-| 后端算法/检索 | 1 | LLM Profile 封装 + pgvector + Rerank + Prompt 调优 + 评测 |
+---
 
 ## 核心数据流
 
 ```
-用户输入 (Android)
+用户输入（文字或图片）
   ↓
-意图识别 (Qwen-Turbo primary / Doubao fallback) + 槽位检查
-  ↓ add_to_cart意图 → cart_action事件 → 购物车状态更新
+意图识别 + 槽位检查
   ↓ 需要澄清时 → clarification 事件
-  ↓ 并行
-购买标准生成 (Qwen-Turbo primary / Doubao fallback)  |  投机检索 (embedding + 硬过滤)
   ↓
-混合检索：硬过滤(SQL) + 向量召回(pgvector) + Rerank(qwen3-rerank)
+购买标准生成  ←→  投机检索
   ↓
-推荐解释生成 (Qwen-Turbo) + 证据绑定
+混合检索：硬过滤 + 向量召回 + Rerank
   ↓
-SSE 事件流：thinking → clarification → criteria_card → text_delta → product_card → cart_action → final_decision → done
+推荐解释生成 + 证据绑定
   ↓
-Android Compose + LazyColumn 卡片渲染
+SSE 事件流：
+  thinking → criteria_card → text_delta → product_card → final_decision → done
   ↓
-用户反馈 → feedbacks 表 → 下一轮 retrieval 硬过滤
+Android 卡片渲染
+  ↓
+用户反馈（标准调整/排除/加购/对比）→ 下一轮推荐
 ```
 
-## 止损规则
+---
 
-| 时间节点 | 状态要求 | 否则 |
-|---------|---------|------|
-| 5/27（第 7 天） | 完整链路能走通 + 一键启动 | 砍掉所有P1/P2，只追P0 |
-| 6/03（第 14 天） | 4条Demo路径全部可演示 + 无幻觉无Bug | 砍掉复杂后台和增强功能 |
-| 6/07（第 18 天） | 冻结功能 + design-decisions.md完成 | 只修Bug、打磨体验、准备答辩 |
+## SSE 事件协议
+
+共 10 种事件类型，完整定义见 `contracts/sse-events.schema.json`：
+
+| 事件 | 用途 |
+|------|------|
+| `thinking` | Agent 思考中，前端显示加载状态 |
+| `clarification` | 需要用户澄清（槽位缺失） |
+| `criteria_card` | 购买标准卡片 |
+| `text_delta` | 流式文本增量 |
+| `product_card` | 商品卡片 |
+| `compare_card` | 多商品对比卡片 |
+| `cart_action` | 购物车操作（加购/删除） |
+| `final_decision` | 最终决策 |
+| `done` | 本轮对话结束 |
+| `error` | 错误信息 |
+
+---
+
+## 开发指南
+
+### 后端开发
+
+```bash
+cd backend
+uv sync --extra dev
+uv run uvicorn src.api.app:app --reload --port 8000
+```
+
+### 测试
+
+```bash
+# 单元测试
+uv run pytest -q
+
+# 端到端验证（需要 Postgres/pgvector + 真实 API Key）
+uv run -m src.scripts.smoke_live_rag
+```
+
+### 架构约束
+
+- **分层依赖**：API → Runtime → Service → Repo → Config/Types（禁止反向依赖）
+- **SSE 协议**：修改事件类型必须三端对齐（Schema → Python → Kotlin）
+- **LLM 调用**：必须通过 task-oriented interface，禁止在 Runtime 层直接调用 SDK
+- **数据库**：运行时必须使用 PostgreSQL + pgvector，SQLite 仅用于 pytest 隔离测试
+
+详见 `CLAUDE.md`。
+
+---
+
+## 文档索引
+
+| 文档 | 用途 |
+|------|------|
+| `CLAUDE.md` | 开发指引（架构约束、编码规范） |
+| `doc/prd/` | 产品需求（前后端 PRD） |
+| `doc/decisions/` | 架构决策记录 |
+| `doc/status/` | 完成状态 |
+| `contracts/sse-events.schema.json` | SSE 事件契约 |
+| `design-decisions.md` | 核心设计决策 |
+
+---
+
+## 演示场景
+
+4 条端到端 Demo 路径：
+
+1. **模糊推荐**："推荐适合油皮的洗面奶，200 元以内"
+2. **拍照找货**：上传商品图片 + "这个适合敏感肌吗？"
+3. **多轮对话**："不要含酒精的防晒霜" + "预算降到 200"
+4. **对话式加购**："把这个加到购物车"
+
+运行 `make smoke` 验证所有场景。
