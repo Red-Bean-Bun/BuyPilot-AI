@@ -34,8 +34,8 @@ log() {
 }
 
 die() {
-    log "❌ $*"
-    notify_feishu "❌ 自动部署失败" "$*"
+    log "[FAIL] $*"
+    notify_feishu "[FAIL] 自动部署失败" "$*"
     exit 1
 }
 
@@ -64,7 +64,7 @@ notify_feishu() {
             \"msg_type\": \"interactive\",
             \"card\": {
                 \"header\": {
-                    \"title\": {\"tag\": \"plain_text\", \"content\": \"🚀 BuyPilot CD\"},
+                    \"title\": {\"tag\": \"plain_text\", \"content\": \"BuyPilot CD\"},
                     \"template\": \"blue\"
                 },
                 \"elements\": [
@@ -72,7 +72,7 @@ notify_feishu() {
                         \"tag\": \"div\",
                         \"text\": {
                             \"tag\": \"lark_md\",
-                            \"content\": \"**${title}**\n${body}\n\n🖥️ ${hostname} · $(date '+%m/%d %H:%M')\"
+                            \"content\": \"**${title}**\n${body}\n\n${hostname} · $(date '+%m/%d %H:%M')\"
                         }
                     }
                 ]
@@ -85,7 +85,7 @@ notify_feishu() {
 # 防止并发执行
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-    log "⏭️  另一个 deploy 进程正在运行，跳过"
+    log "[SKIP] 另一个 deploy 进程正在运行，跳过"
     exit 0
 fi
 
@@ -112,27 +112,27 @@ log "远程 main:   ${REMOTE:0:8}"
 
 # 2. 比较：是否有新提交
 if [[ "$LOCAL" == "$REMOTE" ]]; then
-    log "✅ 已是最新，无需更新"
+    log "[OK] 已是最新，无需更新"
     trim_log
     exit 0
 fi
 
 # 3. 检查本地是否有未推送的提交（不应自动覆盖）
 if [[ "$LOCAL" != "$BASE" ]]; then
-    log "⚠️  本地有未推送的提交，跳过自动部署（请手动 push 后再试）"
+    log "[WARN] 本地有未推送的提交，跳过自动部署（请手动 push 后再试）"
     exit 0
 fi
 
 # 4. 检查工作区是否干净（允许 untracked 文件）
 DIRTY_FILES=$(git status --porcelain | grep -v '^??' || true)
 if [[ -n "$DIRTY_FILES" ]]; then
-    log "⚠️  工作区有未提交的修改，跳过自动部署："
+    log "[WARN] 工作区有未提交的修改，跳过自动部署："
     log "$DIRTY_FILES"
     exit 0
 fi
 
 # 5. 拉取最新代码
-log "📥 拉取新提交..."
+log "[PULL] 拉取新提交..."
 if ! git pull --ff-only origin main 2>>"$LOG_FILE"; then
     die "git pull --ff-only 失败（可能存在分叉？请手动检查）"
 fi
@@ -158,16 +158,16 @@ while IFS= read -r f; do
 done <<< "$CHANGED_FILES"
 
 if [[ "$NEEDS_REBUILD" == "false" ]]; then
-    log "ℹ️  变更不涉及后端/数据/部署文件，跳过 rebuild"
-    notify_feishu "📝 代码已更新（无需 rebuild）" "提交: ${COMMIT_MSG}\n哈希: ${NEW_HEAD:0:8}"
+    log "[INFO] 变更不涉及后端/数据/部署文件，跳过 rebuild"
+    notify_feishu "[UPDATE] 代码已更新（无需 rebuild）" "提交: ${COMMIT_MSG}\n哈希: ${NEW_HEAD:0:8}"
     trim_log
     exit 0
 fi
 
 # 7. rebuild 并重启
-log "🔨 开始 rebuild 后端服务..."
+log "[BUILD] 开始 rebuild 后端服务..."
 if make rebuild 2>&1 | tee -a "$LOG_FILE"; then
-    log "✅ 部署完成"
+    log "[OK] 部署完成"
 else
     die "make rebuild 失败，请检查日志"
 fi
@@ -175,11 +175,11 @@ fi
 # 8. 健康检查
 sleep 5
 if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-    log "✅ 健康检查通过"
-    notify_feishu "✅ 部署成功" "提交: ${COMMIT_MSG}\n哈希: ${NEW_HEAD:0:8}\n变更: $(echo "$CHANGED_FILES" | wc -l) 个文件"
+    log "[OK] 健康检查通过"
+    notify_feishu "[OK] 部署成功" "提交: ${COMMIT_MSG}\n哈希: ${NEW_HEAD:0:8}\n变更: $(echo "$CHANGED_FILES" | wc -l) 个文件"
 else
-    log "⚠️  健康检查未通过（服务可能仍在启动中）"
-    notify_feishu "⚠️ 部署完成但健康检查未通过" "提交: ${COMMIT_MSG}\n哈希: ${NEW_HEAD:0:8}\n请检查服务状态"
+    log "[WARN] 健康检查未通过（服务可能仍在启动中）"
+    notify_feishu "[WARN] 部署完成但健康检查未通过" "提交: ${COMMIT_MSG}\n哈希: ${NEW_HEAD:0:8}\n请检查服务状态"
 fi
 
 trim_log

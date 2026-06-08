@@ -82,24 +82,24 @@ def analyze_events(events: list) -> dict:
 
 def print_result(test_name: str, result: dict, expected: str):
     """打印测试结果"""
-    status = "✅" if result["success"] else "❌"
+    status = "[PASS]" if result["success"] else "[FAIL]"
     analysis = analyze_events(result.get("events", []))
 
     match = ""
     if expected == "compare_card":
-        match = "✅" if analysis["has_compare_card"] else "❌"
+        match = "[PASS]" if analysis["has_compare_card"] else "[FAIL]"
     elif expected == "product_card":
-        match = "✅" if analysis["has_product_card"] else "❌"
+        match = "[PASS]" if analysis["has_product_card"] else "[FAIL]"
     elif expected == "multiple_products":
-        match = "✅" if analysis["product_count"] >= 2 else "❌"
+        match = "[PASS]" if analysis["product_count"] >= 2 else "[FAIL]"
 
     print(f"\n{status} {test_name} {match}")
     print(f"   事件流: {' → '.join(analysis['event_types'][:15])}")
 
     if analysis["has_compare_card"]:
-        print(f"   📊 对比卡片触发! 商品: {analysis['compare_ids']}")
+        print(f"   [COMPARE] 对比卡片触发! 商品: {analysis['compare_ids']}")
     if analysis["product_count"] > 0:
-        print(f"   📦 商品数量: {analysis['product_count']}")
+        print(f"   [PRODUCT] 商品数量: {analysis['product_count']}")
 
 
 def main():

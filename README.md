@@ -123,7 +123,7 @@ doc/
 
 ## 快速开始
 
-### 评委验收路径（推荐）
+### 验收路径（推荐）
 
 #### 前置要求
 
@@ -159,7 +159,7 @@ image_embeddings: 100
 
 `make smoke` 应输出：
 ```
-✅ All 6 demo scenarios passed
+[PASS] All 6 demo scenarios passed
 ```
 
 如果数字不对，运行 `make reset` 全量重置后重试。
@@ -169,8 +169,8 @@ image_embeddings: 100
 #### 启动日志说明
 
 启动时会打印配置检查信息：
-- `✅ BAILIAN_API_KEY 已配置` — API Key 已填写
-- `⚠️ BAILIAN_API_KEY 未配置或为占位符` — 需要编辑 .env 填写真实 Key
+- `[PASS] BAILIAN_API_KEY 已配置` — API Key 已填写
+- `[WARN] BAILIAN_API_KEY 未配置或为占位符` — 需要编辑 .env 填写真实 Key
 
 #### 常见问题
 
@@ -270,6 +270,6 @@ Android Compose + LazyColumn 卡片渲染
 
 | 时间节点 | 状态要求 | 否则 |
 |---------|---------|------|
-| 5/27（第 7 天） | 评委拿起App能走通完整链路 + 一键启动 | 砍掉所有P1/P2，只追P0 |
+| 5/27（第 7 天） | 完整链路能走通 + 一键启动 | 砍掉所有P1/P2，只追P0 |
 | 6/03（第 14 天） | 4条Demo路径全部可演示 + 无幻觉无Bug | 砍掉复杂后台和增强功能 |
 | 6/07（第 18 天） | 冻结功能 + design-decisions.md完成 | 只修Bug、打磨体验、准备答辩 |

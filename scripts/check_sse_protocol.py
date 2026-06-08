@@ -105,23 +105,23 @@ def main() -> int:
 
     try:
         schema_types = extract_schema_event_types()
-        print(f"✓ Schema: {len(schema_types)} event types")
+        print(f"[OK] Schema: {len(schema_types)} event types")
     except Exception as e:
-        print(f"✗ Failed to parse schema: {e}")
+        print(f"[ERR] Failed to parse schema: {e}")
         return 1
 
     try:
         python_types = extract_python_event_types()
-        print(f"✓ Python: {len(python_types)} event types")
+        print(f"[OK] Python: {len(python_types)} event types")
     except Exception as e:
-        print(f"✗ Failed to parse Python: {e}")
+        print(f"[ERR] Failed to parse Python: {e}")
         return 1
 
     try:
         kotlin_types = extract_kotlin_event_types()
-        print(f"✓ Kotlin: {len(kotlin_types)} event types")
+        print(f"[OK] Kotlin: {len(kotlin_types)} event types")
     except Exception as e:
-        print(f"✗ Failed to parse Kotlin: {e}")
+        print(f"[ERR] Failed to parse Kotlin: {e}")
         return 1
 
     print()
@@ -162,13 +162,13 @@ def main() -> int:
         )
 
     if errors:
-        print("✗ SSE protocol drift detected:\n")
+        print("[ERR] SSE protocol drift detected:\n")
         for i, error in enumerate(errors, 1):
             print(f"{i}. {error}\n")
         print("Fix the drift, then re-run: make protocol-check")
         return 1
     else:
-        print("✓ All three sources aligned: Schema ↔ Python ↔ Kotlin")
+        print("[OK] All three sources aligned: Schema <-> Python <-> Kotlin")
         print()
         print("Event types:")
         for event_type in sorted(schema_types):

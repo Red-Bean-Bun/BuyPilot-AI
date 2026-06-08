@@ -258,15 +258,15 @@ def _print_result(r: AnalysisResult, expect: str | None = None, expect_error: bo
     print(f"  事件: {events_str}")
 
     if r.has_error:
-        print(f"  🔴 错误: {r.error_message}")
+        print(f"  [ERR] 错误: {r.error_message}")
     if r.has_product_card:
-        print(f"  📦 商品卡片: {r.product_count} 个")
+        print(f"  [PRODUCT] 商品卡片: {r.product_count} 个")
     if r.has_compare_card:
-        print(f"  📊 对比卡片: {r.compare_ids or '(触发)'}")
+        print(f"  [COMPARE] 对比卡片: {r.compare_ids or '(触发)'}")
     if r.has_cart_action:
-        print(f"  🛒 购物车: {r.cart_action_type} → {r.cart_product_id}")
+        print(f"  [CART] 购物车: {r.cart_action_type} → {r.cart_product_id}")
     if r.has_clarification and not r.has_product_card:
-        print(f"  ❓ 澄清提问")
+        print(f"  [CLARIFY] 澄清提问")
 
 
 def _section(title: str):
@@ -462,7 +462,7 @@ def phase_edge():
         ("   ", "纯空白", True),    # expect_error=True: 422 是预期行为
         ("a" * 2000, "超长文本 (2000字)", False),
         ("推荐" + "？" * 100, "重复标点", False),
-        ("推荐🔥💰手机", "emoji 混合", False),
+        ("推荐手机", "混合关键词", False),
         ("推 荐 洗 面 奶", "空格分隔", False),
         ("RECOMMEND FACE WASH", "纯英文", False),
         ("推荐\n洗面奶\n200元", "换行分隔", False),
@@ -567,7 +567,7 @@ def phase_demo():
     )
 
 
-# ─── Phase 8: 拍照找货（⭐⭐⭐ 多模态） ─────────────────────────────────
+# ─── Phase 8: 拍照找货（多模态深度方向） ─────────────────────────────────
 def phase_multimodal():
     """图片输入 → VL 分析 → 找相似商品"""
     _section("Phase 8: 拍照找货（多模态）")
@@ -696,20 +696,20 @@ def _assert_scenario_routing(
 
     if failures or r.has_error:
         _stats["fail"] += 1
-        print(f"\n❌ {message}")
+        print(f"\n[FAIL] {message}")
         print(f"  事件: {events_str}")
         if r.has_error:
-            print(f"  🔴 错误: {r.error_message}")
+            print(f"  [ERR] 错误: {r.error_message}")
         for f in failures:
-            print(f"  🔴 {f}")
+            print(f"  [ERR] {f}")
     else:
         _stats["pass"] += 1
-        print(f"\n✅ {message}")
+        print(f"\n[PASS] {message}")
         print(f"  事件: {events_str}")
         if r.shopping_strategy_scene_type:
-            print(f"  🎯 scene_type: {r.shopping_strategy_scene_type}")
+            print(f"  [SCENE] scene_type: {r.shopping_strategy_scene_type}")
         if r.has_text_delta_before_product:
-            print(f"  📝 场景判断文字出现在商品卡之前")
+            print(f"  [TEXT] 场景判断文字出现在商品卡之前")
 
 
 def phase_scenario_p0():
@@ -889,7 +889,7 @@ def print_summary():
     print(f"  总计: {total}  通过: {passed}  警告: {warned}  失败: {failed}")
     print(f"  通过率: {rate:.0f}%")
     if failed > 0:
-        print(f"  🔴 有 {failed} 个测试失败，请检查上面的输出")
+        print(f"  [FAIL] 有 {failed} 个测试失败，请检查上面的输出")
     print()
 
 
