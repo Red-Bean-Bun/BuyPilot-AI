@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from sqlalchemy import inspect, text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import SQLModel
@@ -12,6 +13,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.config.settings import get_settings
 from src.repos import models as _models  # noqa: F401  # register SQLModel tables
+from src.repos.vector import PgVector
+
+# Register vector type with PostgreSQL dialect to suppress SAWarning during reflection
+postgresql.base.PGDialect.ischema_names["vector"] = PgVector
 
 _CREATE_TABLES_LOCK = threading.Lock()
 _CREATED_DATABASE_URLS: set[str] = set()

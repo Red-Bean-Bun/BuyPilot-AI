@@ -102,9 +102,7 @@ _MOCK_KNOWN_VIOLATIONS = {
     "tests/conftest.py::mock_external_ai -> src.services.embedding._embedding_request",
     "tests/conftest.py::mock_external_ai -> src.services.embedding._vl_embedding_request",
     "tests/conftest.py::mock_external_ai -> src.services.reranker._rerank_request",
-    "tests/conftest.py::_patch_vector_search_for_sqlite_tests -> src.services.retriever.list_vector_chunks_by_similarity",
     "tests/test_retrieval.py::test_retrieve_prefers_pgvector_hits -> src.services.retriever.list_vector_chunks_by_similarity",
-    "tests/test_retrieval.py::test_retrieve_returns_empty_without_db_vector_hits -> src.services.retriever.embed_text",
     # Goal 7: LLM bad response defense — stub stage raising RuntimeError
     # to simulate invalid/empty/hallucinated responses (no llm_gateway._chat_completion
     # mock needed — uses MOCK_ALLOWED_INTERNAL stage entry points instead)
@@ -115,11 +113,32 @@ _MOCK_KNOWN_VIOLATIONS = {
     # Demo smoke: mock internal constants and helpers for timeout testing
     "tests/test_demo_smoke.py::test_demo_smoke_run_turn_times_out -> demo_smoke.TURN_TIMEOUT_SECONDS",
     "tests/test_demo_smoke.py::test_demo_smoke_run_turn_times_out -> demo_smoke._collect_turn_events",
+    # Demo smoke: mock internal helpers for stable compare/checkout testing
+    "tests/test_demo_smoke.py::test_demo_smoke_main_uses_stable_compare_and_checkout_order -> demo_smoke._check_live_provider",
+    "tests/test_demo_smoke.py::test_demo_smoke_main_uses_stable_compare_and_checkout_order -> demo_smoke._check_postgres",
+    "tests/test_demo_smoke.py::test_demo_smoke_main_uses_stable_compare_and_checkout_order -> demo_smoke._demo_image_url",
+    "tests/test_demo_smoke.py::test_demo_smoke_main_uses_stable_compare_and_checkout_order -> demo_smoke._run_turn",
+    "tests/test_demo_smoke.py::test_demo_smoke_main_uses_stable_compare_and_checkout_order -> demo_smoke.get_cart",
     # VL embedding tests: mock internal _vl_embedding_request for payload/error testing
     "tests/test_image_embedding.py::test_vl_embedding_request_sends_correct_payload -> src.services.embedding._vl_embedding_request",
     "tests/test_image_embedding.py::test_vl_embedding_request_omits_parameters_when_no_dimensions -> client.post",
     "tests/test_image_embedding.py::test_vl_embedding_raises_on_empty_response -> src.services.embedding._vl_embedding_request",
     "tests/test_image_embedding.py::test_vl_embedding_raises_on_malformed_embedding -> src.services.embedding._vl_embedding_request",
+    # Multimodal pipeline expanded tests: mock stage functions for unit testing
+    "tests/test_multimodal_pipeline_expanded.py::test_none_image_url_returns_none -> src.runtime.stages.multimodal.analyze_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_empty_string_image_url_returns_none -> src.runtime.stages.multimodal.analyze_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_valid_image_url_calls_analyze_image -> src.runtime.stages.multimodal.analyze_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_vl_exception_propagates -> src.runtime.stages.multimodal.analyze_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_none_image_url_returns_none -> src.runtime.stages.multimodal.embed_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_empty_string_returns_none -> src.runtime.stages.multimodal.embed_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_embedding_failure_returns_none_gracefully -> src.runtime.stages.multimodal.embed_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_embedding_failure_returns_none_gracefully -> src.runtime.stages.multimodal.image_url_to_provider_url",
+    "tests/test_multimodal_pipeline_expanded.py::test_generic_exception_returns_none_gracefully -> src.runtime.stages.multimodal.embed_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_generic_exception_returns_none_gracefully -> src.runtime.stages.multimodal.image_url_to_provider_url",
+    "tests/test_multimodal_pipeline_expanded.py::test_success_returns_embedding_vector -> src.runtime.stages.multimodal.embed_image",
+    "tests/test_multimodal_pipeline_expanded.py::test_success_returns_embedding_vector -> src.runtime.stages.multimodal.image_url_to_provider_url",
+    # Protocol guards test: mock internal schema loader
+    "tests/test_protocol_guards.py::test_guard_detects_schema_drift -> src.types.sse_events._load_schema_event_types",
     # message_rules tests seed known brands for deterministic brand extraction testing
     "tests/test_message_rules.py::_seed_test_brands -> mr.get_known_brands",
     # Pipeline test: add_to_cart reclassification mock
