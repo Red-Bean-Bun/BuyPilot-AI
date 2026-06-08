@@ -12,6 +12,7 @@ fun ChatRoute(
     viewModel: ChatViewModel = hiltViewModel(),
     onOpenProductDeck: (String, String?, String?) -> Unit = { _, _, _ -> },
     onOpenProductDetail: (String, String, String?) -> Unit = { _, _, _ -> },
+    onHistoryOpen: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val timelinePresentation by viewModel.timelinePresentationState.collectAsStateWithLifecycle()
@@ -34,9 +35,9 @@ fun ChatRoute(
             onCartQuantityChange = viewModel::updateCartQuantity,
             onOpenProductDeck = onOpenProductDeck,
             onOpenProductDetail = onOpenProductDetail,
+            onHistoryOpen = onHistoryOpen,
             onRetryLastMessage = viewModel::retryLastMessage,
             onEditLastMessage = viewModel::editLastMessage,
-            onClearConversation = viewModel::clearConversation,
             onConvergeProductDeck = { deckId ->
                 viewModel.convergeProductDeck(deckId, allowFullyHandled = true)
             },

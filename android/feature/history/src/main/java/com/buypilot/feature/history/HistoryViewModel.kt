@@ -48,4 +48,14 @@ class HistoryViewModel @Inject constructor(
             }
         }
     }
+
+    fun deleteSession(sessionId: String) {
+        if (sessionId.isBlank()) return
+        viewModelScope.launch {
+            runCatching { sessionRepository.deleteSession(sessionId) }
+                .onFailure { throwable ->
+                    _uiState.update { it.copy(error = throwable.message) }
+                }
+        }
+    }
 }

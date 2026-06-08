@@ -59,8 +59,84 @@ class ChatRepositoryProductDetailTest {
         assertEquals("p_detail_020", repository.getCachedProductDetail("p_detail_020")?.product?.productId)
     }
 
-    private fun testRepository(productDetailApi: ProductDetailApi): ChatRepository =
-        ChatRepository(
+    @Test
+    fun recordUserMessageCreatesSessionThenPreservesTitleAndCreatedAt() = runTest {
+        val repository = testRepository()
+
+        repository.recordUserMessage("sess_history", "第一条导购需求很长很长很长", nowMs = 100)
+        repository.recordUserMessage("sess_history", "第二条补充预算", nowMs = 200)
+
+        val session = InMemorySessionDao.getSession("sess_history")!!
+        val messages = InMemoryMessageDao.getMessages("sess_history")
+
+        assertEquals("第一条导购需求很长很长很长".take(24), session.title)
+        assertEquals("第二条补充预算", session.lastMessage)
+        assertEquals(100, session.createdAtMs)
+        assertEquals(200, session.updatedAtMs)
+        assertEquals(listOf("第一条导购需求很长很长很长", "第二条补充预算"), messages.map { it.content })
+    }
+
+    @Test
+    fun restoreUserMessagesReturnsOnlyUserMessagesInTimelineOrder() = runTest {
+        val repository = testRepository()
+
+        InMemoryMessageDao.upsert(
+            MessageEntity(
+                messageId = "msg_late",
+                sessionId = "sess_restore",
+                role = "user",
+                content = "后发的需求",
+                createdAtMs = 300,
+            ),
+        )
+        InMemoryMessageDao.upsert(
+            MessageEntity(
+                messageId = "msg_assistant",
+                sessionId = "sess_restore",
+                role = "assistant",
+                content = "不会在 v1 恢复",
+                createdAtMs = 200,
+            ),
+        )
+        InMemoryMessageDao.upsert(
+            MessageEntity(
+                messageId = "msg_early",
+                sessionId = "sess_restore",
+                role = "user",
+                content = "先发的需求",
+                createdAtMs = 100,
+            ),
+        )
+
+        val restored = repository.restoreUserMessages("sess_restore")
+
+        assertEquals(listOf("msg_early", "msg_late"), restored.map { it.messageId })
+        assertEquals(listOf("先发的需求", "后发的需求"), restored.map { it.content })
+    }
+
+    @Test
+    fun restoreUserMessagesFallsBackToSessionLastMessageForLegacyRows() = runTest {
+        val repository = testRepository()
+        InMemorySessionDao.upsert(
+            SessionEntity(
+                sessionId = "sess_legacy",
+                title = "旧标题",
+                lastMessage = "旧会话最后一条",
+                createdAtMs = 100,
+                updatedAtMs = 200,
+            ),
+        )
+
+        val restored = repository.restoreUserMessages("sess_legacy")
+
+        assertEquals(listOf("legacy_sess_legacy_200"), restored.map { it.messageId })
+        assertEquals(listOf("旧会话最后一条"), restored.map { it.content })
+    }
+
+    private fun testRepository(productDetailApi: ProductDetailApi = RecordingProductDetailApi()): ChatRepository {
+        InMemorySessionDao.reset()
+        InMemoryMessageDao.reset()
+        return ChatRepository(
             chatApi = EmptyChatApi,
             chatCancelApi = NoopChatCancelApi,
             feedbackApi = NoopFeedbackApi,
@@ -71,6 +147,7 @@ class ChatRepositoryProductDetailTest {
             sessionDao = InMemorySessionDao,
             messageDao = InMemoryMessageDao,
         )
+    }
 }
 
 private class RecordingProductDetailApi : ProductDetailApi {
@@ -130,6 +207,10 @@ private object StaticBaseUrlProvider : BaseUrlProvider {
 private object InMemorySessionDao : SessionDao {
     private val sessions = mutableMapOf<String, SessionEntity>()
 
+    fun reset() {
+        sessions.clear()
+    }
+
     override suspend fun upsert(session: SessionEntity) {
         sessions[session.sessionId] = session
     }
@@ -145,6 +226,10 @@ private object InMemorySessionDao : SessionDao {
 
 private object InMemoryMessageDao : MessageDao {
     private val messagesBySessionId = mutableMapOf<String, MutableList<MessageEntity>>()
+
+    fun reset() {
+        messagesBySessionId.clear()
+    }
 
     override suspend fun upsert(message: MessageEntity) {
         val messages = messagesBySessionId.getOrPut(message.sessionId) { mutableListOf() }

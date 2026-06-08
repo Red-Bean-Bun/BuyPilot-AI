@@ -30,15 +30,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 
-private const val ProductDeckArrivalMs = 680
-private const val ProductImageSeedVisibleUntilProgress = 0.985f
+private const val ProductDeckArrivalMs = 320
+private const val ProductImageSeedVisibleUntilProgress = 0.78f
 private const val ProductArrivalSeedMinVisibleProgress = 0.01f
 
 internal fun lerp(start: Float, stop: Float, fraction: Float): Float =
@@ -181,15 +180,11 @@ internal fun ProductDeckArrivalMotion(
                 .height(218.dp)
                 .graphicsLayer {
                     val t = arrivalProgress()
-                    val seedT = segmentProgress(t, 0f, 0.12f)
-                    val expandT = segmentProgress(t, 0.18f, 0.78f)
-                    val settleT = segmentProgress(t, 0.72f, 1f)
-                    val settleScale = 0.975f + settleT * 0.025f
-                    alpha = 0.78f + seedT * 0.22f
-                    translationY = with(density) { lerp(24f, 0f, settleT).dp.toPx() }
-                    scaleX = lerp(0.26f, 1f, expandT) * settleScale
-                    scaleY = lerp(0.25f, 1f, expandT) * settleScale
-                    transformOrigin = TransformOrigin(0.06f, 0.5f)
+                    val enterT = segmentProgress(t, 0f, 1f)
+                    alpha = 0.08f + enterT * 0.92f
+                    translationY = with(density) { lerp(14f, 0f, enterT).dp.toPx() }
+                    scaleX = 1f
+                    scaleY = 1f
                 }
                 .shadow(
                     elevation = 8.dp,
@@ -210,9 +205,9 @@ internal fun ProductDeckArrivalMotion(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val contentT = segmentProgress(arrivalProgress(), 0.6f, 1f)
+                        val contentT = segmentProgress(arrivalProgress(), 0.18f, 1f)
                         alpha = contentT
-                        translationY = (1f - contentT) * 16f
+                        translationY = (1f - contentT) * 8f
                     },
             ) {
                 content()

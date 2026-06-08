@@ -39,6 +39,7 @@ val buyPilotBaseUrl = providers
     .environmentVariable("BUY_PILOT_BASE_URL")
     .orNull
     ?.takeIf { it.isNotBlank() }
+    ?: System.getenv("BUY_PILOT_BASE_URL")?.takeIf { it.isNotBlank() }
     ?: loadRootDotEnv()["BUY_PILOT_BASE_URL"]?.takeIf { it.isNotBlank() }
     ?: defaultBuyPilotBaseUrl
 
@@ -46,6 +47,7 @@ val adminApiKey = providers
     .environmentVariable("ADMIN_API_KEY")
     .orNull
     ?.takeIf { it.isNotBlank() }
+    ?: System.getenv("ADMIN_API_KEY")?.takeIf { it.isNotBlank() }
     ?: loadRootDotEnv()["ADMIN_API_KEY"]?.takeIf { it.isNotBlank() }
     ?: ""
 

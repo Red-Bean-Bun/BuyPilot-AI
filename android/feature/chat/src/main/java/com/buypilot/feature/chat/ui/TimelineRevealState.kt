@@ -240,12 +240,6 @@ internal fun shouldAnimateTimelineItem(
     hasEntered: Boolean,
 ): Boolean = animateEnter && !hasEntered
 
-internal fun shouldConsumeFlightUserAnchor(
-    userMessageKey: String?,
-    activeFlightMessageKey: String?,
-): Boolean =
-    userMessageKey != null && userMessageKey == activeFlightMessageKey
-
 internal fun shouldAnimateInitialCompletedText(
     turnId: String,
     currentTurnId: String?,

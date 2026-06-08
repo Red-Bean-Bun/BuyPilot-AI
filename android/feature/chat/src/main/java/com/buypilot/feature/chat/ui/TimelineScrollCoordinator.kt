@@ -42,6 +42,7 @@ internal data class TimelineScrollIntent(
     val scrollOffset: Int = 0,
     val deltaPx: Int = 0,
     val allowOffscreenAnchor: Boolean = false,
+    val allowWhileAutoFocusSuppressed: Boolean = false,
 )
 
 internal data class PendingTimelineScrollIntent(
@@ -66,6 +67,7 @@ internal class TimelineViewportController(
         intent: TimelineScrollIntent,
         isRouteReturnSuppressed: Boolean,
         isClarificationFlightActive: Boolean,
+        isProductViewportMotionLocked: Boolean = false,
     ): Boolean =
         coordinator.request(
             intent = intent,
@@ -73,6 +75,7 @@ internal class TimelineViewportController(
                 intentKind = intent.kind,
                 isRouteReturnSuppressed = isRouteReturnSuppressed,
                 isClarificationFlightActive = isClarificationFlightActive,
+                isProductViewportMotionLocked = isProductViewportMotionLocked,
             ),
         )
 
@@ -133,6 +136,7 @@ internal class TimelineViewportController(
         index: Int,
         isRouteReturnSuppressed: Boolean,
         isClarificationFlightActive: Boolean,
+        isProductViewportMotionLocked: Boolean = false,
     ): Boolean =
         request(
             intent = TimelineScrollIntent(
@@ -142,12 +146,14 @@ internal class TimelineViewportController(
             ),
             isRouteReturnSuppressed = isRouteReturnSuppressed,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = isProductViewportMotionLocked,
         )
 
     fun requestKeyboardChanged(
         deltaPx: Int,
         isRouteReturnSuppressed: Boolean,
         isClarificationFlightActive: Boolean,
+        isProductViewportMotionLocked: Boolean = false,
     ): Boolean =
         request(
             intent = TimelineScrollIntent(
@@ -156,6 +162,7 @@ internal class TimelineViewportController(
             ),
             isRouteReturnSuppressed = isRouteReturnSuppressed,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = isProductViewportMotionLocked,
         )
 
     fun requestFinalDecision(
@@ -164,6 +171,7 @@ internal class TimelineViewportController(
         index: Int,
         isRouteReturnSuppressed: Boolean,
         isClarificationFlightActive: Boolean,
+        isProductViewportMotionLocked: Boolean = false,
     ): Boolean =
         request(
             intent = TimelineScrollIntent(
@@ -174,20 +182,25 @@ internal class TimelineViewportController(
             ),
             isRouteReturnSuppressed = isRouteReturnSuppressed,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = isProductViewportMotionLocked,
         )
 
     fun requestReadableTurnFollow(
         allowOffscreenAnchor: Boolean,
         isRouteReturnSuppressed: Boolean,
         isClarificationFlightActive: Boolean,
+        isProductViewportMotionLocked: Boolean = false,
+        allowWhileAutoFocusSuppressed: Boolean = false,
     ): Boolean =
         request(
             intent = TimelineScrollIntent(
                 kind = TimelineScrollIntentKind.FollowReadableTurn,
                 allowOffscreenAnchor = allowOffscreenAnchor,
+                allowWhileAutoFocusSuppressed = allowWhileAutoFocusSuppressed,
             ),
             isRouteReturnSuppressed = isRouteReturnSuppressed,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = isProductViewportMotionLocked,
         )
 
     fun interruptWithUserDrag() {
@@ -217,7 +230,7 @@ internal class TimelineScrollCoordinator {
         intent: TimelineScrollIntent,
         autoFocusSuppressed: Boolean,
     ): Boolean {
-        if (autoFocusSuppressed && !intent.kind.canRunWhileAutoFocusSuppressed) return false
+        if (autoFocusSuppressed && !intent.canRunWhileAutoFocusSuppressed) return false
         if (
             intent.kind == TimelineScrollIntentKind.RouteReturn &&
             pendingIntents.any { queued -> queued.intent.kind == TimelineScrollIntentKind.UserSent }
@@ -288,13 +301,15 @@ internal class TimelineScrollCoordinator {
             index == other.index &&
             scrollOffset == other.scrollOffset &&
             deltaPx == other.deltaPx &&
-            allowOffscreenAnchor == other.allowOffscreenAnchor
+            allowOffscreenAnchor == other.allowOffscreenAnchor &&
+            allowWhileAutoFocusSuppressed == other.allowWhileAutoFocusSuppressed
 }
 
-private val TimelineScrollIntentKind.canRunWhileAutoFocusSuppressed: Boolean
-    get() = this == TimelineScrollIntentKind.RouteReturn ||
-        this == TimelineScrollIntentKind.ViewportFreeze ||
-        this == TimelineScrollIntentKind.UserSent
+private val TimelineScrollIntent.canRunWhileAutoFocusSuppressed: Boolean
+    get() = kind == TimelineScrollIntentKind.RouteReturn ||
+        kind == TimelineScrollIntentKind.ViewportFreeze ||
+        kind == TimelineScrollIntentKind.UserSent ||
+        (kind == TimelineScrollIntentKind.FollowReadableTurn && allowWhileAutoFocusSuppressed)
 
 private val TimelineScrollIntentKind.isVolatile: Boolean
     get() = this == TimelineScrollIntentKind.ViewportFreeze
@@ -374,9 +389,10 @@ internal fun shouldAutoFocusTimelineFinalDecision(
     autoFocusSuppressed: Boolean,
     manualScrollActive: Boolean,
     userDetachedFromLatest: Boolean = false,
+    currentTurnFollowActive: Boolean = true,
 ): Boolean {
     val key = decisionKey?.takeIf { it.isNotBlank() } ?: return false
-    if (autoFocusSuppressed || manualScrollActive || userDetachedFromLatest) return false
+    if (autoFocusSuppressed || manualScrollActive || userDetachedFromLatest || !currentTurnFollowActive) return false
     if (key == routeReturnSettledDecisionKey || key == lastFocusedDecisionKey) return false
     val decisionTurn = decisionTurnId?.takeIf { it.isNotBlank() }
     val currentTurn = currentTurnId?.takeIf { it.isNotBlank() }
@@ -407,12 +423,22 @@ internal fun shouldBlockTimelineAutoFocusForSuppression(
     intentKind: TimelineScrollIntentKind,
     isAutoFocusSuppressed: Boolean,
 ): Boolean =
-    isAutoFocusSuppressed && !intentKind.canRunWhileAutoFocusSuppressed
+    shouldBlockTimelineAutoFocusForSuppression(
+        intent = TimelineScrollIntent(kind = intentKind),
+        isAutoFocusSuppressed = isAutoFocusSuppressed,
+    )
+
+internal fun shouldBlockTimelineAutoFocusForSuppression(
+    intent: TimelineScrollIntent,
+    isAutoFocusSuppressed: Boolean,
+): Boolean =
+    isAutoFocusSuppressed && !intent.canRunWhileAutoFocusSuppressed
 
 internal fun isTimelineAutoFocusSuppressedForIntent(
     intentKind: TimelineScrollIntentKind,
     isRouteReturnSuppressed: Boolean,
     isClarificationFlightActive: Boolean,
+    isProductViewportMotionLocked: Boolean = false,
 ): Boolean =
     when (intentKind) {
         TimelineScrollIntentKind.UserDrag,
@@ -420,11 +446,15 @@ internal fun isTimelineAutoFocusSuppressedForIntent(
         TimelineScrollIntentKind.RouteReturn,
         TimelineScrollIntentKind.ViewportFreeze -> false
 
-        TimelineScrollIntentKind.AssistantStarted -> isRouteReturnSuppressed
+        TimelineScrollIntentKind.AssistantStarted -> isRouteReturnSuppressed ||
+            isClarificationFlightActive ||
+            isProductViewportMotionLocked
 
         TimelineScrollIntentKind.FinalDecision,
         TimelineScrollIntentKind.KeyboardChanged,
-        TimelineScrollIntentKind.FollowReadableTurn -> isRouteReturnSuppressed || isClarificationFlightActive
+        TimelineScrollIntentKind.FollowReadableTurn -> isRouteReturnSuppressed ||
+            isClarificationFlightActive ||
+            isProductViewportMotionLocked
     }
 
 internal fun shouldFreezeTimelineViewport(

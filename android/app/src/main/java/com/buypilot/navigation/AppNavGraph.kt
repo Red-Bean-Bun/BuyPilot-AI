@@ -15,7 +15,13 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
@@ -30,9 +36,12 @@ import com.buypilot.feature.chat.ui.canOpenDeckForConvergence
 import com.buypilot.feature.chat.ui.ProductEvidenceOverlayScreen
 import com.buypilot.feature.chat.ui.ProductHeroDetailScreen
 import com.buypilot.feature.chat.ui.ProductSwipeModeScreen
+import com.buypilot.feature.history.HistoryDrawerContent
+import com.buypilot.feature.history.HistoryViewModel
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.launch
 
 @Composable
 fun AppNavGraph(modifier: Modifier = Modifier) {
@@ -52,20 +61,64 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                 }
                 val viewModel: ChatViewModel = hiltViewModel(parentEntry)
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                ChatRoute(
-                    viewModel = viewModel,
-                    onOpenProductDeck = { deckId, productId, deckNodeKey ->
-                        val targetProductId = productId.orEmpty()
-                        if (uiState.canOpenDeckForConvergence(deckId, deckNodeKey)) {
-                            navController.navigate(Routes.productDeck(deckId, productId, deckNodeKey))
-                        } else if (targetProductId.isNotBlank()) {
-                            navController.navigate(Routes.productDetail(deckId, targetProductId, deckNodeKey))
+                val historyViewModel: HistoryViewModel = hiltViewModel(parentEntry)
+                val historyState by historyViewModel.uiState.collectAsStateWithLifecycle()
+                val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                val scope = rememberCoroutineScope()
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        ModalDrawerSheet(
+                            drawerContainerColor = Color(0xFFFCFCFD),
+                        ) {
+                            HistoryDrawerContent(
+                                state = historyState,
+                                currentSessionId = uiState.sessionId,
+                                actionsEnabled = !uiState.isStreaming,
+                                onNewChat = {
+                                    if (!uiState.isStreaming) {
+                                        viewModel.clearConversation()
+                                        scope.launch { drawerState.close() }
+                                    }
+                                },
+                                onSessionSelected = { sessionId ->
+                                    if (!uiState.isStreaming) {
+                                        if (sessionId != uiState.sessionId) {
+                                            viewModel.restoreSession(sessionId)
+                                        }
+                                        scope.launch { drawerState.close() }
+                                    }
+                                },
+                                onSessionDeleted = { sessionId ->
+                                    if (!uiState.isStreaming) {
+                                        historyViewModel.deleteSession(sessionId)
+                                        if (sessionId == uiState.sessionId) {
+                                            viewModel.clearConversation()
+                                        }
+                                    }
+                                },
+                            )
                         }
                     },
-                    onOpenProductDetail = { deckId, productId, deckNodeKey ->
-                        navController.navigate(Routes.productDetail(deckId, productId, deckNodeKey))
-                    },
-                )
+                ) {
+                    ChatRoute(
+                        viewModel = viewModel,
+                        onOpenProductDeck = { deckId, productId, deckNodeKey ->
+                            val targetProductId = productId.orEmpty()
+                            if (uiState.canOpenDeckForConvergence(deckId, deckNodeKey)) {
+                                navController.navigate(Routes.productDeck(deckId, productId, deckNodeKey))
+                            } else if (targetProductId.isNotBlank()) {
+                                navController.navigate(Routes.productDetail(deckId, targetProductId, deckNodeKey))
+                            }
+                        },
+                        onOpenProductDetail = { deckId, productId, deckNodeKey ->
+                            navController.navigate(Routes.productDetail(deckId, productId, deckNodeKey))
+                        },
+                        onHistoryOpen = {
+                            scope.launch { drawerState.open() }
+                        },
+                    )
+                }
             }
 
             composable(

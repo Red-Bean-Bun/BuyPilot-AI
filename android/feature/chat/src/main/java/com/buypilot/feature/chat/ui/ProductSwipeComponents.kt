@@ -31,13 +31,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.buypilot.core.model.ProductCardPayload
@@ -70,7 +68,6 @@ import com.yuyakaido.android.cardstackview.SwipeableMethod
 import kotlin.math.roundToInt
 
 private const val ProductSwipeDetailEnterMs = 520
-private const val ProductDeckAutoCloseDelayMs = 280L
 private const val ProductSwipeAnimationMs = 430
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,20 +99,6 @@ fun ProductSwipeModeScreen(
     }
     val haptics = LocalHapticFeedback.current
     val cardStackBridge = remember(deckId) { CardStackBridge() }
-    val deckFullyHandled = isProductDeckFullyHandled(
-        products = products,
-        swipeState = swipeState,
-    )
-    var autoClosed by rememberSaveable(deckId) { mutableStateOf(false) }
-    val latestOnBack by rememberUpdatedState(onBack)
-
-    LaunchedEffect(deckId, deckFullyHandled) {
-        if (!deckFullyHandled || autoClosed) return@LaunchedEffect
-        autoClosed = true
-        kotlinx.coroutines.delay(ProductDeckAutoCloseDelayMs)
-        latestOnBack()
-    }
-
     Surface(color = BuyPilotColors.SurfaceBg, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ProductSwipeTopBar(
@@ -135,6 +118,7 @@ fun ProductSwipeModeScreen(
             if (deck == null || payload == null) {
                 if (deck != null && products.isNotEmpty() && remainingProducts.isEmpty()) {
                     ProductSwipeCompletedState(
+                        onBack = onBack,
                     )
                 } else {
                     ExpiredRecommendationState(onBack = onBack)
@@ -262,16 +246,19 @@ private fun ProductSingleCandidateModeContent(
 }
 
 @Composable
-private fun ProductSwipeCompletedState() {
+private fun ProductSwipeCompletedState(
+    onBack: () -> Unit,
+) {
     val mascotProgressState = rememberRouteEnterProgress(
         key = "product_swipe_completed_mascot",
         durationMillis = 260,
     )
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 34.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 34.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         Image(
             painter = painterResource(R.drawable.redbean_bun_mascot_eyes_variant),
@@ -288,6 +275,29 @@ private fun ProductSwipeCompletedState() {
                     scaleX = lerp(0.96f, 1f, mascotProgress)
                     scaleY = lerp(0.96f, 1f, mascotProgress)
                 },
+        )
+        Spacer(Modifier.height(18.dp))
+        Text(
+            text = stringResource(R.string.swipe_completed_title),
+            color = BuyPilotColors.TextPrimary,
+            fontSize = 22.sp,
+            lineHeight = 28.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.swipe_completed_body),
+            color = BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Body,
+            lineHeight = 21.sp,
+        )
+        Spacer(Modifier.height(22.dp))
+        CandidateActionButton(
+            label = stringResource(R.string.swipe_back_to_recommendations),
+            leadingIconRes = R.drawable.ic_arrow_back_24,
+            primary = true,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onBack,
         )
     }
 }
@@ -542,16 +552,29 @@ private fun ProductCardStackView(
         update = { stackView ->
             val adapter = stackView.adapter as? ProductCardStackAdapter ?: return@AndroidView
             adapter.backendBaseUrl = backendBaseUrl
+            val layoutManager = stackView.layoutManager as? CardStackLayoutManager
+            val oldProductIds = adapter.productIds
             val nextProductIds = products.map { it.product.productId }
             if (adapter.productIds != nextProductIds) {
+                val previousTopPosition = layoutManager?.getTopPosition()?.coerceAtLeast(0) ?: 0
+                val previousVisibleProductId = oldProductIds.getOrNull(previousTopPosition)
                 val changed = adapter.submit(products)
-                stackView.scrollToPosition(0)
-                if (changed) latestOnStackPositionChanged(0)
+                val nextTopPosition = previousVisibleProductId
+                    ?.let { nextProductIds.indexOf(it) }
+                    ?.takeIf { it >= 0 }
+                    ?: 0
+                if (changed && nextTopPosition != previousTopPosition) {
+                    stackView.scrollToPosition(nextTopPosition)
+                    latestOnStackPositionChanged(nextTopPosition)
+                } else if (changed && previousTopPosition >= nextProductIds.size) {
+                    stackView.scrollToPosition(0)
+                    latestOnStackPositionChanged(0)
+                }
             } else {
                 adapter.submit(products)
             }
             bridge.view = stackView
-            bridge.manager = stackView.layoutManager as? CardStackLayoutManager
+            bridge.manager = layoutManager
         },
     )
 }
@@ -580,11 +603,30 @@ private class ProductCardStackAdapter(
     val productIds: List<String>
         get() = items.map { it.product.productId }
 
+    init {
+        setHasStableIds(true)
+    }
+
     fun submit(nextItems: List<ProductCardPayload>): Boolean {
         if (items == nextItems) return false
+        val previousItems = items.toList()
+        val diffResult = DiffUtil.calculateDiff(
+            object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = previousItems.size
+
+                override fun getNewListSize(): Int = nextItems.size
+
+                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                    previousItems[oldItemPosition].product.productId ==
+                        nextItems[newItemPosition].product.productId
+
+                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                    previousItems[oldItemPosition] == nextItems[newItemPosition]
+            },
+        )
         items.clear()
         items.addAll(nextItems)
-        notifyDataSetChanged()
+        diffResult.dispatchUpdatesTo(this)
         return true
     }
 
@@ -899,6 +941,9 @@ private class ProductCardStackAdapter(
         )
     }
 
+    override fun getItemId(position: Int): Long =
+        stableProductIdHash(items.getOrNull(position)?.product?.productId.orEmpty())
+
     override fun getItemCount(): Int = items.size
 
     private fun createSwipeOverlays(
@@ -987,7 +1032,7 @@ private class ProductCardStackAdapter(
             itemView.isClickable = false
             positionBadge.text = positionLabel
             image.load(product.imageUrl.resolveProductImageUrl(backendBaseUrl)) {
-                crossfade(180)
+                crossfade(false)
                 placeholder(R.drawable.product_image_placeholder)
                 error(R.drawable.product_image_placeholder)
                 fallback(R.drawable.product_image_placeholder)
@@ -1095,4 +1140,12 @@ private class ProductCardStackAdapter(
             }
         }
     }
+}
+
+private fun stableProductIdHash(productId: String): Long {
+    var hash = 1125899906842597L
+    productId.forEach { char ->
+        hash = hash * 31 + char.code
+    }
+    return hash
 }

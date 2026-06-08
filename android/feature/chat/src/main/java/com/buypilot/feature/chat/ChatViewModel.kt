@@ -1097,16 +1097,51 @@ class ChatViewModel @Inject constructor(
     }
 
     fun clearConversation() {
-        streamJob?.cancel()
-        pendingFeedbackJobsByDeck.clear()
-        convergenceJobsByDeck.clear()
-        pendingConvergenceRequestsByDeck.clear()
-        backendReadyDeckIds.clear()
-        nextSendFromEditResubmit = false
+        clearRuntimeState()
         _uiState.value = ChatUiState(
             backendBaseUrl = chatRepository.backendBaseUrl,
             useMockChat = BuildConfig.USE_MOCK_CHAT,
         )
+    }
+
+    fun restoreSession(sessionId: String) {
+        if (sessionId.isBlank() || _uiState.value.isStreaming) return
+        viewModelScope.launch {
+            val restoredMessages = runCatching { chatRepository.restoreUserMessages(sessionId) }
+                .getOrElse { throwable ->
+                    _uiState.update {
+                        it.copy(lastError = throwable.message ?: "会话恢复失败")
+                    }
+                    return@launch
+                }
+            val keepTtsEnabled = _uiState.value.ttsEnabled
+            clearRuntimeState()
+            _uiState.value = restoredSessionState(
+                sessionId = sessionId,
+                messages = restoredMessages,
+                backendBaseUrl = chatRepository.backendBaseUrl,
+                useMockChat = BuildConfig.USE_MOCK_CHAT,
+                ttsEnabled = keepTtsEnabled,
+            )
+            refreshCart()
+        }
+    }
+
+    private fun clearRuntimeState() {
+        streamJob?.cancel()
+        streamJob = null
+        backgroundCartJobsByProductId.values.forEach { it.cancel() }
+        backgroundCartJobsByProductId.clear()
+        pendingFeedbackJobsByDeck.values.flatten().forEach { it.cancel() }
+        pendingFeedbackJobsByDeck.clear()
+        convergenceJobsByDeck.values.forEach { it.cancel() }
+        convergenceJobsByDeck.clear()
+        pendingConvergenceRequestsByDeck.clear()
+        backendReadyDeckIds.clear()
+        pendingProductDetailIds.clear()
+        ttsManager.stop()
+        ttsSentenceBuffer.clear()
+        nextSendFromEditResubmit = false
     }
 
     fun onInputChanged(text: String, hasImage: Boolean = false) {

@@ -63,6 +63,9 @@
     <string name="swipe_single_candidate_body">这轮只有一个匹配商品，不需要左右滑。先看详情，最终建议会判断它是否真的适合你。</string>
     <string name="swipe_overlay_dislike">不合适</string>
     <string name="swipe_overlay_like">喜欢</string>
+    <string name="swipe_completed_title">选择已记录</string>
+    <string name="swipe_completed_body">回到推荐结果后，我会根据你的取舍继续收敛。</string>
+    <string name="swipe_back_to_recommendations">回到推荐结果</string>
     <string name="image_selected_preview_desc">已选择的图片，点按预览</string>
     <string name="image_remove_desc">移除图片</string>
     <string name="image_preview_desc">图片预览</string>
@@ -73,7 +76,7 @@
     <string name="composer_placeholder_image_error">移除图片后重试，或重新选择</string>
     <string name="composer_placeholder_revealing">正在显示回复，可继续查看</string>
     <string name="composer_placeholder_adjusting">放宽预算、换品类或继续描述需求...</string>
-    <string name="composer_placeholder_default">继续追问或描述需求...</string>
+    <string name="composer_placeholder_default">说说预算、用途，或者不想踩的雷...</string>
     <string name="warning_title">注意：</string>
     <string name="evidence_why_title">为什么推荐它</string>
     <string name="evidence_lead_subtitle">基于筛选条件、商品资料与用户评价交叉校验</string>
@@ -95,9 +98,8 @@
     <string name="compare_dimension_evidence">维度依据</string>
     <string name="compare_detail_explain">长证据、商品字段和检索片段用于支撑这些判断，外层表格与雷达只展示摘要。</string>
     <string name="compare_risk_title">风险提醒</string>
-    <string name="topbar_clear_chat_desc">清空当前对话</string>
+    <string name="topbar_history_desc">打开历史对话</string>
     <string name="topbar_cart_desc">查看购物车</string>
-    <string name="topbar_open_menu_desc">打开菜单</string>
     <string name="composer_focus_desc">聚焦输入框</string>
     <string name="converge_choose_button">帮我选</string>
     <string name="previous_candidates">上一轮候选</string>

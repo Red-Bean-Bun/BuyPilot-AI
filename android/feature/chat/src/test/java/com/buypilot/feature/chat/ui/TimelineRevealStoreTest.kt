@@ -1,6 +1,8 @@
 package com.buypilot.feature.chat.ui
 
 import androidx.compose.runtime.saveable.SaverScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import com.buypilot.core.model.FinalDecisionPayload
 import com.buypilot.core.model.ProductCardPayload
 import com.buypilot.core.model.ProductPayload
@@ -246,10 +248,10 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun viewportControllerKeepsAssistantAnchorDuringClarificationFlight() {
+    fun viewportControllerBlocksAssistantAnchorDuringClarificationFlight() {
         val controller = TimelineViewportController()
 
-        assertTrue(
+        assertFalse(
             controller.requestAssistantStarted(
                 turnId = "turn_1",
                 index = 1,
@@ -257,10 +259,7 @@ class TimelineRevealStoreTest {
                 isClarificationFlightActive = true,
             ),
         )
-        assertEquals(
-            listOf(TimelineScrollIntentKind.AssistantStarted),
-            controller.queuedIntentKinds,
-        )
+        assertEquals(0, controller.pendingIntentCount)
     }
 
     @Test
@@ -278,6 +277,32 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun viewportControllerOnlyLetsExplicitReadableFollowThroughProductMotionLock() {
+        val controller = TimelineViewportController()
+
+        assertFalse(
+            controller.requestReadableTurnFollow(
+                allowOffscreenAnchor = true,
+                isRouteReturnSuppressed = false,
+                isClarificationFlightActive = false,
+                isProductViewportMotionLocked = true,
+            ),
+        )
+        assertTrue(
+            controller.requestReadableTurnFollow(
+                allowOffscreenAnchor = true,
+                isRouteReturnSuppressed = false,
+                isClarificationFlightActive = false,
+                isProductViewportMotionLocked = true,
+                allowWhileAutoFocusSuppressed = true,
+            ),
+        )
+
+        assertEquals(TimelineScrollIntentKind.FollowReadableTurn, controller.pendingIntent?.intent?.kind)
+        assertTrue(controller.pendingIntent?.intent?.allowWhileAutoFocusSuppressed == true)
+    }
+
+    @Test
     fun scrollCoordinatorKeepsUserInitiatedFollowFromBeingDedupedByPassiveFollow() {
         val coordinator = TimelineScrollCoordinator()
 
@@ -292,6 +317,7 @@ class TimelineRevealStoreTest {
                 intent = TimelineScrollIntent(
                     kind = TimelineScrollIntentKind.FollowReadableTurn,
                     allowOffscreenAnchor = true,
+                    allowWhileAutoFocusSuppressed = true,
                 ),
                 autoFocusSuppressed = false,
             ),
@@ -299,6 +325,7 @@ class TimelineRevealStoreTest {
 
         assertEquals(1, coordinator.pendingIntentCount)
         assertTrue(coordinator.pendingIntent?.intent?.allowOffscreenAnchor == true)
+        assertTrue(coordinator.pendingIntent?.intent?.allowWhileAutoFocusSuppressed == true)
     }
 
     @Test
@@ -763,6 +790,18 @@ class TimelineRevealStoreTest {
                 userDetachedFromLatest = true,
             ),
         )
+        assertFalse(
+            shouldAutoFocusTimelineFinalDecision(
+                decisionKey = "final_current",
+                decisionTurnId = "turn_2",
+                currentTurnId = "turn_2",
+                lastFocusedDecisionKey = null,
+                routeReturnSettledDecisionKey = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+                currentTurnFollowActive = false,
+            ),
+        )
     }
 
     @Test
@@ -806,8 +845,8 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun assistantStartedAnchorIgnoresClarificationFlightSuppression() {
-        assertFalse(
+    fun assistantStartedAnchorWaitsForClarificationFlightToFinish() {
+        assertTrue(
             isTimelineAutoFocusSuppressedForIntent(
                 intentKind = TimelineScrollIntentKind.AssistantStarted,
                 isRouteReturnSuppressed = false,
@@ -873,25 +912,42 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun flightUserAnchorIsConsumedWithoutRequestingASecondUserScroll() {
-        assertTrue(
-            shouldConsumeFlightUserAnchor(
-                userMessageKey = "user_after_clarification",
-                activeFlightMessageKey = "user_after_clarification",
-            ),
+    fun clarificationFlightTargetLocksOnlyAfterStableFrames() {
+        val first = clarificationSnapshot(x = 120f, y = 540f)
+        val shifted = clarificationSnapshot(x = 120f, y = 552f)
+        val nearlySame = clarificationSnapshot(x = 120.7f, y = 552.8f, width = 136.6f)
+
+        var stableFrames = nextClarificationTargetStableFrameCount(
+            previous = null,
+            current = first,
+            previousStableFrames = 0,
         )
-        assertFalse(
-            shouldConsumeFlightUserAnchor(
-                userMessageKey = "user_after_clarification",
-                activeFlightMessageKey = "previous_user",
-            ),
+        assertEquals(1, stableFrames)
+        assertFalse(shouldLockClarificationTargetSnapshot(stableFrames))
+
+        stableFrames = nextClarificationTargetStableFrameCount(
+            previous = first,
+            current = shifted,
+            previousStableFrames = stableFrames,
         )
-        assertFalse(
-            shouldConsumeFlightUserAnchor(
-                userMessageKey = null,
-                activeFlightMessageKey = "user_after_clarification",
-            ),
+        assertEquals(1, stableFrames)
+        assertFalse(shouldLockClarificationTargetSnapshot(stableFrames))
+
+        stableFrames = nextClarificationTargetStableFrameCount(
+            previous = shifted,
+            current = nearlySame,
+            previousStableFrames = stableFrames,
         )
+        assertEquals(2, stableFrames)
+        assertFalse(shouldLockClarificationTargetSnapshot(stableFrames))
+
+        stableFrames = nextClarificationTargetStableFrameCount(
+            previous = nearlySame,
+            current = shifted,
+            previousStableFrames = stableFrames,
+        )
+        assertEquals(3, stableFrames)
+        assertTrue(shouldLockClarificationTargetSnapshot(stableFrames))
     }
 
     @Test
@@ -2150,7 +2206,7 @@ class TimelineRevealStoreTest {
     }
 
     @Test
-    fun followReadableTurnFallsBackToAssistantWhenUserAnchorIsMissingOrAfterTurn() {
+    fun followReadableTurnFallsBackToAssistantWhenUserAnchorIsMissing() {
         val items = listOf(
             UserMessageNode(key = "user_1", content = "推荐一款手机"),
             AiStreamNode(
@@ -2170,14 +2226,6 @@ class TimelineRevealStoreTest {
             ),
         ).toTimelineRenderItems()
 
-        assertEquals(
-            3,
-            readableTurnAnchorIndexForFollow(
-                timelineItems = items,
-                currentTurnId = "turn_2",
-                activeUserBubbleAnchorKey = null,
-            ),
-        )
         assertEquals(
             3,
             readableTurnAnchorIndexForFollow(
@@ -2348,6 +2396,16 @@ class TimelineRevealStoreTest {
         key = key,
         payload = ClarificationPayload(question = "你想买哪一类商品？", requiredSlots = listOf("category")),
         turnId = "turn_1",
+    )
+
+    private fun clarificationSnapshot(
+        x: Float,
+        y: Float,
+        width: Float = 136f,
+        height: Float = 44f,
+    ) = ClarificationChipSnapshot(
+        position = Offset(x, y),
+        size = Size(width, height),
     )
 
     private fun deck(key: String, turnId: String = "turn_1") = ProductDeckNode(

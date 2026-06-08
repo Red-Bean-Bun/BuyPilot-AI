@@ -20,6 +20,11 @@ class SessionRepository @Inject constructor(
 
     suspend fun restoreMessages(sessionId: String): List<MessageEntity> =
         messageDao.getMessages(sessionId)
+
+    suspend fun deleteSession(sessionId: String) {
+        messageDao.deleteForSession(sessionId)
+        sessionDao.delete(sessionId)
+    }
 }
 
 private fun SessionEntity.toSummary(): SessionSummary =

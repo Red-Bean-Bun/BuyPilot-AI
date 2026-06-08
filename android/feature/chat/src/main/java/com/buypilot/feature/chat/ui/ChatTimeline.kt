@@ -250,7 +250,6 @@ private const val ClarificationSelectionHoldMs = 0
 private const val ClarificationExitMs = 110
 internal const val ClarificationFlightMs = 360
 internal const val ClarificationKeyboardBirthMs = 150
-internal const val ClarificationTargetSettleMs = 24L
 internal const val ClarificationTargetFallbackMs = 760L
 private const val ClarificationQuestionToCardDelayMs = 170L
 private const val ClarificationCardEnterMs = 460
@@ -281,8 +280,9 @@ private const val ThinkingToTextHandoffMs = 0L
 private const val FinalDecisionAnchorWaitFrames = 12
 private const val UserBubbleAnchorWaitFrames = 2
 private const val UserBubbleAnchorSettleFrames = 8
-private const val TimelineRevealScrollThrottleMs = 40L
+private const val TimelineRevealScrollThrottleMs = 140L
 private const val ManualScrollSettleMs = 520L
+private const val ProductDeckViewportMotionLockMs = 340L
 private val TrailingThinkingDotsRegex = Regex("""[.。…]+$""")
 
 private enum class ThinkingTextHandoffPhase {
@@ -478,7 +478,29 @@ internal fun ChatTimeline(
         TimelineRouteReturnState()
     }
     val clarificationFreezeState = remember { TimelineFreezeState() }
-    val suppressTimelineAutoFocus = routeReturnState.suppressAutoFocus || isClarificationFlightActive
+    var productViewportMotionLockUntilMs by remember { mutableStateOf(0L) }
+    var productViewportAutoFocusLocked by remember { mutableStateOf(false) }
+    fun lockTimelineAutoFocusForProductMotion(durationMs: Long) {
+        val lockUntil = SystemClock.uptimeMillis() + durationMs.coerceAtLeast(0L)
+        if (lockUntil > productViewportMotionLockUntilMs) {
+            productViewportMotionLockUntilMs = lockUntil
+        }
+    }
+    LaunchedEffect(productViewportMotionLockUntilMs) {
+        val delayMs = productViewportMotionLockUntilMs - SystemClock.uptimeMillis()
+        if (delayMs <= 0L) {
+            productViewportAutoFocusLocked = false
+            return@LaunchedEffect
+        }
+        productViewportAutoFocusLocked = true
+        kotlinx.coroutines.delay(delayMs)
+        if (SystemClock.uptimeMillis() >= productViewportMotionLockUntilMs) {
+            productViewportAutoFocusLocked = false
+        }
+    }
+    val suppressTimelineAutoFocus = routeReturnState.suppressAutoFocus ||
+        isClarificationFlightActive ||
+        productViewportAutoFocusLocked
     val revealSnapshotHolder = rememberSaveable(saver = TimelineRevealSnapshotHolderSaver) {
         TimelineRevealSnapshotHolder()
     }
@@ -628,6 +650,7 @@ internal fun ChatTimeline(
                 allowOffscreenAnchor = false,
                 isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
                 isClarificationFlightActive = isClarificationFlightActive,
+                isProductViewportMotionLocked = productViewportAutoFocusLocked,
             )
         }
     }
@@ -783,7 +806,7 @@ internal fun ChatTimeline(
             index = routeReturnState.itemIndex,
             scrollOffset = routeReturnState.scrollOffset,
             isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
-            isClarificationFlightActive = isClarificationFlightActive,
+            isClarificationFlightActive = isClarificationFlightActive || productViewportAutoFocusLocked,
         )
     }
 
@@ -834,10 +857,6 @@ internal fun ChatTimeline(
 
     LaunchedEffect(state.lastUserMessageKey, activeFlightMessageKey, timelineScrollAnchorSignature, timelineItems.size) {
         val key = state.lastUserMessageKey ?: return@LaunchedEffect
-        if (shouldConsumeFlightUserAnchor(key, activeFlightMessageKey)) {
-            lastHandledUserMessageKey = key
-            return@LaunchedEffect
-        }
         val index = timelineItems.indexOfFirst { it is UserTimelineItem && it.node.key == key }
         if (index >= 0 && key != lastHandledUserMessageKey) {
             routeReturnState.settledTurnId = null
@@ -850,7 +869,7 @@ internal fun ChatTimeline(
                 key = key,
                 index = index,
                 isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
-                isClarificationFlightActive = isClarificationFlightActive,
+                isClarificationFlightActive = isClarificationFlightActive || productViewportAutoFocusLocked,
             )
         }
     }
@@ -860,10 +879,13 @@ internal fun ChatTimeline(
         state.activeConvergenceDeckId,
         routeReturnState.suppressAutoFocus,
         manualScrollActive,
+        isClarificationFlightActive,
         timelineScrollAnchorSignature,
         timelineItems.size,
     ) {
-        if (routeReturnState.suppressAutoFocus || manualScrollActive) return@LaunchedEffect
+        if (routeReturnState.suppressAutoFocus || manualScrollActive || isClarificationFlightActive) {
+            return@LaunchedEffect
+        }
         val turnId = state.currentTurnId ?: return@LaunchedEffect
         if (
             turnId == lastAnchoredAssistantTurnId ||
@@ -883,6 +905,7 @@ internal fun ChatTimeline(
             index = assistantTurnIndex,
             isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = productViewportAutoFocusLocked,
         )
     }
 
@@ -902,6 +925,7 @@ internal fun ChatTimeline(
                 deltaPx = delta,
                 isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
                 isClarificationFlightActive = isClarificationFlightActive,
+                isProductViewportMotionLocked = productViewportAutoFocusLocked,
             )
         }
         if (
@@ -915,6 +939,7 @@ internal fun ChatTimeline(
                 allowOffscreenAnchor = true,
                 isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
                 isClarificationFlightActive = isClarificationFlightActive,
+                isProductViewportMotionLocked = productViewportAutoFocusLocked,
             )
         }
         if (stableImeBottomPx == 0) {
@@ -989,6 +1014,7 @@ internal fun ChatTimeline(
                 autoFocusSuppressed = suppressTimelineAutoFocus,
                 manualScrollActive = manualScrollActive,
                 userDetachedFromLatest = userDetachedFromLatest,
+                currentTurnFollowActive = currentTurnFollowActive,
             )
         ) {
             return@LaunchedEffect
@@ -1004,6 +1030,7 @@ internal fun ChatTimeline(
             index = decisionItemIndex,
             isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = productViewportAutoFocusLocked,
         )
     }
 
@@ -1019,6 +1046,7 @@ internal fun ChatTimeline(
             allowOffscreenAnchor = false,
             isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = productViewportAutoFocusLocked,
         )
     }
 
@@ -1046,8 +1074,9 @@ internal fun ChatTimeline(
             intentKind = intent.kind,
             isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
             isClarificationFlightActive = isClarificationFlightActive,
+            isProductViewportMotionLocked = productViewportAutoFocusLocked,
         )
-        if (shouldBlockTimelineAutoFocusForSuppression(intent.kind, intentAutoFocusSuppressed)) {
+        if (shouldBlockTimelineAutoFocusForSuppression(intent, intentAutoFocusSuppressed)) {
             clearPending()
             return@LaunchedEffect
         }
@@ -1161,6 +1190,7 @@ internal fun ChatTimeline(
                                 index = assistantIndex,
                                 isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
                                 isClarificationFlightActive = isClarificationFlightActive,
+                                isProductViewportMotionLocked = productViewportAutoFocusLocked,
                             )
                         }
                     }
@@ -1399,6 +1429,7 @@ internal fun ChatTimeline(
                                     onRetryLastMessage = onRetryLastMessage,
                                     onEditLastMessage = onEditLastMessage,
                                     onQuickAction = onQuickAction,
+                                    onViewportMotionLock = { lockTimelineAutoFocusForProductMotion(it) },
                                     onUserImagePreview = onUserImagePreview,
                                     onMessageRevealComplete = onMessageRevealComplete,
                                     onMessageRevealActiveChange = onMessageRevealActiveChange,
@@ -1447,6 +1478,7 @@ internal fun ChatTimeline(
                                     onRetryLastMessage = onRetryLastMessage,
                                     onEditLastMessage = onEditLastMessage,
                                     onQuickAction = onQuickAction,
+                                    onViewportMotionLock = { lockTimelineAutoFocusForProductMotion(it) },
                                     onUserImagePreview = onUserImagePreview,
                                     onMessageRevealComplete = onMessageRevealComplete,
                                     onMessageRevealActiveChange = onMessageRevealActiveChange,
@@ -1515,6 +1547,7 @@ internal fun ChatTimeline(
                                 onRetryLastMessage = onRetryLastMessage,
                                 onEditLastMessage = onEditLastMessage,
                                 onQuickAction = onQuickAction,
+                                onViewportMotionLock = { lockTimelineAutoFocusForProductMotion(it) },
                                 onUserImagePreview = onUserImagePreview,
                                 onMessageRevealComplete = { key ->
                                     revealStore.markTextCompleted(key)
@@ -1583,6 +1616,7 @@ internal fun ChatTimeline(
                         allowOffscreenAnchor = true,
                         isRouteReturnSuppressed = routeReturnState.suppressAutoFocus,
                         isClarificationFlightActive = isClarificationFlightActive,
+                        allowWhileAutoFocusSuppressed = true,
                     )
                 },
             )
@@ -1620,6 +1654,7 @@ private fun AssistantTurnBlock(
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
     onQuickAction: (QuickActionPayload) -> Unit,
+    onViewportMotionLock: (Long) -> Unit,
     onUserImagePreview: (String) -> Unit,
     onMessageRevealComplete: (String) -> Unit,
     onMessageRevealActiveChange: (String, Boolean) -> Unit,
@@ -1859,6 +1894,7 @@ private fun AssistantTurnBlock(
                                     onRetryLastMessage = onRetryLastMessage,
                                     onEditLastMessage = onEditLastMessage,
                                     onQuickAction = onQuickAction,
+                                    onViewportMotionLock = onViewportMotionLock,
                                     onUserImagePreview = onUserImagePreview,
                                     onMessageRevealComplete = { key ->
                                         coordinator.markTextCompleted(key)
@@ -2215,6 +2251,7 @@ private class TimelineNodeActions(
     val onRetryLastMessage: () -> Unit,
     val onEditLastMessage: (String) -> Unit,
     val onQuickAction: (QuickActionPayload) -> Unit,
+    val onViewportMotionLock: (Long) -> Unit,
     val onUserImagePreview: (String) -> Unit,
     val onMessageRevealComplete: (String) -> Unit,
     val onMessageRevealActiveChange: (String, Boolean) -> Unit,
@@ -2375,6 +2412,7 @@ private fun TimelineNodeContent(
                 motionEnabled = motionState.structuredMotionEnabled,
                 alreadyEntered = motionState.structuredAlreadyEntered,
                 onEntered = { actions.onStructuredEntered(node.key) },
+                onViewportMotionLock = actions.onViewportMotionLock,
                 onOpen = { deckId, productId -> actions.onProductOpen(deckId, productId, node.key) },
                 onOpenDetail = { deckId, productId -> actions.onProductDetailOpen(deckId, productId, node.key, node.key) },
                 onCompare = { ranks ->
@@ -3042,7 +3080,10 @@ private suspend fun scrollReadableTurnAnchorIfNeeded(
         val desiredTop = layoutInfo.viewportStartOffset + anchorTopPx
         val correction = (item.offset - desiredTop).toFloat()
         if (abs(correction) > tolerancePx) {
-            listState.scrollBy(correction)
+            listState.animateScrollBy(
+                value = correction,
+                animationSpec = tween(durationMillis = 120, easing = MenuEaseOut),
+            )
         }
         kotlinx.coroutines.delay(16L)
     }

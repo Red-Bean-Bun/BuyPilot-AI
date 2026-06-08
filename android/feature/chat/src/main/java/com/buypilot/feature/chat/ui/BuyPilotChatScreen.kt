@@ -48,6 +48,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -131,6 +132,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -271,21 +273,52 @@ internal val MenuEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 internal val PremiumRevealEase = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val ClarificationEaseOut = CubicBezierEasing(0.1f, 1f, 0.1f, 1f)
 private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+internal const val ClarificationTargetStableFrames = 3
+internal const val ClarificationTargetMaxSettleFrames = 18
+internal const val ClarificationTargetStableTolerancePx = 1.5f
 private val ProductDetailRevealDistance = 220.dp
 private const val ProductDetailSnapThreshold = 0.36f
 private const val ProductDetailEnterMs = 560
+private val ProductDetailImagePullDistance = 240.dp
+private const val ProductDetailImagePullThreshold = 0.42f
+private const val ProductDetailImageExpandMs = 260
+private const val ProductDetailImageDismissMs = 220
 private const val CriteriaCardEnterMs = 560
 private const val DecisionCardEnterMs = 760
 private const val DecisionReasonBaseDelayMs = 240
 private const val DecisionReasonStaggerMs = 120
 private const val MaxCompareSelectionCount = 4
 private val ProductDeckFooterHeight = 46.dp
+private val ProductDeckCandidateModeHeight = 238.dp
+private val ProductDeckCompactCompareItemHeight = 94.dp
+private val ProductDeckWideCompareItemHeight = 178.dp
+private val ProductDeckCompareRowGap = 8.dp
+private val ProductDeckCompareControlGap = 12.dp
+private val ProductDeckCompareConfirmHeight = 30.dp
+private const val ProductDeckModeSwitchViewportLockMs = 340L
+private const val ProductDeckPagerViewportLockMs = 220L
 private val DecisionPriceLabelRegex = Regex("""^([¥￥$]?)(\d+(?:\.\d+)?)(.*)$""")
 private val DecisionLeadingDividerRegex = Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*""")
 private val DecisionCompareWhitespaceRegex = Regex("\\s+")
 private val DecisionCompareSplitRegex = Regex("[，,（(]")
 private val TechnicalPathHintRegex = Regex("""\b(?:api|v\d+|chat|stream)\b""")
 private val DecisionRiskLeadingPunctuationRegex = Regex("""^[：:，,、\s]+""")
+
+private fun productDeckModeSlotHeight(productCount: Int): Dp {
+    val visibleCount = productCount.coerceAtMost(6)
+    val compareHeight = if (visibleCount >= 4) {
+        val rowCount = ((visibleCount + 1) / 2).coerceAtLeast(1)
+        ProductDeckCompactCompareItemHeight * rowCount.toFloat() +
+            ProductDeckCompareRowGap * (rowCount - 1).coerceAtLeast(0).toFloat() +
+            ProductDeckCompareControlGap +
+            ProductDeckCompareConfirmHeight
+    } else {
+        ProductDeckWideCompareItemHeight +
+            ProductDeckCompareControlGap +
+            ProductDeckCompareConfirmHeight
+    }
+    return if (compareHeight > ProductDeckCandidateModeHeight) compareHeight else ProductDeckCandidateModeHeight
+}
 
 private data class PendingClarificationAnswer(
     val nodeKey: String,
@@ -396,6 +429,32 @@ internal fun LayoutCoordinates.toClarificationSnapshot(): ClarificationChipSnaps
     )
 }
 
+internal fun nextClarificationTargetStableFrameCount(
+    previous: ClarificationChipSnapshot?,
+    current: ClarificationChipSnapshot,
+    previousStableFrames: Int,
+    tolerancePx: Float = ClarificationTargetStableTolerancePx,
+): Int =
+    if (previous != null && previous.visuallyMatches(current, tolerancePx)) {
+        previousStableFrames + 1
+    } else {
+        1
+    }
+
+internal fun shouldLockClarificationTargetSnapshot(
+    stableFrames: Int,
+    requiredStableFrames: Int = ClarificationTargetStableFrames,
+): Boolean = stableFrames >= requiredStableFrames
+
+private fun ClarificationChipSnapshot.visuallyMatches(
+    other: ClarificationChipSnapshot,
+    tolerancePx: Float,
+): Boolean =
+    abs(position.x - other.position.x) <= tolerancePx &&
+        abs(position.y - other.position.y) <= tolerancePx &&
+        abs(size.width - other.size.width) <= tolerancePx &&
+        abs(size.height - other.size.height) <= tolerancePx
+
 private data class ClarificationFlight(
     val id: Int,
     val nodeKey: String,
@@ -491,9 +550,9 @@ internal fun BuyPilotChatScreen(
     onCartQuantityChange: (String, Int) -> Unit,
     onOpenProductDeck: (String, String?, String?) -> Unit,
     onOpenProductDetail: (String, String, String?) -> Unit,
+    onHistoryOpen: () -> Unit,
     onRetryLastMessage: () -> Unit,
     onEditLastMessage: (String) -> Unit,
-    onClearConversation: () -> Unit,
     onConvergeProductDeck: (String) -> Unit,
     ttsEnabled: Boolean = false,
     onTtsToggle: () -> Unit = {},
@@ -593,11 +652,47 @@ internal fun BuyPilotChatScreen(
     val clarificationFlightActive = transientState.dismissingClarificationKey != null ||
         pendingClarificationAnswer?.awaitsFlight == true ||
         activeClarificationFlight != null
+    var displayedSessionId by rememberSaveable { mutableStateOf(state.sessionId) }
 
     LaunchedEffect(shouldDismissWelcomeContent) {
         if (shouldDismissWelcomeContent) {
             welcomePromptDismissed = true
         }
+    }
+    LaunchedEffect(state.sessionId, state.isStreaming) {
+        if (state.sessionId == displayedSessionId) return@LaunchedEffect
+        if (state.isStreaming) {
+            displayedSessionId = state.sessionId
+            return@LaunchedEffect
+        }
+
+        input = ""
+        showAttachmentMenu = false
+        sheetContent = null
+        transientState.sheetExiting = false
+        transientState.sheetTransitionId += 1
+        transientState.pendingProductDetailAfterTimelineFreeze = null
+        dismissedClarificationKeys = emptySet()
+        transientState.dismissingClarificationKey = null
+        welcomePromptDismissed = false
+        revealedMessageKeyList = emptyList()
+        liveRevealedMessageKeys = emptySet()
+        typingMessageKeys = emptySet()
+        timelineInstanceId += 1
+        transientState.visualActiveTurnKeys = emptySet()
+        pendingClarificationAnswer = null
+        activeClarificationFlight = null
+        hiddenFlightMessageKeys = emptySet()
+        transientState.userBubbleSnapshots = emptyMap()
+        transientState.clarificationManualSource = null
+        transientState.keyboardFlightSnapshot = null
+        transientState.compareDetailPayload = null
+        pendingInlineCompareDeckId = null
+        inlineCompareTurnIds = emptySet()
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onInputChanged("", false)
+        displayedSessionId = state.sessionId
     }
     LaunchedEffect(timelinePresentation.revealKeys, timelineItemKeySignature) {
         val currentRevealKeys = timelinePresentation.revealKeys
@@ -757,37 +852,6 @@ internal fun BuyPilotChatScreen(
         keyboardController?.show()
     }
 
-    fun clearConversationForDebug() {
-        input = ""
-        showAttachmentMenu = false
-        sheetContent = null
-        transientState.sheetExiting = false
-        transientState.sheetTransitionId += 1
-        transientState.pendingProductDetailAfterTimelineFreeze = null
-        dismissedClarificationKeys = emptySet()
-        transientState.dismissingClarificationKey = null
-        welcomePromptDismissed = false
-        revealedMessageKeyList = emptyList()
-        liveRevealedMessageKeys = emptySet()
-        typingMessageKeys = emptySet()
-        timelineInstanceId += 1
-        transientState.visualActiveTurnKeys = emptySet()
-        pendingClarificationAnswer = null
-        activeClarificationFlight = null
-        hiddenFlightMessageKeys = emptySet()
-        transientState.userBubbleSnapshots = emptyMap()
-        transientState.clarificationManualSource = null
-        transientState.keyboardFlightSnapshot = null
-        transientState.compareDetailPayload = null
-        pendingInlineCompareDeckId = null
-        inlineCompareTurnIds = emptySet()
-        transientState.inlineComparePayloadByDeckId = emptyMap()
-        focusManager.clearFocus()
-        keyboardController?.hide()
-        onInputChanged("", false)
-        onClearConversation()
-    }
-
     fun answerClarification(
         message: String,
         selectedOption: String? = null,
@@ -894,14 +958,13 @@ internal fun BuyPilotChatScreen(
         Column(Modifier.fillMaxSize()) {
             TopBar(
                 centered = timelinePresentation.hasNodes,
-                showBack = timelinePresentation.hasStructuredContent,
-                showClear = timelinePresentation.hasNodes,
+                showCartAction = timelinePresentation.hasNodes,
                 cartCount = state.cartState.totalItems,
+                onHistoryOpen = onHistoryOpen,
                 onCartOpen = {
                     onCartOpen()
                     openSheet(ChatSheetContent.Cart)
                 },
-                onClearConversation = ::clearConversationForDebug,
             )
 
             Box(
@@ -1478,11 +1541,10 @@ private fun AttachmentMenuMotion(
 @Composable
 private fun TopBar(
     centered: Boolean,
-    showBack: Boolean,
-    showClear: Boolean,
+    showCartAction: Boolean,
     cartCount: Int,
+    onHistoryOpen: () -> Unit,
     onCartOpen: () -> Unit,
-    onClearConversation: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1492,24 +1554,16 @@ private fun TopBar(
     ) {
         M3TopAppBarRow(
             title = if (centered) "BuyPilot AI" else "BuyPilot",
-            titleCentered = centered,
-            navigationIcon = if (showBack) R.drawable.ic_arrow_back_24 else R.drawable.ic_menu_24,
-            navigationDescription = if (showBack) {
-                stringResource(R.string.common_back)
-            } else {
-                stringResource(R.string.topbar_open_menu_desc)
-            },
-            navigationTint = if (showBack) BuyPilotColors.PrimaryDark else BuyPilotColors.TextSecondary,
-            actionIcon = R.drawable.ic_restart_24.takeIf { showClear },
-            actionDescription = stringResource(R.string.topbar_clear_chat_desc),
-            actionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.72f),
-            secondaryActionIcon = R.drawable.ic_shopping_bag_24.takeIf { showClear },
+            titleCentered = true,
+            navigationIcon = R.drawable.ic_chat_history_24,
+            navigationDescription = stringResource(R.string.topbar_history_desc),
+            navigationTint = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
+            secondaryActionIcon = R.drawable.ic_shopping_bag_24.takeIf { showCartAction },
             secondaryActionDescription = stringResource(R.string.topbar_cart_desc),
             secondaryActionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
             secondaryBadge = cartCount.takeIf { it > 0 }?.coerceAtMost(99)?.toString(),
-            onNavigationClick = {},
+            onNavigationClick = onHistoryOpen,
             onSecondaryActionClick = onCartOpen,
-            onActionClick = onClearConversation,
         )
         HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
     }
@@ -1851,6 +1905,7 @@ private fun ClarificationFlightOverlay(
     val density = LocalDensity.current
     val latestFlight by rememberUpdatedState(flight)
     val latestOnFinished by rememberUpdatedState(onFinished)
+    val latestTargetSnapshot by rememberUpdatedState(targetSnapshot)
     var settledTargetSnapshot by remember(flight.id) { mutableStateOf<ClarificationChipSnapshot?>(null) }
     var flightStarted by remember(flight.id) { mutableStateOf(false) }
     val lockedTarget = settledTargetSnapshot
@@ -1887,10 +1942,31 @@ private fun ClarificationFlightOverlay(
         ?.coerceIn(timelineTopPx, rootSize.height - targetHeightPx)
         ?: flight.startPosition.y
 
-    LaunchedEffect(flight.id, targetSnapshot) {
-        if (targetSnapshot == null || settledTargetSnapshot != null) return@LaunchedEffect
-        kotlinx.coroutines.delay(ClarificationTargetSettleMs)
-        settledTargetSnapshot = targetSnapshot
+    LaunchedEffect(flight.id, flight.targetMessageKey, targetSnapshot != null) {
+        if (settledTargetSnapshot != null) return@LaunchedEffect
+
+        var previousSnapshot: ClarificationChipSnapshot? = null
+        var stableFrames = 0
+        repeat(ClarificationTargetMaxSettleFrames) {
+            withFrameNanos { }
+            val currentSnapshot = latestTargetSnapshot
+            if (currentSnapshot == null) {
+                previousSnapshot = null
+                stableFrames = 0
+                return@repeat
+            }
+            stableFrames = nextClarificationTargetStableFrameCount(
+                previous = previousSnapshot,
+                current = currentSnapshot,
+                previousStableFrames = stableFrames,
+            )
+            previousSnapshot = currentSnapshot
+            if (shouldLockClarificationTargetSnapshot(stableFrames)) {
+                settledTargetSnapshot = currentSnapshot
+                return@LaunchedEffect
+            }
+        }
+        latestTargetSnapshot?.let { settledTargetSnapshot = it }
     }
 
     LaunchedEffect(flight.id) {
@@ -2190,6 +2266,7 @@ internal fun ProductRecommendationStrip(
     motionEnabled: Boolean,
     alreadyEntered: Boolean,
     onEntered: () -> Unit,
+    onViewportMotionLock: (Long) -> Unit,
     onOpen: (String, String?) -> Unit,
     onOpenDetail: (String, String) -> Unit,
     onCompare: (List<Int>) -> Unit,
@@ -2221,8 +2298,16 @@ internal fun ProductRecommendationStrip(
         products.joinToString(separator = "|") { it.product.productId }
     }
     var comparePicking by rememberSaveable(node.key, productIdSignature) { mutableStateOf(false) }
+    var compareModeInitialized by rememberSaveable(node.key, productIdSignature) { mutableStateOf(false) }
     var selectedCompareRanks by rememberSaveable(node.key, productIdSignature) {
         mutableStateOf(products.take(2).mapIndexed { index, _ -> index + 1 })
+    }
+    LaunchedEffect(comparePicking, productIdSignature) {
+        if (compareModeInitialized) {
+            onViewportMotionLock(ProductDeckModeSwitchViewportLockMs)
+        } else {
+            compareModeInitialized = true
+        }
     }
     LaunchedEffect(comparePicking, products.size) {
         if (comparePicking && selectedCompareRanks.size < 2 && products.size >= 2) {
@@ -2235,10 +2320,24 @@ internal fun ProductRecommendationStrip(
         pageCount = { products.size },
     )
     val activeIndex = pagerState.currentPage.coerceIn(0, products.lastIndex)
+    var initialPreferredPageApplied by rememberSaveable(node.key, productIdSignature) { mutableStateOf(false) }
 
-    LaunchedEffect(node.deckId, productIdSignature, preferredPage, products.size) {
-        if (preferredPage != pagerState.currentPage && !pagerState.isScrollInProgress) {
+    LaunchedEffect(node.deckId, productIdSignature) {
+        if (!initialPreferredPageApplied && preferredPage != pagerState.currentPage && !pagerState.isScrollInProgress) {
             pagerState.scrollToPage(preferredPage)
+        }
+        initialPreferredPageApplied = true
+    }
+
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        if (pagerState.isScrollInProgress) {
+            onViewportMotionLock(ProductDeckPagerViewportLockMs)
+        }
+    }
+
+    LaunchedEffect(comparePayload?.compareId) {
+        if (comparePayload != null) {
+            onViewportMotionLock(ProductDeckModeSwitchViewportLockMs)
         }
     }
 
@@ -2296,123 +2395,100 @@ internal fun ProductRecommendationStrip(
                 },
             )
         }
-        AnimatedContent(
-            targetState = comparePicking,
-            transitionSpec = {
-                if (targetState) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(productDeckModeSlotHeight(products.size)),
+        ) {
+            AnimatedContent(
+                targetState = comparePicking,
+                transitionSpec = {
                     fadeIn(
-                        animationSpec = tween(durationMillis = 230, delayMillis = 45, easing = MenuEaseOut),
+                        animationSpec = tween(durationMillis = 170, delayMillis = 20, easing = MenuEaseOut),
                     ) + slideInVertically(
-                        animationSpec = tween(durationMillis = 280, delayMillis = 35, easing = MenuEaseOut),
-                        initialOffsetY = { it / 14 },
-                    ) + scaleIn(
-                        animationSpec = tween(durationMillis = 280, delayMillis = 35, easing = MenuEaseOut),
-                        initialScale = 0.972f,
-                        transformOrigin = TransformOrigin(0.5f, 0.16f),
+                        animationSpec = tween(durationMillis = 210, delayMillis = 16, easing = MenuEaseOut),
+                        initialOffsetY = { if (targetState) it / 18 else -it / 24 },
                     ) togetherWith fadeOut(
-                        animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+                        animationSpec = tween(durationMillis = 110, easing = MenuEaseIn),
                     ) + slideOutVertically(
-                        animationSpec = tween(durationMillis = 160, easing = MenuEaseIn),
-                        targetOffsetY = { -it / 20 },
-                    ) + scaleOut(
-                        animationSpec = tween(durationMillis = 160, easing = MenuEaseIn),
-                        targetScale = 0.966f,
-                        transformOrigin = TransformOrigin(0.5f, 0.12f),
+                        animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+                        targetOffsetY = { if (targetState) -it / 28 else it / 28 },
+                    )
+                },
+                label = "product_deck_compare_mode",
+                modifier = Modifier.fillMaxSize(),
+            ) { picking ->
+                if (picking) {
+                    ProductDeckComparePicker(
+                        products = products,
+                        backendBaseUrl = backendBaseUrl,
+                        selectedRanks = selectedCompareRanks,
+                        chromeProgress = chromeProgress,
+                        confirmEnabled = selectedCompareRanks.size >= 2,
+                        motionEnabled = motionEnabled,
+                        onSelectionChange = { selectedCompareRanks = it },
+                        onConfirm = {
+                            if (selectedCompareRanks.size >= 2) {
+                                comparePicking = false
+                                onCompare(selectedCompareRanks)
+                            }
+                        },
                     )
                 } else {
-                    fadeIn(
-                        animationSpec = tween(durationMillis = 190, delayMillis = 25, easing = MenuEaseOut),
-                    ) + slideInVertically(
-                        animationSpec = tween(durationMillis = 220, delayMillis = 20, easing = MenuEaseOut),
-                        initialOffsetY = { -it / 26 },
-                    ) + scaleIn(
-                        animationSpec = tween(durationMillis = 220, delayMillis = 20, easing = MenuEaseOut),
-                        initialScale = 0.982f,
-                        transformOrigin = TransformOrigin(0.5f, 0.18f),
-                    ) togetherWith fadeOut(
-                        animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
-                    ) + slideOutVertically(
-                        animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
-                        targetOffsetY = { it / 24 },
-                    ) + scaleOut(
-                        animationSpec = tween(durationMillis = 140, easing = MenuEaseIn),
-                        targetScale = 0.986f,
-                        transformOrigin = TransformOrigin(0.5f, 0.1f),
-                    )
-                }
-            },
-            label = "product_deck_compare_mode",
-        ) { picking ->
-            if (picking) {
-                ProductDeckComparePicker(
-                    products = products,
-                    backendBaseUrl = backendBaseUrl,
-                    selectedRanks = selectedCompareRanks,
-                    chromeProgress = chromeProgress,
-                    confirmEnabled = selectedCompareRanks.size >= 2,
-                    motionEnabled = motionEnabled,
-                    onSelectionChange = { selectedCompareRanks = it },
-                    onConfirm = {
-                        if (selectedCompareRanks.size >= 2) {
-                            comparePicking = false
-                            onCompare(selectedCompareRanks)
-                        }
-                    },
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(238.dp),
-                ) {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
-                        pageSpacing = 14.dp,
-                        beyondViewportPageCount = 0,
-                    ) { page ->
-                        val payload = products[page]
-                        val pageOffset = (
-                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                            ).coerceIn(-1f, 1f)
-                        val distance = abs(pageOffset)
-                        val thumbModifier = Modifier
+                    Box(
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .graphicsLayer {
-                                scaleX = 1f - distance * 0.055f
-                                scaleY = 1f - distance * 0.075f
-                                alpha = 1f - distance * 0.18f
+                            .height(ProductDeckCandidateModeHeight),
+                    ) {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = if (singleCandidate) 12.dp else 44.dp),
+                            pageSpacing = 14.dp,
+                            beyondViewportPageCount = 0,
+                        ) { page ->
+                            val payload = products[page]
+                            val pageOffset = (
+                                (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                                ).coerceIn(-1f, 1f)
+                            val distance = abs(pageOffset)
+                            val thumbModifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    scaleX = 1f - distance * 0.035f
+                                    scaleY = 1f - distance * 0.045f
+                                    alpha = 1f - distance * 0.14f
+                                }
+                            val openProduct = {
+                                val productId = payload.product.productId.takeIf { id -> id.isNotBlank() }
+                                if (productId != null) {
+                                    onOpenDetail(node.deckId, productId)
+                                } else {
+                                    onOpen(node.deckId, null)
+                                }
                             }
-                        val openProduct = {
-                            val productId = payload.product.productId.takeIf { id -> id.isNotBlank() }
-                            if (productId != null) {
-                                onOpenDetail(node.deckId, productId)
+                            if (page == 0) {
+                                ProductDeckArrivalMotion(
+                                    arrivalProgress = arrivalProgress,
+                                ) {
+                                    ProductRecommendationThumb(
+                                        payload = payload,
+                                        backendBaseUrl = backendBaseUrl,
+                                        selected = page == activeIndex,
+                                        arrivalProgress = arrivalProgress,
+                                        onClick = openProduct,
+                                        modifier = thumbModifier,
+                                    )
+                                }
                             } else {
-                                onOpen(node.deckId, null)
-                            }
-                        }
-                        if (page == 0) {
-                            ProductDeckArrivalMotion(
-                                arrivalProgress = arrivalProgress,
-                            ) {
                                 ProductRecommendationThumb(
                                     payload = payload,
                                     backendBaseUrl = backendBaseUrl,
                                     selected = page == activeIndex,
-                                    arrivalProgress = arrivalProgress,
                                     onClick = openProduct,
                                     modifier = thumbModifier,
                                 )
                             }
-                        } else {
-                            ProductRecommendationThumb(
-                                payload = payload,
-                                backendBaseUrl = backendBaseUrl,
-                                selected = page == activeIndex,
-                                onClick = openProduct,
-                                modifier = thumbModifier,
-                            )
                         }
                     }
                 }
@@ -2622,7 +2698,11 @@ private fun ProductDeckComparePicker(
             (maxWidth - horizontalGap * (visibleProducts.size - 1).coerceAtLeast(0)) /
                 visibleProducts.size.coerceAtLeast(1)
         }
-        val itemHeight = if (compactGrid) 94.dp else 178.dp
+        val itemHeight = if (compactGrid) {
+            ProductDeckCompactCompareItemHeight
+        } else {
+            ProductDeckWideCompareItemHeight
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2632,12 +2712,12 @@ private fun ProductDeckComparePicker(
                     translationY = (1f - chrome.coerceIn(0f, 1f)) * 6f
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(ProductDeckCompareControlGap),
         ) {
             if (compactGrid) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(ProductDeckCompareRowGap),
                 ) {
                     visibleProducts.chunked(2).forEachIndexed { rowIndex, rowProducts ->
                         Row(
@@ -2719,7 +2799,7 @@ private fun ProductDeckComparePicker(
                 enabled = confirmEnabled,
                 onClick = onConfirm,
                 modifier = Modifier
-                    .height(30.dp),
+                    .height(ProductDeckCompareConfirmHeight),
             )
         }
     }
@@ -4183,6 +4263,21 @@ fun ProductHeroDetailScreen(
     val detailListState = rememberLazyListState()
     val density = LocalDensity.current
     val revealDistancePx = with(density) { ProductDetailRevealDistance.toPx() }
+    val imagePullDistancePx = with(density) { ProductDetailImagePullDistance.toPx() }
+    var imagePullTarget by remember(activeProductId) { mutableFloatStateOf(0f) }
+    val imageViewerProgress by animateFloatAsState(
+        targetValue = imagePullTarget,
+        animationSpec = tween(
+            durationMillis = if (imagePullTarget >= 1f) {
+                ProductDetailImageExpandMs
+            } else {
+                ProductDetailImageDismissMs
+            },
+            easing = PremiumRevealEase,
+        ),
+        label = "product_detail_image_viewer",
+    )
+    val imageViewerActive = imagePullTarget > 0.01f || imageViewerProgress > 0.01f
     val scrollProgress by remember {
         derivedStateOf {
             val offset = detailListState.firstVisibleItemScrollOffset.toFloat()
@@ -4208,7 +4303,7 @@ fun ProductHeroDetailScreen(
         label = "product_detail_action_bottom_padding",
     )
     val actionsVisible = choiceActionsAvailable && actionAlpha > 0.05f
-    val actionsEnabled = actionsVisible && submittedFeedback == null
+    val actionsEnabled = actionsVisible && submittedFeedback == null && !imageViewerActive
     val swipeMaxDistancePx = with(density) { 132.dp.toPx() }
     val swipeThresholdPx = with(density) { 74.dp.toPx() }
     val swipeThrowDistancePx = with(density) { 430.dp.toPx() }
@@ -4245,6 +4340,10 @@ fun ProductHeroDetailScreen(
 
     LaunchedEffect(product.productId) {
         latestOnRequestProductDetail(product.productId)
+    }
+
+    BackHandler(enabled = imageViewerActive) {
+        imagePullTarget = 0f
     }
 
     LaunchedEffect(product.productId) {
@@ -4284,7 +4383,7 @@ fun ProductHeroDetailScreen(
         }
     }
 
-    val swipeGestureModifier = if (choiceActionsAvailable) {
+    val swipeGestureModifier = if (choiceActionsAvailable && !imageViewerActive) {
         Modifier.pointerInput(activeProductId, actionsEnabled) {
             detectHorizontalDragGestures(
                 onDragEnd = {
@@ -4308,16 +4407,46 @@ fun ProductHeroDetailScreen(
     } else {
         Modifier
     }
+    val imagePullGestureModifier = Modifier.pointerInput(activeProductId) {
+        detectVerticalDragGestures(
+            onDragEnd = {
+                imagePullTarget = if (imagePullTarget >= ProductDetailImagePullThreshold) 1f else 0f
+            },
+            onDragCancel = {
+                imagePullTarget = 0f
+            },
+            onVerticalDrag = { change, dragAmount ->
+                val atTop = detailListState.firstVisibleItemIndex == 0 &&
+                    detailListState.firstVisibleItemScrollOffset == 0
+                when {
+                    imagePullTarget > 0f -> {
+                        if (dragAmount < 0f || (atTop && dragAmount > 0f) || imagePullTarget >= 1f) {
+                            change.consume()
+                            imagePullTarget = (imagePullTarget + dragAmount / imagePullDistancePx)
+                                .coerceIn(0f, 1f)
+                        }
+                    }
+                    atTop && dragAmount > 0f -> {
+                        change.consume()
+                        imagePullTarget = (imagePullTarget + dragAmount / imagePullDistancePx)
+                            .coerceIn(0f, 1f)
+                    }
+                }
+            },
+        )
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
+            .then(imagePullGestureModifier)
             .then(swipeGestureModifier),
     ) {
         ProductCinematicBackdrop(
             product = product,
             backendBaseUrl = state.backendBaseUrl,
             progress = scrollProgress,
+            imagePullProgress = imageViewerProgress,
             enterProgress = { segmentProgress(routeProgressState.value, 0f, 0.82f) },
             modifier = Modifier
                 .fillMaxSize()
@@ -4336,7 +4465,7 @@ fun ProductHeroDetailScreen(
                 .padding(start = 16.dp, top = 8.dp)
                 .graphicsLayer {
                     val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
-                    alpha = chromeEnter
+                    alpha = chromeEnter * (1f - imageViewerProgress)
                     translationY = (1f - chromeEnter) * -18f
                     scaleX = lerp(0.92f, 1f, chromeEnter)
                     scaleY = lerp(0.92f, 1f, chromeEnter)
@@ -4353,7 +4482,7 @@ fun ProductHeroDetailScreen(
                 .padding(end = 16.dp, top = 8.dp)
                 .graphicsLayer {
                     val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
-                    alpha = chromeEnter
+                    alpha = chromeEnter * (1f - imageViewerProgress)
                     translationY = (1f - chromeEnter) * -18f
                     scaleX = lerp(0.92f, 1f, chromeEnter)
                     scaleY = lerp(0.92f, 1f, chromeEnter)
@@ -4366,12 +4495,13 @@ fun ProductHeroDetailScreen(
                 .fillMaxSize()
                 .graphicsLayer {
                     val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
-                    alpha = contentEnter * (1f - gestureProgress * 0.42f)
+                    alpha = contentEnter * (1f - gestureProgress * 0.42f) * (1f - imageViewerProgress * 0.86f)
                     translationX = animatedGestureOffsetPx
-                    translationY = (1f - contentEnter) * 42f
+                    translationY = (1f - contentEnter) * 42f + imageViewerProgress * 22f
                     rotationZ = (animatedGestureOffsetPx / swipeThrowDistancePx) * 11f
-                    scaleX = lerp(0.975f, 1f, contentEnter)
-                    scaleY = lerp(0.975f, 1f, contentEnter)
+                    val contentScale = lerp(0.975f, 1f, contentEnter) * lerp(1f, 0.986f, imageViewerProgress)
+                    scaleX = contentScale
+                    scaleY = contentScale
                 },
             contentPadding = PaddingValues(
                 start = 22.dp,
@@ -4406,7 +4536,7 @@ fun ProductHeroDetailScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .alpha(actionAlpha)
+                    .alpha(actionAlpha * (1f - imageViewerProgress))
                     .graphicsLayer {
                         val chromeEnter = segmentProgress(routeProgressState.value, 0.28f, 1f)
                         val actionProgress = minOf(chromeEnter, actionAlpha)
@@ -4455,6 +4585,15 @@ fun ProductHeroDetailScreen(
                 }
             }
         }
+        if (imageViewerActive) {
+            ProductImageViewerOverlay(
+                product = product,
+                backendBaseUrl = state.backendBaseUrl,
+                progress = imageViewerProgress,
+                onDismiss = { imagePullTarget = 0f },
+                modifier = Modifier.zIndex(4f),
+            )
+        }
     }
 }
 
@@ -4463,10 +4602,11 @@ private fun ProductCinematicBackdrop(
     product: ProductPayload,
     backendBaseUrl: String,
     progress: Float,
+    imagePullProgress: Float,
     enterProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
-    val imageAlpha = lerp(0.94f, 0.56f, progress)
+    val imageAlpha = lerp(0.94f, 0.56f, progress) * (1f - imagePullProgress * 0.44f)
     Box(modifier = modifier.background(BuyPilotColors.SurfaceBg)) {
         ProductImage(
             product = product,
@@ -4478,8 +4618,10 @@ private fun ProductCinematicBackdrop(
                 .padding(top = 86.dp, start = 20.dp, end = 20.dp)
                 .graphicsLayer {
                     val enter = enterProgress()
-                    val scale = lerp(0.92f, lerp(1.02f, 1.08f, progress), enter)
-                    val offsetY = lerp(42f, lerp(0f, -54f, progress), enter)
+                    val scale = lerp(0.92f, lerp(1.02f, 1.08f, progress), enter) *
+                        lerp(1f, 1.045f, imagePullProgress)
+                    val offsetY = lerp(42f, lerp(0f, -54f, progress), enter) +
+                        imagePullProgress * 22f
                     scaleX = scale
                     scaleY = scale
                     translationY = offsetY
@@ -4515,6 +4657,77 @@ private fun ProductCinematicBackdrop(
                         ),
                     ),
                 ),
+        )
+    }
+}
+
+@Composable
+private fun ProductImageViewerOverlay(
+    product: ProductPayload,
+    backendBaseUrl: String,
+    progress: Float,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scrimInteraction = remember { MutableInteractionSource() }
+    val easedProgress = segmentProgress(progress, 0.04f, 1f)
+    val imageAlpha = segmentProgress(progress, 0.06f, 0.32f)
+    val chromeAlpha = segmentProgress(progress, 0.34f, 1f)
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = scrimInteraction,
+                indication = null,
+                onClick = onDismiss,
+            ),
+    ) {
+        val density = LocalDensity.current
+        val sourceCenterY = with(density) {
+            val imageHeight = 560.dp.toPx()
+            val topInset = 86.dp.toPx()
+            topInset + (imageHeight - topInset) / 2f
+        }
+        val targetCenterY = constraints.maxHeight * 0.5f
+        val targetShiftY = (targetCenterY - sourceCenterY) * easedProgress
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = lerp(0f, 0.58f, progress))),
+        )
+        ProductImage(
+            product = product,
+            backendBaseUrl = backendBaseUrl,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(560.dp)
+                .align(Alignment.TopCenter)
+                .padding(top = 86.dp, start = 18.dp, end = 18.dp)
+                .graphicsLayer {
+                    val scale = lerp(1.02f, 1.18f, easedProgress)
+                    scaleX = scale
+                    scaleY = scale
+                    translationY = targetShiftY
+                    alpha = imageAlpha
+                },
+        )
+        ImmersiveCircleButton(
+            iconRes = R.drawable.ic_close_24,
+            contentDescription = stringResource(R.string.image_preview_close_desc),
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(end = 16.dp, top = 8.dp)
+                .graphicsLayer {
+                    alpha = chromeAlpha
+                    translationY = (1f - chromeAlpha) * -12f
+                    scaleX = lerp(0.94f, 1f, chromeAlpha)
+                    scaleY = lerp(0.94f, 1f, chromeAlpha)
+                },
         )
     }
 }

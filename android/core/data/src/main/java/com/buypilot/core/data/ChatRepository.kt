@@ -115,6 +115,38 @@ class ChatRepository @Inject constructor(
         )
     }
 
+    suspend fun restoreUserMessages(sessionId: String): List<PersistedChatMessage> {
+        val restored = messageDao.getMessages(sessionId)
+            .asSequence()
+            .filter { it.role.equals("user", ignoreCase = true) }
+            .map { message ->
+                PersistedChatMessage(
+                    messageId = message.messageId,
+                    sessionId = message.sessionId,
+                    turnId = message.turnId,
+                    role = message.role,
+                    content = message.content,
+                    createdAtMs = message.createdAtMs,
+                )
+            }
+            .toList()
+        if (restored.isNotEmpty()) return restored
+
+        val legacySession = sessionDao.getSession(sessionId) ?: return emptyList()
+        val fallbackContent = legacySession.lastMessage.trim().ifBlank { legacySession.title.trim() }
+        if (fallbackContent.isBlank()) return emptyList()
+        return listOf(
+            PersistedChatMessage(
+                messageId = "legacy_${legacySession.sessionId}_${legacySession.updatedAtMs}",
+                sessionId = legacySession.sessionId,
+                turnId = null,
+                role = "user",
+                content = fallbackContent,
+                createdAtMs = legacySession.updatedAtMs,
+            ),
+        )
+    }
+
     suspend fun recordUserMessage(
         sessionId: String,
         content: String,
@@ -129,12 +161,15 @@ class ChatRepository @Inject constructor(
                 createdAtMs = nowMs,
             ),
         )
+        val existing = sessionDao.getSession(sessionId)
+        val title = existing?.title?.takeIf { it.isNotBlank() }
+            ?: content.trim().take(24).ifBlank { "新会话" }
         sessionDao.upsert(
             SessionEntity(
                 sessionId = sessionId,
-                title = content.take(24).ifBlank { "新会话" },
+                title = title,
                 lastMessage = content,
-                createdAtMs = nowMs,
+                createdAtMs = existing?.createdAtMs ?: nowMs,
                 updatedAtMs = nowMs,
             ),
         )

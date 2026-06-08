@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_drawer_title">对话</string>
+    <string name="history_recents">最近</string>
+    <string name="history_new_chat">新会话</string>
+    <string name="history_empty_title">还没有历史对话</string>
+    <string name="history_empty_body">发起一次导购后，会在这里继续。</string>
+    <string name="history_current_session">当前</string>
+    <string name="history_disabled_hint">正在生成，先停止后再切换</string>
+    <string name="history_delete_session">删除</string>
+    <string name="history_delete_desc">删除会话记录</string>
+</resources>
