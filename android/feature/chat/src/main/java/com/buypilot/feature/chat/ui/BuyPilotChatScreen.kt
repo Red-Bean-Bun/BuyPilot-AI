@@ -1301,10 +1301,10 @@ private data class PendingProductDetailRoute(
 )
 
 private val WelcomePrompts = listOf(
-    WelcomePrompt(R.drawable.ic_search_24, "油皮洁面怎么选？", BuyPilotColors.Info),
-    WelcomePrompt(R.drawable.ic_shield_24, "敏感肌面霜，帮我避开酒精香精", BuyPilotColors.Success),
-    WelcomePrompt(R.drawable.ic_compare_arrows_24, "帮我对比两款商品，选更稳的", BuyPilotColors.PrimaryDark),
-    WelcomePrompt(R.drawable.ic_payments_24, "200 元以内，推荐一支通勤防晒", BuyPilotColors.Warning),
+    WelcomePrompt(R.drawable.ic_search_24, "下周去海边，帮我搭配防晒穿搭方案", BuyPilotColors.PrimaryDark),
+    WelcomePrompt(R.drawable.ic_image_24, "拍一张照片，帮我找同款护肤品", BuyPilotColors.Warning),
+    WelcomePrompt(R.drawable.ic_block_24, "推荐防晒霜，不要酒精也不要香精，200以内", BuyPilotColors.Success),
+    WelcomePrompt(R.drawable.ic_search_24, "推荐一款手机，我主要用来拍照", BuyPilotColors.Info),
 )
 
 @Composable
