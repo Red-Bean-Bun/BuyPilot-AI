@@ -709,13 +709,13 @@ async def _generate_strategy_narration(strategy: ShoppingStrategyPayload, route:
     try:
         narration = await generate_strategy_narration(payload)
         if _is_usable_strategy_narration(narration):
-            return narration
+            return _compact_strategy_narration_spacing(narration)
         logger.warning("LLM strategy narration returned unusable text; falling back to template")
     except Exception as e:
         logger.warning("LLM strategy narration failed, falling back to template: %s", e)
 
     # Fallback to template-based generation
-    return _strategy_narration_text_fallback(strategy, route)
+    return _compact_strategy_narration_spacing(_strategy_narration_text_fallback(strategy, route))
 
 
 def _is_usable_strategy_narration(text: str | None) -> bool:
@@ -735,6 +735,10 @@ def _is_usable_strategy_narration(text: str | None) -> bool:
     return True
 
 
+def _compact_strategy_narration_spacing(text: str) -> str:
+    return "\n".join(line.strip() for line in text.replace("\r\n", "\n").split("\n") if line.strip())
+
+
 def _strategy_narration_text_fallback(strategy: ShoppingStrategyPayload, route: str) -> str:
     """Natural template fallback when the narration LLM is unavailable or malformed."""
     direction = strategy.primary_direction
@@ -752,7 +756,7 @@ def _strategy_narration_text_fallback(strategy: ShoppingStrategyPayload, route: 
     else:
         parts.append("下面先给你几款候选，之后可以再按预算、品牌或使用场景继续收窄。")
 
-    return "\n\n".join(part for part in parts if part)
+    return "\n".join(part for part in parts if part)
 
 
 def _strategy_opening_text(strategy: ShoppingStrategyPayload) -> str:

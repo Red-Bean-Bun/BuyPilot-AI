@@ -274,10 +274,31 @@ class TestBuildShoppingStrategyPlan:
         assert "下面先给你几款候选" in plan.scene_judgement_text
         assert "低踩雷的黑科技小件" in plan.scene_judgement_text
         assert "真无线耳机" in plan.scene_judgement_text
+        assert "\n\n" not in plan.scene_judgement_text
         assert "**" not in plan.scene_judgement_text
         assert "顾虑" not in plan.scene_judgement_text
         assert "假设" not in plan.scene_judgement_text
         assert "###" not in plan.scene_judgement_text
+
+    async def test_plan_compacts_llm_strategy_narration_blank_lines(self, monkeypatch):
+        async def fake_generate_strategy_narration(payload):
+            del payload
+            return "第一段判断。\n\n第二段方向。\r\n\r\n第三段避坑。"
+
+        monkeypatch.setattr(
+            "src.services.llm_client.generate_strategy_narration",
+            fake_generate_strategy_narration,
+        )
+
+        plan = await build_shopping_strategy_plan(
+            _request("男朋友生日，喜欢电子产品"),
+            _intent(category="数码电子"),
+            _criteria(),
+            retrieval_probe=_probe_factory(2),
+        )
+
+        assert plan is not None
+        assert plan.scene_judgement_text == "第一段判断。\n第二段方向。\n第三段避坑。"
 
     async def test_avoid_risks_present_for_gift(self):
         plan = await build_shopping_strategy_plan(
