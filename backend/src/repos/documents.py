@@ -243,7 +243,7 @@ def _named_placeholders(prefix: str, values: tuple[str, ...], params: dict[str, 
     return ", ".join(names) if names else "NULL"
 
 
-def evidence_for_chunk(chunk: ChunkDocument, max_chars: int = 180) -> EvidencePayload:
+def evidence_for_chunk(chunk: ChunkDocument, max_chars: int = 500) -> EvidencePayload:
     return EvidencePayload(
         source_type="product_chunk",
         snippet=" ".join(chunk.chunk_text.split())[:max_chars],
