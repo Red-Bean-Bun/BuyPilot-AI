@@ -841,7 +841,7 @@ private class ProductCardStackAdapter(
 
         val riskText = TextView(context).apply {
             includeFontPadding = false
-            setTextColor(textSecondaryColor)
+            setTextColor(android.graphics.Color.rgb(174, 49, 4))  // 深红色文字
             textSize = 12.5f
             maxLines = 2
             setLineSpacing((2 * density), 1f)
@@ -849,8 +849,8 @@ private class ProductCardStackAdapter(
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.RECTANGLE
                 cornerRadius = 12 * density
-                setColor(android.graphics.Color.rgb(255, 247, 248))
-                setStroke((1 * density).roundToInt().coerceAtLeast(1), android.graphics.Color.rgb(255, 226, 232))
+                setColor(android.graphics.Color.rgb(255, 239, 232))  // 浅橙色背景
+                setStroke((1 * density).roundToInt().coerceAtLeast(1), android.graphics.Color.rgb(255, 106, 61))  // 橙色边框
             }
             setPadding((10 * density).roundToInt(), (7 * density).roundToInt(), (10 * density).roundToInt(), (7 * density).roundToInt())
         }
