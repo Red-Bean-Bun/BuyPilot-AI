@@ -140,6 +140,26 @@ async def retrieve_with_evidence(
                 recall_stats = relaxed_result
                 break
 
+    # BM25 keyword recall + RRF fusion (lazy init on first call)
+    from src.services.bm25_recall import bm25_index
+    from src.services.rrf_merge import rrf_merge
+
+    await bm25_index.ensure_ready()
+    bm25_hits = bm25_index.search(criteria_query_text(criteria), limit=PGVECTOR_RECALL_LIMIT)
+    if bm25_hits:
+        vector_ranking = [h.chunk.id for h in chunk_hits if h.chunk is not None]
+        bm25_ranking = [h.chunk_id for h in bm25_hits]
+        merged_ids = rrf_merge([vector_ranking, bm25_ranking])
+        # Reorder chunk_hits by RRF ranking
+        chunk_by_id = {h.chunk.id: h for h in chunk_hits if h.chunk is not None}
+        rrf_ordered_hits = [chunk_by_id[cid] for cid in merged_ids if cid in chunk_by_id]
+        # Append any vector hits not in BM25 at the end
+        rrf_ids_set = set(merged_ids)
+        for h in chunk_hits:
+            if h.chunk is not None and h.chunk.id not in rrf_ids_set:
+                rrf_ordered_hits.append(h)
+        chunk_hits = rrf_ordered_hits
+
     # Merge visual recall results
     visual_hits: list[ProductHit] = []
     visual_recall_stats: dict[str, object] = {}

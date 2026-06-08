@@ -17,6 +17,8 @@ dependencies = [
     "httpx[socks]>=0.27.0",
     "openai>=1.55.0",
     "numpy>=2.1.0",
+    "rank-bm25>=0.2.2",
+    "jieba>=0.42.1",
 ]
 
 [project.optional-dependencies]

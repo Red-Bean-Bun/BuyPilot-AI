@@ -39,4 +39,13 @@ async def initialize_database(auto_seed: bool = False, strict_embeddings: bool =
     expected_dimensions = EXPECTED_EMBEDDING_DIMENSIONS if strict_embeddings else None
     text_result = await seed_products_if_needed(expected_embedding_dimensions=expected_dimensions)
     image_result = await seed_image_embeddings_if_needed()
+
+    # After text seed, build BM25 index (non-blocking, graceful degradation)
+    try:
+        from src.services.bm25_recall import bm25_index
+
+        await bm25_index.build_from_db()
+    except Exception as e:
+        logger.warning("BM25 index build failed (non-fatal): %s", e)
+
     return {**text_result, "image_seed": image_result}

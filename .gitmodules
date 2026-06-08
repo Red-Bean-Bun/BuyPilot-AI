@@ -1,0 +1,18 @@
+[submodule "competitors/agent_based_rag"]
+	path = competitors/agent_based_rag
+	url = https://github.com/Liufuyao-git/agent_based_rag
+[submodule "competitors/ai-agent-polarish"]
+	path = competitors/ai-agent-polarish
+	url = https://github.com/PolarishT/ai-agent
+[submodule "competitors/ai-agent-codeman"]
+	path = competitors/ai-agent-codeman
+	url = https://github.com/codemanQAQ/ai-agent
+[submodule "competitors/RAGent"]
+	path = competitors/RAGent
+	url = https://github.com/wanglongze123/RAGent
+[submodule "competitors/CartCompass"]
+	path = competitors/CartCompass
+	url = https://github.com/xiaweiyi713/CartCompass
+[submodule "competitors/rag-ecommerce-agent"]
+	path = competitors/rag-ecommerce-agent
+	url = https://github.com/aThreeleaf/rag-ecommerce-agent
