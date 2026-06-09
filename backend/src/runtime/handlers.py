@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from src.config import user_messages as msg
 from src.config.tuning import (
@@ -652,12 +652,17 @@ async def continue_recommendation_from_criteria(
     ))
 
     # Emit product cards with pacing delay (built into _product_card_events)
+    # Captured before the branch split so both single-product and multi-product paths have it.
+    # Single-product turns skip the text streaming block; their AI text lives in decision.summary.
+    captured_product_cards: list[dict[str, Any]] = []
     async for event in _product_card_events(
         ctx, criteria, products, evidences_by_product,
         risk_notes_extra=risk_notes_extra,
         reason_hint=reason_hint,
         shopping_strategy=shopping_strategy,
     ):
+        if isinstance(event, ProductCardEvent):
+            captured_product_cards.append(event.model_dump(mode="json"))
         yield event
 
     # Branch 1: single product — score, then LLM explanation, then final_decision
@@ -695,7 +700,12 @@ async def continue_recommendation_from_criteria(
             next_step="accept_recommendation" if status == "selected" else "adjust_criteria",
         )
         yield _final_decision_event(ctx, criteria, products, merged, score_breakdown=winner.score_breakdown)
-        await _persist_recommendation(ctx, body, criteria, retrieval)
+        # Single-product turns skip text streaming; decision summary is the turn's AI text.
+        await _persist_recommendation(
+            ctx, body, criteria, retrieval,
+            product_cards=captured_product_cards,
+            decision=_decision_result_to_dict(merged),
+        )
         yield ctx.done("completed")
         return
 
@@ -703,6 +713,7 @@ async def continue_recommendation_from_criteria(
     # PRD 05/06: multi-candidate decks must wait for user feedback or an
     # explicit convergence turn before emitting final_decision.
     # Step 1: LLM recommendation explanation ("为什么先给这些")
+    captured_turn_text_parts: list[str] = []
     conversation_context = await get_conversation_summary(ctx.session_id)
     try:
         async for event in _stream_recommendation_text_events(
@@ -711,6 +722,8 @@ async def continue_recommendation_from_criteria(
                 criteria, products, evidences_by_product, conversation_context=conversation_context
             ),
         ):
+            if isinstance(event, TextDeltaEvent):
+                captured_turn_text_parts.append(event.delta)
             yield event
     except Exception as exc:
         record_fallback(
@@ -737,9 +750,15 @@ async def continue_recommendation_from_criteria(
         message_id=f"followup_{ctx.turn_id}",
         node_id=f"followup_{ctx.turn_id}",
     ):
+        if isinstance(event, TextDeltaEvent):
+            captured_turn_text_parts.append(event.delta)
         yield event
 
-    await _persist_recommendation(ctx, body, criteria, retrieval)
+    await _persist_recommendation(
+        ctx, body, criteria, retrieval,
+        product_cards=captured_product_cards,
+        turn_text="".join(captured_turn_text_parts),
+    )
     yield ctx.done("awaiting_product_feedback", deck_id=ctx.deck_id)
 
 
@@ -763,20 +782,17 @@ async def continue_decision_from_current_deck(
 
     # Decision state B: all candidates excluded by user
     if not filtered_products:
+        no_suitable_decision = DecisionResult(
+            winner_product_id="",
+            summary=msg.NO_SUITABLE_WINNER,
+            why=[],
+            not_for=[p.product_id for p in products],
+            decision_status="no_suitable_winner",
+            confidence=None,
+            next_step="replace_deck",
+        )
         yield _final_decision_event(
-            ctx,
-            criteria,
-            products,
-            DecisionResult(
-                winner_product_id="",
-                summary=msg.NO_SUITABLE_WINNER,
-                why=[],
-                not_for=[p.product_id for p in products],
-                decision_status="no_suitable_winner",
-                confidence=None,
-                next_step="replace_deck",
-            ),
-            deck_id=deck_id,
+            ctx, criteria, products, no_suitable_decision, deck_id=deck_id,
         )
         yield _criteria_card_event(ctx, criteria)
         await save_recommendation_turn(
@@ -785,6 +801,7 @@ async def continue_decision_from_current_deck(
             [product.product_id for product in products],
             deck_id=deck_id,
             user_message=body.message,
+            decision=_decision_result_to_dict(no_suitable_decision),
         )
         yield ctx.done("awaiting_criteria_adjustment")
         return
@@ -856,6 +873,7 @@ async def continue_decision_from_current_deck(
         deck_id=deck_id,
         user_message=body.message,
         ai_response=merged.summary,
+        decision=_decision_result_to_dict(merged),
     )
     yield ctx.done()
 
@@ -1320,11 +1338,27 @@ def _final_decision_event(
     )
 
 
+def _decision_result_to_dict(result: DecisionResult) -> dict[str, Any]:
+    """Serialize DecisionResult fields for conversation storage."""
+    return {
+        "winner_product_id": result.winner_product_id,
+        "summary": result.summary,
+        "why": result.why,
+        "not_for": result.not_for,
+        "decision_status": result.decision_status,
+        "confidence": result.confidence,
+        "next_step": result.next_step,
+    }
+
+
 async def _persist_recommendation(
     ctx: StreamContext,
     body: ChatStreamRequest,
     criteria: CriteriaPayload,
     retrieval: RetrievalResult,
+    product_cards: list[dict[str, Any]] | None = None,
+    decision: dict[str, Any] | None = None,
+    turn_text: str | None = None,
 ) -> None:
     products = retrieval.products
     evidences_by_product = retrieval.evidence_by_product
@@ -1334,6 +1368,9 @@ async def _persist_recommendation(
         [product.product_id for product in products],
         deck_id=ctx.deck_id,
         user_message=body.message,
+        product_cards=product_cards,
+        decision=decision,
+        turn_text=turn_text,
     )
     await asyncio.gather(
         record_retrieval_trace(

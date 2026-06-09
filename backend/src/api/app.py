@@ -18,6 +18,7 @@ from src.api.cart import cart_router
 from src.api.cancel import cancel_router
 from src.api.chat import chat_router
 from src.api.feedback import feedback_router
+from src.api.history import history_router
 from src.api.observability import observability_router
 from src.api.products import products_router
 from src.api.upload import upload_router
@@ -97,6 +98,7 @@ app.include_router(cancel_router, dependencies=_public_api_dependencies())
 app.include_router(feedback_router, dependencies=_public_api_dependencies())
 app.include_router(upload_router, dependencies=_public_api_dependencies())
 app.include_router(cart_router, dependencies=_public_api_dependencies())
+app.include_router(history_router, dependencies=_public_api_dependencies())
 app.include_router(products_router, dependencies=_public_api_dependencies())
 app.include_router(admin_eval_router)
 app.include_router(observability_router)

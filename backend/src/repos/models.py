@@ -78,6 +78,9 @@ class Conversation(SQLModel, table=True):
     criteria_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     ai_response: str | None = None
     product_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    product_cards_json: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
+    decision_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    turn_text: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

@@ -1108,6 +1108,22 @@ class ChatViewModel @Inject constructor(
     fun restoreSession(sessionId: String) {
         if (sessionId.isBlank() || _uiState.value.isStreaming) return
         viewModelScope.launch {
+            // Try full restore from backend API first
+            val apiResult = runCatching { chatRepository.fetchSessionHistory(sessionId) }
+            val apiHistory = apiResult.getOrNull()
+            val keepTtsEnabled = _uiState.value.ttsEnabled
+            if (apiHistory != null && apiHistory.turns.isNotEmpty()) {
+                clearRuntimeState()
+                _uiState.value = mapToChatUiState(
+                    history = apiHistory,
+                    backendBaseUrl = chatRepository.backendBaseUrl,
+                    ttsEnabled = keepTtsEnabled,
+                )
+                refreshCart()
+                return@launch
+            }
+            Log.w("BuyPilotRestore", "API restore failed or empty, falling back to Room", apiResult.exceptionOrNull())
+            // Fall back to local Room DB restore
             val restoredMessages = runCatching { chatRepository.restoreChatMessages(sessionId) }
                 .getOrElse { throwable ->
                     _uiState.update {
@@ -1115,7 +1131,6 @@ class ChatViewModel @Inject constructor(
                     }
                     return@launch
                 }
-            val keepTtsEnabled = _uiState.value.ttsEnabled
             val restoredAssistantMessageKeys = restoredMessages
                 .asSequence()
                 .filter { it.role.equals("assistant", ignoreCase = true) }

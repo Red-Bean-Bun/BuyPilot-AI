@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.repos.conversations import (
     get_last_criteria,
     get_last_deck_id,
@@ -21,6 +23,9 @@ async def save_recommendation_turn(
     deck_id: str | None = None,
     user_message: str = "",
     ai_response: str | None = None,
+    product_cards: list[dict[str, Any]] | None = None,
+    decision: dict[str, Any] | None = None,
+    turn_text: str | None = None,
 ) -> str | None:
     return await save_turn(
         session_id,
@@ -30,6 +35,9 @@ async def save_recommendation_turn(
         deck_id=deck_id,
         user_message=user_message,
         ai_response=ai_response,
+        product_cards=product_cards,
+        decision=decision,
+        turn_text=turn_text,
     )
 
 

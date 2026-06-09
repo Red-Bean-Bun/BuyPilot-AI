@@ -14,6 +14,7 @@ import com.buypilot.core.model.responses.CartResponse
 import com.buypilot.core.model.responses.ChatCancelResponse
 import com.buypilot.core.model.responses.ImageUploadResponse
 import com.buypilot.core.model.responses.ProductDetailResponse
+import com.buypilot.core.model.responses.SessionHistoryResponse
 import com.buypilot.core.network.BaseUrlProvider
 import com.buypilot.core.network.CartApi
 import com.buypilot.core.network.ChatApi
@@ -32,6 +33,7 @@ class ChatRepository @Inject constructor(
     private val imageUploadApi: ImageUploadApi,
     private val cartApi: CartApi,
     private val productDetailApi: ProductDetailApi,
+    private val sessionHistoryApi: com.buypilot.core.network.SessionHistoryApi,
     private val baseUrlProvider: BaseUrlProvider,
     private val sessionDao: SessionDao,
     private val messageDao: MessageDao,
@@ -114,6 +116,9 @@ class ChatRepository @Inject constructor(
             ),
         )
     }
+
+    suspend fun fetchSessionHistory(sessionId: String): SessionHistoryResponse =
+        sessionHistoryApi.getSessionHistory(sessionId)
 
     suspend fun restoreChatMessages(sessionId: String): List<PersistedChatMessage> {
         val restored = messageDao.getMessages(sessionId)

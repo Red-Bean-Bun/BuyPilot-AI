@@ -15,8 +15,10 @@ import com.buypilot.core.network.OkHttpFeedbackApi
 import com.buypilot.core.network.OkHttpImageUploadApi
 import com.buypilot.core.network.OkHttpProductDetailApi
 import com.buypilot.core.network.OkHttpSseClient
+import com.buypilot.core.network.OkHttpSessionHistoryApi
 import com.buypilot.core.network.ProductDetailApi
 import com.buypilot.core.network.RestClient
+import com.buypilot.core.network.SessionHistoryApi
 import com.buypilot.core.network.SseChatApi
 import com.buypilot.core.network.SseClient
 import dagger.Module
@@ -76,4 +78,8 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideProductDetailApi(restClient: RestClient): ProductDetailApi = OkHttpProductDetailApi(restClient)
+
+    @Provides
+    @Singleton
+    fun provideSessionHistoryApi(restClient: RestClient): SessionHistoryApi = OkHttpSessionHistoryApi(restClient)
 }

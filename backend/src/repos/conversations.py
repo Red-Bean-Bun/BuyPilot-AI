@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from pydantic import ValidationError
 from sqlmodel import select
@@ -21,6 +22,9 @@ async def save_turn(
     deck_id: str | None = None,
     user_message: str = "",
     ai_response: str | None = None,
+    product_cards: list[dict[str, Any]] | None = None,
+    decision: dict[str, Any] | None = None,
+    turn_text: str | None = None,
 ) -> str | None:
     await create_db_and_tables()
     row = Conversation(
@@ -31,6 +35,9 @@ async def save_turn(
         criteria_json=criteria.model_dump(mode="json") if criteria is not None else None,
         ai_response=ai_response,
         product_ids=list(product_ids),
+        product_cards_json=product_cards,
+        decision_json=decision,
+        turn_text=turn_text,
     )
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         session.add(row)
@@ -98,6 +105,20 @@ async def get_last_product_ids(session_id: str) -> list[str]:
             )
         ).first()
     return list(row.product_ids) if row else []
+
+
+async def list_all_turns(session_id: str) -> list[Conversation]:
+    """Return all turns for a session in chronological order."""
+    await create_db_and_tables()
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        rows = (
+            await session.exec(
+                select(Conversation)
+                .where(Conversation.session_id == session_id)
+                .order_by(Conversation.created_at.asc())
+            )
+        ).all()
+    return list(rows)
 
 
 async def get_last_deck_id(session_id: str) -> str | None:

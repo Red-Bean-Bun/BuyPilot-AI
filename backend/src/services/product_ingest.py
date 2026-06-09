@@ -20,7 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from src.config.domain_terms import normalize_category
 from src.config.settings import get_settings
 from src.repos.database import create_db_and_tables, get_async_engine
-from src.repos.models import Product, ProductChunk, ProductImageEmbedding, SystemMetadata, utc_now
+from src.repos.models import EvidenceLink, Product, ProductChunk, ProductImageEmbedding, SystemMetadata, utc_now
 from src.repos.products import dataset_dir, list_raw_products
 from src.repos.vector import VL_EMBEDDING_DIMENSIONS
 from src.services.chunking import build_product_chunks, build_product_knowledge_package
@@ -62,6 +62,8 @@ async def seed_products(
             source_hash = _source_hash(raw)
             knowledge_package = build_product_knowledge_package(raw)
             knowledge = raw.get("rag_knowledge") or {}
+            chunk_subq = select(ProductChunk.id).where(ProductChunk.product_id == product_id)
+            await session.exec(delete(EvidenceLink).where(EvidenceLink.chunk_id.in_(chunk_subq)))
             await session.exec(delete(ProductChunk).where(ProductChunk.product_id == product_id))
             existing = (await session.exec(select(Product).where(Product.id == product_id))).one_or_none()
             existing_highlights = (
