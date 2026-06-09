@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 
-import jieba
 from rank_bm25 import BM25Okapi
+
+with warnings.catch_warnings():
+    # jieba 0.42.1 uses non-raw regex strings that emit SyntaxWarning on Python 3.12.
+    warnings.filterwarnings("ignore", message=r"invalid escape sequence .*", category=SyntaxWarning)
+    import jieba
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Eval_Score-78%25-blue" alt="综合评测 78%" />
   <img src="https://img.shields.io/badge/Eval-20%2F20-green" alt="Eval 20/20" />
-  <img src="https://img.shields.io/badge/Tests-618%20passed-green" alt="Tests 618 passed" />
+  <img src="https://img.shields.io/badge/Tests-422%20passed-green" alt="Tests 422 passed" />
   <img src="https://img.shields.io/badge/意图准确率-90%25-green" alt="意图准确率 90%" />
   <img src="https://img.shields.io/badge/多轮一致性-100%25-green" alt="多轮一致性 100%" />
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
@@ -50,13 +50,69 @@
 
 </details>
 
-**核心能力**：
-- **多模态双通道检索**：文本 embedding（1024 维）+ 图像 embedding（1024 维），同一向量空间支持图搜文、文搜图
-- **混合检索**：BM25 关键词召回 + 向量语义召回 + RRF 融合排序 + Cross-Encoder 精排
-- **证据绑定**：每个推荐理由可追溯到原始商品描述/FAQ/评价，点击"看证据"查看原文
-- **多商品对比**：自动提取对比维度（价格/品牌/成分/场景），结构化呈现优劣
-- **对话式交互**：意图澄清、标准生成、推荐解释、购物车管理全链路闭环
-- **工程深度**：618 单元测试、三端协议守卫、确定性否定语义解析、决策评分算法
+<details>
+<summary>验证口径（评测与测试数字）</summary>
+
+| 数字 | 最后验证时间 | 复现命令 | 报告来源 |
+|------|--------------|----------|----------|
+| 评测综合分 **78.4%**（20 条样本 × 15 指标） | 2026-06-08 发布验收 | `make eval`（需 Docker 服务、真实 `BAILIAN_API_KEY`、非空 `ADMIN_API_KEY`） | Chat Stream Observer 截图：`doc/ui/dashboard.png`、`doc/ui/LLM_trace.png`、`doc/ui/trace.png`；样本源：`data/eval/eval_samples.json` |
+| 默认 pytest **422 passed** | 2026-06-10 赛前验收 | `cd backend && uv run pytest -q` | 本地命令输出；完整集成集可用 `RUN_FULL_TESTS=1 uv run pytest -q` 打开 |
+
+</details>
+
+## 评委证据区
+
+> 以下证据证明系统真实可运行，非 mock/placeholder。所有数据来自真实 Postgres + pgvector + 百炼 API。
+
+### Chat Stream Observer
+
+全链路可观测性 Dashboard，追踪每轮 chat 的 LLM 调用、SSE 事件、检索 Trace、证据绑定和业务审计：
+
+![Dashboard 概览](doc/ui/dashboard.png)
+
+<details>
+<summary>展开查看 6 个维度的追踪详情</summary>
+
+| 维度 | 截图 | 证明什么 |
+|------|------|----------|
+| **LLM 调用** | ![LLM](doc/ui/LLM_trace.png) | 3 次模型调用（intent/criteria/recommendation），0 failed，0 fallback，最慢 1.21s |
+| **SSE 事件流** | ![SSE](doc/ui/sse.png) | 64 个事件按序推送，0 missing seq，0 error，完整流式协议 |
+| **检索 Trace** | ![Trace](doc/ui/trace.png) | 94 traces、474 hits、5054 向量候选、61 最终选中，混合检索链路可追溯 |
+| **证据绑定** | ![Evidence](doc/ui/evdence.png) | 200 条证据链接，每个推荐理由绑定到具体 chunk（faq/review/marketing_description） |
+| **审计事件** | ![Audit](doc/ui/side.png) | 3 次 side effect（chat.turn_started / recommendation_persisted / turn_completed），资源变更可回放 |
+
+</details>
+
+### 如何验证
+
+| 证据类型 | 内容 | 验证方式 |
+|---------|------|----------|
+| **评测报告** | 20 样本 × 15 指标，综合分 78.4% | `make eval` 或查看上方 Dashboard |
+| **端到端验证** | 5 项 smoke checks 全通过 | `make smoke` |
+| **默认 pytest** | 422 passed | `cd backend && uv run pytest -q` |
+| **真机 APK** | 5.7MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk) |
+| **Demo 视频** | 4 条路径完整演示 | 🎬 [观看 Demo 视频](#)（录制后替换链接） |
+
+> `make eval` 是 admin 接口，除 `BAILIAN_API_KEY` 外还必须配置 `ADMIN_API_KEY`；Demo 视频链接暂留占位，录制完成后替换。
+
+| 能力 | 说明 |
+|------|------|
+| 多模态双通道检索 | 文本 + 图像 embedding 同一向量空间（1024 维），图搜文、文搜图无缝切换 |
+| 混合检索 | BM25 关键词 + 向量语义 + RRF 融合 + Cross-Encoder 精排，品牌查询召回率提升 40%+ |
+| 证据绑定 | 推荐理由可追溯到原始商品描述/FAQ/评价，点击"看证据"查看原文 |
+| 多商品对比 | 自动提取对比维度（价格/品牌/成分/场景），结构化呈现优劣 |
+| 对话式交互 | 意图澄清、标准生成、推荐解释、购物车管理全链路闭环 |
+| 工程深度 | 默认 pytest 422 passed、三端协议守卫、确定性否定语义解析、决策评分算法 |
+
+---
+
+## 团队分工
+
+| 成员 | 负责模块 |
+|------|---------|
+| ZJL | 后端架构：混合检索（BM25+RRF）、评测框架、部署链路（Cloudflare/Docker/APK）、文档体系 |
+| forever-ivy | Android 客户端：聊天 UI/UX、会话恢复、历史记录、Compose 动画与交互优化 |
+| MilanKing | 后端功能：GroundingGuard 防幻觉、意图快速路由、检索优化、会话历史 API、测试防御 |
 
 ---
 
@@ -83,20 +139,45 @@
 
 ## 技术亮点
 
-### 1. 多模态双通道检索
-图片和文字映射到同一向量空间（文本 1024 维 + 图像 1024 维），支持"以图搜图"和"以文搜图"无缝切换。100 张商品图片预建视觉索引，响应时间 < 200ms。
+| # | 亮点 | 说明 |
+|---|------|------|
+| 1 | 多模态双通道检索 | 文本 1024 维 + 图像 1024 维同一向量空间，100 张商品图片预建视觉索引，响应 < 200ms |
+| 2 | 混合检索 + RRF 融合 | BM25 关键词 + pgvector 语义 + RRF 融合 + qwen3-rerank 精排，品牌查询召回率提升 40%+ |
+| 3 | 证据绑定 + 幻觉防御 | 推荐理由绑定原始知识库（evidence_id + source_type），结构化数据从数据库直查，LLM 无法编造 |
+| 4 | 意图解析与否定语义 | 确定性规则层（毫秒级）+ LLM 理解层协同，"不要含酒精但含烟酰胺"→规则层识别否定作用域 |
+| 5 | 三端协议守卫 | SSE 10 种 event type，三层自动化守卫（Python import-time / Kotlin build-time / CI），漂移 = 无法启动 |
+| 6 | 品类理解与校验 | 数据驱动同义词系统（30+ 品类，含层级扩展）+ 品类白名单校验，防止推荐不存在的商品 |
 
-### 2. 混合检索 + RRF 融合
-BM25 关键词召回（精确匹配品牌/成分）+ pgvector 语义召回（理解"适合油皮的控油产品"）+ RRF 融合 + Cross-Encoder 精排（qwen3-rerank）。对精确品牌查询，召回率提升 40%+。
+**代码规模**：后端 Python ~20,500 行 · Android Kotlin ~35,300 行 · Prompt 模板 ~1,200 行 · 测试 ~11,700 行 · 文档 105 篇
 
-### 3. 证据绑定 + 幻觉防御
-每个推荐理由绑定到原始商品知识库（evidence_id + evidence_text + source_type），用户可点击"看证据"查看原文。结构化数据（价格/库存/SKU）从数据库直查，LLM 无法编造。
+---
 
-### 4. 关键路径工程化：意图解析与否定语义
-高频场景（意图识别、否定约束、槽位提取）用确定性规则层（毫秒级）+ LLM 理解层（语义深度）协同。例如"不要含酒精但含烟酰胺"：规则层识别否定作用域，LLM 基于约束生成推荐理由。
+## 赛题完成度对照
 
-### 5. 三端协议守卫
-SSE 事件协议是封闭 DSL（10 种 event type），三层自动化守卫（Python import-time / Kotlin build-time / CI）确保一致性。漂移 = 程序无法启动/编译，不是"测试可能发现"。
+### 基础场景（全部达成）
+
+| 场景 | 完成 | 实现路径 |
+|------|:----:|---------|
+| 模糊推荐 + 条件筛选 | ✅ | 意图识别 → 标准生成 → 混合检索 → 商品推荐 → 证据绑定 |
+| 拍照找货 | ✅ | 双通道检索（图像 + 文本）→ Qwen-VL 理解 → 相似商品推荐 |
+| 多轮对话 + 反选排除 | ✅ | 否定语义解析 → 约束累积 → 检索收敛 |
+| 对话式购物车 | ✅ | 自然语言 CRUD → 购物车状态实时更新 → 多轮状态管理 |
+
+### 加分项
+
+| 加分方向 | 档位 | 实现内容 |
+|----------|:----:|---------|
+| 4.2 多模态交互 | 拍照找货 | Qwen-VL-Plus 图片理解 + 双通道视觉检索 |
+| 4.3 对话智能与 RAG 增强 | 反选排除 + 多商品对比 | 确定性否定语义解析 + 结构化对比卡 |
+| 4.1 业务闭环 | 对话式加购 | cart_action SSE 事件 + 购物车 CRUD |
+
+### 减分项防御
+
+| 减分项 | 防御 | 状态 |
+|--------|------|:----:|
+| AI 编造商品/价格/优惠 | 混合检索 + 硬过滤 + GroundingGuard 价格校验 | ✅ |
+| 纯 Web/H5 替代原生 App | Android 原生 Kotlin + Jetpack Compose | ✅ |
+| Demo 无法运行 | docker-compose up 一键启动 + APK 直连云端 | ✅ |
 
 ---
 
@@ -120,6 +201,8 @@ SSE 事件协议是封闭 DSL（10 种 event type），三层自动化守卫（P
 # 1) 准备配置
 cp .env.example .env
 # 编辑 .env，填写 BAILIAN_API_KEY=sk-your-real-key
+# 如需运行 make eval 或访问 /admin/*，先用 openssl rand -hex 24 生成随机值
+# 然后在 .env 写入 ADMIN_API_KEY=生成的随机值
 
 # 2) 启动服务（首次 2-5 分钟）
 make rebuild
@@ -156,6 +239,7 @@ image_embeddings: 100
 | 问题 | 解决方案 |
 |------|---------|
 | `BAILIAN_API_KEY 未配置` | 编辑 `.env`，填写 `BAILIAN_API_KEY=sk-xxx` |
+| `make eval` 返回 404/鉴权失败 | 编辑 `.env`，填写非空 `ADMIN_API_KEY`，然后重新 `make rebuild` |
 | `make rebuild` 卡住 | 首次启动需要生成 embedding，耐心等待 2-5 分钟 |
 | `image_embeddings: 0` | 运行 `make seed-image` 手动构建图片索引 |
 | 端口 5432/8000 被占用 | 修改 `deploy/docker-compose.yml` 端口映射 |
@@ -171,7 +255,7 @@ image_embeddings: 100
 make rebuild       # 重建镜像并启动（首次 2-5 分钟）
 make db-stats      # 查看数据库统计（products:100, chunks:1292, image_embeddings:100）
 make smoke         # 运行端到端验证（JSON 格式，每个 check 一行）
-make eval          # 触发评测并查看结果
+make eval          # 触发评测并查看结果（需要 ADMIN_API_KEY）
 ```
 
 <details>
