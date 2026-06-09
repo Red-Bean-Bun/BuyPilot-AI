@@ -85,7 +85,6 @@ RECOMMENDATION_STREAM_MIN_CHARS = 1
 RECOMMENDATION_STREAM_MAX_CHARS = 8
 RECOMMENDATION_STREAM_BOUNDARIES = set("，。！？；、,.!?;:\n")
 INTRO_TEXT_NO_CONSTRAINTS = msg.INTRO_NO_CONSTRAINTS
-FOLLOWUP_TEXT_DEFAULT = msg.FOLLOWUP_DEFAULT
 FOLLOWUP_TEXT_SUBSEQUENT = msg.FOLLOWUP_SUBSEQUENT
 FOLLOWUP_TEXT_BUDGET_RELAXED = msg.FOLLOWUP_BUDGET_RELAXED
 
@@ -343,6 +342,8 @@ async def _run_combo_retrieval(
 async def handle_recommendation(
     ctx: StreamContext, body: ChatStreamRequest, intent: IntentResult
 ) -> AsyncGenerator[SSEEventBase, None]:
+    logger.info("[timing] handle_recommendation start intent=%s", intent.intent)
+
     if intent.intent == "feedback":
         await _record_feedback_intent(ctx, intent, body.message)
 
@@ -386,6 +387,7 @@ async def handle_recommendation(
 
     # ── Speculative retrieval: launch in background while criteria runs ──
     image_embedding = await image_embedding_task.task if image_embedding_task else None
+    t_retrieval_start = time.perf_counter()
     retrieval_task = start_stage_task(
         ctx,
         ctx.stages.run_retrieval(spec_criteria, top_n=12, feedback=feedback, image_embedding=image_embedding),
@@ -395,6 +397,7 @@ async def handle_recommendation(
 
     # ── Criteria generation (in parallel with speculative retrieval) ──
     yield ctx.thinking("criteria", msg.THINKING_GENERATING_CRITERIA)
+    t_criteria_start = time.perf_counter()
     criteria_capture: CapturedStage[CriteriaPayload] = CapturedStage()
     ctx.ensure_active()
     async for event in _capture_stage_result(
@@ -409,6 +412,7 @@ async def handle_recommendation(
     ):
         yield event
     criteria = criteria_capture.require("criteria")
+    logger.info("[timing] criteria=%.3fs", time.perf_counter() - t_criteria_start)
 
     # ── Await speculative retrieval + post-filter, then delegate ──
     if not retrieval_task.task.done():
@@ -417,11 +421,13 @@ async def handle_recommendation(
         ))
     try:
         precomputed = await retrieval_task.task
+        logger.info("[timing] retrieval=%.3fs", time.perf_counter() - t_retrieval_start)
     except Exception:
         logger.warning("Speculative retrieval failed, falling back to serial retrieval", exc_info=True)
         precomputed = None
 
     # ── Try shopping strategy for scenario-based recommendations ──
+    t_strategy_start = time.perf_counter()
     strategy_result = await _try_build_shopping_strategy_plan(
         ctx, body, intent, criteria, feedback, image_embedding
     )
@@ -430,13 +436,20 @@ async def handle_recommendation(
     reason_hint: str | None = None
     combo_criteria: list[CriteriaPayload] = []
     if strategy_result is not None:
+        logger.info("[timing] shopping_strategy=%.3fs", time.perf_counter() - t_strategy_start)
         criteria, shopping_strategy, scene_judgement_text, reason_hint, combo_criteria = strategy_result
         # Discard speculative retrieval — strategy may have changed criteria
         precomputed = None
 
     # ── Travel combo: multi-category parallel retrieval ──
     if shopping_strategy is not None and combo_criteria:
+        t_combo_start = time.perf_counter()
         combo_results = await _run_combo_retrieval(ctx, combo_criteria, feedback, image_embedding)
+        logger.info(
+            "[timing] combo_retrieval=%.3fs products=%d",
+            time.perf_counter() - t_combo_start,
+            len(combo_results.products),
+        )
         if combo_results.products:
             precomputed = combo_results
 
@@ -515,6 +528,7 @@ async def continue_recommendation_from_criteria(
     is_scenario_flow = shopping_strategy is not None
     if is_scenario_flow:
         if scene_judgement_text:
+            t_scene_start = time.perf_counter()
             async for event in stream_text(
                 ctx,
                 scene_judgement_text,
@@ -522,7 +536,10 @@ async def continue_recommendation_from_criteria(
                 node_id=f"scene_{ctx.turn_id}",
             ):
                 yield event
+            logger.info("[timing] scene_judgement_text=%.3fs", time.perf_counter() - t_scene_start)
+        t_criteria_card_start = time.perf_counter()
         yield _criteria_card_event(ctx, criteria, shopping_strategy=shopping_strategy)
+        logger.info("[timing] criteria_card=%.3fs", time.perf_counter() - t_criteria_card_start)
 
     if precomputed_feedback is not None:
         feedback = precomputed_feedback
@@ -653,6 +670,7 @@ async def continue_recommendation_from_criteria(
     captured_turn_text_parts: list[str] = []
 
     # Signal ranking stage before product cards
+    t_ranking_start = time.perf_counter()
     yield ctx.thinking("ranking", _thinking_with_category(
         msg.THINKING_RANKING, msg.THINKING_RANKING_CATEGORY_TEMPLATE, criteria.category,
     ))
@@ -670,6 +688,7 @@ async def continue_recommendation_from_criteria(
             yield event
 
     # Emit product cards with pacing delay (built into _product_card_events)
+    logger.info("[timing] pre_product_cards=%.3fs", time.perf_counter() - t_ranking_start)
     async for event in _product_card_events(
         ctx, criteria, products, evidences_by_product,
         risk_notes_extra=risk_notes_extra,
@@ -774,22 +793,23 @@ async def continue_recommendation_from_criteria(
     if not is_scenario_flow:
         yield _criteria_card_event(ctx, criteria)
 
-    # Step 3: followup guidance text ("你可以自然语言调整...")
+    # Step 3: followup guidance text — only when there's real signal to convey
     if budget_relaxed:
         followup_text = FOLLOWUP_TEXT_BUDGET_RELAXED
-    elif feedback:
+    elif any(v for v in feedback.values()):
         followup_text = FOLLOWUP_TEXT_SUBSEQUENT
     else:
-        followup_text = FOLLOWUP_TEXT_DEFAULT
-    async for event in stream_text(
-        ctx,
-        followup_text,
-        message_id=f"followup_{ctx.turn_id}",
-        node_id=f"followup_{ctx.turn_id}",
-    ):
-        if isinstance(event, TextDeltaEvent):
-            captured_turn_text_parts.append(event.delta)
-        yield event
+        followup_text = None
+    if followup_text:
+        async for event in stream_text(
+            ctx,
+            followup_text,
+            message_id=f"followup_{ctx.turn_id}",
+            node_id=f"followup_{ctx.turn_id}",
+        ):
+            if isinstance(event, TextDeltaEvent):
+                captured_turn_text_parts.append(event.delta)
+            yield event
 
     await _persist_recommendation(
         ctx, body, criteria, retrieval,

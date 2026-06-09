@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 import weakref
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -188,7 +189,11 @@ async def chat_stream(session_id: str, body: ChatStreamRequest) -> AsyncGenerato
 
 
 async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGenerator[SSEEventBase, None]:
+    t_total_start = time.perf_counter()
+    logger.info("[timing] session=%s turn=%s msg=%s...", ctx.session_id, ctx.turn_id, body.message[:50])
+
     pipeline_body = None
+    t_prep_start = time.perf_counter()
     async for item in _prepare_pipeline_body(ctx, body):
         if isinstance(item, StageResult):
             pipeline_body = item.value
@@ -196,6 +201,7 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
             yield item
     if pipeline_body is None:
         raise RuntimeError("pipeline body stage completed without a result.")
+    logger.info("[timing] image_analysis=%.3fs", time.perf_counter() - t_prep_start)
 
     if is_commercial_claim_question(pipeline_body.message) and maybe_checkout_intent(pipeline_body.message) is None:
         async for event in _emit_commercial_claim_reply(ctx):
@@ -203,6 +209,7 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
         return
 
     resolved = None
+    t_intent_start = time.perf_counter()
     async for item in _resolve_intent(ctx, pipeline_body):
         if isinstance(item, StageResult):
             resolved = item.value
@@ -210,6 +217,7 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
             yield item
     if resolved is None:
         raise RuntimeError("intent stage completed without a result.")
+    logger.info("[timing] intent=%.3fs intent=%s", time.perf_counter() - t_intent_start, resolved.intent.intent)
     resolved = await _merge_followup_context(ctx.session_id, resolved)
 
     if _unsupported_product_type(resolved.intent):
@@ -243,8 +251,18 @@ async def _run_chat_turn(ctx: StreamContext, body: ChatStreamRequest) -> AsyncGe
                 yield event
             return
 
+    t_handler_start = time.perf_counter()
+    first_product_card_logged = False
     async for event in _dispatch_intent_handler(ctx, resolved.body, resolved.intent):
+        if not first_product_card_logged and getattr(event, "event", None) == "product_card":
+            first_product_card_logged = True
+            logger.info("[timing] first_product_card=%.3fs", time.perf_counter() - t_total_start)
         yield event
+    logger.info(
+        "[timing] handler=%.3fs total=%.3fs",
+        time.perf_counter() - t_handler_start,
+        time.perf_counter() - t_total_start,
+    )
 
 
 async def _prepare_pipeline_body(
