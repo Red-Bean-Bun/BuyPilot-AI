@@ -22,6 +22,12 @@ data class MessageEntity(
     val turnId: String? = null,
     val role: String,
     val content: String,
+    @ColumnInfo(name = "node_type")
+    val nodeType: String? = null,
+    @ColumnInfo(name = "payload_json")
+    val payloadJson: String? = null,
+    @ColumnInfo(name = "deck_id")
+    val deckId: String? = null,
     @ColumnInfo(name = "created_at_ms")
     val createdAtMs: Long,
 )

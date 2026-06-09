@@ -8,6 +8,7 @@ import com.buypilot.core.model.responses.HistoryDecision
 import com.buypilot.core.model.responses.HistoryProductCard
 import com.buypilot.core.model.responses.SessionHistoryResponse
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.CriteriaNode
 import com.buypilot.feature.chat.model.FinalDecisionNode

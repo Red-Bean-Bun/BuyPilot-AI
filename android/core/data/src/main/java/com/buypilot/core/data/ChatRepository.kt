@@ -130,6 +130,9 @@ class ChatRepository @Inject constructor(
                     turnId = message.turnId,
                     role = message.role,
                     content = message.content,
+                    nodeType = message.nodeType,
+                    payloadJson = message.payloadJson,
+                    deckId = message.deckId,
                     createdAtMs = message.createdAtMs,
                 )
             }
@@ -146,6 +149,7 @@ class ChatRepository @Inject constructor(
                 turnId = null,
                 role = "user",
                 content = fallbackContent,
+                nodeType = "user_message",
                 createdAtMs = legacySession.updatedAtMs,
             ),
         )
@@ -161,20 +165,77 @@ class ChatRepository @Inject constructor(
         val cleanContent = content.trim()
         if (sessionId.isBlank() || messageId.isBlank() || cleanContent.isBlank()) return
 
+        recordAssistantNode(
+            sessionId = sessionId,
+            messageId = messageId,
+            turnId = turnId,
+            content = cleanContent,
+            nodeType = "assistant_text",
+            payloadJson = null,
+            deckId = null,
+            nowMs = nowMs,
+            updateLastMessage = true,
+        )
+    }
+
+    suspend fun recordAssistantStructuredNode(
+        sessionId: String,
+        messageId: String,
+        turnId: String?,
+        nodeType: String,
+        payloadJson: String,
+        deckId: String?,
+        content: String,
+        nowMs: Long,
+    ) {
+        if (sessionId.isBlank() || messageId.isBlank() || nodeType.isBlank() || payloadJson.isBlank()) return
+
+        recordAssistantNode(
+            sessionId = sessionId,
+            messageId = messageId,
+            turnId = turnId,
+            content = content.trim(),
+            nodeType = nodeType,
+            payloadJson = payloadJson,
+            deckId = deckId,
+            nowMs = nowMs,
+            updateLastMessage = false,
+        )
+    }
+
+    private suspend fun recordAssistantNode(
+        sessionId: String,
+        messageId: String,
+        turnId: String?,
+        content: String,
+        nodeType: String,
+        payloadJson: String?,
+        deckId: String?,
+        nowMs: Long,
+        updateLastMessage: Boolean,
+    ) {
+        val existingMessage = messageDao.getMessage(messageId)
         messageDao.upsert(
             MessageEntity(
                 messageId = messageId,
                 sessionId = sessionId,
                 turnId = turnId?.takeIf { it.isNotBlank() },
                 role = "assistant",
-                content = cleanContent,
-                createdAtMs = nowMs,
+                content = content,
+                nodeType = nodeType.takeIf { it.isNotBlank() },
+                payloadJson = payloadJson?.takeIf { it.isNotBlank() },
+                deckId = deckId?.takeIf { it.isNotBlank() },
+                createdAtMs = existingMessage?.createdAtMs ?: nowMs,
             ),
         )
         val existing = sessionDao.getSession(sessionId) ?: return
         sessionDao.upsert(
             existing.copy(
-                lastMessage = cleanContent.take(120),
+                lastMessage = if (updateLastMessage && content.isNotBlank()) {
+                    content.take(120)
+                } else {
+                    existing.lastMessage
+                },
                 updatedAtMs = maxOf(existing.updatedAtMs, nowMs),
             ),
         )
@@ -191,6 +252,7 @@ class ChatRepository @Inject constructor(
                 sessionId = sessionId,
                 role = "user",
                 content = content,
+                nodeType = "user_message",
                 createdAtMs = nowMs,
             ),
         )

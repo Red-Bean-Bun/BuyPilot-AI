@@ -3,6 +3,7 @@ package com.buypilot.core.database.di
 import android.content.Context
 import androidx.room.Room
 import com.buypilot.core.database.AppDatabase
+import com.buypilot.core.database.AppDatabaseMigrations
 import com.buypilot.core.database.dao.MessageDao
 import com.buypilot.core.database.dao.SessionDao
 import dagger.Module
@@ -21,6 +22,7 @@ object DatabaseModule {
         @ApplicationContext context: Context,
     ): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "buypilot.db")
+            .addMigrations(AppDatabaseMigrations.MIGRATION_1_2)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 

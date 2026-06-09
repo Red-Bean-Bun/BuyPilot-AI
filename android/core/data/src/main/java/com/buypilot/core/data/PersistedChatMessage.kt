@@ -6,5 +6,8 @@ data class PersistedChatMessage(
     val turnId: String?,
     val role: String,
     val content: String,
+    val nodeType: String? = null,
+    val payloadJson: String? = null,
+    val deckId: String? = null,
     val createdAtMs: Long,
 )

@@ -17,6 +17,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE session_id = :sessionId ORDER BY created_at_ms ASC")
     suspend fun getMessages(sessionId: String): List<MessageEntity>
 
+    @Query("SELECT * FROM messages WHERE message_id = :messageId LIMIT 1")
+    suspend fun getMessage(messageId: String): MessageEntity?
+
     @Query("DELETE FROM messages WHERE session_id = :sessionId")
     suspend fun deleteForSession(sessionId: String)
 }

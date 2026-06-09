@@ -70,7 +70,9 @@ private class FakeMessageDao : MessageDao {
     private val messagesBySessionId = mutableMapOf<String, MutableList<MessageEntity>>()
 
     override suspend fun upsert(message: MessageEntity) {
-        messagesBySessionId.getOrPut(message.sessionId) { mutableListOf() }.add(message)
+        val messages = messagesBySessionId.getOrPut(message.sessionId) { mutableListOf() }
+        messages.removeAll { it.messageId == message.messageId }
+        messages += message
     }
 
     override fun observeMessages(sessionId: String): Flow<List<MessageEntity>> =
@@ -78,6 +80,12 @@ private class FakeMessageDao : MessageDao {
 
     override suspend fun getMessages(sessionId: String): List<MessageEntity> =
         messagesBySessionId[sessionId].orEmpty()
+
+    override suspend fun getMessage(messageId: String): MessageEntity? =
+        messagesBySessionId.values
+            .asSequence()
+            .flatten()
+            .firstOrNull { it.messageId == messageId }
 
     override suspend fun deleteForSession(sessionId: String) {
         messagesBySessionId.remove(sessionId)

@@ -117,4 +117,27 @@ class AppDatabaseTest {
 
         assertEquals(listOf("msg_early", "msg_late"), messages.map { it.messageId })
     }
+
+    @Test
+    fun storesStructuredMessageMetadata() = runTest {
+        database.messageDao().upsert(
+            MessageEntity(
+                messageId = "deck_1",
+                sessionId = "sess_structured",
+                turnId = "turn_1",
+                role = "assistant",
+                content = "已推荐 2 个商品",
+                nodeType = "product_deck",
+                payloadJson = """{"deckId":"deck_1","products":[]}""",
+                deckId = "deck_1",
+                createdAtMs = 20,
+            ),
+        )
+
+        val message = database.messageDao().getMessages("sess_structured").single()
+
+        assertEquals("product_deck", message.nodeType)
+        assertEquals("""{"deckId":"deck_1","products":[]}""", message.payloadJson)
+        assertEquals("deck_1", message.deckId)
+    }
 }

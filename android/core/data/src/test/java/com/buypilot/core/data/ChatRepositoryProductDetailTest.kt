@@ -16,6 +16,7 @@ import com.buypilot.core.model.responses.ChatCancelResponse
 import com.buypilot.core.model.responses.FeedbackResponse
 import com.buypilot.core.model.responses.ImageUploadResponse
 import com.buypilot.core.model.responses.ProductDetailResponse
+import com.buypilot.core.model.responses.SessionHistoryResponse
 import com.buypilot.core.network.BaseUrlProvider
 import com.buypilot.core.network.CartApi
 import com.buypilot.core.network.ChatApi
@@ -23,6 +24,7 @@ import com.buypilot.core.network.ChatCancelApi
 import com.buypilot.core.network.FeedbackApi
 import com.buypilot.core.network.ImageUploadApi
 import com.buypilot.core.network.ProductDetailApi
+import com.buypilot.core.network.SessionHistoryApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
@@ -157,6 +159,53 @@ class ChatRepositoryProductDetailTest {
         assertEquals(listOf("推荐手机", "可以优先看影像旗舰。"), messages.map { it.content })
     }
 
+    @Test
+    fun recordAssistantStructuredNodePreservesTimelineSlotAndSessionLastMessage() = runTest {
+        val repository = testRepository()
+
+        repository.recordUserMessage("sess_structured", "推荐洁面", nowMs = 100)
+        repository.recordAssistantMessage(
+            sessionId = "sess_structured",
+            messageId = "assistant_intro",
+            turnId = "turn_1",
+            content = "先给你一个筛选方向。",
+            nowMs = 120,
+        )
+        repository.recordAssistantStructuredNode(
+            sessionId = "sess_structured",
+            messageId = "deck_1",
+            turnId = "turn_1",
+            nodeType = "product_deck",
+            payloadJson = """{"deckId":"deck_1","products":[{"rank":1}]}""",
+            deckId = "deck_1",
+            content = "已推荐 1 个商品",
+            nowMs = 130,
+        )
+        repository.recordAssistantStructuredNode(
+            sessionId = "sess_structured",
+            messageId = "deck_1",
+            turnId = "turn_1",
+            nodeType = "product_deck",
+            payloadJson = """{"deckId":"deck_1","products":[{"rank":1},{"rank":2}]}""",
+            deckId = "deck_1",
+            content = "已推荐 2 个商品",
+            nowMs = 180,
+        )
+
+        val session = InMemorySessionDao.getSession("sess_structured")!!
+        val deckMessage = InMemoryMessageDao.getMessage("deck_1")!!
+        val restored = repository.restoreChatMessages("sess_structured")
+
+        assertEquals("先给你一个筛选方向。", session.lastMessage)
+        assertEquals(180, session.updatedAtMs)
+        assertEquals(130, deckMessage.createdAtMs)
+        assertEquals("product_deck", deckMessage.nodeType)
+        assertEquals("deck_1", deckMessage.deckId)
+        assertEquals("""{"deckId":"deck_1","products":[{"rank":1},{"rank":2}]}""", deckMessage.payloadJson)
+        assertEquals(listOf("user", "assistant", "assistant"), restored.map { it.role })
+        assertEquals(listOf("user_message", "assistant_text", "product_deck"), restored.map { it.nodeType })
+    }
+
     private fun testRepository(productDetailApi: ProductDetailApi = RecordingProductDetailApi()): ChatRepository {
         InMemorySessionDao.reset()
         InMemoryMessageDao.reset()
@@ -167,6 +216,7 @@ class ChatRepositoryProductDetailTest {
             imageUploadApi = NoopImageUploadApi,
             cartApi = NoopCartApi,
             productDetailApi = productDetailApi,
+            sessionHistoryApi = NoopSessionHistoryApi,
             baseUrlProvider = StaticBaseUrlProvider,
             sessionDao = InMemorySessionDao,
             messageDao = InMemoryMessageDao,
@@ -224,6 +274,11 @@ private object NoopCartApi : CartApi {
     override suspend fun removeItem(sessionId: String, productId: String) = Unit
 }
 
+private object NoopSessionHistoryApi : SessionHistoryApi {
+    override suspend fun getSessionHistory(sessionId: String): SessionHistoryResponse =
+        SessionHistoryResponse(sessionId = sessionId)
+}
+
 private object StaticBaseUrlProvider : BaseUrlProvider {
     override val baseUrl: String = "http://127.0.0.1:8000"
 }
@@ -266,6 +321,12 @@ private object InMemoryMessageDao : MessageDao {
 
     override suspend fun getMessages(sessionId: String): List<MessageEntity> =
         messagesBySessionId[sessionId].orEmpty().sortedBy { it.createdAtMs }
+
+    override suspend fun getMessage(messageId: String): MessageEntity? =
+        messagesBySessionId.values
+            .asSequence()
+            .flatten()
+            .firstOrNull { it.messageId == messageId }
 
     override suspend fun deleteForSession(sessionId: String) {
         messagesBySessionId.remove(sessionId)

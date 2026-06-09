@@ -1,8 +1,18 @@
 package com.buypilot.feature.chat
 
+import com.buypilot.core.common.json.AppJson
 import com.buypilot.core.data.PersistedChatMessage
+import com.buypilot.core.model.CriteriaCardPayload
+import com.buypilot.core.model.CriteriaPayload
+import com.buypilot.core.model.FinalDecisionPayload
+import com.buypilot.core.model.ProductCardPayload
+import com.buypilot.core.model.ProductPayload
 import com.buypilot.feature.chat.model.AiStreamNode
+import com.buypilot.feature.chat.model.CriteriaNode
+import com.buypilot.feature.chat.model.FinalDecisionNode
+import com.buypilot.feature.chat.model.ProductDeckNode
 import com.buypilot.feature.chat.model.UserMessageNode
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,6 +66,91 @@ class SessionRestoreMapperTest {
     }
 
     @Test
+    fun restoredSessionStateRestoresStructuredTimelineNodes() {
+        val criteriaPayload = CriteriaCardPayload(
+            criteria = CriteriaPayload(
+                criteriaId = "criteria_1",
+                category = "美妆护肤",
+                summary = "油皮洁面，200 元以内",
+            ),
+        )
+        val productPayload = ProductCardPayload(
+            rank = 1,
+            product = ProductPayload(
+                productId = "p_beauty_001",
+                name = "温和洁面",
+                category = "美妆护肤",
+            ),
+            reason = "预算和肤质都匹配",
+        )
+        val decisionPayload = FinalDecisionPayload(
+            winnerProductId = "p_beauty_001",
+            summary = "优先选温和洁面。",
+        )
+
+        val state = restoredSessionState(
+            sessionId = "sess_restore",
+            messages = listOf(
+                persistedMessage(
+                    messageId = "msg_user",
+                    role = "user",
+                    content = "推荐适合油皮的洗面奶",
+                    createdAtMs = 100,
+                ),
+                persistedMessage(
+                    messageId = "criteria_1",
+                    role = "assistant",
+                    content = criteriaPayload.criteria.summary,
+                    createdAtMs = 110,
+                    turnId = "turn_1",
+                    nodeType = RestorableNodeTypeCriteriaCard,
+                    payloadJson = AppJson.instance.encodeToString(criteriaPayload),
+                ),
+                persistedMessage(
+                    messageId = "deck_1",
+                    role = "assistant",
+                    content = "已推荐 1 个商品",
+                    createdAtMs = 120,
+                    turnId = "turn_1",
+                    nodeType = RestorableNodeTypeProductDeck,
+                    payloadJson = AppJson.instance.encodeToString(
+                        PersistedProductDeckPayload(
+                            deckId = "deck_1",
+                            products = listOf(productPayload),
+                        ),
+                    ),
+                    deckId = "deck_1",
+                ),
+                persistedMessage(
+                    messageId = "decision_1",
+                    role = "assistant",
+                    content = decisionPayload.summary,
+                    createdAtMs = 130,
+                    turnId = "turn_1",
+                    nodeType = RestorableNodeTypeFinalDecision,
+                    payloadJson = AppJson.instance.encodeToString(decisionPayload),
+                    deckId = "deck_1",
+                ),
+            ),
+            backendBaseUrl = "http://127.0.0.1:8000",
+            useMockChat = false,
+            ttsEnabled = false,
+        )
+
+        val criteriaNode = state.nodes[1] as CriteriaNode
+        val deckNode = state.nodes[2] as ProductDeckNode
+        val decisionNode = state.nodes[3] as FinalDecisionNode
+        assertEquals(listOf("msg_user", "criteria_1", "deck_1", "decision_1"), state.nodes.map { it.key })
+        assertEquals("油皮洁面，200 元以内", criteriaNode.payload.criteria.summary)
+        assertEquals("turn_1", criteriaNode.turnId)
+        assertEquals("deck_1", deckNode.deckId)
+        assertEquals(listOf("p_beauty_001"), deckNode.products.map { it.product.productId })
+        assertEquals("turn_1", deckNode.turnId)
+        assertEquals("p_beauty_001", decisionNode.payload.winnerProductId)
+        assertEquals("deck_1", decisionNode.deckId)
+    }
+
+    @Test
     fun restoredSessionStateClearsRuntimeOnlyState() {
         val state = restoredSessionState(
             sessionId = "sess_empty",
@@ -82,6 +177,9 @@ private fun persistedMessage(
     content: String,
     createdAtMs: Long,
     turnId: String? = null,
+    nodeType: String? = null,
+    payloadJson: String? = null,
+    deckId: String? = null,
 ): PersistedChatMessage =
     PersistedChatMessage(
         messageId = messageId,
@@ -89,5 +187,8 @@ private fun persistedMessage(
         turnId = turnId,
         role = role,
         content = content,
+        nodeType = nodeType,
+        payloadJson = payloadJson,
+        deckId = deckId,
         createdAtMs = createdAtMs,
     )

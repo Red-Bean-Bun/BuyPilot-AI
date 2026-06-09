@@ -1388,6 +1388,7 @@ class ChatViewModel @Inject constructor(
                     presentationTurnId = presentationTurnId,
                 )
             }
+            persistRestorableChatNodes(presentationTurnId)
             return
         }
 
@@ -2023,10 +2024,8 @@ class ChatViewModel @Inject constructor(
     private fun applyEnvelope(envelope: AgentUiEnvelope<AgentPayload>) {
         _uiState.update { ChatReducer.reduce(it, envelope) }
         val stateAfterApply = _uiState.value
-        if (envelope.event == AgentEventType.Done ||
-            ((envelope.payload as? TextDeltaPayload)?.done == true)
-        ) {
-            persistCompletedAssistantMessages(
+        if (envelope.shouldPersistRestorableChatNodes()) {
+            persistRestorableChatNodes(
                 envelope.turnId.takeIf { it.isNotBlank() }
                     ?: stateAfterApply.currentTurnId.orEmpty(),
             )
@@ -2082,11 +2081,11 @@ class ChatViewModel @Inject constructor(
         drainPendingConvergenceIfReady(readyDeckId)
     }
 
-    private fun persistCompletedAssistantMessages(turnId: String) {
+    private fun persistRestorableChatNodes(turnId: String) {
         if (BuildConfig.USE_MOCK_CHAT) return
         val state = _uiState.value
         val sessionId = state.sessionId ?: return
-        val nodes = completedAssistantMessagesForPersistence(
+        val nodes = restorableChatNodesForPersistence(
             state = state,
             turnId = turnId,
             persistedMessageKeys = persistedAssistantMessageKeys,
@@ -2095,22 +2094,47 @@ class ChatViewModel @Inject constructor(
 
         val nowMs = System.currentTimeMillis()
         nodes.forEachIndexed { index, node ->
-            persistedAssistantMessageKeys += node.key
+            val wasPersisted = node.messageId in persistedAssistantMessageKeys
+            persistedAssistantMessageKeys += node.messageId
             viewModelScope.launch {
                 runCatching {
-                    chatRepository.recordAssistantMessage(
-                        sessionId = sessionId,
-                        messageId = node.key,
-                        turnId = node.turnId.ifBlank { turnId },
-                        content = node.content,
-                        nowMs = nowMs + index,
-                    )
+                    if (node.nodeType == RestorableNodeTypeAssistantText) {
+                        chatRepository.recordAssistantMessage(
+                            sessionId = sessionId,
+                            messageId = node.messageId,
+                            turnId = node.turnId?.takeIf { it.isNotBlank() } ?: turnId,
+                            content = node.content,
+                            nowMs = nowMs + index,
+                        )
+                    } else {
+                        chatRepository.recordAssistantStructuredNode(
+                            sessionId = sessionId,
+                            messageId = node.messageId,
+                            turnId = node.turnId?.takeIf { it.isNotBlank() } ?: turnId,
+                            nodeType = node.nodeType,
+                            payloadJson = node.payloadJson.orEmpty(),
+                            deckId = node.deckId,
+                            content = node.content,
+                            nowMs = nowMs + index,
+                        )
+                    }
                 }.onFailure {
-                    persistedAssistantMessageKeys -= node.key
+                    if (!wasPersisted) {
+                        persistedAssistantMessageKeys -= node.messageId
+                    }
                 }
             }
         }
     }
+
+    private fun AgentUiEnvelope<AgentPayload>.shouldPersistRestorableChatNodes(): Boolean =
+        when (event) {
+            AgentEventType.CriteriaCard,
+            AgentEventType.FinalDecision,
+            AgentEventType.Done -> true
+            AgentEventType.TextDelta -> (payload as? TextDeltaPayload)?.done == true
+            else -> false
+        }
 
     private fun drainPendingConvergenceIfReady(deckId: String) {
         val pending = pendingConvergenceRequestsByDeck.remove(deckId) ?: return
