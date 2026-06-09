@@ -22,7 +22,7 @@
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
   <img src="https://img.shields.io/badge/Faithfulness-82%25-green" alt="Faithfulness 82%" />
   <img src="https://img.shields.io/badge/约束满足-89%25-blue" alt="约束满足 89%" />
-  <a href="https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk">
+  <a href="https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk">
     <img src="https://img.shields.io/badge/Download-APK-orange?style=for-the-badge&logo=android" alt="Download APK" />
   </a>
 </p>
@@ -90,7 +90,7 @@
 | **评测报告** | 20 样本 × 15 指标，综合分 78.4% | `make eval` 或查看上方 Dashboard |
 | **端到端验证** | 5 项 smoke checks 全通过 | `make smoke` |
 | **默认 pytest** | 422 passed | `cd backend && uv run pytest -q` |
-| **真机 APK** | 5.7MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk) |
+| **真机 APK** | 6.6MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk) |
 | **Demo 视频** | 4 条路径完整演示 | 🎬 [观看 Demo 视频](#)（录制后替换链接） |
 
 > `make eval` 是 admin 接口，除 `BAILIAN_API_KEY` 外还必须配置 `ADMIN_API_KEY`；Demo 视频链接暂留占位，录制完成后替换。
@@ -187,7 +187,7 @@
 
 直接安装预编译 APK，零配置体验完整功能：
 
-📦 **[BuyPilot-v0.1.0-release.apk](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v0.1.0/BuyPilot-v0.1.0-release.apk)** (5.7MB)
+📦 **[BuyPilot-v1.1.0-release.apk](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk)** (6.6MB)
 
 - 已内置云端后端地址
 - 支持 Android 8.0+ (API 26+)
