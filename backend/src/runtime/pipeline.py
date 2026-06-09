@@ -20,6 +20,7 @@ from src.services.message_rules import (
     is_compare_phrase,
     is_commercial_claim_question,
     is_replace_deck_phrase,
+    maybe_cart_intent,
     maybe_checkout_intent,
     maybe_intercept_budget_patch,
     maybe_shopping_intent,
@@ -288,7 +289,11 @@ async def _resolve_intent(
     # Only fires when no higher-priority rule has claimed the turn, and
     # only for text-only messages (image uploads carry VL analysis context).
     if synthetic_intent is None and not pipeline_body.image_url and not pipeline_body.criteria_patch:
-        determined = maybe_checkout_intent(pipeline_body.message) or maybe_shopping_intent(pipeline_body.message)
+        determined = (
+            maybe_checkout_intent(pipeline_body.message)
+            or maybe_cart_intent(pipeline_body.message)
+            or maybe_shopping_intent(pipeline_body.message)
+        )
         if determined is not None and determined.intent == "checkout_confirm":
             cart = await get_session_cart(ctx.session_id)
             if cart.total_items == 0:

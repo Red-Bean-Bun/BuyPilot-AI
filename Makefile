@@ -63,6 +63,16 @@ smoke: ## 运行 live RAG smoke test
 health: ## 检查 API 健康状态
 	@curl -sf http://localhost:8000/health | python3 -m json.tool || echo "❌ API 不可达"
 
+eval: ## 触发评测（需要 Docker 已启动）
+	@curl -sf http://localhost:8000/health > /dev/null || \
+		(echo "❌ API 不可达，先运行 make rebuild" && exit 1); \
+	curl -s -X POST "http://localhost:8000/admin/eval/runs" \
+		-H "Authorization: Bearer $$(grep ADMIN_API_KEY .env | cut -d= -f2)" \
+		-H "Content-Type: application/json" \
+		-d '{"strategy_tag": "baseline"}' | python3 -m json.tool; \
+	echo ""; \
+	echo "评测结果: http://localhost:8000/admin/eval/runs"
+
 define DB_STATS_PY
 import asyncio
 from sqlmodel import select, func

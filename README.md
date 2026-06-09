@@ -9,13 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="doc/ui/demo-path-2.gif" alt="BuyPilot Demo - 拍照找货" width="320" />
+  <img src="doc/ui/06-product-recommendation-strip.png" alt="BuyPilot Demo - 商品推荐" width="320" />
+  <br/><sub>4 条 Demo 路径完整演示见下方</sub>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Eval_Score-78%25-blue" alt="综合评测 78%" />
   <img src="https://img.shields.io/badge/Eval-20%2F20-green" alt="Eval 20/20" />
-  <img src="https://img.shields.io/badge/Tests-140%20passed-green" alt="Tests 140 passed" />
+  <img src="https://img.shields.io/badge/Tests-618%20passed-green" alt="Tests 618 passed" />
   <img src="https://img.shields.io/badge/意图准确率-90%25-green" alt="意图准确率 90%" />
   <img src="https://img.shields.io/badge/多轮一致性-100%25-green" alt="多轮一致性 100%" />
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
@@ -50,12 +51,12 @@
 </details>
 
 **核心能力**：
-- **多模态双通道检索**：文本 embedding（1024 维）+ 图像 embedding（512 维），同一向量空间支持图搜文、文搜图
+- **多模态双通道检索**：文本 embedding（1024 维）+ 图像 embedding（1024 维），同一向量空间支持图搜文、文搜图
 - **混合检索**：BM25 关键词召回 + 向量语义召回 + RRF 融合排序 + Cross-Encoder 精排
 - **证据绑定**：每个推荐理由可追溯到原始商品描述/FAQ/评价，点击"看证据"查看原文
 - **多商品对比**：自动提取对比维度（价格/品牌/成分/场景），结构化呈现优劣
 - **对话式交互**：意图澄清、标准生成、推荐解释、购物车管理全链路闭环
-- **工程深度**：140+ 单元测试、三端协议守卫、确定性否定语义解析、决策评分算法
+- **工程深度**：618 单元测试、三端协议守卫、确定性否定语义解析、决策评分算法
 
 ---
 
@@ -68,7 +69,7 @@
 | LLM | **百炼主力 + Doubao 兜底**：Qwen-Turbo 做意图/标准/推荐/决策主力；Qwen-VL-Plus 做图片理解 |
 | 后端 | Python FastAPI + PostgreSQL + pgvector + SQLModel |
 | 流式协议 | SSE（OkHttp SSE 直连 FastAPI `/chat/stream`，10 种事件类型） |
-| Embedding | text-embedding-v3（1024 维，百炼），确定性 fallback 仅用于开发态 |
+| Embedding | text-embedding-v3（1024 维，百炼），强制 live provider（无确定性 fallback） |
 | Rerank | qwen3-rerank（百炼 DashScope API） |
 | 降级策略 | 仅保留 LLM provider fallback；embedding/rerank/retrieval 显性失败；运行时必须使用 PostgreSQL + pgvector |
 | SSE 管道 | async generator stage 模式（推荐文案与检索后台并行） |
@@ -76,7 +77,7 @@
 | 图片上传 | multipart `/upload/image`，本地 jpg + 上传转 data URL 进入 Qwen-VL 多模态理解 |
 | 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/retrieval_traces/evidence_links 等 |
 
-完整决策记录 → [doc/decisions/](doc/decisions/) · 设计决策 → [design-decisions.md](design-decisions.md)
+完整决策记录 → [doc/decisions/](doc/decisions/) · 设计决策 → [design-decisions.md](design-decisions.md)（模型策略以 CLAUDE.md 和 llm_profiles.yaml 为准）
 
 ---
 
@@ -125,7 +126,7 @@ make rebuild
 
 # 3) 验证
 make db-stats     # products:100, chunks:1292, image_embeddings:100
-make smoke        # All 6 demo scenarios passed
+make smoke        # All 5 smoke checks passed
 ```
 
 详细部署指南 → [Android 编译 SOP](doc/dev/android-build-sop.md)
@@ -170,6 +171,7 @@ image_embeddings: 100
 make rebuild       # 重建镜像并启动（首次 2-5 分钟）
 make db-stats      # 查看数据库统计（products:100, chunks:1292, image_embeddings:100）
 make smoke         # 运行端到端验证（JSON 格式，每个 check 一行）
+make eval          # 触发评测并查看结果
 ```
 
 <details>
@@ -201,7 +203,7 @@ backend/
 │   ├── types/               # DTO、SSE 事件定义、Schema
 │   ├── config/              # settings + llm_profiles.yaml + domain_terms
 │   └── middleware/          # 请求上下文中间件
-├── prompts/                 # 运行时 Prompt 模板（7 个 .md，PromptStore 加载）
+├── prompts/                 # 运行时 Prompt 模板（12 个 .md，PromptStore 加载）
 └── tests/                   # 按层对应的测试 + fixtures/
 ```
 
@@ -241,8 +243,6 @@ android/
 │   ├── auto-deploy.sh               # 生产 CD 脚本（cron 驱动）
 │   └── check_sse_protocol.py        # SSE 协议一致性检查
 │
-├── dist/                        # 编译产物
-│   └── BuyPilot-v0.1.0-release.apk  # 预编译 APK（公网后端）
 │
 ├── doc/                         # 文档层
 │   ├── strategy/                    # 战略与决策
@@ -294,7 +294,6 @@ flowchart TB
 
     subgraph Repo["存储层"]
         E1[(PostgreSQL<br/>+ pgvector)]
-        E2[(SQLite<br/>开发态)]
         E3[商品数据<br/>100 条 × 4 品类]
     end
 
@@ -304,8 +303,8 @@ flowchart TB
         F3[criteria_card]
         F4[text_delta]
         F5[product_card]
-        F6[compare_card]
-        F7[cart_action]
+        F6[cart_action]
+        F7[compare_card]
         F8[final_decision]
         F9[done]
         F10[error]
@@ -317,12 +316,12 @@ flowchart TB
     C2 --> C3
     C3 --> C4
     C4 --> C5
-    C5 --> F1 & F2 & F3 & F4 & F5 & F6 & F7 & F8 & F9 & F10
+    C1 & C2 & C3 & C4 & C5 --> F1 & F2 & F3 & F4 & F5 & F6 & F7 & F8 & F9 & F10
 
     C1 & C2 & C4 & C5 --> D1
     C3 --> D2
     D2 --> D3 & D4
-    D1 & D5 --> E1 & E2
+    D1 & D5 --> E1
     D2 --> E3
 
     F1 & F2 & F3 & F4 & F5 & F6 & F7 & F8 & F9 & F10 --> A
@@ -338,7 +337,7 @@ flowchart TB
     class B1,B2,B3 api
     class C1,C2,C3,C4,C5 runtime
     class D1,D2,D3,D4,D5 service
-    class E1,E2,E3 repo
+    class E1,E3 repo
     class F1,F2,F3,F4,F5,F6,F7,F8,F9,F10 sse
 ```
 
@@ -388,7 +387,7 @@ uv run -m src.scripts.smoke_live_rag
 - **分层依赖**：API → Runtime → Service → Repo → Config/Types（禁止反向依赖）
 - **SSE 协议**：修改事件类型必须三端对齐（Schema → Python → Kotlin）
 - **LLM 调用**：必须通过 task-oriented interface，禁止在 Runtime 层直接调用 SDK
-- **数据库**：运行时必须使用 PostgreSQL + pgvector，SQLite 仅用于 pytest 隔离测试
+- **数据库**：运行时必须使用 PostgreSQL + pgvector
 
 详见 `CLAUDE.md`。
 

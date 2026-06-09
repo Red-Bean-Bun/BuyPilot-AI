@@ -478,6 +478,70 @@ def maybe_shopping_intent(message: str) -> IntentResult | None:
     return None
 
 
+# ── Cart / Recommend intent fast-route markers ───────────────────────────
+# Ordered by priority: precise cart operations > exclusion-based recommend >
+# generic recommend (short messages only to avoid false positives).
+#
+# Known limitation: "去掉/删掉/移除" are ambiguous in Chinese — they can mean
+# "remove from cart" ("这个去掉") or "exclude from search" ("去掉含酒精的").
+# We guard against the latter by checking that the keyword is NOT immediately
+# followed by a constraint word (含/超过/低于/所有/全部).
+_CART_ADD_MARKERS = ("加入购物车", "加购", "都买", "都要", "全要")
+_CART_REMOVE_UNAMBIGUOUS = ("不要了",)  # always safe: "不要了" ≠ "不要含"
+_CART_REMOVE_AMBIGUOUS = ("去掉", "删掉", "移除")  # need constraint guard
+_CART_VIEW_MARKERS = ("看看购物车", "购物车里有什么", "我的购物车", "打开购物车")
+_RECOMMEND_EXCLUDE_MARKERS = ("不要含", "不含", "除了", "避开")
+_RECOMMEND_FAST_MARKERS = ("推荐", "有没有", "帮我找", "帮我选")
+# If an ambiguous remove keyword is followed by any of these, it's an
+# exclusion constraint, not a cart operation.
+_CONSTRAINT_AFTER_REMOVE = ("含", "超过", "低于", "所有", "全部", "的", "品牌")
+
+
+def maybe_cart_intent(message: str) -> IntentResult | None:
+    """Deterministic cart / recommend intent pre-check.
+
+    Returns an IntentResult for unambiguous cart actions or recommendation
+    signals, or None to fall through to the LLM intent classifier.
+
+    Priority: cart_remove > cart_add > cart_view > recommend_exclude > recommend
+    """
+    text = message.strip()
+    # P0: cart item removal (must precede exclusion detection — "不要了" ≠ "不要含")
+    # P0a: unambiguous remove markers — always safe
+    for kw in _CART_REMOVE_UNAMBIGUOUS:
+        if kw in text:
+            return IntentResult(intent="remove_from_cart", confidence=1.0)
+    # P0b: ambiguous remove markers — guard against "去掉含酒精的" (exclusion)
+    for kw in _CART_REMOVE_AMBIGUOUS:
+        idx = text.find(kw)
+        if idx == -1:
+            continue
+        # Check if the keyword is followed by a constraint word
+        after = text[idx + len(kw):].strip()
+        is_exclusion = any(after.startswith(c) for c in _CONSTRAINT_AFTER_REMOVE)
+        if not is_exclusion:
+            return IntentResult(intent="remove_from_cart", confidence=1.0)
+    # P1: cart add
+    for kw in _CART_ADD_MARKERS:
+        if kw in text:
+            return IntentResult(intent="add_to_cart", confidence=1.0)
+    # P2: cart view
+    for kw in _CART_VIEW_MARKERS:
+        if kw in text:
+            return IntentResult(intent="view_cart", confidence=1.0)
+    # P3: recommendation with explicit exclusion constraint
+    for kw in _RECOMMEND_EXCLUDE_MARKERS:
+        if kw in text:
+            return IntentResult(intent="recommend", confidence=1.0)
+    # P4: generic recommendation — only for short messages (≤30 chars)
+    #     to avoid misclassifying complex messages that mention "推荐" in passing.
+    if len(text) <= 30:
+        for kw in _RECOMMEND_FAST_MARKERS:
+            if kw in text:
+                return IntentResult(intent="recommend", confidence=1.0)
+    return None
+
+
 def has_shopping_signal(message: str) -> bool:
     """True when the message contains strong shopping-intent signals.
 

@@ -163,3 +163,75 @@ class TestExtractAdjustmentHints:
         """'不要' + stopword prefix is filtered out."""
         result = extract_adjustment_hints("不要太贵")
         assert "ingredient_avoid" not in result
+
+
+# ── maybe_cart_intent ──────────────────────────────────────────────────
+
+from src.services.message_rules import maybe_cart_intent
+
+
+class TestMaybeCartIntent:
+    """Direct tests for deterministic cart/recommend intent fast-route (铁律5)."""
+
+    def test_add_to_cart(self):
+        r = maybe_cart_intent("加购第二个")
+        assert r is not None
+        assert r.intent == "add_to_cart"
+        assert r.confidence == 1.0
+
+    def test_remove_unambiguous(self):
+        """'不要了' is always a cart remove signal."""
+        r = maybe_cart_intent("这个不要了")
+        assert r is not None
+        assert r.intent == "remove_from_cart"
+
+    def test_remove_ambiguous_safe(self):
+        """'删掉这个' without constraint context is a cart action."""
+        r = maybe_cart_intent("删掉这个")
+        assert r is not None
+        assert r.intent == "remove_from_cart"
+
+    def test_remove_ambiguous_blocked_by_constraint(self):
+        """'去掉含酒精的防晒霜' is an exclusion, not a cart removal."""
+        r = maybe_cart_intent("去掉含酒精的防晒霜")
+        # Should NOT be remove_from_cart — the constraint guard blocks it.
+        # Falls through to recommend_exclude ("含" in "含酒精").
+        assert r is None or r.intent != "remove_from_cart"
+
+    def test_remove_ambiguous_blocked_by_brand_constraint(self):
+        """'移除所有日系品牌' is an exclusion."""
+        r = maybe_cart_intent("移除所有日系品牌")
+        assert r is None or r.intent != "remove_from_cart"
+
+    def test_exclusion_recommend(self):
+        r = maybe_cart_intent("不要含酒精的防晒霜")
+        assert r is not None
+        assert r.intent == "recommend"
+
+    def test_short_recommend(self):
+        r = maybe_cart_intent("推荐一款面霜")
+        assert r is not None
+        assert r.intent == "recommend"
+
+    def test_medium_recommend_passes_p4(self):
+        """25-char message with '推荐' triggers P4 recommend (≤30 chars)."""
+        r = maybe_cart_intent("推荐一款适合油皮的洗面奶，200元以内，日常护肤用")
+        assert r is not None
+        assert r.intent == "recommend"
+
+    def test_long_recommend_skips_p4(self):
+        """Messages >30 chars skip generic recommend to avoid false positives."""
+        r = maybe_cart_intent(
+            "我朋友前几天强烈推荐我买这款氨基酸洗面奶试一下控油效果怎么样呢"
+        )
+        assert r is None
+
+    def test_view_cart(self):
+        r = maybe_cart_intent("看看购物车里有什么")
+        assert r is not None
+        assert r.intent == "view_cart"
+
+    def test_non_shopping_passes_through(self):
+        """Non-shopping messages return None → LLM handles them."""
+        r = maybe_cart_intent("你好")
+        assert r is None

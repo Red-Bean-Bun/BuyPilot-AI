@@ -58,6 +58,7 @@ from src.services.fallbacks import get_fallback_events, record_fallback
 from src.services.feedback import get_feedback_context, record_feedback
 from src.services.recommendation_reasons import build_reason_atoms, fetch_risk_notes_for_products, reason_from_atoms
 from src.services.retriever import filter_products
+from src.services.grounding_guard import validate_price_claims
 from src.services.trace_recorder import record_evidence_links, record_retrieval_trace
 from src.types.schemas import ChatStreamRequest, DecisionNextStep, DecisionResult, IntentResult
 from src.types.sse_events import (
@@ -746,6 +747,28 @@ async def continue_recommendation_from_criteria(
             error_type=type(exc).__name__,
         )
         logger.warning("Recommendation stream text failed; continuing with product cards.", exc_info=True)
+
+    # GroundingGuard: validate that LLM-generated prices exist in the product DB.
+    # Runs post-stream (text already sent to client) — emits a correction notice
+    # if any price figure is not in the product/SKU/user-budget whitelist.
+    if captured_turn_text_parts and products:
+        full_text = "".join(captured_turn_text_parts)
+        correction = validate_price_claims(
+            full_text,
+            products,
+            budget_max=criteria.constraints.budget_max,
+            budget_min=criteria.constraints.budget_min,
+        )
+        if correction:
+            async for event in stream_text(
+                ctx,
+                correction,
+                message_id=f"guard_{ctx.turn_id}",
+                node_id=f"guard_{ctx.turn_id}",
+            ):
+                if isinstance(event, TextDeltaEvent):
+                    captured_turn_text_parts.append(event.delta)
+                yield event
 
     # Step 2: criteria_card as post-hoc filter adjustment card
     if not is_scenario_flow:
