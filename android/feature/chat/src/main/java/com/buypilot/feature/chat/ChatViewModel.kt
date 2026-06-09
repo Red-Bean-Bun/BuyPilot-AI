@@ -324,6 +324,7 @@ class ChatViewModel @Inject constructor(
     private val pendingConvergenceRequestsByDeck = mutableMapOf<String, PendingConvergenceRequest>()
     private val backendReadyDeckIds = mutableSetOf<String>()
     private val pendingProductDetailIds = mutableSetOf<String>()
+    private val persistedAssistantMessageKeys = mutableSetOf<String>()
     private var nextSendFromEditResubmit = false
 
     // ── TTS ─────────────────────────────────────────────────────────
@@ -1107,7 +1108,7 @@ class ChatViewModel @Inject constructor(
     fun restoreSession(sessionId: String) {
         if (sessionId.isBlank() || _uiState.value.isStreaming) return
         viewModelScope.launch {
-            val restoredMessages = runCatching { chatRepository.restoreUserMessages(sessionId) }
+            val restoredMessages = runCatching { chatRepository.restoreChatMessages(sessionId) }
                 .getOrElse { throwable ->
                     _uiState.update {
                         it.copy(lastError = throwable.message ?: "会话恢复失败")
@@ -1115,7 +1116,14 @@ class ChatViewModel @Inject constructor(
                     return@launch
                 }
             val keepTtsEnabled = _uiState.value.ttsEnabled
+            val restoredAssistantMessageKeys = restoredMessages
+                .asSequence()
+                .filter { it.role.equals("assistant", ignoreCase = true) }
+                .map { it.messageId }
+                .filter { it.isNotBlank() }
+                .toSet()
             clearRuntimeState()
+            persistedAssistantMessageKeys += restoredAssistantMessageKeys
             _uiState.value = restoredSessionState(
                 sessionId = sessionId,
                 messages = restoredMessages,
@@ -1138,6 +1146,7 @@ class ChatViewModel @Inject constructor(
         convergenceJobsByDeck.clear()
         pendingConvergenceRequestsByDeck.clear()
         backendReadyDeckIds.clear()
+        persistedAssistantMessageKeys.clear()
         pendingProductDetailIds.clear()
         ttsManager.stop()
         ttsSentenceBuffer.clear()
@@ -1998,6 +2007,15 @@ class ChatViewModel @Inject constructor(
 
     private fun applyEnvelope(envelope: AgentUiEnvelope<AgentPayload>) {
         _uiState.update { ChatReducer.reduce(it, envelope) }
+        val stateAfterApply = _uiState.value
+        if (envelope.event == AgentEventType.Done ||
+            ((envelope.payload as? TextDeltaPayload)?.done == true)
+        ) {
+            persistCompletedAssistantMessages(
+                envelope.turnId.takeIf { it.isNotBlank() }
+                    ?: stateAfterApply.currentTurnId.orEmpty(),
+            )
+        }
 
         // ── TTS trigger ───────────────────────────────────────────
         if (_uiState.value.ttsEnabled) {
@@ -2047,6 +2065,36 @@ class ChatViewModel @Inject constructor(
         backendReadyDeckIds += readyDeckId
         logConvergence { "backend ready deck=$readyDeckId pending=${readyDeckId in pendingConvergenceRequestsByDeck}" }
         drainPendingConvergenceIfReady(readyDeckId)
+    }
+
+    private fun persistCompletedAssistantMessages(turnId: String) {
+        if (BuildConfig.USE_MOCK_CHAT) return
+        val state = _uiState.value
+        val sessionId = state.sessionId ?: return
+        val nodes = completedAssistantMessagesForPersistence(
+            state = state,
+            turnId = turnId,
+            persistedMessageKeys = persistedAssistantMessageKeys,
+        )
+        if (nodes.isEmpty()) return
+
+        val nowMs = System.currentTimeMillis()
+        nodes.forEachIndexed { index, node ->
+            persistedAssistantMessageKeys += node.key
+            viewModelScope.launch {
+                runCatching {
+                    chatRepository.recordAssistantMessage(
+                        sessionId = sessionId,
+                        messageId = node.key,
+                        turnId = node.turnId.ifBlank { turnId },
+                        content = node.content,
+                        nowMs = nowMs + index,
+                    )
+                }.onFailure {
+                    persistedAssistantMessageKeys -= node.key
+                }
+            }
+        }
     }
 
     private fun drainPendingConvergenceIfReady(deckId: String) {

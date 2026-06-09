@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="BuyPilot Logo" width="280" />
+  <img src="doc/ui/brand/redbean-bun-mascot/logo.png" alt="BuyPilot Logo" width="280" />
 </p>
 
 <h1 align="center">BuyPilot-AI</h1>

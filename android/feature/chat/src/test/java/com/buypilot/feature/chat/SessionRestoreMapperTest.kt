@@ -1,6 +1,7 @@
 package com.buypilot.feature.chat
 
 import com.buypilot.core.data.PersistedChatMessage
+import com.buypilot.feature.chat.model.AiStreamNode
 import com.buypilot.feature.chat.model.UserMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -8,7 +9,7 @@ import org.junit.Test
 
 class SessionRestoreMapperTest {
     @Test
-    fun restoredSessionStateKeepsOnlyUserTextMessages() {
+    fun restoredSessionStateKeepsUserAndAssistantTextMessages() {
         val state = restoredSessionState(
             sessionId = "sess_restore",
             messages = listOf(
@@ -21,8 +22,9 @@ class SessionRestoreMapperTest {
                 persistedMessage(
                     messageId = "msg_assistant",
                     role = "assistant",
-                    content = "v1 不恢复 assistant 文本",
+                    content = "助手回复内容",
                     createdAtMs = 200,
+                    turnId = "turn_1",
                 ),
                 persistedMessage(
                     messageId = "msg_user_2",
@@ -37,9 +39,15 @@ class SessionRestoreMapperTest {
         )
 
         val userNodes = state.nodes.filterIsInstance<UserMessageNode>()
+        val assistantNodes = state.nodes.filterIsInstance<AiStreamNode>()
         assertEquals("sess_restore", state.sessionId)
+        assertEquals(listOf("msg_user_1", "msg_assistant", "msg_user_2"), state.nodes.map { it.key })
         assertEquals(listOf("msg_user_1", "msg_user_2"), userNodes.map { it.key })
         assertEquals(listOf("先发的需求", "后发的预算"), userNodes.map { it.content })
+        assertEquals(listOf("msg_assistant"), assistantNodes.map { it.key })
+        assertEquals(listOf("助手回复内容"), assistantNodes.map { it.content })
+        assertEquals(listOf(true), assistantNodes.map { it.done })
+        assertEquals(listOf("turn_1"), assistantNodes.map { it.turnId })
         assertEquals("后发的预算", state.lastUserMessage)
         assertEquals("msg_user_2", state.lastUserMessageKey)
         assertEquals("http://127.0.0.1:8000", state.backendBaseUrl)
@@ -73,11 +81,12 @@ private fun persistedMessage(
     role: String,
     content: String,
     createdAtMs: Long,
+    turnId: String? = null,
 ): PersistedChatMessage =
     PersistedChatMessage(
         messageId = messageId,
         sessionId = "sess_restore",
-        turnId = null,
+        turnId = turnId,
         role = role,
         content = content,
         createdAtMs = createdAtMs,

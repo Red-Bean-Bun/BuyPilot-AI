@@ -89,6 +89,11 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                                         scope.launch { drawerState.close() }
                                     }
                                 },
+                                onSessionPinToggled = { sessionId ->
+                                    if (!uiState.isStreaming) {
+                                        historyViewModel.togglePinnedSession(sessionId)
+                                    }
+                                },
                                 onSessionDeleted = { sessionId ->
                                     if (!uiState.isStreaming) {
                                         historyViewModel.deleteSession(sessionId)

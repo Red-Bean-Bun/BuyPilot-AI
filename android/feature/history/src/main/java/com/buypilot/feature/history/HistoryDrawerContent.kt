@@ -5,11 +5,15 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,27 +30,30 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.buypilot.core.data.SessionSummary
@@ -59,11 +66,11 @@ private val DrawerPrimarySoft = Color(0xFFFFF0EA)
 private val DrawerSelected = Color(0xFFF0F1F3)
 private val DrawerPrimary = Color(0xFFFF6A3D)
 private val DrawerDelete = Color(0xFFE84C3D)
-private val DrawerDeleteSurface = Color(0xFFFFECE9)
 private val DrawerTextPrimary = Color(0xFF17191D)
 private val DrawerTextSecondary = Color(0xFF4E5561)
 private val DrawerTextMuted = Color(0xFF929BAA)
 private val DrawerRowShape = RoundedCornerShape(15.dp)
+private val DrawerMenuShape = RoundedCornerShape(22.dp)
 
 @Composable
 fun HistoryDrawerContent(
@@ -72,6 +79,7 @@ fun HistoryDrawerContent(
     actionsEnabled: Boolean,
     onNewChat: () -> Unit,
     onSessionSelected: (String) -> Unit,
+    onSessionPinToggled: (String) -> Unit,
     onSessionDeleted: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -164,11 +172,13 @@ fun HistoryDrawerContent(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 items(state.sessions, key = { it.sessionId }) { session ->
-                    SwipeToDeleteSessionRow(
+                    ContextMenuSessionRow(
                         session = session,
                         selected = session.sessionId == currentSessionId,
+                        pinned = session.sessionId in state.pinnedSessionIds,
                         enabled = actionsEnabled,
                         onClick = { onSessionSelected(session.sessionId) },
+                        onPinToggle = { onSessionPinToggled(session.sessionId) },
                         onDelete = { onSessionDeleted(session.sessionId) },
                     )
                 }
@@ -185,22 +195,14 @@ private fun HistoryEmptyState(modifier: Modifier = Modifier) {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(9.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.alpha(0.92f),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(DrawerSurfaceMuted, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.ChatBubbleOutline,
-                    contentDescription = null,
-                    tint = DrawerTextMuted,
-                    modifier = Modifier.size(21.dp),
-                )
-            }
+            Image(
+                painter = painterResource(R.drawable.redbean_bun_character_02),
+                contentDescription = null,
+                modifier = Modifier.size(104.dp),
+            )
             Text(
                 text = stringResource(R.string.history_empty_title),
                 color = DrawerTextPrimary,
@@ -208,84 +210,117 @@ private fun HistoryEmptyState(modifier: Modifier = Modifier) {
                 lineHeight = 20.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = stringResource(R.string.history_empty_body),
-                color = DrawerTextMuted,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-            )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwipeToDeleteSessionRow(
+private fun ContextMenuSessionRow(
     session: SessionSummary,
     selected: Boolean,
+    pinned: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    onPinToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (enabled && value == SwipeToDismissBoxValue.EndToStart) {
-                onDelete()
-                true
-            } else {
-                false
-            }
-        },
-        positionalThreshold = { distance -> distance * 0.32f },
-    )
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = enabled,
-        backgroundContent = {
-            DeleteSessionBackground(enabled = enabled)
-        },
-        content = {
-            HistorySessionRow(
-                session = session,
-                selected = selected,
+    var menuExpanded by remember(session.sessionId) { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        HistorySessionRow(
+            session = session,
+            selected = selected,
+            pinned = pinned,
+            enabled = enabled,
+            modifier = Modifier.combinedClickable(
                 enabled = enabled,
+                role = Role.Button,
                 onClick = onClick,
-            )
-        },
-    )
+                onLongClick = { menuExpanded = true },
+            ),
+        )
+        HistorySessionMenu(
+            expanded = menuExpanded,
+            pinned = pinned,
+            onDismiss = { menuExpanded = false },
+            onPinToggle = {
+                menuExpanded = false
+                onPinToggle()
+            },
+            onDelete = {
+                menuExpanded = false
+                onDelete()
+            },
+        )
+    }
 }
 
 @Composable
-private fun DeleteSessionBackground(enabled: Boolean) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(58.dp)
-            .clip(DrawerRowShape)
-            .background(DrawerDeleteSurface)
-            .alpha(if (enabled) 1f else 0.42f)
-            .padding(horizontal = 18.dp),
-        contentAlignment = Alignment.CenterEnd,
+private fun HistorySessionMenu(
+    expanded: Boolean,
+    pinned: Boolean,
+    onDismiss: () -> Unit,
+    onPinToggle: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        offset = DpOffset(x = 26.dp, y = (-4).dp),
+        containerColor = DrawerSurface,
+        tonalElevation = 0.dp,
+        shadowElevation = 14.dp,
+        shape = DrawerMenuShape,
+        modifier = Modifier.width(218.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.DeleteOutline,
-                contentDescription = stringResource(R.string.history_delete_desc),
-                tint = DrawerDelete,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(
-                text = stringResource(R.string.history_delete_session),
-                color = DrawerDelete,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = stringResource(
+                        if (pinned) {
+                            R.string.history_unpin_session
+                        } else {
+                            R.string.history_pin_session
+                        },
+                    ),
+                    color = DrawerTextPrimary,
+                    fontSize = 17.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.PushPin,
+                    contentDescription = null,
+                    tint = DrawerTextSecondary,
+                    modifier = Modifier.size(22.dp),
+                )
+            },
+            onClick = onPinToggle,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = stringResource(R.string.history_delete_session),
+                    color = DrawerDelete,
+                    fontSize = 17.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.DeleteOutline,
+                    contentDescription = null,
+                    tint = DrawerDelete,
+                    modifier = Modifier.size(22.dp),
+                )
+            },
+            onClick = onDelete,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        )
     }
 }
 
@@ -293,8 +328,9 @@ private fun DeleteSessionBackground(enabled: Boolean) {
 private fun HistorySessionRow(
     session: SessionSummary,
     selected: Boolean,
+    pinned: Boolean,
     enabled: Boolean,
-    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val containerColor by animateColorAsState(
         targetValue = if (selected) DrawerSelected else DrawerSurface,
@@ -318,7 +354,7 @@ private fun HistorySessionRow(
                 alpha = rowAlpha
             }
             .clip(DrawerRowShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .then(modifier),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 18.dp),
@@ -337,6 +373,14 @@ private fun HistorySessionRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            AnimatedVisibility(visible = pinned) {
+                Icon(
+                    imageVector = Icons.Rounded.PushPin,
+                    contentDescription = stringResource(R.string.history_pinned_desc),
+                    tint = DrawerPrimary.copy(alpha = 0.76f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }

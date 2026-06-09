@@ -488,6 +488,45 @@ class ChatReducerTest {
     }
 
     @Test
+    fun blankTurnEventsUseCurrentTurnSoDoneFlushesAllTextSegments() {
+        val withIntro = ChatReducer.reduce(
+            ChatUiState(currentTurnId = "turn_current"),
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "intro_turn_current",
+                turnId = "",
+                payload = TextDeltaPayload(messageId = "intro_turn_current", delta = "开场", done = false),
+            ),
+        )
+        val withFollowup = ChatReducer.reduce(
+            withIntro,
+            envelope(
+                event = AgentEventType.TextDelta,
+                nodeId = "followup_turn_current",
+                turnId = "",
+                payload = TextDeltaPayload(messageId = "followup_turn_current", delta = "追问引导", done = false),
+            ),
+        )
+
+        val state = ChatReducer.reduce(
+            withFollowup,
+            envelope(
+                event = AgentEventType.Done,
+                nodeId = "done",
+                turnId = "",
+                payload = DonePayload(),
+            ),
+        )
+
+        val nodes = state.nodes.filterIsInstance<AiStreamNode>()
+        assertEquals(listOf("intro_turn_current", "followup_turn_current"), nodes.map { it.key })
+        assertEquals(listOf("turn_current", "turn_current"), nodes.map { it.turnId })
+        assertTrue(nodes.all { it.done })
+        assertEquals("turn_current", state.currentTurnId)
+        assertFalse(state.isStreaming)
+    }
+
+    @Test
     fun blankMessageIdUsesNodeIdAsSeparateTextNodeKey() {
         val first = ChatReducer.reduce(
             ChatUiState(),

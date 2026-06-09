@@ -115,10 +115,9 @@ class ChatRepository @Inject constructor(
         )
     }
 
-    suspend fun restoreUserMessages(sessionId: String): List<PersistedChatMessage> {
+    suspend fun restoreChatMessages(sessionId: String): List<PersistedChatMessage> {
         val restored = messageDao.getMessages(sessionId)
             .asSequence()
-            .filter { it.role.equals("user", ignoreCase = true) }
             .map { message ->
                 PersistedChatMessage(
                     messageId = message.messageId,
@@ -143,6 +142,35 @@ class ChatRepository @Inject constructor(
                 role = "user",
                 content = fallbackContent,
                 createdAtMs = legacySession.updatedAtMs,
+            ),
+        )
+    }
+
+    suspend fun recordAssistantMessage(
+        sessionId: String,
+        messageId: String,
+        turnId: String?,
+        content: String,
+        nowMs: Long,
+    ) {
+        val cleanContent = content.trim()
+        if (sessionId.isBlank() || messageId.isBlank() || cleanContent.isBlank()) return
+
+        messageDao.upsert(
+            MessageEntity(
+                messageId = messageId,
+                sessionId = sessionId,
+                turnId = turnId?.takeIf { it.isNotBlank() },
+                role = "assistant",
+                content = cleanContent,
+                createdAtMs = nowMs,
+            ),
+        )
+        val existing = sessionDao.getSession(sessionId) ?: return
+        sessionDao.upsert(
+            existing.copy(
+                lastMessage = cleanContent.take(120),
+                updatedAtMs = maxOf(existing.updatedAtMs, nowMs),
             ),
         )
     }

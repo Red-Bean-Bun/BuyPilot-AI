@@ -67,9 +67,14 @@ object ChatReducer {
         state: ChatUiState,
         envelope: AgentUiEnvelope<AgentPayload>,
     ): ChatUiState {
+        @Suppress("NAME_SHADOWING")
+        val envelope = state.currentTurnId
+            ?.takeIf { it.isNotBlank() && envelope.turnId.isBlank() }
+            ?.let { envelope.copy(turnId = it) }
+            ?: envelope
         val base = state.copy(
             sessionId = state.sessionId ?: envelope.sessionId,
-            currentTurnId = envelope.turnId,
+            currentTurnId = envelope.turnId.takeIf { it.isNotBlank() } ?: state.currentTurnId,
         )
         val contentBase = if (envelope.event.shouldClearTransientThinking(base, envelope.turnId)) {
             base.withoutThinking(envelope.turnId)

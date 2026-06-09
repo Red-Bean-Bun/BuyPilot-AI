@@ -77,7 +77,7 @@ class ChatRepositoryProductDetailTest {
     }
 
     @Test
-    fun restoreUserMessagesReturnsOnlyUserMessagesInTimelineOrder() = runTest {
+    fun restoreChatMessagesReturnsUserAndAssistantMessagesInTimelineOrder() = runTest {
         val repository = testRepository()
 
         InMemoryMessageDao.upsert(
@@ -94,7 +94,7 @@ class ChatRepositoryProductDetailTest {
                 messageId = "msg_assistant",
                 sessionId = "sess_restore",
                 role = "assistant",
-                content = "不会在 v1 恢复",
+                content = "助手回复",
                 createdAtMs = 200,
             ),
         )
@@ -108,14 +108,15 @@ class ChatRepositoryProductDetailTest {
             ),
         )
 
-        val restored = repository.restoreUserMessages("sess_restore")
+        val restored = repository.restoreChatMessages("sess_restore")
 
-        assertEquals(listOf("msg_early", "msg_late"), restored.map { it.messageId })
-        assertEquals(listOf("先发的需求", "后发的需求"), restored.map { it.content })
+        assertEquals(listOf("msg_early", "msg_assistant", "msg_late"), restored.map { it.messageId })
+        assertEquals(listOf("user", "assistant", "user"), restored.map { it.role })
+        assertEquals(listOf("先发的需求", "助手回复", "后发的需求"), restored.map { it.content })
     }
 
     @Test
-    fun restoreUserMessagesFallsBackToSessionLastMessageForLegacyRows() = runTest {
+    fun restoreChatMessagesFallsBackToSessionLastMessageForLegacyRows() = runTest {
         val repository = testRepository()
         InMemorySessionDao.upsert(
             SessionEntity(
@@ -127,10 +128,33 @@ class ChatRepositoryProductDetailTest {
             ),
         )
 
-        val restored = repository.restoreUserMessages("sess_legacy")
+        val restored = repository.restoreChatMessages("sess_legacy")
 
         assertEquals(listOf("legacy_sess_legacy_200"), restored.map { it.messageId })
         assertEquals(listOf("旧会话最后一条"), restored.map { it.content })
+    }
+
+    @Test
+    fun recordAssistantMessagePersistsAssistantTextAndPreservesSessionTitle() = runTest {
+        val repository = testRepository()
+
+        repository.recordUserMessage("sess_assistant", "推荐手机", nowMs = 100)
+        repository.recordAssistantMessage(
+            sessionId = "sess_assistant",
+            messageId = "assistant_1",
+            turnId = "turn_1",
+            content = "可以优先看影像旗舰。",
+            nowMs = 150,
+        )
+
+        val session = InMemorySessionDao.getSession("sess_assistant")!!
+        val messages = InMemoryMessageDao.getMessages("sess_assistant")
+
+        assertEquals("推荐手机", session.title)
+        assertEquals("可以优先看影像旗舰。", session.lastMessage)
+        assertEquals(150, session.updatedAtMs)
+        assertEquals(listOf("user", "assistant"), messages.map { it.role })
+        assertEquals(listOf("推荐手机", "可以优先看影像旗舰。"), messages.map { it.content })
     }
 
     private fun testRepository(productDetailApi: ProductDetailApi = RecordingProductDetailApi()): ChatRepository {

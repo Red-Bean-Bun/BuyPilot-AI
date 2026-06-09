@@ -70,6 +70,12 @@
     <string name="image_remove_desc">移除图片</string>
     <string name="image_preview_desc">图片预览</string>
     <string name="image_preview_close_desc">关闭图片预览</string>
+    <string name="speech_input_unavailable">当前设备没有可用语音输入</string>
+    <string name="speech_input_permission_denied">需要麦克风权限才能语音输入</string>
+    <string name="speech_input_start_desc">开始语音输入</string>
+    <string name="speech_input_stop_desc">停止语音输入</string>
+    <string name="speech_input_send_desc">发送语音输入</string>
+    <string name="speech_waveform_desc">正在语音输入</string>
     <string name="composer_placeholder_clarifying">请回答上面的问题</string>
     <string name="composer_placeholder_streaming">正在生成，可随时停止</string>
     <string name="composer_placeholder_image_uploading">图片上传中...</string>
@@ -99,6 +105,8 @@
     <string name="compare_detail_explain">长证据、商品字段和检索片段用于支撑这些判断，外层表格与雷达只展示摘要。</string>
     <string name="compare_risk_title">风险提醒</string>
     <string name="topbar_history_desc">打开历史对话</string>
+    <string name="topbar_tts_on_desc">语音播报已开启，点击关闭</string>
+    <string name="topbar_tts_off_desc">语音播报已关闭，点击开启</string>
     <string name="topbar_cart_desc">查看购物车</string>
     <string name="composer_focus_desc">聚焦输入框</string>
     <string name="converge_choose_button">帮我选</string>

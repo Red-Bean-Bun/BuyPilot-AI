@@ -1,15 +1,23 @@
 package com.buypilot.feature.chat.ui
 
 import androidx.annotation.DrawableRes
+import android.Manifest
 import android.graphics.Bitmap
 import android.net.Uri
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -159,6 +167,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -176,6 +187,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -189,8 +202,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -198,6 +213,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -265,8 +281,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 internal val MenuEaseOut = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 internal val MenuEaseIn = CubicBezierEasing(0.3f, 0f, 1f, 1f)
@@ -276,8 +294,13 @@ private val ClarificationFlightEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 internal const val ClarificationTargetStableFrames = 3
 internal const val ClarificationTargetMaxSettleFrames = 18
 internal const val ClarificationTargetStableTolerancePx = 1.5f
-private val ProductDetailRevealDistance = 220.dp
+private val ProductDetailCardTopPadding = 418.dp
+private val ProductDetailExpandedTopPadding = 72.dp
+private val ProductDetailPanelHorizontalPadding = 22.dp
+private val ProductDetailImageGestureBottomGap = 18.dp
+private val ProductDetailRevealDistance = ProductDetailCardTopPadding - ProductDetailExpandedTopPadding
 private const val ProductDetailSnapThreshold = 0.36f
+private const val ProductDetailCardSnapMs = 340
 private const val ProductDetailEnterMs = 560
 private val ProductDetailImagePullDistance = 240.dp
 private const val ProductDetailImagePullThreshold = 0.42f
@@ -303,6 +326,9 @@ private val DecisionCompareWhitespaceRegex = Regex("\\s+")
 private val DecisionCompareSplitRegex = Regex("[，,（(]")
 private val TechnicalPathHintRegex = Regex("""\b(?:api|v\d+|chat|stream)\b""")
 private val DecisionRiskLeadingPunctuationRegex = Regex("""^[：:，,、\s]+""")
+private const val VoiceWaveformBarCount = 52
+private const val VoiceWaveformFloor = 0.1f
+private const val VoiceWaveformSettledLevel = 0.24f
 
 private fun productDeckModeSlotHeight(productCount: Int): Dp {
     val visibleCount = productCount.coerceAtMost(6)
@@ -559,6 +585,9 @@ internal fun BuyPilotChatScreen(
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var showAttachmentMenu by rememberSaveable { mutableStateOf(false) }
+    var voiceInputActive by rememberSaveable { mutableStateOf(false) }
+    var voiceTranscript by rememberSaveable { mutableStateOf("") }
+    var voiceLevels by remember { mutableStateOf(seedVoiceWaveformLevels()) }
     var imagePreviewAttachment by rememberSaveable(stateSaver = ChatImageAttachmentStateSaver) {
         mutableStateOf<ChatImageAttachmentState?>(null)
     }
@@ -604,6 +633,15 @@ internal fun BuyPilotChatScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
     val imagePreviewFileName = stringResource(R.string.image_preview_desc)
+    val speechInputUnavailable = stringResource(R.string.speech_input_unavailable)
+    val speechInputPermissionDenied = stringResource(R.string.speech_input_permission_denied)
+    val speechRecognizer = remember(context) {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        } else {
+            null
+        }
+    }
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -616,6 +654,82 @@ internal fun BuyPilotChatScreen(
     ) { bitmap ->
         if (bitmap != null) {
             onImageCaptured(bitmap)
+        }
+    }
+    val voicePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            startInlineVoiceInput(
+                speechRecognizer = speechRecognizer,
+                onUnavailable = {
+                    Toast.makeText(context, speechInputUnavailable, Toast.LENGTH_SHORT).show()
+                },
+                onStart = {
+                    showAttachmentMenu = false
+                    voiceTranscript = ""
+                    voiceLevels = seedVoiceWaveformLevels()
+                    voiceInputActive = true
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                },
+                onFailed = {
+                    voiceInputActive = false
+                    voiceLevels = seedVoiceWaveformLevels()
+                },
+            )
+        } else {
+            Toast.makeText(context, speechInputPermissionDenied, Toast.LENGTH_SHORT).show()
+        }
+    }
+    DisposableEffect(speechRecognizer) {
+        val recognizer = speechRecognizer ?: return@DisposableEffect onDispose {}
+        recognizer.setRecognitionListener(
+            object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    voiceInputActive = true
+                    voiceLevels = seedVoiceWaveformLevels()
+                }
+
+                override fun onBeginningOfSpeech() {
+                    voiceInputActive = true
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {
+                    voiceLevels = nextVoiceWaveformLevels(voiceLevels, rmsdB)
+                }
+
+                override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+                override fun onEndOfSpeech() {
+                    voiceLevels = voiceLevels.map { it.coerceAtLeast(VoiceWaveformSettledLevel) }
+                }
+
+                override fun onError(error: Int) {
+                    if (voiceTranscript.isBlank()) {
+                        voiceInputActive = false
+                        voiceLevels = seedVoiceWaveformLevels()
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    extractSpeechText(results)?.let { voiceTranscript = it }
+                    voiceLevels = voiceLevels.mapIndexed { index, level ->
+                        maxOf(level, VoiceWaveformSettledLevel + ((index % 5) * 0.015f))
+                            .coerceIn(VoiceWaveformFloor, 1f)
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    extractSpeechText(partialResults)?.let { voiceTranscript = it }
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) = Unit
+            },
+        )
+        onDispose {
+            recognizer.cancel()
+            recognizer.destroy()
         }
     }
     val defaultSkinTypeOptions = remember(context, configuration) {
@@ -668,6 +782,10 @@ internal fun BuyPilotChatScreen(
 
         input = ""
         showAttachmentMenu = false
+        voiceInputActive = false
+        voiceTranscript = ""
+        voiceLevels = seedVoiceWaveformLevels()
+        speechRecognizer?.cancel()
         sheetContent = null
         transientState.sheetExiting = false
         transientState.sheetTransitionId += 1
@@ -778,6 +896,10 @@ internal fun BuyPilotChatScreen(
     LaunchedEffect(state.isStreaming) {
         if (state.isStreaming) {
             showAttachmentMenu = false
+            voiceInputActive = false
+            voiceTranscript = ""
+            voiceLevels = seedVoiceWaveformLevels()
+            speechRecognizer?.cancel()
         }
     }
 
@@ -941,6 +1063,85 @@ internal fun BuyPilotChatScreen(
         }
     }
 
+    fun stopVoiceInput(clearTranscript: Boolean = true) {
+        speechRecognizer?.cancel()
+        voiceInputActive = false
+        voiceLevels = seedVoiceWaveformLevels()
+        if (clearTranscript) {
+            voiceTranscript = ""
+        }
+    }
+
+    fun startVoiceInput() {
+        if (state.isStreaming) return
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            startInlineVoiceInput(
+                speechRecognizer = speechRecognizer,
+                onUnavailable = {
+                    Toast.makeText(context, speechInputUnavailable, Toast.LENGTH_SHORT).show()
+                },
+                onStart = {
+                    showAttachmentMenu = false
+                    voiceTranscript = ""
+                    voiceLevels = seedVoiceWaveformLevels()
+                    voiceInputActive = true
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                },
+                onFailed = {
+                    voiceInputActive = false
+                    voiceLevels = seedVoiceWaveformLevels()
+                },
+            )
+        } else {
+            voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    fun submitComposerMessage(message: String) {
+        if (state.isStreaming) {
+            onCancel()
+            return
+        }
+        val next = message.trim()
+        val imageUrl = state.imageAttachment.imageUrl?.takeIf {
+            state.imageAttachment.canSend
+        }
+        if (next.isNotEmpty() || imageUrl != null) {
+            if (activeClarificationKey != null) {
+                val keyboardSnapshot = if (
+                    imeBottomPx > 0 &&
+                    transientState.rootSize.width > 0 &&
+                    transientState.rootSize.height > imeBottomPx
+                ) {
+                    ClarificationChipSnapshot(
+                        position = Offset(0f, transientState.rootSize.height - imeBottomPx.toFloat()),
+                        size = Size(transientState.rootSize.width.toFloat(), imeBottomPx.toFloat()),
+                    )
+                } else {
+                    null
+                }
+                val manualSnapshot = transientState.clarificationManualSource
+                    ?.takeIf { it.nodeKey == activeClarificationKey }
+                    ?.let { keyboardSnapshot ?: transientState.keyboardFlightSnapshot ?: it.snapshot }
+                    ?: keyboardSnapshot
+                    ?: transientState.keyboardFlightSnapshot
+                answerClarification(next, manualSnapshot = manualSnapshot)
+            } else {
+                sendAndClear(next, imageUrl)
+            }
+        }
+    }
+
+    fun submitVoiceInput() {
+        val next = mergeSpeechInput(current = input, spoken = voiceTranscript)
+        stopVoiceInput(clearTranscript = true)
+        submitComposerMessage(next)
+    }
+
     BackHandler(enabled = transientState.compareDetailPayload != null || sheetContent != null || transientState.composerFocused) {
         when {
             transientState.compareDetailPayload != null -> transientState.compareDetailPayload = null
@@ -960,7 +1161,9 @@ internal fun BuyPilotChatScreen(
                 centered = timelinePresentation.hasNodes,
                 showCartAction = timelinePresentation.hasNodes,
                 cartCount = state.cartState.totalItems,
+                ttsEnabled = ttsEnabled,
                 onHistoryOpen = onHistoryOpen,
+                onTtsToggle = onTtsToggle,
                 onCartOpen = {
                     onCartOpen()
                     openSheet(ChatSheetContent.Cart)
@@ -1102,8 +1305,6 @@ internal fun BuyPilotChatScreen(
                             showAttachmentMenu = false
                             cameraLauncher.launch(null)
                         },
-                        ttsEnabled = ttsEnabled,
-                        onTtsToggle = onTtsToggle,
                     )
                 }
             }
@@ -1119,6 +1320,9 @@ internal fun BuyPilotChatScreen(
             isTextRevealing = assistantVisualActive,
             awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
+            voiceInputActive = voiceInputActive,
+            voiceTranscript = voiceTranscript,
+            voiceInputLevels = voiceLevels,
             imageAttachment = state.imageAttachment,
             focusRequester = composerFocusRequester,
             modifier = Modifier
@@ -1142,39 +1346,13 @@ internal fun BuyPilotChatScreen(
             },
             onRemoveImage = onClearImageAttachment,
             onPreviewImage = { imagePreviewAttachment = state.imageAttachment },
+            onVoiceInputClick = {
+                startVoiceInput()
+            },
+            onVoiceCancel = { stopVoiceInput(clearTranscript = true) },
+            onVoiceSubmit = { submitVoiceInput() },
             onSubmit = {
-                if (state.isStreaming) {
-                    onCancel()
-                    return@BottomComposer
-                }
-                val next = input.trim()
-                val imageUrl = state.imageAttachment.imageUrl?.takeIf {
-                    state.imageAttachment.canSend
-                }
-                if (next.isNotEmpty() || imageUrl != null) {
-                    if (activeClarificationKey != null) {
-                        val keyboardSnapshot = if (
-                            imeBottomPx > 0 &&
-                            transientState.rootSize.width > 0 &&
-                            transientState.rootSize.height > imeBottomPx
-                        ) {
-                            ClarificationChipSnapshot(
-                                position = Offset(0f, transientState.rootSize.height - imeBottomPx.toFloat()),
-                                size = Size(transientState.rootSize.width.toFloat(), imeBottomPx.toFloat()),
-                            )
-                        } else {
-                            null
-                        }
-                        val manualSnapshot = transientState.clarificationManualSource
-                            ?.takeIf { it.nodeKey == activeClarificationKey }
-                            ?.let { keyboardSnapshot ?: transientState.keyboardFlightSnapshot ?: it.snapshot }
-                            ?: keyboardSnapshot
-                            ?: transientState.keyboardFlightSnapshot
-                        answerClarification(next, manualSnapshot = manualSnapshot)
-                    } else {
-                        sendAndClear(next, imageUrl)
-                    }
-                }
+                submitComposerMessage(input)
             },
         )
 
@@ -1543,7 +1721,9 @@ private fun TopBar(
     centered: Boolean,
     showCartAction: Boolean,
     cartCount: Int,
+    ttsEnabled: Boolean,
     onHistoryOpen: () -> Unit,
+    onTtsToggle: () -> Unit,
     onCartOpen: () -> Unit,
 ) {
     Column(
@@ -1555,15 +1735,29 @@ private fun TopBar(
         M3TopAppBarRow(
             title = if (centered) "BuyPilot AI" else "BuyPilot",
             titleCentered = true,
-            navigationIcon = R.drawable.ic_chat_history_24,
+            navigationIcon = R.drawable.ic_menu_24,
             navigationDescription = stringResource(R.string.topbar_history_desc),
             navigationTint = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
             secondaryActionIcon = R.drawable.ic_shopping_bag_24.takeIf { showCartAction },
             secondaryActionDescription = stringResource(R.string.topbar_cart_desc),
             secondaryActionTint = BuyPilotColors.TextSecondary.copy(alpha = 0.82f),
             secondaryBadge = cartCount.takeIf { it > 0 }?.coerceAtMost(99)?.toString(),
+            actionIcon = if (ttsEnabled) R.drawable.ic_volume_up_24 else R.drawable.ic_volume_off_24,
+            actionDescription = stringResource(
+                if (ttsEnabled) {
+                    R.string.topbar_tts_on_desc
+                } else {
+                    R.string.topbar_tts_off_desc
+                },
+            ),
+            actionTint = if (ttsEnabled) {
+                BuyPilotColors.PrimaryDark
+            } else {
+                BuyPilotColors.TextSecondary.copy(alpha = 0.72f)
+            },
             onNavigationClick = onHistoryOpen,
             onSecondaryActionClick = onCartOpen,
+            onActionClick = onTtsToggle,
         )
         HorizontalDivider(thickness = 1.dp, color = BuyPilotColors.Border.copy(alpha = 0.46f))
     }
@@ -1577,6 +1771,11 @@ internal fun M3TopAppBarRow(
     navigationIcon: Int? = null,
     navigationDescription: String? = null,
     navigationTint: Color = BuyPilotColors.TextPrimary,
+    leadingActionIcon: Int? = null,
+    leadingActionDescription: String? = null,
+    leadingActionTint: Color = BuyPilotColors.TextSecondary,
+    leadingActionContainerColor: Color = Color.Transparent,
+    leadingActionEnabled: Boolean = true,
     actionIcon: Int? = null,
     actionDescription: String? = null,
     actionTint: Color = BuyPilotColors.TextSecondary,
@@ -1589,10 +1788,22 @@ internal fun M3TopAppBarRow(
     containerColor: Color = Color.Transparent,
     contentColor: Color = BuyPilotColors.TextPrimary,
     onNavigationClick: () -> Unit = {},
+    onLeadingActionClick: () -> Unit = {},
     onSecondaryActionClick: () -> Unit = {},
     onActionClick: () -> Unit = {},
 ) {
-    val actionPadding = if (secondaryActionIcon != null && actionIcon != null) 120.dp else 72.dp
+    val leadingActionCount = listOfNotNull(navigationIcon, leadingActionIcon).size
+    val trailingActionCount = listOfNotNull(secondaryActionIcon, actionIcon).size
+    val edgeReservation = when (maxOf(leadingActionCount, trailingActionCount)) {
+        0 -> 16.dp
+        1 -> 72.dp
+        else -> 120.dp
+    }
+    val startReservation = when (leadingActionCount) {
+        0 -> 16.dp
+        1 -> 64.dp
+        else -> 112.dp
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -1600,11 +1811,11 @@ internal fun M3TopAppBarRow(
             .background(containerColor)
             .padding(horizontal = 4.dp),
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .size(56.dp),
-            contentAlignment = Alignment.Center,
+                .padding(start = 0.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             if (navigationIcon != null) {
                 M3IconButton(
@@ -1614,15 +1825,25 @@ internal fun M3TopAppBarRow(
                     onClick = onNavigationClick,
                 )
             }
+            if (leadingActionIcon != null) {
+                M3IconButton(
+                    iconRes = leadingActionIcon,
+                    contentDescription = leadingActionDescription.orEmpty(),
+                    tint = leadingActionTint,
+                    containerColor = leadingActionContainerColor,
+                    enabled = leadingActionEnabled,
+                    onClick = onLeadingActionClick,
+                )
+            }
         }
         Box(
             modifier = Modifier
                 .align(if (titleCentered) Alignment.Center else Alignment.CenterStart)
                 .then(
                     if (titleCentered) {
-                        Modifier.padding(start = actionPadding, end = actionPadding)
+                        Modifier.padding(start = edgeReservation, end = edgeReservation)
                     } else {
-                        Modifier.padding(start = 64.dp, end = actionPadding)
+                        Modifier.padding(start = startReservation, end = edgeReservation)
                     },
                 ),
             contentAlignment = if (titleCentered) Alignment.Center else Alignment.CenterStart,
@@ -4262,8 +4483,12 @@ fun ProductHeroDetailScreen(
     val productAddPending = activeProductId in state.cartState.pendingAddProductIds
     val detailListState = rememberLazyListState()
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val cardTopPaddingPx = with(density) { ProductDetailCardTopPadding.toPx() }
     val revealDistancePx = with(density) { ProductDetailRevealDistance.toPx() }
     val imagePullDistancePx = with(density) { ProductDetailImagePullDistance.toPx() }
+    val imageGestureBottomGapPx = with(density) { ProductDetailImageGestureBottomGap.toPx() }
+    var detailRevealPx by remember(activeProductId, revealDistancePx) { mutableFloatStateOf(0f) }
     var imagePullTarget by remember(activeProductId) { mutableFloatStateOf(0f) }
     val imageViewerProgress by animateFloatAsState(
         targetValue = imagePullTarget,
@@ -4280,10 +4505,34 @@ fun ProductHeroDetailScreen(
     val imageViewerActive = imagePullTarget > 0.01f || imageViewerProgress > 0.01f
     val scrollProgress by remember {
         derivedStateOf {
-            val offset = detailListState.firstVisibleItemScrollOffset.toFloat()
-            (offset / revealDistancePx).coerceIn(0f, 1f)
+            (detailRevealPx / revealDistancePx).coerceIn(0f, 1f)
         }
     }
+    val detailPanelTopPadding = lerp(
+        ProductDetailCardTopPadding.value,
+        ProductDetailExpandedTopPadding.value,
+        scrollProgress,
+    ).dp
+    val minDetailPanelHeight = maxOf(
+        420.dp,
+        configuration.screenHeightDp.dp - detailPanelTopPadding,
+    )
+    val detailPanelHorizontalPadding = lerp(ProductDetailPanelHorizontalPadding.value, 0f, scrollProgress).dp
+    val detailPanelBottomSpacer = lerp(86f, 18f, scrollProgress).dp
+    val imageGestureHeightPx by remember(cardTopPaddingPx, imageGestureBottomGapPx) {
+        derivedStateOf {
+            val cardFullyCollapsed = detailRevealPx <= 2f &&
+                detailListState.firstVisibleItemIndex == 0 &&
+                detailListState.firstVisibleItemScrollOffset <= 2
+            if (cardFullyCollapsed) {
+                (cardTopPaddingPx - imageGestureBottomGapPx).coerceIn(0f, cardTopPaddingPx)
+            } else {
+                0f
+            }
+        }
+    }
+    val imageGestureHeight = with(density) { imageGestureHeightPx.toDp() }
+    val imageGestureInteractionSource = remember { MutableInteractionSource() }
     val choiceActionsActive = choiceActionsAvailable && submittedFeedback == null
     val showCommerceControls = !choiceActionsAvailable
     val showInlineCartAction = activeProductId.isNotBlank() &&
@@ -4346,24 +4595,6 @@ fun ProductHeroDetailScreen(
         imagePullTarget = 0f
     }
 
-    LaunchedEffect(product.productId) {
-        snapshotFlow { detailListState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { isScrolling ->
-                if (isScrolling) return@collect
-
-                val currentOffset = detailListState.firstVisibleItemScrollOffset.toFloat()
-                val isTransitionRange = currentOffset > 8f && currentOffset < revealDistancePx - 8f
-                if (!isTransitionRange) return@collect
-
-                val targetOffset = if (scrollProgress >= ProductDetailSnapThreshold) revealDistancePx else 0f
-                detailListState.animateScrollBy(
-                    value = targetOffset - currentOffset,
-                    animationSpec = tween(durationMillis = 280, easing = MenuEaseOut),
-                )
-        }
-    }
-
     LaunchedEffect(submittedFeedback) {
         if (submittedFeedback != null) {
             kotlinx.coroutines.delay(360L)
@@ -4381,6 +4612,90 @@ fun ProductHeroDetailScreen(
             }
             gestureOffsetPx = 0f
         }
+    }
+
+    suspend fun settleDetailReveal(velocityY: Float = 0f) {
+        val currentReveal = detailRevealPx.coerceIn(0f, revealDistancePx)
+        if (currentReveal <= 1f || currentReveal >= revealDistancePx - 1f) {
+            detailRevealPx = currentReveal
+            return
+        }
+        val targetReveal = when {
+            velocityY < -650f -> revealDistancePx
+            velocityY > 650f -> 0f
+            currentReveal / revealDistancePx >= ProductDetailSnapThreshold -> revealDistancePx
+            else -> 0f
+        }
+        val animatable = Animatable(currentReveal)
+        animatable.animateTo(
+            targetValue = targetReveal,
+            animationSpec = tween(durationMillis = ProductDetailCardSnapMs, easing = PremiumRevealEase),
+        ) {
+            detailRevealPx = value.coerceIn(0f, revealDistancePx)
+        }
+        detailRevealPx = targetReveal
+    }
+
+    fun consumeDetailReveal(deltaY: Float): Float {
+        if (deltaY == 0f || imageViewerActive) return 0f
+        val contentAtTop = detailListState.firstVisibleItemIndex == 0 &&
+            detailListState.firstVisibleItemScrollOffset == 0
+        return when {
+            deltaY < 0f && detailRevealPx < revealDistancePx -> {
+                val previous = detailRevealPx
+                detailRevealPx = (detailRevealPx - deltaY).coerceIn(0f, revealDistancePx)
+                -(detailRevealPx - previous)
+            }
+            deltaY > 0f && contentAtTop && detailRevealPx > 0f -> {
+                val previous = detailRevealPx
+                detailRevealPx = (detailRevealPx - deltaY).coerceIn(0f, revealDistancePx)
+                previous - detailRevealPx
+            }
+            else -> 0f
+        }
+    }
+
+    val detailRevealNestedScroll = remember(activeProductId, revealDistancePx, imageViewerActive) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val consumedY = consumeDetailReveal(available.y)
+                return if (consumedY == 0f) Offset.Zero else Offset(0f, consumedY)
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val consumedY = consumeDetailReveal(available.y)
+                return if (consumedY == 0f) Offset.Zero else Offset(0f, consumedY)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (detailRevealPx <= 1f || detailRevealPx >= revealDistancePx - 1f) {
+                    return Velocity.Zero
+                }
+                settleDetailReveal(available.y)
+                return available
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                settleDetailReveal(consumed.y + available.y)
+                return Velocity.Zero
+            }
+        }
+    }
+
+    LaunchedEffect(product.productId, revealDistancePx) {
+        snapshotFlow { detailListState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { isScrolling ->
+                if (!isScrolling) {
+                    settleDetailReveal()
+                }
+            }
     }
 
     val swipeGestureModifier = if (choiceActionsAvailable && !imageViewerActive) {
@@ -4416,7 +4731,8 @@ fun ProductHeroDetailScreen(
                 imagePullTarget = 0f
             },
             onVerticalDrag = { change, dragAmount ->
-                val atTop = detailListState.firstVisibleItemIndex == 0 &&
+                val atTop = detailRevealPx <= 1f &&
+                    detailListState.firstVisibleItemIndex == 0 &&
                     detailListState.firstVisibleItemScrollOffset == 0
                 when {
                     imagePullTarget > 0f -> {
@@ -4439,7 +4755,6 @@ fun ProductHeroDetailScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .then(imagePullGestureModifier)
             .then(swipeGestureModifier),
     ) {
         ProductCinematicBackdrop(
@@ -4489,10 +4804,11 @@ fun ProductHeroDetailScreen(
                 }
                 .zIndex(2f),
         )
-        LazyColumn(
-            state = detailListState,
+        Box(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(top = detailPanelTopPadding)
+                .nestedScroll(detailRevealNestedScroll)
                 .graphicsLayer {
                     val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
                     alpha = contentEnter * (1f - gestureProgress * 0.42f) * (1f - imageViewerProgress * 0.86f)
@@ -4503,32 +4819,45 @@ fun ProductHeroDetailScreen(
                     scaleX = contentScale
                     scaleY = contentScale
                 },
-            contentPadding = PaddingValues(
-                start = 22.dp,
-                end = 22.dp,
-                top = 418.dp,
-                bottom = actionBottomPadding,
-            ),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            item("detail_panel") {
-                CinematicProductDetailPanel(
-                    payload = payload,
-                    detail = productDetail,
-                    progress = scrollProgress,
-                    showCommerceControls = showCommerceControls,
-                    cartAction = if (showInlineCartAction) {
-                        {
-                            ProductDetailInlineCartAction(
-                                pending = productAddPending,
-                                inCart = productAlreadyInCart,
-                                onAddToCart = { onAddToCart(activeProductId) },
-                            )
-                        }
-                    } else {
-                        null
-                    },
-                )
+            LazyColumn(
+                state = detailListState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 0.dp,
+                    end = 0.dp,
+                    top = 0.dp,
+                    bottom = 0.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                item("detail_panel") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = detailPanelHorizontalPadding),
+                    ) {
+                        CinematicProductDetailPanel(
+                            payload = payload,
+                            detail = productDetail,
+                            progress = scrollProgress,
+                            minHeight = minDetailPanelHeight,
+                            bottomSpacerHeight = detailPanelBottomSpacer,
+                            showCommerceControls = showCommerceControls,
+                            cartAction = if (showInlineCartAction) {
+                                {
+                                    ProductDetailInlineCartAction(
+                                        pending = productAddPending,
+                                        inCart = productAlreadyInCart,
+                                        onAddToCart = { onAddToCart(activeProductId) },
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
             }
         }
         if (choiceActionsAvailable && (submittedFeedback == null || actionAlpha > 0.01f)) {
@@ -4585,13 +4914,32 @@ fun ProductHeroDetailScreen(
                 }
             }
         }
+        if (!imageViewerActive && imageGestureHeightPx > 1f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(imageGestureHeight)
+                    .then(imagePullGestureModifier)
+                    .clickable(
+                        interactionSource = imageGestureInteractionSource,
+                        indication = null,
+                        role = Role.Button,
+                    ) {
+                        imagePullTarget = 1f
+                    }
+                    .zIndex(1f),
+            )
+        }
         if (imageViewerActive) {
             ProductImageViewerOverlay(
                 product = product,
                 backendBaseUrl = state.backendBaseUrl,
                 progress = imageViewerProgress,
                 onDismiss = { imagePullTarget = 0f },
-                modifier = Modifier.zIndex(4f),
+                modifier = Modifier
+                    .then(imagePullGestureModifier)
+                    .zIndex(4f),
             )
         }
     }
@@ -4814,6 +5162,8 @@ private fun CinematicProductDetailPanel(
     payload: ProductCardPayload,
     detail: ProductDetailResponse?,
     progress: Float,
+    minHeight: Dp = 0.dp,
+    bottomSpacerHeight: Dp = 14.dp,
     showCommerceControls: Boolean = true,
     cartAction: (@Composable () -> Unit)? = null,
 ) {
@@ -4848,15 +5198,16 @@ private fun CinematicProductDetailPanel(
     val selectedSku = skuOptions.getOrNull(selectedSkuIndex)
     val priceLabel = selectedSku?.price?.let { "¥${it.clean()}" } ?: product.priceLabel()
     val shape = RoundedCornerShape(
-        topStart = lerp(30f, 22f, progress).dp,
-        topEnd = lerp(30f, 22f, progress).dp,
-        bottomStart = lerp(28f, 20f, progress).dp,
-        bottomEnd = lerp(28f, 20f, progress).dp,
+        topStart = lerp(30f, 18f, progress).dp,
+        topEnd = lerp(30f, 18f, progress).dp,
+        bottomStart = lerp(28f, 0f, progress).dp,
+        bottomEnd = lerp(28f, 0f, progress).dp,
     )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = minHeight)
             .shadow(
                 elevation = lerp(8f, 3f, progress).dp,
                 shape = shape,
@@ -4946,7 +5297,7 @@ private fun CinematicProductDetailPanel(
         description?.let { ProductDescriptionSection(description = it) }
         faqs?.let { ProductFaqSection(faqs = it) }
         reviews?.let { ProductReviewsSection(reviews = it) }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(bottomSpacerHeight))
     }
 }
 
@@ -6417,6 +6768,9 @@ private fun BottomComposer(
     isTextRevealing: Boolean,
     awaitingCriteriaAdjustment: Boolean,
     isAttachmentMenuOpen: Boolean,
+    voiceInputActive: Boolean,
+    voiceTranscript: String,
+    voiceInputLevels: List<Float>,
     imageAttachment: ChatImageAttachmentState,
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
@@ -6428,6 +6782,9 @@ private fun BottomComposer(
     onKeyboardFlightSourceChanged: (ClarificationChipSnapshot) -> Unit,
     onRemoveImage: () -> Unit,
     onPreviewImage: () -> Unit,
+    onVoiceInputClick: () -> Unit,
+    onVoiceCancel: () -> Unit,
+    onVoiceSubmit: () -> Unit,
     onSubmit: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -6440,35 +6797,44 @@ private fun BottomComposer(
         awaitingCriteriaAdjustment -> stringResource(R.string.composer_placeholder_adjusting)
         else -> stringResource(R.string.composer_placeholder_default)
     }
+    val voiceStartDescription = stringResource(R.string.speech_input_start_desc)
+    val voiceStopDescription = stringResource(R.string.speech_input_stop_desc)
+    val voiceSendDescription = stringResource(R.string.speech_input_send_desc)
+    val waveformDescription = stringResource(R.string.speech_waveform_desc)
     val attachmentBlocksSubmit = imageAttachment.hasImage && !imageAttachment.canSend
     val canSubmit = isStreaming || (!attachmentBlocksSubmit && (text.isNotBlank() || imageAttachment.canSend))
+    val hasVoiceDraft = voiceTranscript.isNotBlank() || text.isNotBlank() || imageAttachment.canSend
+    val canVoiceSubmit = !attachmentBlocksSubmit && (hasVoiceDraft || voiceInputActive)
+    val voiceInputEnabled = !isStreaming && !imageAttachment.isUploading
     val containerColor by animateColorAsState(
         targetValue = when {
+            voiceInputActive -> BuyPilotColors.SurfaceCard
             isFocused -> BuyPilotColors.SurfaceCard
             else -> BuyPilotColors.SurfaceMuted
         },
-        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 180, easing = PremiumRevealEase),
         label = "composer_container_color",
     )
     val borderColor by animateColorAsState(
         targetValue = when {
+            voiceInputActive -> BuyPilotColors.Primary.copy(alpha = 0.42f)
             isFocused -> BuyPilotColors.Primary.copy(alpha = 0.68f)
             else -> BuyPilotColors.Border
         },
-        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 180, easing = PremiumRevealEase),
         label = "composer_border_color",
     )
     val borderWidth by animateDpAsState(
-        targetValue = if (isFocused) 1.5.dp else 1.dp,
+        targetValue = if (isFocused && !voiceInputActive) 1.5.dp else 1.dp,
         animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
         label = "composer_border_width",
     )
     val attachmentIconRotation by animateFloatAsState(
-        targetValue = if (isAttachmentMenuOpen) 45f else 0f,
+        targetValue = if (!voiceInputActive && isAttachmentMenuOpen) 45f else 0f,
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
         label = "attachment_icon_rotation",
     )
-    val attachmentEnabled = !isStreaming
+    val attachmentEnabled = !isStreaming || voiceInputActive
 
     Box(
         modifier = modifier
@@ -6502,67 +6868,262 @@ private fun BottomComposer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = onAttachmentClick,
+                    onClick = if (voiceInputActive) onVoiceCancel else onAttachmentClick,
                     enabled = attachmentEnabled,
                     modifier = Modifier.size(48.dp),
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_add_24),
-                        contentDescription = if (isAttachmentMenuOpen) "收起更多输入方式" else "打开更多输入方式",
-                        tint = if (attachmentEnabled) BuyPilotColors.TextSecondary else BuyPilotColors.TextMuted,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .rotate(attachmentIconRotation),
-                    )
-                }
-                BasicTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    enabled = !isStreaming,
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .onFocusChanged {
-                            isFocused = it.isFocused
-                            onFocusChanged(it.isFocused)
-                            if (it.isFocused) onTextFocus()
-                        }
-                        .padding(horizontal = 8.dp),
-                    textStyle = TextStyle(
-                        color = BuyPilotColors.TextPrimary,
-                        fontSize = BuyPilotType.Body,
-                        lineHeight = 20.sp,
-                    ),
-                    cursorBrush = SolidColor(BuyPilotColors.Primary),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (canSubmit) onSubmit() }),
-                    maxLines = 3,
-                    decorationBox = { innerTextField ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 28.dp)
-                                .padding(vertical = 4.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            if (text.isEmpty()) {
-                                Text(
-                                    text = placeholder,
-                                    color = BuyPilotColors.TextMuted,
-                                    fontSize = BuyPilotType.Body,
-                                    lineHeight = 20.sp,
+                    AnimatedContent(
+                        targetState = voiceInputActive,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(durationMillis = 150, easing = MenuEaseOut)) +
+                                scaleIn(
+                                    initialScale = 0.82f,
+                                    animationSpec = tween(durationMillis = 180, easing = MenuEaseOut),
+                                ))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(durationMillis = 100, easing = MenuEaseIn)) +
+                                        scaleOut(
+                                            targetScale = 0.82f,
+                                            animationSpec = tween(durationMillis = 110, easing = MenuEaseIn),
+                                        ),
+                                )
+                        },
+                        label = "composer_leading_voice_state",
+                    ) { recording ->
+                        if (recording) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.92f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_stop_24),
+                                    contentDescription = voiceStopDescription,
+                                    tint = BuyPilotColors.PrimaryDark,
+                                    modifier = Modifier.size(14.dp),
                                 )
                             }
-                            innerTextField()
+                        } else {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_add_24),
+                                contentDescription = if (isAttachmentMenuOpen) {
+                                    "收起更多输入方式"
+                                } else {
+                                    "打开更多输入方式"
+                                },
+                                tint = if (attachmentEnabled) {
+                                    BuyPilotColors.TextSecondary
+                                } else {
+                                    BuyPilotColors.TextMuted
+                                },
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .rotate(attachmentIconRotation),
+                            )
                         }
+                    }
+                }
+                AnimatedContent(
+                    targetState = voiceInputActive,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 40.dp),
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(durationMillis = 180, easing = PremiumRevealEase)) +
+                            scaleIn(
+                                initialScale = 0.98f,
+                                animationSpec = tween(durationMillis = 210, easing = PremiumRevealEase),
+                            ))
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(durationMillis = 110, easing = MenuEaseIn)) +
+                                    scaleOut(
+                                        targetScale = 0.98f,
+                                        animationSpec = tween(durationMillis = 120, easing = MenuEaseIn),
+                                    ),
+                            )
                     },
-                )
+                    label = "composer_input_voice_state",
+                ) { recording ->
+                    if (recording) {
+                        LiveVoiceWaveform(
+                            levels = voiceInputLevels,
+                            contentDescription = waveformDescription,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp)
+                                .padding(start = 2.dp, end = 10.dp),
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            BasicTextField(
+                                value = text,
+                                onValueChange = onTextChange,
+                                enabled = !isStreaming,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(focusRequester)
+                                    .onFocusChanged {
+                                        isFocused = it.isFocused
+                                        onFocusChanged(it.isFocused)
+                                        if (it.isFocused) onTextFocus()
+                                    }
+                                    .padding(horizontal = 8.dp),
+                                textStyle = TextStyle(
+                                    color = BuyPilotColors.TextPrimary,
+                                    fontSize = BuyPilotType.Body,
+                                    lineHeight = 20.sp,
+                                ),
+                                cursorBrush = SolidColor(BuyPilotColors.Primary),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { if (canSubmit) onSubmit() }),
+                                maxLines = 3,
+                                decorationBox = { innerTextField ->
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 28.dp)
+                                            .padding(vertical = 4.dp),
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) {
+                                        if (text.isEmpty()) {
+                                            Text(
+                                                text = placeholder,
+                                                color = BuyPilotColors.TextMuted,
+                                                fontSize = BuyPilotType.Body,
+                                                lineHeight = 20.sp,
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                },
+                            )
+                            ComposerMicButton(
+                                enabled = voiceInputEnabled,
+                                contentDescription = voiceStartDescription,
+                                onClick = onVoiceInputClick,
+                            )
+                        }
+                    }
+                }
                 ComposerActionButton(
                     isStreaming = isStreaming,
-                    enabled = canSubmit,
-                    onClick = onSubmit,
+                    enabled = if (voiceInputActive) canVoiceSubmit else canSubmit,
+                    contentDescription = if (voiceInputActive) voiceSendDescription else null,
+                    onClick = if (voiceInputActive) onVoiceSubmit else onSubmit,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ComposerMicButton(
+    enabled: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.92f else 1f,
+        animationSpec = tween(durationMillis = if (pressed) 90 else 170, easing = MenuEaseOut),
+        label = "composer_mic_scale",
+    )
+    val tint by animateColorAsState(
+        targetValue = if (enabled) {
+            BuyPilotColors.TextSecondary.copy(alpha = 0.78f)
+        } else {
+            BuyPilotColors.TextMuted.copy(alpha = 0.55f)
+        },
+        animationSpec = tween(durationMillis = 150, easing = MenuEaseOut),
+        label = "composer_mic_tint",
+    )
+
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_mic_24),
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun LiveVoiceWaveform(
+    levels: List<Float>,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "voice_waveform_transition")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (Math.PI * 2).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 960, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "voice_waveform_phase",
+    )
+    val stableLevels = remember(levels) {
+        if (levels.size == VoiceWaveformBarCount) levels else seedVoiceWaveformLevels()
+    }
+
+    Canvas(
+        modifier = modifier.semantics {
+            this.contentDescription = contentDescription
+        },
+    ) {
+        val count = VoiceWaveformBarCount
+        val preferredBarWidth = 3.dp.toPx()
+        val barWidth = minOf(preferredBarWidth, size.width / (count * 2.2f))
+            .coerceAtLeast(1.6.dp.toPx())
+        val gap = ((size.width - barWidth * count) / (count - 1)).coerceAtLeast(1.6.dp.toPx())
+        val totalWidth = barWidth * count + gap * (count - 1)
+        val startX = (size.width - totalWidth) / 2f
+        val centerY = size.height / 2f
+        val maxBarHeight = size.height * 0.76f
+
+        repeat(count) { index ->
+            val liveLevel = stableLevels.getOrElse(index) { VoiceWaveformFloor }
+            val ambient = ((sin(phase + index * 0.54f) + 1f) / 2f) * 0.2f
+            val centerBias = 1f - (abs(index - count * 0.58f) / count).coerceIn(0f, 0.44f)
+            val normalized = (liveLevel * 0.78f + ambient).coerceIn(VoiceWaveformFloor, 1f)
+            val barHeight = (maxBarHeight * normalized * centerBias).coerceAtLeast(4.dp.toPx())
+            val isAccentBar = normalized > 0.34f || index % 11 in 4..7
+            val barColor = if (isAccentBar) {
+                BuyPilotColors.Primary.copy(alpha = (0.34f + normalized * 0.42f).coerceIn(0.34f, 0.76f))
+            } else {
+                BuyPilotColors.TextMuted.copy(alpha = (0.2f + normalized * 0.28f).coerceIn(0.2f, 0.46f))
+            }
+            val x = startX + index * (barWidth + gap)
+            drawRoundRect(
+                color = barColor,
+                topLeft = Offset(x, centerY - barHeight / 2f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth, barWidth),
+            )
         }
     }
 }
@@ -6571,6 +7132,7 @@ private fun BottomComposer(
 private fun ComposerActionButton(
     isStreaming: Boolean,
     enabled: Boolean,
+    contentDescription: String? = null,
     onClick: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -6668,7 +7230,7 @@ private fun ComposerActionButton(
                 painter = painterResource(
                     if (streaming) R.drawable.ic_stop_24 else R.drawable.ic_arrow_upward_24,
                 ),
-                contentDescription = if (streaming) "停止生成" else "发送",
+                contentDescription = if (streaming) "停止生成" else contentDescription ?: "发送",
                 tint = contentColor,
                 modifier = Modifier.size(if (streaming) 16.dp else 21.dp),
             )
@@ -6681,8 +7243,6 @@ private fun AttachmentMenu(
     modifier: Modifier = Modifier,
     onImageInput: () -> Unit,
     onCameraInput: () -> Unit,
-    ttsEnabled: Boolean = false,
-    onTtsToggle: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -6700,33 +7260,74 @@ private fun AttachmentMenu(
     ) {
         AttachmentAction(R.drawable.ic_image_24, "商品图识别", enabled = true, onClick = onImageInput)
         AttachmentAction(R.drawable.ic_add_photo_24, "拍照/截图识别", enabled = true, onClick = onCameraInput)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .clickable(role = Role.Button, onClick = onTtsToggle)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                painter = painterResource(
-                    if (ttsEnabled) R.drawable.ic_volume_up_24
-                    else R.drawable.ic_volume_off_24
-                ),
-                contentDescription = null,
-                tint = if (ttsEnabled) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                if (ttsEnabled) "语音播报：开" else "语音播报：关",
-                color = if (ttsEnabled) BuyPilotColors.PrimaryDark else BuyPilotColors.TextMuted,
-                fontSize = BuyPilotType.Body,
-                fontWeight = FontWeight.Medium,
-                lineHeight = 20.sp,
-            )
-        }
     }
+}
+
+private fun startInlineVoiceInput(
+    speechRecognizer: SpeechRecognizer?,
+    onUnavailable: () -> Unit,
+    onStart: () -> Unit,
+    onFailed: () -> Unit,
+) {
+    val recognizer = speechRecognizer ?: run {
+        onFailed()
+        onUnavailable()
+        return
+    }
+    onStart()
+    recognizer.cancel()
+    runCatching {
+        recognizer.startListening(inlineSpeechRecognitionIntent())
+    }.onFailure {
+        recognizer.cancel()
+        onFailed()
+        onUnavailable()
+    }
+}
+
+private fun inlineSpeechRecognitionIntent(): Intent =
+    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    }
+
+private fun extractSpeechText(results: Bundle?): String? =
+    results
+        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+        ?.firstOrNull()
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
+private fun seedVoiceWaveformLevels(): List<Float> =
+    List(VoiceWaveformBarCount) { index ->
+        val wave = ((sin(index * 0.54) + 1.0) / 2.0).toFloat()
+        val centerBias = 1f - (abs(index - VoiceWaveformBarCount * 0.52f) / VoiceWaveformBarCount)
+            .coerceIn(0f, 0.45f)
+        (VoiceWaveformFloor + wave * 0.08f + centerBias * 0.08f)
+            .coerceIn(VoiceWaveformFloor, 0.34f)
+    }
+
+private fun nextVoiceWaveformLevels(current: List<Float>, rmsdB: Float): List<Float> {
+    val source = current.takeIf { it.size == VoiceWaveformBarCount } ?: seedVoiceWaveformLevels()
+    val normalized = ((rmsdB + 2f) / 12f).coerceIn(VoiceWaveformFloor, 1f)
+    return source.mapIndexed { index, previous ->
+        val wave = ((sin(index * 0.42 + normalized * 6.2) + 1.0) / 2.0).toFloat()
+        val target = (VoiceWaveformFloor + normalized * (0.26f + wave * 0.68f))
+            .coerceIn(VoiceWaveformFloor, 1f)
+        (previous * 0.52f + target * 0.48f).coerceIn(VoiceWaveformFloor, 1f)
+    }
+}
+
+internal fun mergeSpeechInput(current: String, spoken: String): String {
+    val left = current.trimEnd()
+    val right = spoken.trim()
+    if (left.isEmpty()) return right
+    if (right.isEmpty()) return left
+
+    val needsSpace = left.last().isLetterOrDigit() && right.first().isLetterOrDigit()
+    return if (needsSpace) "$left $right" else left + right
 }
 
 @Composable
