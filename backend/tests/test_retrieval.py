@@ -133,7 +133,7 @@ async def test_retrieve_relaxes_budget_but_not_product_type():
     assert all(normalize_product_type(product.sub_category) == "真无线耳机" for product in retrieval.products)
     steps = retrieval.trace_details["filters_applied"]["relaxation_steps"]
     assert steps[0]["step"] == "strict"
-    assert any(step["step"] == "without_budget_max" for step in steps)
+    assert any(step["step"] == "budget_relaxed_30pct" for step in steps)
 
 
 def test_sql_filters_include_structured_hard_constraints():

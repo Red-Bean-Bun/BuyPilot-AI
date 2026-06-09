@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
@@ -16,6 +17,9 @@ from src.config.domain_terms import (
     product_type_aliases,
 )
 from src.config.tuning import (
+    BUDGET_PENALTY_CAP,
+    BUDGET_PENALTY_FACTOR,
+    BUDGET_RELAXATION_STEPS,
     FILTER_SCORE_BRAND,
     FILTER_SCORE_BRAND_PREFER,
     FILTER_SCORE_BUDGET,
@@ -113,6 +117,7 @@ async def retrieve_with_evidence(
     recall_criteria = criteria
     recall_filters = filters
     recall_stats = recall_result
+    original_budget_max = criteria.constraints.budget_max
     relaxation_steps: list[dict[str, object]] = [
         {
             "step": "strict",
@@ -186,7 +191,9 @@ async def retrieve_with_evidence(
     if not merged_hits:
         return RetrievalOutput(products=[], evidence_by_product={}, trace_details=_visual_trace(visual_recall_stats))
 
-    candidate_hits = _rank_hits(criteria, merged_hits)[: max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)]
+    candidate_hits = _rank_hits(merged_hits, original_budget_max)[
+        : max(top_n * RETRIEVAL_CANDIDATE_MULTIPLIER, top_n)
+    ]
     ranked_hits, all_reranked_hits = await _rerank_chunk_hits(criteria, candidate_hits, top_n=top_n)
 
     # Hard guarantee: brand_prefer products always appear first in results,
@@ -264,16 +271,23 @@ async def _vector_recall_from_pgvector(
     )
 
 
-def _rank_hits(criteria: CriteriaPayload, hits: list[ProductHit]) -> list[ProductHit]:
-    return sorted(
-        hits,
-        key=lambda hit: (
-            hit.filter_score,
+def _rank_hits(
+    hits: list[ProductHit],
+    original_budget_max: float | None = None,
+) -> list[ProductHit]:
+    def _key(hit: ProductHit) -> tuple:
+        price = hit.product.price or 0.0
+        budget_penalty = 0.0
+        if original_budget_max and original_budget_max > 0 and price > original_budget_max:
+            excess_pct = (price - original_budget_max) / original_budget_max
+            budget_penalty = min(excess_pct * BUDGET_PENALTY_FACTOR, BUDGET_PENALTY_CAP)
+        return (
+            hit.filter_score - budget_penalty,
             hit.vector_score,
-            -(hit.product.price or 0.0),
-        ),
-        reverse=True,
-    )
+            -(price),
+        )
+
+    return sorted(hits, key=_key, reverse=True)
 
 
 _EVIDENCE_KIND_PRIORITY = ("why_buy", "faq", "risk", "compare")
@@ -360,21 +374,24 @@ def _trace_hit_payload(hit: ProductHit, rank: int) -> dict[str, object]:
 def _relaxation_attempts(
     criteria: CriteriaPayload, filters: RetrievalFilters
 ) -> list[tuple[str, CriteriaPayload, RetrievalFilters, list[str]]]:
-    """Relax budget_max when strict returns empty, but never silently relax category or product_type.
+    """Progressively relax budget_max (30% → 50% → unlimited). Category and product_type are never relaxed.
 
-    category and product_type are hard constraints — showing a 防晒 for a 洁面 request is worse than showing nothing.
-    budget_max is a threshold constraint — showing a 220 CNY item for a 200 CNY budget is helpful with a note.
+    category and product_type are hard constraints — showing a different product type is worse than showing nothing.
+    budget_max is a soft constraint — relaxing it with a clear note is better than returning no results.
     """
     attempts: list[tuple[str, CriteriaPayload, RetrievalFilters, list[str]]] = []
     if criteria.constraints.budget_max is not None:
-        attempts.append(
-            (
-                "without_budget_max",
-                _criteria_with_constraints(criteria, budget_max=None),
-                filters,
-                ["budget_max"],
+        budget = criteria.constraints.budget_max
+        for ratio, label in BUDGET_RELAXATION_STEPS:
+            relaxed_max = None if ratio is None else math.ceil(budget * ratio)
+            attempts.append(
+                (
+                    label,
+                    _criteria_with_constraints(criteria, budget_max=relaxed_max),
+                    filters,
+                    ["budget_max"],
+                )
             )
-        )
     if filters.avoid_traits:
         attempts.append(
             (

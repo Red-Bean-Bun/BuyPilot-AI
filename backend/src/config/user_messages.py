@@ -114,7 +114,7 @@ QA_LOW_FAT = "低脂"
 
 # ── Risk notes ──────────────────────────────────────────────────────────
 
-RISK_OVER_BUDGET = "原预算内无匹配，此为超预算备选"
+RISK_OVER_BUDGET = "原预算内没有匹配商品，以下为放宽预算后的备选。如果你想回到原预算，可以直接说或点筛选卡修改。"
 
 # ── Cart clarification questions ────────────────────────────────────────
 # See also: prompts/clarification.md ## DeterministicQuestions ### Cart Clarification

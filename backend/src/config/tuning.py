@@ -20,6 +20,18 @@ CHEAPER_BUDGET_DEFAULT_MAX = 100.0
 CHEAPER_BUDGET_RATIO = 0.5
 CHEAPER_BUDGET_MIN_MAX = 50.0
 
+# Progressive budget relaxation: (ratio, label). None = remove budget entirely.
+# Each step is tried in order; product_type and category are NEVER relaxed.
+BUDGET_RELAXATION_STEPS: tuple[tuple[float | None, str], ...] = (
+    (1.3, "budget_relaxed_30pct"),
+    (1.5, "budget_relaxed_50pct"),
+    (None, "budget_relaxed_unlimited"),
+)
+# Penalty factor for products above the original budget: excess_pct * factor.
+BUDGET_PENALTY_FACTOR = 10.0
+# Maximum penalty to prevent a single over-budget product from being buried entirely.
+BUDGET_PENALTY_CAP = 5.0
+
 # Product card emission pacing (ms)
 INTER_CARD_DELAY_MS = 150
 

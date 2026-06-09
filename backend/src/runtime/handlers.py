@@ -646,15 +646,29 @@ async def continue_recommendation_from_criteria(
             trace_details=retrieval.trace_details,
         )
 
+    # Captured before the branch split so both single-product and multi-product paths have it.
+    # Single-product turns skip the text streaming block; their AI text lives in decision.summary.
+    captured_product_cards: list[dict[str, Any]] = []
+    captured_turn_text_parts: list[str] = []
+
     # Signal ranking stage before product cards
     yield ctx.thinking("ranking", _thinking_with_category(
         msg.THINKING_RANKING, msg.THINKING_RANKING_CATEGORY_TEMPLATE, criteria.category,
     ))
 
+    # Budget relaxed: warn user BEFORE showing products so they see the context first
+    if budget_relaxed:
+        async for event in stream_text(
+            ctx,
+            msg.RISK_OVER_BUDGET,
+            message_id=f"budget_warning_{ctx.turn_id}",
+            node_id=f"budget_warning_{ctx.turn_id}",
+        ):
+            if isinstance(event, TextDeltaEvent):
+                captured_turn_text_parts.append(event.delta)
+            yield event
+
     # Emit product cards with pacing delay (built into _product_card_events)
-    # Captured before the branch split so both single-product and multi-product paths have it.
-    # Single-product turns skip the text streaming block; their AI text lives in decision.summary.
-    captured_product_cards: list[dict[str, Any]] = []
     async for event in _product_card_events(
         ctx, criteria, products, evidences_by_product,
         risk_notes_extra=risk_notes_extra,
@@ -705,6 +719,7 @@ async def continue_recommendation_from_criteria(
             ctx, body, criteria, retrieval,
             product_cards=captured_product_cards,
             decision=_decision_result_to_dict(merged),
+            turn_text="".join(captured_turn_text_parts) if captured_turn_text_parts else None,
         )
         yield ctx.done("completed")
         return
@@ -713,7 +728,6 @@ async def continue_recommendation_from_criteria(
     # PRD 05/06: multi-candidate decks must wait for user feedback or an
     # explicit convergence turn before emitting final_decision.
     # Step 1: LLM recommendation explanation ("为什么先给这些")
-    captured_turn_text_parts: list[str] = []
     conversation_context = await get_conversation_summary(ctx.session_id)
     try:
         async for event in _stream_recommendation_text_events(

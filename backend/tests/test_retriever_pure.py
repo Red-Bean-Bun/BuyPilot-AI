@@ -96,35 +96,32 @@ class TestDistanceToScore:
 
 class TestRankHits:
     def test_sorted_by_filter_score_desc(self):
-        criteria = _criteria()
         hits = [
             _hit(product_id="p1", filter_score=1.0, vector_score=0.5, price=100),
             _hit(product_id="p2", filter_score=3.0, vector_score=0.5, price=100),
             _hit(product_id="p3", filter_score=2.0, vector_score=0.5, price=100),
         ]
-        ranked = _rank_hits(criteria, hits)
+        ranked = _rank_hits(hits)
         assert [h.product.product_id for h in ranked] == ["p2", "p3", "p1"]
 
     def test_tie_breaks_by_vector_score(self):
-        criteria = _criteria()
         hits = [
             _hit(product_id="p1", filter_score=2.0, vector_score=0.3, price=100),
             _hit(product_id="p2", filter_score=2.0, vector_score=0.9, price=100),
         ]
-        ranked = _rank_hits(criteria, hits)
+        ranked = _rank_hits(hits)
         assert [h.product.product_id for h in ranked] == ["p2", "p1"]
 
     def test_tie_breaks_by_price_lower_first(self):
-        criteria = _criteria()
         hits = [
             _hit(product_id="p_expensive", filter_score=2.0, vector_score=0.5, price=200),
             _hit(product_id="p_cheap", filter_score=2.0, vector_score=0.5, price=50),
         ]
-        ranked = _rank_hits(criteria, hits)
+        ranked = _rank_hits(hits)
         assert [h.product.product_id for h in ranked] == ["p_cheap", "p_expensive"]
 
     def test_empty_list(self):
-        assert _rank_hits(_criteria(), []) == []
+        assert _rank_hits([]) == []
 
 
 # ── _merge_text_and_visual ───────────────────────────────────────────────────
