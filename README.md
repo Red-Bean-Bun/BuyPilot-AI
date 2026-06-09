@@ -95,6 +95,23 @@
 
 > `make eval` 是 admin 接口，除 `BAILIAN_API_KEY` 外还必须配置 `ADMIN_API_KEY`；Demo 视频链接暂留占位，录制完成后替换。
 
+<details>
+<summary>Android 客户端补充证据（原生 Compose + 真机截图）</summary>
+
+| 前端能力 | 客户端完成点 | 截图 / 证据 |
+|----------|--------------|-------------|
+| 原生 Android 客户端 | Kotlin + Jetpack Compose 实现聊天主界面、卡片、底板和输入区状态 | <img src="doc/ui/android/01-home-empty.png" alt="Android home" width="120" /> |
+| SSE 流式渲染 | OkHttp SSE 直连 `/chat/stream`，生成中可见 thinking 状态和停止按钮 | <img src="doc/ui/android/02-streaming-thinking.png" alt="Android streaming thinking" width="120" /> |
+| 澄清与筛选 | 预算澄清卡、筛选调整底板和 quick actions 承接多轮补充条件 | <img src="doc/ui/android/03-budget-clarification.png" alt="Android budget clarification" width="90" /> <img src="doc/ui/android/04-filter-edit-sheet.png" alt="Android filter edit sheet" width="90" /> |
+| 证据与决策层 | 商品推荐证据页、最终决策依据页展示“为什么推荐”和“不适合情况” | <img src="doc/ui/android/05-recommendation-evidence.png" alt="Android recommendation evidence" width="90" /> <img src="doc/ui/android/06-decision-evidence.png" alt="Android decision evidence" width="90" /> |
+| 多商品对比 | `compare_card` 渲染为结构化对比表，补齐价格、参数、性能、续航等维度 | <img src="doc/ui/android/07-compare-table.png" alt="Android compare table" width="120" /> |
+| 图片输入入口 | 输入区附件菜单提供“选图片”和“拍照”，承接拍照找货 Demo 路径 | <img src="doc/ui/android/10-attachment-menu.png" alt="Android attachment menu" width="120" /> |
+| 购物车反馈 | `cart_action` 驱动角标、已加入状态、数量步进和购物车底板 | <img src="doc/ui/android/09-final-recommendation-added.png" alt="Android final recommendation added" width="90" /> <img src="doc/ui/android/08-cart-sheet.png" alt="Android cart sheet" width="90" /> |
+
+完整截图索引见 `doc/ui/android/README.md`。
+
+</details>
+
 | 能力 | 说明 |
 |------|------|
 | 多模态双通道检索 | 文本 + 图像 embedding 同一向量空间（1024 维），图搜文、文搜图无缝切换 |
