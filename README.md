@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="doc/ui/06-product-recommendation-strip.png" alt="BuyPilot Demo - 商品推荐" width="320" />
+  <img src="doc/ui/06-product-recommendation-strip.png" alt="BuyPilot Demo - 商品推荐" width="720" />
   <br/><sub>4 条 Demo 路径完整演示见下方</sub>
 </p>
 
