@@ -9,6 +9,7 @@ Requires: pip install streamlit plotly requests
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,18 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+API_BASE = os.getenv("EVAL_API_BASE", "http://localhost:8000")
+
+# 从项目根目录 .env 读取 admin key，复用 FastAPI 的配置加载逻辑
+_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
+if _ENV_PATH.exists():
+    for _raw in _ENV_PATH.read_text(encoding="utf-8").splitlines():
+        _line = _raw.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _key, _val = _line.split("=", 1)
+            os.environ.setdefault(_key.strip(), _val.strip())
+_ADMIN_KEY = os.getenv("ADMIN_API_KEY", "")
+_AUTH = {"Authorization": f"Bearer {_ADMIN_KEY}"}
 
 st.set_page_config(page_title="BuyPilot Eval", layout="wide")
 st.title("BuyPilot-AI 评测看板")
@@ -35,17 +47,17 @@ RADAR_METRICS = [
 def _ensure_samples_seeded():
     """Seed eval samples if the table is empty."""
     try:
-        resp = requests.get(f"{API_BASE}/admin/eval/samples", timeout=5)
+        resp = requests.get(f"{API_BASE}/admin/eval/samples", timeout=5, headers=_AUTH)
         if resp.status_code == 200 and len(resp.json()) == 0:
             with st.spinner("Seeding eval samples..."):
-                requests.post(f"{API_BASE}/admin/eval/samples/seed", timeout=10)
+                requests.post(f"{API_BASE}/admin/eval/samples/seed", timeout=10, headers=_AUTH)
     except requests.ConnectionError:
         st.warning(f"Cannot connect to API at {API_BASE}. Start the FastAPI server first.")
 
 
 def _fetch_runs():
     try:
-        resp = requests.get(f"{API_BASE}/admin/eval/runs", timeout=10)
+        resp = requests.get(f"{API_BASE}/admin/eval/runs", timeout=10, headers=_AUTH)
         if resp.status_code == 200:
             return resp.json()
     except requests.ConnectionError:
@@ -55,7 +67,7 @@ def _fetch_runs():
 
 def _fetch_run_detail(run_id: str):
     try:
-        resp = requests.get(f"{API_BASE}/admin/eval/runs/{run_id}", timeout=10)
+        resp = requests.get(f"{API_BASE}/admin/eval/runs/{run_id}", timeout=10, headers=_AUTH)
         if resp.status_code == 200:
             return resp.json()
     except requests.ConnectionError:

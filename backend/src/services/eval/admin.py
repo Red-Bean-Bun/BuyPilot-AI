@@ -20,6 +20,7 @@ async def list_eval_runs(limit: int = 20) -> list[dict]:
             "git_commit": run.git_commit,
             "sample_count": run.sample_count,
             "overall_score": (run.metrics or {}).get("overall_score"),
+            "metrics": run.metrics or {},
             "created_at": run.created_at.isoformat(),
         }
         for run in runs
