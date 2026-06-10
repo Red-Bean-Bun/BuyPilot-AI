@@ -16,13 +16,13 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Eval_Score-78%25-blue" alt="综合评测 78%" />
   <img src="https://img.shields.io/badge/Eval-20%2F20-green" alt="Eval 20/20" />
-  <img src="https://img.shields.io/badge/Tests-641%20passed-green" alt="Tests 641 passed" />
+  <img src="https://img.shields.io/badge/Tests-426%20passed%20%2F%20220%20skipped-yellowgreen" alt="Tests 426 passed / 220 skipped" />
   <img src="https://img.shields.io/badge/意图准确率-90%25-green" alt="意图准确率 90%" />
   <img src="https://img.shields.io/badge/多轮一致性-100%25-green" alt="多轮一致性 100%" />
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
   <img src="https://img.shields.io/badge/Faithfulness-82%25-green" alt="Faithfulness 82%" />
   <img src="https://img.shields.io/badge/约束满足-89%25-blue" alt="约束满足 89%" />
-  <a href="https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk">
+  <a href="https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.0.1/BuyPilot-v1.0.1.apk">
     <img src="https://img.shields.io/badge/Download-APK-orange?style=for-the-badge&logo=android" alt="Download APK" />
   </a>
 </p>
@@ -56,7 +56,7 @@
 | 数字 | 最后验证时间 | 复现命令 | 报告来源 |
 |------|--------------|----------|----------|
 | 评测综合分 **78.4%**（20 条样本 × 15 指标） | 2026-06-08 发布验收 | `make eval`（需 Docker 服务、真实 `BAILIAN_API_KEY`、非空 `ADMIN_API_KEY`） | Chat Stream Observer 截图：`doc/ui/dashboard.png`、`doc/ui/LLM_trace.png`、`doc/ui/trace.png`；样本源：`data/eval/eval_samples.json` |
-| 默认 pytest **641 passed** | 2026-06-10 赛前验收 | `cd backend && uv run pytest -q` | 本地命令输出；默认跳过 22 个集成测试文件，全量用 `RUN_FULL_TESTS=1 uv run pytest -q` |
+| 默认 pytest **426 passed / 220 skipped** | 2026-06-10 当前工作区 | `cd backend && uv run pytest -q` | 本地命令输出；默认跳过预发布隔离和部分集成测试，全量用 `RUN_FULL_TESTS=1 uv run pytest -q` |
 
 </details>
 
@@ -88,9 +88,9 @@
 | 证据类型 | 内容 | 验证方式 |
 |---------|------|----------|
 | **评测报告** | 20 样本 × 15 指标，综合分 78.4% | `make eval` 或查看上方 Dashboard |
-| **端到端验证** | 13 场景 demo smoke 全通过 | `make smoke` |
-| **默认 pytest** | 641 passed | `cd backend && uv run pytest -q` |
-| **真机 APK** | 6.6MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk) |
+| **端到端验证** | Live RAG smoke 通过（PostgreSQL + 1024 维 embedding + 两轮 chat_stream） | `make smoke` |
+| **默认 pytest** | 426 passed / 220 skipped | `cd backend && uv run pytest -q` |
+| **真机 APK** | 6.6MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.0.1/BuyPilot-v1.0.1.apk) |
 | **Demo 视频** | 4 条路径完整演示 | 🎬 [观看 Demo 视频](#)（录制后替换链接） |
 
 > `make eval` 是 admin 接口，除 `BAILIAN_API_KEY` 外还必须配置 `ADMIN_API_KEY`；Demo 视频链接暂留占位，录制完成后替换。
@@ -105,8 +105,7 @@
 | 澄清与筛选 | 预算澄清卡、筛选调整底板和 quick actions 承接多轮补充条件 | <img src="doc/ui/android/03-budget-clarification.png" alt="Android budget clarification" width="90" /> <img src="doc/ui/android/04-filter-edit-sheet.png" alt="Android filter edit sheet" width="90" /> |
 | 证据与决策层 | 商品推荐证据页、最终决策依据页展示“为什么推荐”和“不适合情况” | <img src="doc/ui/android/05-recommendation-evidence.png" alt="Android recommendation evidence" width="90" /> <img src="doc/ui/android/06-decision-evidence.png" alt="Android decision evidence" width="90" /> |
 | 多商品对比 | `compare_card` 渲染为结构化对比表，补齐价格、参数、性能、续航等维度 | <img src="doc/ui/android/07-compare-table.png" alt="Android compare table" width="120" /> |
-| 图片输入入口 | 输入区附件菜单提供”选图片”和”拍照”，承接拍照找货 Demo 路径 | <img src=”doc/ui/android/10-attachment-menu.png” alt=”Android attachment menu” width=”120” /> |
-| 语音交互闭环 | SpeechRecognizer 转写语音 → 输入框合并 → 同一 Agent 链路；TTS 按句朗读 text_delta/澄清/决策摘要 | <img src=”doc/ui/android/11-voice-input.png” alt=”Android voice input” width=”120” /> |
+| 图片输入入口 | 输入区附件菜单提供"选图片"和"拍照"，承接拍照找货 Demo 路径 | <img src="doc/ui/android/10-attachment-menu.png" alt="Android attachment menu" width="120" /> |
 | 购物车反馈 | `cart_action` 驱动角标、已加入状态、数量步进和购物车底板 | <img src="doc/ui/android/09-final-recommendation-added.png" alt="Android final recommendation added" width="90" /> <img src="doc/ui/android/08-cart-sheet.png" alt="Android cart sheet" width="90" /> |
 
 完整截图索引见 `doc/ui/android/README.md`。
@@ -120,9 +119,9 @@
 | 证据绑定 | 推荐理由可追溯到原始商品描述/FAQ/评价，点击"看证据"查看原文 |
 | 多商品对比 | 自动提取对比维度（价格/品牌/成分/场景），结构化呈现优劣 |
 | 流水线并行执行 | LLM 生成购买标准时后台并行跑 DB 召回 + image embedding，降低首字延迟 |
-| ASR+TTS 语音闭环 | Android 原生 SpeechRecognizer 语音输入 + TextToSpeech 流式播报，同一 Agent/RAG 链路 |
+| TTS 语音播报 | Android 原生 TextToSpeech 按句播报；SpeechRecognizer 语音输入代码路径保留，当前 release 隐藏入口以降低设备兼容风险 |
 | 对话式交互 | 意图澄清、标准生成、推荐解释、购物车管理全链路闭环 |
-| 工程深度 | 641 单元测试、三端协议守卫、确定性消息路由、决策评分算法、语境诊断审计、检索缓存 |
+| 工程深度 | 646 个后端测试收集项（默认 426 passed / 220 skipped）、三端协议守卫、确定性消息路由、决策评分算法、语境诊断审计、检索缓存 |
 
 ---
 
@@ -151,7 +150,7 @@
 | SSE 管道 | async generator stage 模式（推荐文案与检索后台并行） |
 | LLM 调用 | task-oriented interface + Profile 配置驱动（YAML）+ PromptStore 运行时加载 |
 | 图片上传 | multipart `/upload/image`，本地 jpg + 上传转 data URL 进入 Qwen-VL 多模态理解 |
-| 语音交互 | Android SpeechRecognizer + TTS，端侧闭环，零云端语音模型依赖 |
+| 语音交互 | Android TextToSpeech 端侧播报；SpeechRecognizer 输入能力保留但当前 release 隐藏入口，零云端语音模型依赖 |
 | 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/retrieval_traces/evidence_links 等 |
 
 完整决策记录 → [doc/decisions/](doc/decisions/) · 设计决策 → [design-decisions.md](design-decisions.md)（模型策略以 CLAUDE.md 和 llm_profiles.yaml 为准）
@@ -169,10 +168,10 @@
 | 5 | 意图解析与否定语义 | 多层预 LLM 确定性路由（购物车/预算/品牌/排除/对比/商品查询/商业声明） + LLM 理解层协同，毫秒级快速路径 |
 | 6 | 三端协议守卫 | SSE 10 种 event type，三层自动化守卫（Python import-time / Kotlin build-time / CI），漂移 = 无法启动 |
 | 7 | 品类理解与校验 | 数据驱动同义词系统（30+ 品类，含层级扩展）+ 品类白名单校验，防止推荐不存在的商品 |
-| 8 | ASR+TTS 端侧语音闭环 | Android SpeechRecognizer 语音输入 + TextToSpeech 按句增量朗读，无需额外云端语音模型，降低 Demo 失败风险 |
+| 8 | TTS 端侧语音播报 | Android TextToSpeech 按句增量朗读；SpeechRecognizer 输入能力保留但当前 release 隐藏入口，无需额外云端语音模型 |
 | 9 | 场景化购物策略 | 确定性场景分类（送礼/兴趣/旅行），决策障碍检测，旅行跨品类组合推荐，LLM 策略叙事 + 模板 fallback |
 
-**代码规模**：后端 Python ~20,500 行 · Android Kotlin ~35,300 行 · Prompt 模板 ~1,200 行 · 测试 ~11,700 行 · 文档 105 篇
+**代码规模**：后端 Python ~20,700 行 · Android Kotlin ~36,600 行 · Prompt 模板 ~1,200 行 · 测试 ~11,300 行 · 文档 106 篇
 
 ---
 
@@ -201,7 +200,7 @@
 |--------|------|:----:|
 | AI 编造商品/价格/优惠 | 混合检索 + 硬过滤 + GroundingGuard 价格校验 | ✅ |
 | 纯 Web/H5 替代原生 App | Android 原生 Kotlin + Jetpack Compose | ✅ |
-| Demo 无法运行 | docker-compose up 一键启动 + APK 直连云端 | ✅ |
+| Demo 无法运行 | `make rebuild` 一键启动 + APK 直连云端 | ✅ |
 
 ---
 
@@ -211,7 +210,7 @@
 
 直接安装预编译 APK，零配置体验完整功能：
 
-📦 **[BuyPilot-v1.1.0-release.apk](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk)** (6.6MB)
+📦 **[BuyPilot-v1.0.1.apk](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.0.1/BuyPilot-v1.0.1.apk)** (6.6MB)
 
 - 已内置云端后端地址
 - 支持 Android 8.0+ (API 26+)
@@ -233,7 +232,7 @@ make rebuild
 
 # 3) 验证
 make db-stats     # products:100, chunks:1292, image_embeddings:100
-make smoke        # All 13 scenarios passed
+make smoke        # Live RAG smoke passed
 ```
 
 详细部署指南 → [Android 编译 SOP](doc/dev/android-build-sop.md)
@@ -315,17 +314,20 @@ backend/
 └── tests/                   # 按层对应的测试 + fixtures/
 ```
 
-### Android 客户端（Kotlin + Compose）
+### Android 客户端（Kotlin + Compose，多模块）
 
 ```
 android/
-└── app/src/main/java/com/buypilot/
-    ├── ui/                  # Compose 组件 + cards/
-    ├── viewmodel/           # ViewModel + StateFlow
-    ├── network/             # OkHttp SSE + API 调用
-    ├── data/                # Room DAO + Entity
-    ├── model/               # ChatUiNode sealed interface
-    └── util/
+├── app/                      # 应用入口、导航、主题与启动页
+├── core/
+│   ├── common/               # 通用工具、SSE/JSON/error/coroutine 基础能力
+│   ├── data/                 # Repository 与数据编排
+│   ├── database/             # Room DAO + Entity
+│   ├── model/                # 请求/响应模型与序列化
+│   └── network/              # OkHttp SSE + REST API 调用
+└── feature/
+    ├── chat/                 # 聊天主界面、卡片、TTS、输入区状态
+    └── history/              # 历史会话功能
 ```
 
 <details>
