@@ -4,8 +4,8 @@ import android.graphics.Paint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,9 +19,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -246,30 +249,66 @@ internal fun ProductDeckMarkdownCompareTable(
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
             ) {
-                MarkdownCompareColumn(
-                    modifier = Modifier.width(MarkdownCompareMetricColumnWidth),
-                    header = "",
-                    cells = axes.map { MarkdownCompareCell(note = it.name.cleanCompareText()) },
-                    headerEmphasis = false,
-                    cellEmphasis = true,
-                    revealKeyPrefix = "compare-table-${payload.compareId}-axis",
-                    animateText = animateText,
-                )
-                products.forEach { product ->
-                    MarkdownCompareColumnDivider(rowCount = axes.size)
-                    MarkdownCompareColumn(
-                        modifier = Modifier.width(MarkdownCompareProductColumnWidth),
-                        header = product.shortCompareName(),
-                        cells = axes.map { axis ->
-                            axis.valueFor(product.productId).markdownCell(
-                                axisName = axis.name,
-                                productName = product.displayName(),
+                Column(modifier = Modifier.width(IntrinsicSize.Max)) {
+                    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                        MarkdownCompareHeaderCell(
+                            width = MarkdownCompareMetricColumnWidth,
+                            text = "",
+                            emphasis = false,
+                            revealKey = "compare-table-${payload.compareId}-axis-header",
+                            animateText = animateText,
+                        )
+                        products.forEach { product ->
+                            VerticalDivider(color = BuyPilotColors.Border.copy(alpha = 0.58f))
+                            MarkdownCompareHeaderCell(
+                                width = MarkdownCompareProductColumnWidth,
+                                text = product.shortCompareName(),
+                                emphasis = product.productId == payload.winnerProductId,
+                                revealKey = "compare-table-${payload.compareId}-${product.productId}-header",
+                                animateText = animateText,
                             )
-                        },
-                        headerEmphasis = product.productId == payload.winnerProductId,
-                        revealKeyPrefix = "compare-table-${payload.compareId}-${product.productId}",
-                        animateText = animateText,
-                    )
+                        }
+                    }
+                    HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.72f))
+                    axes.forEachIndexed { rowIndex, axis ->
+                        Row(
+                            modifier = Modifier
+                                .height(IntrinsicSize.Min)
+                                .background(
+                                    if (rowIndex % 2 == 0) {
+                                        Color.Transparent
+                                    } else {
+                                        BuyPilotColors.SurfaceSubtle.copy(alpha = 0.2f)
+                                    },
+                                ),
+                        ) {
+                            MarkdownCompareBodyCell(
+                                width = MarkdownCompareMetricColumnWidth,
+                                text = axis.name.cleanCompareText(),
+                                emphasis = true,
+                                revealKey = "compare-table-${payload.compareId}-axis-cell-$rowIndex",
+                                delayMs = 120L + rowIndex * 55L,
+                                animateText = animateText,
+                            )
+                            products.forEach { product ->
+                                VerticalDivider(color = BuyPilotColors.Border.copy(alpha = 0.58f))
+                                MarkdownCompareBodyCell(
+                                    width = MarkdownCompareProductColumnWidth,
+                                    text = axis.valueFor(product.productId).markdownCell(
+                                        axisName = axis.name,
+                                        productName = product.displayName(),
+                                    ).note,
+                                    emphasis = false,
+                                    revealKey = "compare-table-${payload.compareId}-${product.productId}-cell-$rowIndex",
+                                    delayMs = 120L + rowIndex * 55L,
+                                    animateText = animateText,
+                                )
+                            }
+                        }
+                        if (rowIndex != axes.lastIndex) {
+                            HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.48f))
+                        }
+                    }
                 }
             }
         }
@@ -277,88 +316,70 @@ internal fun ProductDeckMarkdownCompareTable(
 }
 
 @Composable
-private fun MarkdownCompareColumn(
-    header: String,
-    cells: List<MarkdownCompareCell>,
-    modifier: Modifier = Modifier,
-    subHeader: String? = null,
-    headerEmphasis: Boolean = false,
-    cellEmphasis: Boolean = false,
-    revealKeyPrefix: String = header,
-    animateText: Boolean = false,
+private fun MarkdownCompareHeaderCell(
+    width: Dp,
+    text: String,
+    emphasis: Boolean,
+    revealKey: String,
+    animateText: Boolean,
 ) {
-    Column(modifier = modifier) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-                .background(
-                    if (headerEmphasis) {
-                        BuyPilotColors.PrimarySoft.copy(alpha = 0.24f)
-                    } else {
-                        BuyPilotColors.SurfaceSubtle.copy(alpha = 0.36f)
-                    },
-                )
-                .padding(horizontal = 9.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            CompareStreamingLabel(
-                key = "$revealKeyPrefix-header",
-                text = header.cleanCompareText(),
-                animate = animateText,
-                delayMs = 80L,
-                color = if (headerEmphasis) BuyPilotColors.PrimaryDark else BuyPilotColors.TextPrimary,
-                fontSize = BuyPilotType.Label,
-                lineHeight = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
+    Column(
+        modifier = Modifier
+            .width(width)
+            .fillMaxHeight()
+            .heightIn(min = 54.dp)
+            .background(
+                if (emphasis) {
+                    BuyPilotColors.PrimarySoft.copy(alpha = 0.24f)
+                } else {
+                    BuyPilotColors.SurfaceSubtle.copy(alpha = 0.36f)
+                },
             )
-            subHeader?.cleanCompareText()?.takeIf { it.isNotBlank() }?.let {
-                    CompareStreamingLabel(
-                        key = "$revealKeyPrefix-subheader",
-                        text = it,
-                        animate = animateText,
-                        delayMs = 120L,
-                        color = BuyPilotColors.TextMuted,
-                        fontSize = BuyPilotType.Tiny,
-                        lineHeight = 12.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                    )
-                }
-            }
-        HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.72f))
-        cells.forEachIndexed { index, cell ->
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(70.dp)
-                    .background(
-                        if (index % 2 == 0) {
-                            Color.Transparent
-                        } else {
-                            BuyPilotColors.SurfaceSubtle.copy(alpha = 0.2f)
-                        },
-                    )
-                    .padding(horizontal = 9.dp, vertical = 8.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                CompareStreamingLabel(
-                    key = "$revealKeyPrefix-cell-$index",
-                    text = cell.note.ifBlank { "待确认" },
-                    animate = animateText,
-                    delayMs = 120L + index * 55L,
-                    color = if (cellEmphasis) BuyPilotColors.TextPrimary else BuyPilotColors.TextSecondary,
-                    fontSize = BuyPilotType.Label,
-                    lineHeight = 16.sp,
-                    fontWeight = if (cellEmphasis) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 3,
-                )
-            }
-            if (index != cells.lastIndex) {
-                HorizontalDivider(color = BuyPilotColors.Border.copy(alpha = 0.48f))
-            }
-        }
+            .padding(horizontal = 9.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        CompareStreamingLabel(
+            key = revealKey,
+            text = text.cleanCompareText(),
+            animate = animateText,
+            delayMs = 80L,
+            color = if (emphasis) BuyPilotColors.PrimaryDark else BuyPilotColors.TextPrimary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+        )
+    }
+}
+
+@Composable
+private fun MarkdownCompareBodyCell(
+    width: Dp,
+    text: String,
+    emphasis: Boolean,
+    revealKey: String,
+    delayMs: Long,
+    animateText: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .fillMaxHeight()
+            .heightIn(min = 70.dp)
+            .padding(horizontal = 9.dp, vertical = 8.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        CompareStreamingLabel(
+            key = revealKey,
+            text = text.ifBlank { "待确认" },
+            animate = animateText,
+            delayMs = delayMs,
+            color = if (emphasis) BuyPilotColors.TextPrimary else BuyPilotColors.TextSecondary,
+            fontSize = BuyPilotType.Label,
+            lineHeight = 16.sp,
+            fontWeight = if (emphasis) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 3,
+        )
     }
 }
 
@@ -398,21 +419,6 @@ private fun CompareStreamingLabel(
             fontWeight = fontWeight,
             maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun MarkdownCompareColumnDivider(rowCount: Int) {
-    Box(
-        modifier = Modifier
-            .width(1.dp)
-            .height((54 + 70 * rowCount + rowCount.coerceAtLeast(1)).dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(BuyPilotColors.Border.copy(alpha = 0.58f)),
         )
     }
 }
@@ -522,11 +528,10 @@ internal fun CompareSummaryCard(
             narrationRevealComplete = true
         }
     }
-    LaunchedEffect(payload.compareId, artifactReady, hasStreamedConclusion, tradeoffs) {
+    LaunchedEffect(payload.compareId, artifactReady) {
         showModeSwitch = false
         showArtifact = false
         showAxisSummary = false
-        showClosingAdvice = false
         if (!artifactReady) return@LaunchedEffect
 
         delay(40)
@@ -535,7 +540,10 @@ internal fun CompareSummaryCard(
         showArtifact = true
         delay(120)
         showAxisSummary = true
-        if (hasStreamedConclusion || tradeoffs.isNotEmpty()) {
+    }
+    val closingAdviceReady = hasStreamedConclusion || tradeoffs.isNotEmpty()
+    LaunchedEffect(payload.compareId, artifactReady, showAxisSummary, closingAdviceReady) {
+        if (artifactReady && showAxisSummary && closingAdviceReady && !showClosingAdvice) {
             delay(110)
             showClosingAdvice = true
         }
@@ -683,12 +691,11 @@ private fun InlineCompareRadarBlock(
         CompareBarsChart(payload = payload)
         return
     }
-    val progress by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(420, easing = FastOutSlowInEasing),
-        label = "inline_compare_radar_progress",
-    )
-    val colors = comparePalette()
+    val progress = remember(payload.compareId) { Animatable(0f) }
+    LaunchedEffect(payload.compareId) {
+        progress.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
+    }
+    val colors = ComparePalette
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Canvas(
             modifier = Modifier
@@ -729,7 +736,7 @@ private fun InlineCompareRadarBlock(
                 val path = Path()
                 axes.forEachIndexed { axisIndex, axis ->
                     val score = axis.scoreFor(product.productId) ?: 0.0
-                    val point = radarPoint(center, radius * (score / 100.0).toFloat() * progress, axisIndex, count)
+                    val point = radarPoint(center, radius * (score / 100.0).toFloat() * progress.value, axisIndex, count)
                     if (axisIndex == 0) path.moveTo(point.x, point.y) else path.lineTo(point.x, point.y)
                 }
                 path.close()
@@ -1042,12 +1049,11 @@ private fun CompareRadarChart(payload: CompareCardPayload) {
         CompareBarsChart(payload = payload)
         return
     }
-    val progress by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(520, easing = FastOutSlowInEasing),
-        label = "compare_radar_progress",
-    )
-    val colors = comparePalette()
+    val progress = remember(payload.compareId) { Animatable(0f) }
+    LaunchedEffect(payload.compareId) {
+        progress.animateTo(1f, tween(320, easing = FastOutSlowInEasing))
+    }
+    val colors = ComparePalette
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Canvas(
             modifier = Modifier
@@ -1088,7 +1094,7 @@ private fun CompareRadarChart(payload: CompareCardPayload) {
                 val path = Path()
                 axes.forEachIndexed { axisIndex, axis ->
                     val score = axis.scoreFor(product.productId) ?: 0.0
-                    val point = radarPoint(center, radius * (score / 100.0).toFloat() * progress, axisIndex, count)
+                    val point = radarPoint(center, radius * (score / 100.0).toFloat() * progress.value, axisIndex, count)
                     if (axisIndex == 0) path.moveTo(point.x, point.y) else path.lineTo(point.x, point.y)
                 }
                 path.close()
@@ -1126,7 +1132,7 @@ private fun CompareAxisHintRow(axes: List<CompareAxisPayload>) {
 
 @Composable
 private fun CompareBarsChart(payload: CompareCardPayload) {
-    val colors = comparePalette()
+    val colors = ComparePalette
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         payload.axes.filter { it.values.any { value -> value.score != null } }.forEach { axis ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1158,11 +1164,13 @@ private fun CompareScoreBar(
     score: Double,
     color: Color,
 ) {
-    val progress by animateFloatAsState(
-        targetValue = (score / 100.0).toFloat().coerceIn(0f, 1f),
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "compare_score_bar",
-    )
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(score) {
+        progress.animateTo(
+            (score / 100.0).toFloat().coerceIn(0f, 1f),
+            tween(320, easing = FastOutSlowInEasing),
+        )
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             text = label.shortCompareProductAlias().ifBlank { label },
@@ -1182,7 +1190,7 @@ private fun CompareScoreBar(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(progress)
+                    .fillMaxWidth(progress.value)
                     .height(7.dp)
                     .clip(CircleShape)
                     .background(color.copy(alpha = 0.78f)),
@@ -1449,7 +1457,7 @@ private fun CompareProductAvatarRow(products: List<ProductPayload>, backendBaseU
 
 @Composable
 private fun CompareLegend(products: List<ProductPayload>, winnerProductId: String?) {
-    val colors = comparePalette()
+    val colors = ComparePalette
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1783,8 +1791,7 @@ private fun radarPoint(center: Offset, radius: Float, index: Int, count: Int): O
     )
 }
 
-@Composable
-private fun comparePalette(): List<Color> =
+private val ComparePalette: List<Color> =
     listOf(
         BuyPilotColors.Primary,
         Color(0xFF5A7FA8),

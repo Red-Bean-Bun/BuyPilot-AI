@@ -147,6 +147,64 @@ class TimelineRevealStoreTest {
     }
 
     @Test
+    fun streamingTrailSpacerHeightStartsFullThenShrinksToBuffer() {
+        assertEquals(
+            772,
+            computeStreamingTrailSpacerHeightPx(
+                viewportHeightPx = 800,
+                anchorTopPx = 28,
+                turnContentHeightPx = 0,
+                minBufferPx = 72,
+                previousHeightPx = Int.MAX_VALUE,
+            ),
+        )
+        assertEquals(
+            472,
+            computeStreamingTrailSpacerHeightPx(
+                viewportHeightPx = 800,
+                anchorTopPx = 28,
+                turnContentHeightPx = 300,
+                minBufferPx = 72,
+                previousHeightPx = 772,
+            ),
+        )
+        assertEquals(
+            72,
+            computeStreamingTrailSpacerHeightPx(
+                viewportHeightPx = 800,
+                anchorTopPx = 28,
+                turnContentHeightPx = 900,
+                minBufferPx = 72,
+                previousHeightPx = 472,
+            ),
+        )
+    }
+
+    @Test
+    fun streamingTrailSpacerDoesNotGrowWithinTurnWhenViewportChanges() {
+        assertEquals(
+            360,
+            computeStreamingTrailSpacerHeightPx(
+                viewportHeightPx = 900,
+                anchorTopPx = 28,
+                turnContentHeightPx = 200,
+                minBufferPx = 72,
+                previousHeightPx = 360,
+            ),
+        )
+        assertEquals(
+            72,
+            computeStreamingTrailSpacerHeightPx(
+                viewportHeightPx = 360,
+                anchorTopPx = 28,
+                turnContentHeightPx = 400,
+                minBufferPx = 72,
+                previousHeightPx = 360,
+            ),
+        )
+    }
+
+    @Test
     fun scrollCoordinatorReadableAnchorSupersedesViewportFreeze() {
         val coordinator = TimelineScrollCoordinator()
 
@@ -728,6 +786,65 @@ class TimelineRevealStoreTest {
             shouldPauseTimelineFollowForUserDrag(
                 isUserDragging = false,
                 isNearTimelineEnd = false,
+            ),
+        )
+    }
+
+    @Test
+    fun assistantStartedAnchorStopsWhenUserDetachedFromLatest() {
+        assertTrue(
+            shouldAnchorAssistantStartedTurn(
+                turnId = "turn_2",
+                lastAnchoredTurnId = "turn_1",
+                routeReturnSettledTurnId = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+                isClarificationFlightActive = false,
+                userDetachedFromLatest = false,
+            ),
+        )
+        assertFalse(
+            shouldAnchorAssistantStartedTurn(
+                turnId = "turn_2",
+                lastAnchoredTurnId = "turn_1",
+                routeReturnSettledTurnId = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+                isClarificationFlightActive = false,
+                userDetachedFromLatest = true,
+            ),
+        )
+        assertFalse(
+            shouldAnchorAssistantStartedTurn(
+                turnId = "turn_2",
+                lastAnchoredTurnId = "turn_2",
+                routeReturnSettledTurnId = null,
+                autoFocusSuppressed = false,
+                manualScrollActive = false,
+                isClarificationFlightActive = false,
+                userDetachedFromLatest = false,
+            ),
+        )
+    }
+
+    @Test
+    fun routeReturnMarksOnlyCapturedLatestUserMessageHandled() {
+        assertTrue(
+            shouldMarkUserMessageHandledOnRouteReturn(
+                capturedKey = "user_before_route",
+                latestKey = "user_before_route",
+            ),
+        )
+        assertFalse(
+            shouldMarkUserMessageHandledOnRouteReturn(
+                capturedKey = "user_before_route",
+                latestKey = "user_after_route",
+            ),
+        )
+        assertFalse(
+            shouldMarkUserMessageHandledOnRouteReturn(
+                capturedKey = null,
+                latestKey = "user_after_route",
             ),
         )
     }
@@ -2070,6 +2187,13 @@ class TimelineRevealStoreTest {
                 hasSeenLiveStream = false,
             ),
         )
+        assertFalse(
+            shouldKeepPlainTextRendererAfterStreaming(
+                content = "普通正文",
+                hasSeenLiveStream = true,
+                streamedWithNative = true,
+            ),
+        )
     }
 
     @Test
@@ -2085,6 +2209,82 @@ class TimelineRevealStoreTest {
                 """.trimIndent(),
             ),
         )
+    }
+
+    @Test
+    fun streamingMarkdownSplitKeepsOnlyClosedParagraphsStable() {
+        val split = splitStreamingMarkdownBlocks(
+            """
+                第一段已经结束。
+
+                第二段还在输入
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("第一段已经结束。"), split.closedBlocks)
+        assertEquals("第二段还在输入", split.openBlock)
+    }
+
+    @Test
+    fun streamingMarkdownSplitDoesNotCloseFenceUntilBlankAfterFenceEnd() {
+        val openFence = splitStreamingMarkdownBlocks(
+            """
+                ```kotlin
+                val x = 1
+
+                下一段
+            """.trimIndent(),
+        )
+        assertEquals(emptyList<String>(), openFence.closedBlocks)
+        assertTrue(openFence.openBlock.startsWith("```kotlin"))
+
+        val closedFence = splitStreamingMarkdownBlocks(
+            """
+                ```kotlin
+                val x = 1
+                ```
+
+                下一段
+            """.trimIndent(),
+        )
+        assertEquals(listOf("```kotlin\nval x = 1\n```"), closedFence.closedBlocks)
+        assertEquals("下一段", closedFence.openBlock)
+    }
+
+    @Test
+    fun streamingSafeVisibleLengthHidesOpenTableUntilDone() {
+        val content = """
+            推荐如下：
+
+            |商品|价格|
+            |---|---|
+            |A|100|
+        """.trimIndent()
+        val tableStart = content.indexOf("|商品")
+
+        assertEquals(
+            tableStart,
+            streamingSafeVisibleLength(
+                content = content,
+                visibleLength = content.length,
+                done = false,
+            ),
+        )
+        assertEquals(
+            content.length,
+            streamingSafeVisibleLength(
+                content = content,
+                visibleLength = content.length,
+                done = true,
+            ),
+        )
+    }
+
+    @Test
+    fun streamingRendererUpgradeIsMonotonic() {
+        assertFalse(resolveStreamingRendererUpgrade(currentUpgraded = false, visibleContent = "普通正文"))
+        assertTrue(resolveStreamingRendererUpgrade(currentUpgraded = false, visibleContent = "**重点**"))
+        assertTrue(resolveStreamingRendererUpgrade(currentUpgraded = true, visibleContent = "普通正文"))
     }
 
     @Test
@@ -2369,6 +2569,153 @@ class TimelineRevealStoreTest {
             ?: error("snapshot holder did not restore")
 
         assertEquals(holder.snapshot, restored.snapshot)
+    }
+
+    @Test
+    fun speechInputModePrefersInlineRecognizer() {
+        assertEquals(
+            SpeechInputMode.InlineRecognizer,
+            resolveSpeechInputMode(
+                hasInlineRecognizer = true,
+                canLaunchRecognitionActivity = true,
+            ),
+        )
+        assertEquals(
+            SpeechInputMode.InlineRecognizer,
+            resolveSpeechInputMode(
+                hasInlineRecognizer = true,
+                canLaunchRecognitionActivity = false,
+            ),
+        )
+    }
+
+    @Test
+    fun speechInputModeFallsBackToSystemActivity() {
+        assertEquals(
+            SpeechInputMode.SystemActivity,
+            resolveSpeechInputMode(
+                hasInlineRecognizer = false,
+                canLaunchRecognitionActivity = true,
+            ),
+        )
+    }
+
+    @Test
+    fun speechInputModeReportsUnavailableWhenAndroidHasNoRecognizer() {
+        assertEquals(
+            SpeechInputMode.Unavailable,
+            resolveSpeechInputMode(
+                hasInlineRecognizer = false,
+                canLaunchRecognitionActivity = false,
+            ),
+        )
+    }
+
+    @Test
+    fun speechRecognitionServiceChooserUsesFirstEnabledExportedCandidate() {
+        val chosen = chooseSpeechRecognitionServiceCandidate(
+            listOf(
+                SpeechRecognitionServiceCandidate(
+                    packageName = "com.disabled",
+                    serviceName = "DisabledRecognitionService",
+                    serviceEnabled = false,
+                    applicationEnabled = true,
+                    exported = true,
+                    systemApp = true,
+                ),
+                SpeechRecognitionServiceCandidate(
+                    packageName = "com.example.asr",
+                    serviceName = "ExampleRecognitionService",
+                    serviceEnabled = true,
+                    applicationEnabled = true,
+                    exported = true,
+                    systemApp = true,
+                ),
+            ),
+        )
+
+        assertEquals("com.example.asr", chosen?.packageName)
+        assertEquals("ExampleRecognitionService", chosen?.serviceName)
+    }
+
+    @Test
+    fun speechRecognitionServiceChooserRejectsIncompleteOrDisabledCandidates() {
+        assertNull(
+            chooseSpeechRecognitionServiceCandidate(
+                listOf(
+                    SpeechRecognitionServiceCandidate(
+                        packageName = "",
+                        serviceName = "MissingPackageRecognitionService",
+                        serviceEnabled = true,
+                        applicationEnabled = true,
+                        exported = true,
+                        systemApp = true,
+                    ),
+                    SpeechRecognitionServiceCandidate(
+                        packageName = "com.example.asr",
+                        serviceName = "",
+                        serviceEnabled = true,
+                        applicationEnabled = true,
+                        exported = true,
+                        systemApp = true,
+                    ),
+                    SpeechRecognitionServiceCandidate(
+                        packageName = "com.example.disabledapp",
+                        serviceName = "DisabledAppRecognitionService",
+                        serviceEnabled = true,
+                        applicationEnabled = false,
+                        exported = true,
+                        systemApp = true,
+                    ),
+                    SpeechRecognitionServiceCandidate(
+                        packageName = "com.example.private",
+                        serviceName = "PrivateRecognitionService",
+                        serviceEnabled = true,
+                        applicationEnabled = true,
+                        exported = false,
+                        systemApp = true,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun speechRecognitionServiceChooserRejectsThirdPartyServiceWithoutSystemDefault() {
+        assertNull(
+            chooseSpeechRecognitionServiceCandidate(
+                listOf(
+                    SpeechRecognitionServiceCandidate(
+                        packageName = "com.thirdparty.asr",
+                        serviceName = "ThirdPartyRecognitionService",
+                        serviceEnabled = true,
+                        applicationEnabled = true,
+                        exported = true,
+                        systemApp = false,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun speechRecognitionServiceChooserAllowsConfiguredDefaultService() {
+        val chosen = chooseSpeechRecognitionServiceCandidate(
+            listOf(
+                SpeechRecognitionServiceCandidate(
+                    packageName = "com.thirdparty.asr",
+                    serviceName = "ThirdPartyRecognitionService",
+                    serviceEnabled = true,
+                    applicationEnabled = true,
+                    exported = true,
+                    systemApp = false,
+                ),
+            ),
+            defaultServiceComponent = "com.thirdparty.asr/ThirdPartyRecognitionService",
+        )
+
+        assertEquals("com.thirdparty.asr", chosen?.packageName)
+        assertEquals("ThirdPartyRecognitionService", chosen?.serviceName)
     }
 
     private fun thinking(

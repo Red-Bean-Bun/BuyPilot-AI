@@ -380,6 +380,48 @@ internal fun shouldPauseTimelineFollowForUserDrag(
     isNearTimelineEnd: Boolean,
 ): Boolean = isUserDragging && !isNearTimelineEnd
 
+/**
+ * 流式底部占位高度：`ideal = 视口 - 锚位 - 当前 turn 内容高`。
+ * 通过 [previousHeightPx] 实现 turn 内单调收缩（只减不增），
+ * 避免内容生长与占位伸长互相打架导致视口抖动。
+ */
+internal fun computeStreamingTrailSpacerHeightPx(
+    viewportHeightPx: Int,
+    anchorTopPx: Int,
+    turnContentHeightPx: Int,
+    minBufferPx: Int,
+    previousHeightPx: Int,
+): Int {
+    if (viewportHeightPx <= 0) return 0
+    val minHeight = minBufferPx.coerceIn(0, viewportHeightPx)
+    val ideal = viewportHeightPx - anchorTopPx - turnContentHeightPx
+    return ideal
+        .coerceIn(minHeight, viewportHeightPx)
+        .coerceAtMost(previousHeightPx)
+        .coerceAtLeast(minHeight)
+}
+
+internal fun shouldAnchorAssistantStartedTurn(
+    turnId: String?,
+    lastAnchoredTurnId: String?,
+    routeReturnSettledTurnId: String?,
+    autoFocusSuppressed: Boolean,
+    manualScrollActive: Boolean,
+    isClarificationFlightActive: Boolean,
+    userDetachedFromLatest: Boolean,
+): Boolean {
+    val turn = turnId?.takeIf { it.isNotBlank() } ?: return false
+    if (autoFocusSuppressed || manualScrollActive || isClarificationFlightActive || userDetachedFromLatest) {
+        return false
+    }
+    return turn != lastAnchoredTurnId && turn != routeReturnSettledTurnId
+}
+
+internal fun shouldMarkUserMessageHandledOnRouteReturn(
+    capturedKey: String?,
+    latestKey: String?,
+): Boolean = capturedKey != null && capturedKey == latestKey
+
 internal fun shouldAutoFocusTimelineFinalDecision(
     decisionKey: String?,
     decisionTurnId: String?,

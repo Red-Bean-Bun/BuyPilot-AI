@@ -58,7 +58,7 @@ import com.buypilot.core.model.ReasonAtomPayload
 import com.buypilot.feature.chat.R
 import com.buypilot.feature.chat.state.ChatUiState
 
-private const val ProductEvidenceEnterMs = 560
+private const val ProductEvidenceEnterMs = RouteEnterDurationMs
 
 // Light minimal evidence palette
 private val EvidenceBg = Color(0xFFF8F9FB)
@@ -95,17 +95,21 @@ fun ProductEvidenceOverlayScreen(
         return
     }
 
-    val evidenceItems = payload.evidence
-        .mapNotNull { evidence -> evidence.takeIf { it.cleanSnippet().isNotBlank() } }
+    val evidenceItems = remember(payload.evidence) {
+        payload.evidence
+            .mapNotNull { evidence -> evidence.takeIf { it.cleanSnippet().isNotBlank() } }
+    }
     val evidenceByKey = remember(evidenceItems) {
         evidenceItems
             .mapNotNull { evidence -> evidence.linkKey()?.let { key -> key to evidence } }
             .toMap()
     }
-    val reason = payload.reason.withoutInternalDebugTokens().trim()
-    val reasonAtoms = payload.reasonAtoms
-        .filter { it.text.isNotBlank() || it.dimension.isNotBlank() || it.value.isNotBlank() }
-        .take(5)
+    val reason = remember(payload.reason) { payload.reason.withoutInternalDebugTokens().trim() }
+    val reasonAtoms = remember(payload.reasonAtoms) {
+        payload.reasonAtoms
+            .filter { it.text.isNotBlank() || it.dimension.isNotBlank() || it.value.isNotBlank() }
+            .take(5)
+    }
     val linkedEvidenceKeys = reasonAtoms.mapNotNull { it.evidenceId?.trim()?.takeIf(String::isNotBlank) }.toSet()
     val remainingEvidence = evidenceItems.filter { it.linkKey() !in linkedEvidenceKeys }
     val riskSourceTexts = remember(state.productDetails[productId]) {
@@ -119,7 +123,8 @@ fun ProductEvidenceOverlayScreen(
         key = "evidence_${deckId}_${deckNodeKey.orEmpty()}_${productId}",
         durationMillis = ProductEvidenceEnterMs,
     )
-    val progress = routeProgressState.value
+    // 入场进度只通过 lambda 延迟到 draw 阶段读取，避免 560ms 入场期间整屏每帧重组
+    val progress: () -> Float = { routeProgressState.value }
 
     Box(
         modifier = modifier
@@ -159,7 +164,7 @@ fun ProductEvidenceOverlayScreen(
                 .statusBarsPadding()
                 .padding(start = 14.dp, top = 9.dp)
                 .graphicsLayer {
-                    val chromeEnter = segmentProgress(progress, 0.08f, 0.58f)
+                    val chromeEnter = segmentProgress(progress(), 0.08f, 0.58f)
                     alpha = chromeEnter
                     translationY = (1f - chromeEnter) * -10f
                     scaleX = lerp(0.94f, 1f, chromeEnter)
@@ -184,15 +189,15 @@ fun ProductEvidenceOverlayScreen(
 
 @Composable
 private fun EvidenceMotionBlock(
-    progress: Float,
+    progress: () -> Float,
     start: Float,
     end: Float,
     offsetY: Float,
     content: @Composable () -> Unit,
 ) {
-    val t = segmentProgress(progress, start, end)
     Box(
         modifier = Modifier.graphicsLayer {
+            val t = segmentProgress(progress(), start, end)
             alpha = t
             translationY = (1f - t) * offsetY
             scaleX = lerp(0.982f, 1f, t)

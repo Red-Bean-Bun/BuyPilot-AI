@@ -258,6 +258,7 @@ private const val ClarificationCardSequenceReleaseMs = 120L
 private val TimelineNearEndThreshold = 24.dp
 private val TimelineFollowCorrectionTolerance = 8.dp
 private val TimelineSafeGap = 12.dp
+private val TimelineItemSpacing = 16.dp
 private val TimelineBottomReadingBuffer = 72.dp
 private val TimelineKeyboardBottomReadingBuffer = 56.dp
 private val TimelineAnchorTopGap = 28.dp
@@ -306,6 +307,7 @@ private class TimelineRouteReturnState(
     finalDecisionKeyInitial: String? = null,
     settledTurnIdInitial: String? = null,
     settledFinalDecisionKeyInitial: String? = null,
+    capturedLastUserMessageKeyInitial: String? = null,
 ) {
     var suppressAutoFocus by mutableStateOf(suppressAutoFocusInitial)
     var anchorCaptured by mutableStateOf(anchorCapturedInitial)
@@ -320,6 +322,7 @@ private class TimelineRouteReturnState(
     var finalDecisionKey by mutableStateOf(finalDecisionKeyInitial)
     var settledTurnId by mutableStateOf(settledTurnIdInitial)
     var settledFinalDecisionKey by mutableStateOf(settledFinalDecisionKeyInitial)
+    var capturedLastUserMessageKey by mutableStateOf(capturedLastUserMessageKeyInitial)
 
     fun resetAnchor() {
         restorePending = false
@@ -330,6 +333,7 @@ private class TimelineRouteReturnState(
         nodeTopPx = null
         turnId = null
         finalDecisionKey = null
+        capturedLastUserMessageKey = null
     }
 
     companion object {
@@ -349,6 +353,7 @@ private class TimelineRouteReturnState(
                     state.finalDecisionKey,
                     state.settledTurnId,
                     state.settledFinalDecisionKey,
+                    state.capturedLastUserMessageKey,
                 )
             },
             restore = { saved ->
@@ -366,6 +371,7 @@ private class TimelineRouteReturnState(
                     finalDecisionKeyInitial = saved.getOrNull(10) as? String,
                     settledTurnIdInitial = saved.getOrNull(11) as? String,
                     settledFinalDecisionKeyInitial = saved.getOrNull(12) as? String,
+                    capturedLastUserMessageKeyInitial = saved.getOrNull(13) as? String,
                 )
             },
         )
@@ -393,6 +399,78 @@ private class TimelineFreezeState {
     fun clear() {
         captured = false
         itemKey = null
+    }
+}
+
+/**
+ * ChatGPT 式流式底部占位：发送消息时在列表末尾预留接近视口高的空白，
+ * 保证最新用户气泡总能被锚到视口顶部；回答向下生长时占位单调收缩，
+ * 视口零位移。turn 结束后冻结余白（settle），直到下一次 activate。
+ */
+@Stable
+private class StreamingTrailSpacerState {
+    var activeAnchorUserKey by mutableStateOf<String?>(null)
+        private set
+    var heightPx by mutableIntStateOf(0)
+        private set
+    private var userItemHeightPx = 0
+    private var assistantTurnHeightPx = 0
+
+    fun activate(userKey: String, viewportHeightPx: Int, anchorTopPx: Int, minBufferPx: Int) {
+        if (userKey == activeAnchorUserKey) return
+        if (viewportHeightPx <= 0) return
+        activeAnchorUserKey = userKey
+        userItemHeightPx = 0
+        assistantTurnHeightPx = 0
+        // 内容高度未知按 0 计 → 给满占位，UserSent 锚顶必然可达
+        heightPx = computeStreamingTrailSpacerHeightPx(
+            viewportHeightPx = viewportHeightPx,
+            anchorTopPx = anchorTopPx,
+            turnContentHeightPx = 0,
+            minBufferPx = minBufferPx,
+            previousHeightPx = Int.MAX_VALUE,
+        )
+    }
+
+    fun onUserItemMeasured(
+        measuredHeightPx: Int,
+        viewportHeightPx: Int,
+        anchorTopPx: Int,
+        itemSpacingPx: Int,
+        minBufferPx: Int,
+    ) {
+        if (measuredHeightPx == userItemHeightPx) return
+        userItemHeightPx = measuredHeightPx
+        recompute(viewportHeightPx, anchorTopPx, itemSpacingPx, minBufferPx)
+    }
+
+    fun onAssistantTurnMeasured(
+        measuredHeightPx: Int,
+        viewportHeightPx: Int,
+        anchorTopPx: Int,
+        itemSpacingPx: Int,
+        minBufferPx: Int,
+    ) {
+        if (measuredHeightPx == assistantTurnHeightPx) return
+        assistantTurnHeightPx = measuredHeightPx
+        recompute(viewportHeightPx, anchorTopPx, itemSpacingPx, minBufferPx)
+    }
+
+    fun settle() {
+        activeAnchorUserKey = null
+    }
+
+    private fun recompute(viewportHeightPx: Int, anchorTopPx: Int, itemSpacingPx: Int, minBufferPx: Int) {
+        if (activeAnchorUserKey == null || viewportHeightPx <= 0) return
+        val turnContentHeightPx = userItemHeightPx +
+            (if (assistantTurnHeightPx > 0) itemSpacingPx + assistantTurnHeightPx else 0)
+        heightPx = computeStreamingTrailSpacerHeightPx(
+            viewportHeightPx = viewportHeightPx,
+            anchorTopPx = anchorTopPx,
+            turnContentHeightPx = turnContentHeightPx,
+            minBufferPx = minBufferPx,
+            previousHeightPx = heightPx,
+        )
     }
 }
 
@@ -602,6 +680,7 @@ internal fun ChatTimeline(
             currentTurnId = state.currentTurnId,
         )
         routeReturnState.finalDecisionKey = latestFinalDecisionKey
+        routeReturnState.capturedLastUserMessageKey = state.lastUserMessageKey
         routeReturnState.anchorCaptured = true
         routeReturnState.restorePending = false
     }
@@ -672,14 +751,22 @@ internal fun ChatTimeline(
     val jumpButtonBottomPadding = timelineViewportBottomInset + TimelineJumpButtonComposerGap
     val targetEndReadingBuffer = timelineReadingBuffer
     val endReadingBuffer = targetEndReadingBuffer
+    val endReadingBufferPx = with(density) { endReadingBuffer.toPx().roundToInt() }
     val nearEndThresholdPx = with(density) { TimelineNearEndThreshold.toPx() }
     val followCorrectionTolerancePx = with(density) { TimelineFollowCorrectionTolerance.toPx() }
-    val latestContentBottomPaddingPx = with(density) {
-        timelineBottomPadding.toPx() + timelineReadingBuffer.toPx()
+    val trailSpacerState = remember { StreamingTrailSpacerState() }
+    val baseContentBottomPaddingPx = with(density) { timelineBottomPadding.toPx() }
+    val latestContentBottomPaddingPx by remember(baseContentBottomPaddingPx, endReadingBufferPx, trailSpacerState) {
+        derivedStateOf {
+            baseContentBottomPaddingPx + maxOf(endReadingBufferPx, trailSpacerState.heightPx).toFloat()
+        }
     }
     val anchorTopOffsetPx = with(density) { TimelineAnchorTopGap.toPx().roundToInt() }
+    val timelineItemSpacingPx = with(density) { TimelineItemSpacing.toPx().roundToInt() }
+    var timelineViewportHeightPx by remember { mutableIntStateOf(0) }
     val latestTimelineItems by rememberUpdatedState(timelineItems)
     val latestState by rememberUpdatedState(state)
+    val latestManualScrollActive by rememberUpdatedState(manualScrollActive)
     val latestLatestFinalDecisionKey by rememberUpdatedState(latestFinalDecisionKey)
     val latestLatestContentBottomPaddingPx by rememberUpdatedState(latestContentBottomPaddingPx)
     val latestCurrentTurnId by rememberUpdatedState(state.currentTurnId)
@@ -865,6 +952,13 @@ internal fun ChatTimeline(
             followCurrentTurnDuringReveal = false
             activeUserBubbleFollowAnchorKey = null
             userDetachedFromLatest = false
+            // 先铺好底部占位，保证 UserSent 锚顶有足够滚动空间（ChatGPT 模型）
+            trailSpacerState.activate(
+                userKey = key,
+                viewportHeightPx = timelineViewportHeightPx,
+                anchorTopPx = anchorTopOffsetPx,
+                minBufferPx = endReadingBufferPx,
+            )
             viewportController.requestUserSent(
                 key = key,
                 index = index,
@@ -880,19 +974,24 @@ internal fun ChatTimeline(
         routeReturnState.suppressAutoFocus,
         manualScrollActive,
         isClarificationFlightActive,
+        userDetachedFromLatest,
         timelineScrollAnchorSignature,
         timelineItems.size,
     ) {
-        if (routeReturnState.suppressAutoFocus || manualScrollActive || isClarificationFlightActive) {
-            return@LaunchedEffect
-        }
-        val turnId = state.currentTurnId ?: return@LaunchedEffect
         if (
-            turnId == lastAnchoredAssistantTurnId ||
-            turnId == routeReturnState.settledTurnId
+            !shouldAnchorAssistantStartedTurn(
+                turnId = state.currentTurnId,
+                lastAnchoredTurnId = lastAnchoredAssistantTurnId,
+                routeReturnSettledTurnId = routeReturnState.settledTurnId,
+                autoFocusSuppressed = routeReturnState.suppressAutoFocus,
+                manualScrollActive = manualScrollActive,
+                isClarificationFlightActive = isClarificationFlightActive,
+                userDetachedFromLatest = userDetachedFromLatest,
+            )
         ) {
             return@LaunchedEffect
         }
+        val turnId = state.currentTurnId ?: return@LaunchedEffect
         val assistantTurnIndex = timelineItems.indexOfFirst {
             it is AssistantTurnTimelineItem && it.turnId == turnId
         }
@@ -989,6 +1088,8 @@ internal fun ChatTimeline(
         if (!state.isStreaming && !isAssistantVisualActive) {
             followCurrentTurnDuringReveal = false
             activeUserBubbleFollowAnchorKey = null
+            // 冻结余白：保留当前占位高度，停止跟随 turn 内容继续收缩
+            trailSpacerState.settle()
         }
     }
 
@@ -1050,10 +1151,10 @@ internal fun ChatTimeline(
         )
     }
 
+    // 执行器只随 intent serial 重启：manualScrollActive/suppress 翻转不应取消正在执行的滚动动画
+    // （用户拖拽中断由 interruptWithUserDrag 替换意图队列 → serial 变化承担）
     LaunchedEffect(
         viewportController.pendingIntent?.serial,
-        suppressTimelineAutoFocus,
-        manualScrollActive,
     ) {
         val pending = viewportController.pendingIntent ?: return@LaunchedEffect
         val intent = pending.intent
@@ -1066,7 +1167,7 @@ internal fun ChatTimeline(
             clearPending()
             return@LaunchedEffect
         }
-        if (shouldBlockTimelineAutoFocusForManualScroll(intent.kind, manualScrollActive)) {
+        if (shouldBlockTimelineAutoFocusForManualScroll(intent.kind, latestManualScrollActive)) {
             clearPending()
             return@LaunchedEffect
         }
@@ -1102,7 +1203,16 @@ internal fun ChatTimeline(
                 )
                 restoreRouteReturnNodeAnchorIfNeeded()
                 val capturedTurnId = routeReturnState.turnId
-                lastHandledUserMessageKey = latestState.lastUserMessageKey
+                if (
+                    shouldMarkUserMessageHandledOnRouteReturn(
+                        capturedKey = routeReturnState.capturedLastUserMessageKey,
+                        latestKey = latestState.lastUserMessageKey,
+                    )
+                ) {
+                    // 该用户消息在路由离开前已存在，不需要再锚顶；
+                    // 路由期间新到的消息保持未处理，让 UserSent effect 正常锚定
+                    lastHandledUserMessageKey = latestState.lastUserMessageKey
+                }
                 if (capturedTurnId == latestState.currentTurnId) {
                     routeReturnState.settledTurnId = capturedTurnId
                     lastAnchoredAssistantTurnId = capturedTurnId
@@ -1125,6 +1235,7 @@ internal fun ChatTimeline(
                 routeReturnState.nodeTopPx = null
                 routeReturnState.turnId = null
                 routeReturnState.finalDecisionKey = null
+                routeReturnState.capturedLastUserMessageKey = null
                 clearPending()
                 kotlinx.coroutines.delay(420L)
                 routeReturnState.suppressAutoFocus = false
@@ -1368,14 +1479,15 @@ internal fun ChatTimeline(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = timelineViewportBottomInset),
+                    .padding(bottom = timelineViewportBottomInset)
+                    .onSizeChanged { size -> timelineViewportHeightPx = size.height },
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     top = 16.dp,
                     end = 16.dp,
                     bottom = timelineBottomPadding,
                 ),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(TimelineItemSpacing),
             ) {
             items(
                 items = timelineItems,
@@ -1386,6 +1498,17 @@ internal fun ChatTimeline(
                     is UserTimelineItem -> {
                         val hiddenUserMessage = item.node.key in hiddenUserMessageKeys
                         TimelineItemMotion(
+                            modifier = Modifier.onSizeChanged { size ->
+                                if (item.node.key == trailSpacerState.activeAnchorUserKey) {
+                                    trailSpacerState.onUserItemMeasured(
+                                        measuredHeightPx = size.height,
+                                        viewportHeightPx = timelineViewportHeightPx,
+                                        anchorTopPx = anchorTopOffsetPx,
+                                        itemSpacingPx = timelineItemSpacingPx,
+                                        minBufferPx = endReadingBufferPx,
+                                    )
+                                }
+                            },
                             animateEnter = timelineMotionEnabled && !hiddenUserMessage,
                             hasEntered = revealStore.hasEnteredTimelineItem(item.key),
                             onEntered = { revealStore.markTimelineItemEntered(item.key) },
@@ -1446,6 +1569,20 @@ internal fun ChatTimeline(
                     is AssistantTurnTimelineItem -> {
                         if (item.turnId !in inlineCompareTurnIds) {
                             TimelineItemMotion(
+                                modifier = Modifier.onSizeChanged { size ->
+                                    if (
+                                        trailSpacerState.activeAnchorUserKey != null &&
+                                        item.turnId == state.currentTurnId
+                                    ) {
+                                        trailSpacerState.onAssistantTurnMeasured(
+                                            measuredHeightPx = size.height,
+                                            viewportHeightPx = timelineViewportHeightPx,
+                                            anchorTopPx = anchorTopOffsetPx,
+                                            itemSpacingPx = timelineItemSpacingPx,
+                                            minBufferPx = endReadingBufferPx,
+                                        )
+                                    }
+                                },
                                 animateEnter = false,
                                 hasEntered = revealStore.hasEnteredTimelineItem(item.key),
                                 onEntered = { revealStore.markTimelineItemEntered(item.key) },
@@ -1578,7 +1715,8 @@ internal fun ChatTimeline(
 
             if (timelineItems.isNotEmpty()) {
                 item("timeline_bottom_reading_buffer") {
-                    Spacer(Modifier.height(endReadingBuffer))
+                    val trailHeight = with(density) { trailSpacerState.heightPx.toDp() }
+                    Spacer(Modifier.height(maxOf(endReadingBuffer, trailHeight)))
                 }
             }
         }
@@ -2700,8 +2838,30 @@ private fun AssistantPendingDots(
     motionEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    if (!motionEnabled) {
+        // 静态模式不创建 infiniteTransition，避免空转浪费帧调度
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .graphicsLayer {
+                            alpha = lerp(0.28f, 0.82f, 0.45f)
+                            scaleX = lerp(0.82f, 1.04f, 0.45f)
+                            scaleY = lerp(0.82f, 1.04f, 0.45f)
+                        }
+                        .background(BuyPilotColors.ThinkingShimmer, CircleShape),
+                )
+            }
+        }
+        return
+    }
     val transition = rememberInfiniteTransition(label = "assistant_pending_dots")
-    val progress by transition.animateFloat(
+    val progress = transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -2716,16 +2876,13 @@ private fun AssistantPendingDots(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         repeat(3) { index ->
-            val dotProgress = if (motionEnabled) {
-                val shifted = (progress + index * 0.18f) % 1f
-                1f - abs(shifted * 2f - 1f)
-            } else {
-                0.45f
-            }
             Box(
                 modifier = Modifier
                     .size(5.dp)
                     .graphicsLayer {
+                        // draw-phase 延迟读取：动画逐帧只触发重绘，不触发重组
+                        val shifted = (progress.value + index * 0.18f) % 1f
+                        val dotProgress = 1f - abs(shifted * 2f - 1f)
                         alpha = lerp(0.28f, 0.82f, dotProgress)
                         scaleX = lerp(0.82f, 1.04f, dotProgress)
                         scaleY = lerp(0.82f, 1.04f, dotProgress)
@@ -2791,7 +2948,7 @@ private fun ThinkingMascotAnimation(
     }
 
     val composition = LocalThinkingMascotComposition.current
-    val progress = rememberRestartingLoopProgress(
+    val progressState = rememberRestartingLoopProgress(
         durationMs = ThinkingMascotLoopDurationMs,
         enabled = true,
         startedAtMs = animationStartedAtMs,
@@ -2809,7 +2966,8 @@ private fun ThinkingMascotAnimation(
 
     LottieAnimation(
         composition = composition,
-        progress = { progress },
+        // 延迟到 Lottie 绘制阶段读取，避免吉祥物每帧重组
+        progress = { progressState.value },
         modifier = mascotModifier,
     )
 }
@@ -2819,12 +2977,12 @@ private fun rememberRestartingLoopProgress(
     durationMs: Long,
     enabled: Boolean,
     startedAtMs: Long? = null,
-): Float {
-    var progress by remember(startedAtMs) { mutableFloatStateOf(0f) }
+): State<Float> {
+    val progressState = remember(startedAtMs) { mutableFloatStateOf(0f) }
     var localStartedAtMs by remember(startedAtMs) { mutableStateOf(startedAtMs) }
     LaunchedEffect(durationMs, enabled, startedAtMs) {
         if (!enabled || durationMs <= 0L) {
-            progress = 0f
+            progressState.floatValue = 0f
             return@LaunchedEffect
         }
         localStartedAtMs = startedAtMs
@@ -2833,11 +2991,11 @@ private fun rememberRestartingLoopProgress(
                 val nowMs = SystemClock.uptimeMillis()
                 val startedAt = localStartedAtMs ?: nowMs.also { localStartedAtMs = it }
                 val elapsedMs = (nowMs - startedAt).coerceAtLeast(0L)
-                progress = (elapsedMs % durationMs).toFloat() / durationMs.toFloat()
+                progressState.floatValue = (elapsedMs % durationMs).toFloat() / durationMs.toFloat()
             }
         }
     }
-    return progress
+    return progressState
 }
 
 @Composable
@@ -2862,7 +3020,7 @@ private fun ThinkingShimmerText(
             text = text,
             style = textStyle,
             color = shimmerColor,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = modifier,
         )
@@ -2870,7 +3028,7 @@ private fun ThinkingShimmerText(
     }
 
     val transition = rememberInfiniteTransition(label = "thinking_shimmer")
-    val animationProgress by transition.animateFloat(
+    val animationProgress = transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -2879,12 +3037,13 @@ private fun ThinkingShimmerText(
         ),
         label = "thinking_shimmer_progress",
     )
-    val textBrush = remember(animationProgress, shimmerColor) {
+    // brush 只创建一次；createShader 在 draw 阶段调用，逐帧动画只触发重绘不触发重组
+    val textBrush = remember(shimmerColor, animationProgress) {
         object : ShaderBrush() {
             override fun createShader(size: Size): Shader {
                 val width = size.width
                 val gradientWidth = width * 2f
-                val gradientProgress = gradientWidth * animationProgress
+                val gradientProgress = gradientWidth * animationProgress.value
                 return LinearGradientShader(
                     from = Offset(-width + gradientProgress, 0f),
                     to = Offset(gradientProgress, 0f),
@@ -2901,7 +3060,7 @@ private fun ThinkingShimmerText(
     Text(
         text = text,
         style = textStyle.copy(brush = textBrush),
-        maxLines = 1,
+        maxLines = 2,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier,
     )

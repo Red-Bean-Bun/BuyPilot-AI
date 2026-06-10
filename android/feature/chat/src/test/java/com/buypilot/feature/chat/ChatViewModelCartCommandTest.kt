@@ -172,4 +172,25 @@ class ChatViewModelCartCommandTest {
         assertEquals(null, explicitMiss)
         assertEquals(null, genericMiss)
     }
+
+    @Test
+    fun addToCartIntentTreatsRecommendedProductAsCurrentRecommendation() {
+        val fallback = ProductCartCandidate(
+            deckId = "deck_1",
+            productId = "p_recommended",
+            rank = 1,
+            productName = "珀莱雅双抗精华",
+            brand = "珀莱雅",
+            subCategory = "精华",
+            category = "美妆护肤",
+        )
+
+        val target = resolveAddToCartTarget(
+            message = "把推荐商品加入购物车",
+            candidates = emptyList(),
+            fallbackCandidate = fallback,
+        )
+
+        assertEquals("p_recommended", target?.productId)
+    }
 }

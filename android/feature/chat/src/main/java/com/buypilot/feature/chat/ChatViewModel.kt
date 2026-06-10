@@ -79,6 +79,8 @@ private val CART_STOP_WORDS = setOf(
     "购物车",
     "商品",
     "产品",
+    "推荐",
+    "首选",
     "这个",
     "这件",
     "这款",
@@ -190,7 +192,19 @@ private fun String.looksLikeAddToCartIntent(): Boolean {
 
 private fun String.cartReferenceStyle(): CartReferenceStyle {
     val query = extractCartTargetQuery()
-    val hasDeicticWord = listOf("这个", "这件", "这款", "当前", "选中", "它").any { it in this }
+    val hasDeicticWord = listOf(
+        "这个",
+        "这件",
+        "这款",
+        "当前",
+        "选中",
+        "它",
+        "推荐商品",
+        "推荐的商品",
+        "推荐这件",
+        "首选推荐",
+        "推荐款",
+    ).any { it in this }
     if (query.isBlank()) {
         return if (hasDeicticWord) CartReferenceStyle.Deictic else CartReferenceStyle.Explicit
     }
@@ -225,6 +239,10 @@ private fun String.extractCartTargetQuery(): String =
         .replace("添加到购物车", " ")
         .replace("放入购物车", " ")
         .replace("放到购物车", " ")
+        .replace("推荐的商品", " ")
+        .replace("推荐商品", " ")
+        .replace("首选推荐", " ")
+        .replace("推荐款", " ")
         .replace("购物车", " ")
         .replace("加购", " ")
         .replace("加入", " ")

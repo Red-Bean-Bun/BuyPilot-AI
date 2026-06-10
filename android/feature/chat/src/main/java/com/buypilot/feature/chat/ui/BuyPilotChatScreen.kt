@@ -1,14 +1,19 @@
 package com.buypilot.feature.chat.ui
 
-import androidx.annotation.DrawableRes
 import android.Manifest
-import android.graphics.Bitmap
-import android.net.Uri
+import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.view.View
@@ -22,6 +27,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
@@ -77,7 +83,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -158,6 +166,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.LinearGradientShader
@@ -204,6 +213,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -297,16 +309,45 @@ internal const val ClarificationTargetStableTolerancePx = 1.5f
 private val ProductDetailCardTopPadding = 418.dp
 private val ProductDetailExpandedTopPadding = 72.dp
 private val ProductDetailPanelHorizontalPadding = 22.dp
+
+/** layout-phase 顶部 padding 插值：拖拽进度逐帧变化只触发重布局所属节点，不触发重组 */
+private fun Modifier.lerpTopPadding(
+    collapsed: Dp,
+    expanded: Dp,
+    progress: () -> Float,
+): Modifier = layout { measurable, constraints ->
+    val topPx = lerp(collapsed.toPx(), expanded.toPx(), progress().coerceIn(0f, 1f)).roundToInt()
+    val placeable = measurable.measure(constraints.offset(vertical = -topPx))
+    val width = constraints.constrainWidth(placeable.width)
+    val height = constraints.constrainHeight(placeable.height + topPx)
+    layout(width, height) { placeable.place(0, topPx) }
+}
+
+/** layout-phase 水平 padding 插值，同上 */
+private fun Modifier.lerpHorizontalPadding(
+    collapsed: Dp,
+    expanded: Dp,
+    progress: () -> Float,
+): Modifier = layout { measurable, constraints ->
+    val sidePx = lerp(collapsed.toPx(), expanded.toPx(), progress().coerceIn(0f, 1f)).roundToInt()
+    val placeable = measurable.measure(constraints.offset(horizontal = -2 * sidePx))
+    val width = constraints.constrainWidth(placeable.width + 2 * sidePx)
+    val height = constraints.constrainHeight(placeable.height)
+    layout(width, height) { placeable.place(sidePx, 0) }
+}
 private val ProductDetailImageGestureBottomGap = 18.dp
 private val ProductDetailRevealDistance = ProductDetailCardTopPadding - ProductDetailExpandedTopPadding
 private const val ProductDetailSnapThreshold = 0.36f
 private const val ProductDetailCardSnapMs = 340
-private const val ProductDetailEnterMs = 560
+private const val ProductDetailEnterMs = RouteEnterDurationMs
 private val ProductDetailImagePullDistance = 240.dp
 private const val ProductDetailImagePullThreshold = 0.42f
 private const val ProductDetailImageExpandMs = 260
 private const val ProductDetailImageDismissMs = 220
-private const val CriteriaCardEnterMs = 560
+private const val VoiceRecognitionServiceSetting = "voice_recognition_service"
+private const val VoiceInputStatusDismissMillis = 8000L
+private const val VoiceInputEnabled = false
+private const val CriteriaCardEnterMs = CardEnterDurationMs
 private const val DecisionCardEnterMs = 760
 private const val DecisionReasonBaseDelayMs = 240
 private const val DecisionReasonStaggerMs = 120
@@ -556,7 +597,7 @@ private data class ProductDetailAttributeLabels(
     val skuOptions: String,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun BuyPilotChatScreen(
     state: ChatUiState,
@@ -586,6 +627,9 @@ internal fun BuyPilotChatScreen(
     var input by rememberSaveable { mutableStateOf("") }
     var showAttachmentMenu by rememberSaveable { mutableStateOf(false) }
     var voiceInputActive by rememberSaveable { mutableStateOf(false) }
+    var voiceInputPanelVisible by rememberSaveable { mutableStateOf(false) }
+    var voiceInputStatusMessage by rememberSaveable { mutableStateOf("") }
+    var voiceInputStatusSerial by rememberSaveable { mutableIntStateOf(0) }
     var voiceTranscript by rememberSaveable { mutableStateOf("") }
     var voiceLevels by remember { mutableStateOf(seedVoiceWaveformLevels()) }
     var imagePreviewAttachment by rememberSaveable(stateSaver = ChatImageAttachmentStateSaver) {
@@ -626,7 +670,8 @@ internal fun BuyPilotChatScreen(
     val configuration = LocalConfiguration.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val keyboardVisible = imeBottomPx > 0
-    val stableTimelineImeBottomPx = imeBottomPx
+    // Timeline 视口只消费键盘动画目标值：逐帧 IME 值穿透 LazyColumn padding 会导致整列表逐帧重布局
+    val stableTimelineImeBottomPx = WindowInsets.imeAnimationTarget.getBottom(density)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val focusManager = LocalFocusManager.current
     val composerFocusRequester = remember { FocusRequester() }
@@ -635,12 +680,27 @@ internal fun BuyPilotChatScreen(
     val imagePreviewFileName = stringResource(R.string.image_preview_desc)
     val speechInputUnavailable = stringResource(R.string.speech_input_unavailable)
     val speechInputPermissionDenied = stringResource(R.string.speech_input_permission_denied)
-    val speechRecognizer = remember(context) {
-        if (SpeechRecognizer.isRecognitionAvailable(context)) {
-            SpeechRecognizer.createSpeechRecognizer(context)
-        } else {
-            null
-        }
+    val speechRecognitionServiceComponent = remember(context) {
+        if (VoiceInputEnabled) resolveSpeechRecognitionServiceComponent(context) else null
+    }
+    val speechRecognizer = remember(context, speechRecognitionServiceComponent) {
+        runCatching {
+            when {
+                speechRecognitionServiceComponent != null -> {
+                    SpeechRecognizer.createSpeechRecognizer(context, speechRecognitionServiceComponent)
+                }
+                else -> null
+            }
+        }.getOrNull()
+    }
+    val speechRecognitionActivityAvailable = remember(context) {
+        VoiceInputEnabled && canLaunchSpeechRecognitionActivity(context)
+    }
+    val speechInputMode = remember(speechRecognizer, speechRecognitionActivityAvailable) {
+        resolveSpeechInputMode(
+            hasInlineRecognizer = speechRecognizer != null,
+            canLaunchRecognitionActivity = speechRecognitionActivityAvailable,
+        )
     }
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -656,29 +716,96 @@ internal fun BuyPilotChatScreen(
             onImageCaptured(bitmap)
         }
     }
+    val speechRecognitionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        voiceInputActive = false
+        voiceLevels = seedVoiceWaveformLevels()
+        if (result.resultCode == Activity.RESULT_OK) {
+            extractSpeechText(result.data)?.let { spoken ->
+                voiceTranscript = spoken
+                voiceInputStatusMessage = ""
+                voiceInputPanelVisible = true
+            }
+        } else if (voiceTranscript.isBlank()) {
+            voiceInputStatusMessage = speechInputUnavailable
+            voiceInputStatusSerial += 1
+            voiceInputPanelVisible = true
+        }
+    }
+    fun showVoiceInputFailure(message: String) {
+        voiceInputActive = false
+        voiceLevels = seedVoiceWaveformLevels()
+        voiceInputStatusMessage = message
+        voiceInputStatusSerial += 1
+        voiceInputPanelVisible = true
+    }
+
+    fun prepareVoiceInputPanel() {
+        showAttachmentMenu = false
+        voiceTranscript = ""
+        voiceInputStatusMessage = ""
+        voiceInputStatusSerial += 1
+        voiceInputPanelVisible = true
+        voiceInputActive = true
+        voiceLevels = seedVoiceWaveformLevels()
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    fun clearVoiceInputPanel(clearTranscript: Boolean = true) {
+        voiceInputActive = false
+        voiceInputPanelVisible = false
+        voiceInputStatusMessage = ""
+        voiceLevels = seedVoiceWaveformLevels()
+        if (clearTranscript) {
+            voiceTranscript = ""
+        }
+    }
+
+    fun launchSystemSpeechRecognitionOrShowUnavailable() {
+        if (!speechRecognitionActivityAvailable) {
+            showVoiceInputFailure(speechInputUnavailable)
+            return
+        }
+        prepareVoiceInputPanel()
+        runCatching {
+            speechRecognitionLauncher.launch(inlineSpeechRecognitionIntent())
+        }.onFailure {
+            showVoiceInputFailure(speechInputUnavailable)
+        }
+    }
+    fun startVoiceInputAfterPermission() {
+        when (speechInputMode) {
+            SpeechInputMode.InlineRecognizer -> {
+                startInlineVoiceInput(
+                    speechRecognizer = speechRecognizer,
+                    onUnavailable = { launchSystemSpeechRecognitionOrShowUnavailable() },
+                    onStart = {
+                        prepareVoiceInputPanel()
+                    },
+                    onFailed = {
+                        showVoiceInputFailure(speechInputUnavailable)
+                    },
+                )
+            }
+
+            SpeechInputMode.SystemActivity -> {
+                launchSystemSpeechRecognitionOrShowUnavailable()
+            }
+
+            SpeechInputMode.Unavailable -> {
+                showVoiceInputFailure(speechInputUnavailable)
+            }
+        }
+    }
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            startInlineVoiceInput(
-                speechRecognizer = speechRecognizer,
-                onUnavailable = {
-                    Toast.makeText(context, speechInputUnavailable, Toast.LENGTH_SHORT).show()
-                },
-                onStart = {
-                    showAttachmentMenu = false
-                    voiceTranscript = ""
-                    voiceLevels = seedVoiceWaveformLevels()
-                    voiceInputActive = true
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                },
-                onFailed = {
-                    voiceInputActive = false
-                    voiceLevels = seedVoiceWaveformLevels()
-                },
-            )
+            startVoiceInputAfterPermission()
         } else {
+            showVoiceInputFailure(speechInputPermissionDenied)
             Toast.makeText(context, speechInputPermissionDenied, Toast.LENGTH_SHORT).show()
         }
     }
@@ -688,11 +815,15 @@ internal fun BuyPilotChatScreen(
             object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     voiceInputActive = true
+                    voiceInputPanelVisible = true
+                    voiceInputStatusMessage = ""
                     voiceLevels = seedVoiceWaveformLevels()
                 }
 
                 override fun onBeginningOfSpeech() {
                     voiceInputActive = true
+                    voiceInputPanelVisible = true
+                    voiceInputStatusMessage = ""
                 }
 
                 override fun onRmsChanged(rmsdB: Float) {
@@ -706,14 +837,24 @@ internal fun BuyPilotChatScreen(
                 }
 
                 override fun onError(error: Int) {
+                    val message = speechRecognizerErrorLabel(error)
+                    voiceInputActive = false
+                    voiceLevels = seedVoiceWaveformLevels()
                     if (voiceTranscript.isBlank()) {
-                        voiceInputActive = false
-                        voiceLevels = seedVoiceWaveformLevels()
+                        voiceInputStatusMessage = "语音识别失败：$message"
+                        voiceInputStatusSerial += 1
+                        voiceInputPanelVisible = true
                     }
                 }
 
                 override fun onResults(results: Bundle?) {
-                    extractSpeechText(results)?.let { voiceTranscript = it }
+                    val text = extractSpeechText(results)
+                    text?.let {
+                        voiceTranscript = it
+                        voiceInputStatusMessage = ""
+                        voiceInputPanelVisible = true
+                    }
+                    voiceInputActive = false
                     voiceLevels = voiceLevels.mapIndexed { index, level ->
                         maxOf(level, VoiceWaveformSettledLevel + ((index % 5) * 0.015f))
                             .coerceIn(VoiceWaveformFloor, 1f)
@@ -721,7 +862,12 @@ internal fun BuyPilotChatScreen(
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
-                    extractSpeechText(partialResults)?.let { voiceTranscript = it }
+                    val text = extractSpeechText(partialResults)
+                    text?.let {
+                        voiceTranscript = it
+                        voiceInputStatusMessage = ""
+                        voiceInputPanelVisible = true
+                    }
                 }
 
                 override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -735,7 +881,8 @@ internal fun BuyPilotChatScreen(
     val defaultSkinTypeOptions = remember(context, configuration) {
         context.resources.getStringArray(R.array.default_skin_type_options).toSet()
     }
-    val showWelcome = !timelinePresentation.hasNodes && input.isBlank()
+    val voiceInputPresent = VoiceInputEnabled && (voiceInputActive || voiceInputPanelVisible || voiceTranscript.isNotBlank())
+    val showWelcome = !timelinePresentation.hasNodes && input.isBlank() && !voiceInputPresent
     val shouldDismissWelcomeContent = showWelcome &&
         (showAttachmentMenu || keyboardVisible)
     val welcomeContentVisible = showWelcome &&
@@ -773,6 +920,19 @@ internal fun BuyPilotChatScreen(
             welcomePromptDismissed = true
         }
     }
+    LaunchedEffect(voiceInputStatusSerial, voiceInputStatusMessage, voiceInputActive, voiceTranscript) {
+        if (
+            voiceInputStatusSerial > 0 &&
+            voiceInputStatusMessage.isNotBlank() &&
+            !voiceInputActive &&
+            voiceTranscript.isBlank()
+        ) {
+            kotlinx.coroutines.delay(VoiceInputStatusDismissMillis)
+            if (voiceInputStatusMessage.isNotBlank() && !voiceInputActive && voiceTranscript.isBlank()) {
+                clearVoiceInputPanel(clearTranscript = false)
+            }
+        }
+    }
     LaunchedEffect(state.sessionId, state.isStreaming) {
         if (state.sessionId == displayedSessionId) return@LaunchedEffect
         if (state.isStreaming) {
@@ -782,10 +942,8 @@ internal fun BuyPilotChatScreen(
 
         input = ""
         showAttachmentMenu = false
-        voiceInputActive = false
-        voiceTranscript = ""
-        voiceLevels = seedVoiceWaveformLevels()
         speechRecognizer?.cancel()
+        clearVoiceInputPanel(clearTranscript = true)
         sheetContent = null
         transientState.sheetExiting = false
         transientState.sheetTransitionId += 1
@@ -896,10 +1054,8 @@ internal fun BuyPilotChatScreen(
     LaunchedEffect(state.isStreaming) {
         if (state.isStreaming) {
             showAttachmentMenu = false
-            voiceInputActive = false
-            voiceTranscript = ""
-            voiceLevels = seedVoiceWaveformLevels()
             speechRecognizer?.cancel()
+            clearVoiceInputPanel(clearTranscript = true)
         }
     }
 
@@ -1065,39 +1221,26 @@ internal fun BuyPilotChatScreen(
 
     fun stopVoiceInput(clearTranscript: Boolean = true) {
         speechRecognizer?.cancel()
-        voiceInputActive = false
-        voiceLevels = seedVoiceWaveformLevels()
-        if (clearTranscript) {
-            voiceTranscript = ""
-        }
+        clearVoiceInputPanel(clearTranscript = clearTranscript)
     }
 
     fun startVoiceInput() {
         if (state.isStreaming) return
-        if (
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            startInlineVoiceInput(
-                speechRecognizer = speechRecognizer,
-                onUnavailable = {
-                    Toast.makeText(context, speechInputUnavailable, Toast.LENGTH_SHORT).show()
-                },
-                onStart = {
-                    showAttachmentMenu = false
-                    voiceTranscript = ""
-                    voiceLevels = seedVoiceWaveformLevels()
-                    voiceInputActive = true
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                },
-                onFailed = {
-                    voiceInputActive = false
-                    voiceLevels = seedVoiceWaveformLevels()
-                },
-            )
-        } else {
-            voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        if (!VoiceInputEnabled) return
+        when (speechInputMode) {
+            SpeechInputMode.InlineRecognizer -> {
+                if (
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    startVoiceInputAfterPermission()
+                } else {
+                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+
+            SpeechInputMode.SystemActivity,
+            SpeechInputMode.Unavailable -> startVoiceInputAfterPermission()
         }
     }
 
@@ -1321,8 +1464,11 @@ internal fun BuyPilotChatScreen(
             awaitingCriteriaAdjustment = state.awaitingCriteriaAdjustment,
             isAttachmentMenuOpen = showAttachmentMenu,
             voiceInputActive = voiceInputActive,
+            voiceInputPanelVisible = voiceInputPanelVisible,
             voiceTranscript = voiceTranscript,
+            voiceInputStatusMessage = voiceInputStatusMessage,
             voiceInputLevels = voiceLevels,
+            voiceFeatureEnabled = VoiceInputEnabled,
             imageAttachment = state.imageAttachment,
             focusRequester = composerFocusRequester,
             modifier = Modifier
@@ -1544,7 +1690,7 @@ private data class PendingProductDetailRoute(
 private val WelcomePrompts = listOf(
     WelcomePrompt(R.drawable.ic_search_24, "下周去海边，帮我搭配防晒穿搭方案", BuyPilotColors.PrimaryDark),
     WelcomePrompt(R.drawable.ic_image_24, "拍一张照片，帮我找同款护肤品", BuyPilotColors.Warning),
-    WelcomePrompt(R.drawable.ic_block_24, "推荐防晒霜，不要酒精也不要香精，200以内", BuyPilotColors.Success),
+    WelcomePrompt(R.drawable.ic_block_24, "推荐防晒霜，不要香精，200内", BuyPilotColors.Success),
     WelcomePrompt(R.drawable.ic_search_24, "推荐一款手机，我主要用来拍照", BuyPilotColors.Info),
 )
 
@@ -4508,17 +4654,20 @@ fun ProductHeroDetailScreen(
             (detailRevealPx / revealDistancePx).coerceIn(0f, 1f)
         }
     }
-    val detailPanelTopPadding = lerp(
-        ProductDetailCardTopPadding.value,
-        ProductDetailExpandedTopPadding.value,
-        scrollProgress,
-    ).dp
-    val minDetailPanelHeight = maxOf(
-        420.dp,
-        configuration.screenHeightDp.dp - detailPanelTopPadding,
-    )
-    val detailPanelHorizontalPadding = lerp(ProductDetailPanelHorizontalPadding.value, 0f, scrollProgress).dp
-    val detailPanelBottomSpacer = lerp(86f, 18f, scrollProgress).dp
+    // 拖拽进度统一通过 lambda 延迟到 layout/draw 阶段消费，避免详情面板拖拽期间整树逐帧重组重布局
+    val scrollProgressProvider: () -> Float = remember { { scrollProgress } }
+    val detailPanelMinHeightPx: () -> Int = remember(density, configuration.screenHeightDp) {
+        val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+        val floorPx = with(density) { 420.dp.toPx() }
+        val collapsedTopPx = with(density) { ProductDetailCardTopPadding.toPx() }
+        val expandedTopPx = with(density) { ProductDetailExpandedTopPadding.toPx() }
+        val provider: () -> Int = {
+            val topPx = lerp(collapsedTopPx, expandedTopPx, scrollProgress)
+            maxOf(floorPx, screenHeightPx - topPx).roundToInt()
+        }
+        provider
+    }
+    val detailPanelBottomSpacer: () -> Dp = remember { { lerp(86f, 18f, scrollProgress).dp } }
     val imageGestureHeightPx by remember(cardTopPaddingPx, imageGestureBottomGapPx) {
         derivedStateOf {
             val cardFullyCollapsed = detailRevealPx <= 2f &&
@@ -4538,8 +4687,12 @@ fun ProductHeroDetailScreen(
     val showInlineCartAction = activeProductId.isNotBlank() &&
         showCommerceControls &&
         readOnlyByState
+    // 阈值判断用 derivedStateOf：拖拽逐像素变化只在跨过 0.38 阈值时触发一次重组
+    val choiceChromeVisible by remember(choiceActionsActive) {
+        derivedStateOf { choiceActionsActive && scrollProgress < 0.38f }
+    }
     val actionAlpha by animateFloatAsState(
-        targetValue = if (choiceActionsActive && scrollProgress < 0.38f) 1f else 0f,
+        targetValue = if (choiceChromeVisible) 1f else 0f,
         animationSpec = tween(durationMillis = 260, easing = PremiumRevealEase),
         label = "product_detail_action_alpha",
     )
@@ -4760,7 +4913,7 @@ fun ProductHeroDetailScreen(
         ProductCinematicBackdrop(
             product = product,
             backendBaseUrl = state.backendBaseUrl,
-            progress = scrollProgress,
+            progress = scrollProgressProvider,
             imagePullProgress = imageViewerProgress,
             enterProgress = { segmentProgress(routeProgressState.value, 0f, 0.82f) },
             modifier = Modifier
@@ -4807,7 +4960,11 @@ fun ProductHeroDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = detailPanelTopPadding)
+                .lerpTopPadding(
+                    collapsed = ProductDetailCardTopPadding,
+                    expanded = ProductDetailExpandedTopPadding,
+                    progress = scrollProgressProvider,
+                )
                 .nestedScroll(detailRevealNestedScroll)
                 .graphicsLayer {
                     val contentEnter = segmentProgress(routeProgressState.value, 0.18f, 1f)
@@ -4835,18 +4992,23 @@ fun ProductHeroDetailScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = detailPanelHorizontalPadding),
+                            .lerpHorizontalPadding(
+                                collapsed = ProductDetailPanelHorizontalPadding,
+                                expanded = 0.dp,
+                                progress = scrollProgressProvider,
+                            ),
                     ) {
                         CinematicProductDetailPanel(
                             payload = payload,
                             detail = productDetail,
-                            progress = scrollProgress,
-                            minHeight = minDetailPanelHeight,
+                            progress = scrollProgressProvider,
+                            minHeightPx = detailPanelMinHeightPx,
                             bottomSpacerHeight = detailPanelBottomSpacer,
                             showCommerceControls = showCommerceControls,
                             cartAction = if (showInlineCartAction) {
                                 {
                                     ProductDetailInlineCartAction(
+                                        productId = activeProductId,
                                         pending = productAddPending,
                                         inCart = productAlreadyInCart,
                                         onAddToCart = { onAddToCart(activeProductId) },
@@ -4949,12 +5111,11 @@ fun ProductHeroDetailScreen(
 private fun ProductCinematicBackdrop(
     product: ProductPayload,
     backendBaseUrl: String,
-    progress: Float,
+    progress: () -> Float,
     imagePullProgress: Float,
     enterProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
-    val imageAlpha = lerp(0.94f, 0.56f, progress) * (1f - imagePullProgress * 0.44f)
     Box(modifier = modifier.background(BuyPilotColors.SurfaceBg)) {
         ProductImage(
             product = product,
@@ -4965,10 +5126,12 @@ private fun ProductCinematicBackdrop(
                 .align(Alignment.TopCenter)
                 .padding(top = 86.dp, start = 20.dp, end = 20.dp)
                 .graphicsLayer {
+                    val p = progress()
                     val enter = enterProgress()
-                    val scale = lerp(0.92f, lerp(1.02f, 1.08f, progress), enter) *
+                    val imageAlpha = lerp(0.94f, 0.56f, p) * (1f - imagePullProgress * 0.44f)
+                    val scale = lerp(0.92f, lerp(1.02f, 1.08f, p), enter) *
                         lerp(1f, 1.045f, imagePullProgress)
-                    val offsetY = lerp(42f, lerp(0f, -54f, progress), enter) +
+                    val offsetY = lerp(42f, lerp(0f, -54f, p), enter) +
                         imagePullProgress * 22f
                     scaleX = scale
                     scaleY = scale
@@ -4979,17 +5142,20 @@ private fun ProductCinematicBackdrop(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            BuyPilotColors.SurfaceBg.copy(alpha = 0.02f),
-                            BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.04f, 0.28f, progress)),
-                            BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.9f, 1f, progress)),
+                .drawBehind {
+                    val p = progress()
+                    drawRect(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                BuyPilotColors.SurfaceBg.copy(alpha = 0.02f),
+                                BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.04f, 0.28f, p)),
+                                BuyPilotColors.SurfaceBg.copy(alpha = lerp(0.9f, 1f, p)),
+                            ),
+                            startY = 0f,
+                            endY = 1180f,
                         ),
-                        startY = 0f,
-                        endY = 1180f,
-                    ),
-                ),
+                    )
+                },
         )
         Box(
             modifier = Modifier
@@ -5161,9 +5327,9 @@ private fun productDetailAttributeLabels(): ProductDetailAttributeLabels =
 private fun CinematicProductDetailPanel(
     payload: ProductCardPayload,
     detail: ProductDetailResponse?,
-    progress: Float,
-    minHeight: Dp = 0.dp,
-    bottomSpacerHeight: Dp = 14.dp,
+    progress: () -> Float,
+    minHeightPx: () -> Int = { 0 },
+    bottomSpacerHeight: () -> Dp = { 14.dp },
     showCommerceControls: Boolean = true,
     cartAction: (@Composable () -> Unit)? = null,
 ) {
@@ -5197,26 +5363,45 @@ private fun CinematicProductDetailPanel(
     var selectedSkuIndex by rememberSaveable(product.productId, skuOptions.size) { mutableIntStateOf(0) }
     val selectedSku = skuOptions.getOrNull(selectedSkuIndex)
     val priceLabel = selectedSku?.price?.let { "¥${it.clean()}" } ?: product.priceLabel()
-    val shape = RoundedCornerShape(
-        topStart = lerp(30f, 18f, progress).dp,
-        topEnd = lerp(30f, 18f, progress).dp,
-        bottomStart = lerp(28f, 0f, progress).dp,
-        bottomEnd = lerp(28f, 0f, progress).dp,
+    // 拖拽进度在 layout/draw 阶段消费：minHeight 走自定义 layout，
+    // 圆角/阴影走 graphicsLayer，背景/边框走 drawBehind——逐帧拖拽零重组
+    fun panelShape(p: Float) = RoundedCornerShape(
+        topStart = lerp(30f, 18f, p).dp,
+        topEnd = lerp(30f, 18f, p).dp,
+        bottomStart = lerp(28f, 0f, p).dp,
+        bottomEnd = lerp(28f, 0f, p).dp,
     )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = minHeight)
-            .shadow(
-                elevation = lerp(8f, 3f, progress).dp,
-                shape = shape,
-                ambientColor = Color.Black.copy(alpha = 0.08f),
-                spotColor = Color.Black.copy(alpha = 0.1f),
-            )
-            .clip(shape)
-            .background(BuyPilotColors.SurfaceCard.copy(alpha = lerp(0.96f, 1f, progress)), shape)
-            .border(1.dp, BuyPilotColors.Border.copy(alpha = lerp(0.72f, 1f, progress)), shape)
+            .layout { measurable, constraints ->
+                val minH = maxOf(constraints.minHeight, minHeightPx())
+                    .coerceAtMost(constraints.maxHeight)
+                val placeable = measurable.measure(constraints.copy(minHeight = minH))
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }
+            .graphicsLayer {
+                val p = progress().coerceIn(0f, 1f)
+                shape = panelShape(p)
+                clip = true
+                shadowElevation = lerp(8f, 3f, p).dp.toPx()
+                ambientShadowColor = Color.Black.copy(alpha = 0.08f)
+                spotShadowColor = Color.Black.copy(alpha = 0.1f)
+            }
+            .drawBehind {
+                val p = progress().coerceIn(0f, 1f)
+                val outline = panelShape(p).createOutline(size, layoutDirection, this)
+                drawOutline(
+                    outline = outline,
+                    color = BuyPilotColors.SurfaceCard.copy(alpha = lerp(0.96f, 1f, p)),
+                )
+                drawOutline(
+                    outline = outline,
+                    color = BuyPilotColors.Border.copy(alpha = lerp(0.72f, 1f, p)),
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+            }
             .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -5297,7 +5482,12 @@ private fun CinematicProductDetailPanel(
         description?.let { ProductDescriptionSection(description = it) }
         faqs?.let { ProductFaqSection(faqs = it) }
         reviews?.let { ProductReviewsSection(reviews = it) }
-        Spacer(Modifier.height(bottomSpacerHeight))
+        Spacer(
+            Modifier.layout { _, _ ->
+                val heightPx = bottomSpacerHeight().roundToPx()
+                layout(0, heightPx) {}
+            },
+        )
     }
 }
 
@@ -5742,6 +5932,7 @@ private fun RatingStars(rating: Int) {
 
 @Composable
 private fun ProductDetailInlineCartAction(
+    productId: String,
     pending: Boolean,
     inCart: Boolean,
     onAddToCart: () -> Unit,
@@ -5761,7 +5952,8 @@ private fun ProductDetailInlineCartAction(
         label = "product_detail_cart_press",
     )
     val enterProgressState = rememberRouteEnterProgress(
-        key = "product_detail_inline_cart_${label}_${pending}_${inCart}",
+        // key 只绑商品：pending/inCart 状态切换走颜色/文案过渡，不重播入场动画
+        key = "product_detail_inline_cart_$productId",
         durationMillis = 360,
         delayMillis = 70,
     )
@@ -5850,8 +6042,7 @@ private fun ProductDetailInlineCartAction(
 }
 
 @Composable
-private fun CinematicDetailDivider(progress: Float) {
-    val widthFraction = lerp(0.22f, 1f, progress)
+private fun CinematicDetailDivider(progress: () -> Float) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -5860,8 +6051,12 @@ private fun CinematicDetailDivider(progress: Float) {
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth(widthFraction)
+                .fillMaxWidth()
                 .height(1.dp)
+                .graphicsLayer {
+                    scaleX = lerp(0.22f, 1f, progress().coerceIn(0f, 1f))
+                    transformOrigin = TransformOrigin.Center
+                }
                 .background(BuyPilotColors.Border.copy(alpha = 0.92f), CircleShape),
         )
     }
@@ -6769,8 +6964,11 @@ private fun BottomComposer(
     awaitingCriteriaAdjustment: Boolean,
     isAttachmentMenuOpen: Boolean,
     voiceInputActive: Boolean,
+    voiceInputPanelVisible: Boolean,
     voiceTranscript: String,
+    voiceInputStatusMessage: String,
     voiceInputLevels: List<Float>,
+    voiceFeatureEnabled: Boolean,
     imageAttachment: ChatImageAttachmentState,
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
@@ -6802,13 +7000,17 @@ private fun BottomComposer(
     val voiceSendDescription = stringResource(R.string.speech_input_send_desc)
     val waveformDescription = stringResource(R.string.speech_waveform_desc)
     val attachmentBlocksSubmit = imageAttachment.hasImage && !imageAttachment.canSend
+    val effectiveVoiceInputActive = voiceFeatureEnabled && voiceInputActive
+    val effectiveVoicePanelVisible = voiceFeatureEnabled && voiceInputPanelVisible
+    val effectiveVoiceTranscript = if (voiceFeatureEnabled) voiceTranscript else ""
+    val voiceDraftVisible = effectiveVoiceTranscript.isNotBlank()
+    val voiceModeActive = effectiveVoiceInputActive || effectiveVoicePanelVisible || voiceDraftVisible
     val canSubmit = isStreaming || (!attachmentBlocksSubmit && (text.isNotBlank() || imageAttachment.canSend))
-    val hasVoiceDraft = voiceTranscript.isNotBlank() || text.isNotBlank() || imageAttachment.canSend
-    val canVoiceSubmit = !attachmentBlocksSubmit && (hasVoiceDraft || voiceInputActive)
-    val voiceInputEnabled = !isStreaming && !imageAttachment.isUploading
+    val hasVoiceDraft = effectiveVoiceTranscript.isNotBlank() || text.isNotBlank() || imageAttachment.canSend
+    val canVoiceSubmit = !attachmentBlocksSubmit && hasVoiceDraft
     val containerColor by animateColorAsState(
         targetValue = when {
-            voiceInputActive -> BuyPilotColors.SurfaceCard
+            effectiveVoiceInputActive -> BuyPilotColors.SurfaceCard
             isFocused -> BuyPilotColors.SurfaceCard
             else -> BuyPilotColors.SurfaceMuted
         },
@@ -6817,7 +7019,7 @@ private fun BottomComposer(
     )
     val borderColor by animateColorAsState(
         targetValue = when {
-            voiceInputActive -> BuyPilotColors.Primary.copy(alpha = 0.42f)
+            effectiveVoiceInputActive -> BuyPilotColors.Primary.copy(alpha = 0.42f)
             isFocused -> BuyPilotColors.Primary.copy(alpha = 0.68f)
             else -> BuyPilotColors.Border
         },
@@ -6825,16 +7027,16 @@ private fun BottomComposer(
         label = "composer_border_color",
     )
     val borderWidth by animateDpAsState(
-        targetValue = if (isFocused && !voiceInputActive) 1.5.dp else 1.dp,
+        targetValue = if (isFocused && !effectiveVoiceInputActive) 1.5.dp else 1.dp,
         animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
         label = "composer_border_width",
     )
     val attachmentIconRotation by animateFloatAsState(
-        targetValue = if (!voiceInputActive && isAttachmentMenuOpen) 45f else 0f,
+        targetValue = if (!effectiveVoiceInputActive && isAttachmentMenuOpen) 45f else 0f,
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
         label = "attachment_icon_rotation",
     )
-    val attachmentEnabled = !isStreaming || voiceInputActive
+    val attachmentEnabled = !isStreaming || effectiveVoiceInputActive
 
     Box(
         modifier = modifier
@@ -6858,6 +7060,17 @@ private fun BottomComposer(
                 onRemove = onRemoveImage,
                 onPreview = onPreviewImage,
             )
+            if (voiceFeatureEnabled) {
+                VoiceTranscriptDraftBubble(
+                    transcript = effectiveVoiceTranscript,
+                    statusMessage = voiceInputStatusMessage,
+                    listening = effectiveVoiceInputActive,
+                    visible = voiceModeActive,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 54.dp, end = 56.dp, bottom = 8.dp),
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6868,12 +7081,12 @@ private fun BottomComposer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = if (voiceInputActive) onVoiceCancel else onAttachmentClick,
+                    onClick = if (effectiveVoiceInputActive) onVoiceCancel else onAttachmentClick,
                     enabled = attachmentEnabled,
                     modifier = Modifier.size(48.dp),
                 ) {
                     AnimatedContent(
-                        targetState = voiceInputActive,
+                        targetState = effectiveVoiceInputActive,
                         transitionSpec = {
                             (fadeIn(animationSpec = tween(durationMillis = 150, easing = MenuEaseOut)) +
                                 scaleIn(
@@ -6926,7 +7139,7 @@ private fun BottomComposer(
                     }
                 }
                 AnimatedContent(
-                    targetState = voiceInputActive,
+                    targetState = effectiveVoiceInputActive,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 40.dp),
@@ -7002,19 +7215,98 @@ private fun BottomComposer(
                                     }
                                 },
                             )
-                            ComposerMicButton(
-                                enabled = voiceInputEnabled,
-                                contentDescription = voiceStartDescription,
-                                onClick = onVoiceInputClick,
-                            )
+                            if (voiceFeatureEnabled) {
+                                ComposerMicButton(
+                                    enabled = !isStreaming && !imageAttachment.isUploading,
+                                    contentDescription = voiceStartDescription,
+                                    onClick = onVoiceInputClick,
+                                )
+                            }
                         }
                     }
                 }
                 ComposerActionButton(
                     isStreaming = isStreaming,
-                    enabled = if (voiceInputActive) canVoiceSubmit else canSubmit,
-                    contentDescription = if (voiceInputActive) voiceSendDescription else null,
-                    onClick = if (voiceInputActive) onVoiceSubmit else onSubmit,
+                    enabled = if (voiceModeActive) canVoiceSubmit else canSubmit,
+                    contentDescription = if (voiceModeActive) voiceSendDescription else null,
+                    onClick = if (voiceModeActive) onVoiceSubmit else onSubmit,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceTranscriptDraftBubble(
+    transcript: String,
+    statusMessage: String,
+    listening: Boolean,
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val displayText = transcript.takeIf { it.isNotBlank() }
+        ?: statusMessage.takeIf { it.isNotBlank() }
+        ?: if (listening) "正在聆听..." else ""
+    val isStatusMessage = transcript.isBlank() && statusMessage.isNotBlank()
+    AnimatedVisibility(
+        visible = visible && displayText.isNotBlank(),
+        enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = MenuEaseOut)) +
+            slideInVertically(
+                animationSpec = tween(durationMillis = 220, easing = MenuEaseOut),
+                initialOffsetY = { it / 3 },
+            ) +
+            scaleIn(
+                initialScale = 0.96f,
+                animationSpec = tween(durationMillis = 220, easing = PremiumRevealEase),
+            ),
+        exit = fadeOut(animationSpec = tween(durationMillis = 110, easing = MenuEaseIn)) +
+            slideOutVertically(
+                animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+                targetOffsetY = { it / 4 },
+            ) +
+            scaleOut(
+                targetScale = 0.98f,
+                animationSpec = tween(durationMillis = 130, easing = MenuEaseIn),
+            ),
+        modifier = modifier,
+    ) {
+        Surface(
+            color = if (isStatusMessage) {
+                BuyPilotColors.WarningSoft.copy(alpha = 0.96f)
+            } else {
+                BuyPilotColors.PrimarySoft.copy(alpha = 0.92f)
+            },
+            contentColor = if (isStatusMessage) BuyPilotColors.Warning else BuyPilotColors.PrimaryDark,
+            shape = RoundedCornerShape(16.dp),
+            shadowElevation = 4.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            AnimatedContent(
+                targetState = displayText,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(durationMillis = 130, easing = MenuEaseOut)) +
+                        slideInVertically(
+                            animationSpec = tween(durationMillis = 150, easing = MenuEaseOut),
+                            initialOffsetY = { it / 4 },
+                        ))
+                        .togetherWith(
+                            fadeOut(animationSpec = tween(durationMillis = 80, easing = MenuEaseIn)) +
+                                slideOutVertically(
+                                    animationSpec = tween(durationMillis = 90, easing = MenuEaseIn),
+                                    targetOffsetY = { -it / 5 },
+                                ),
+                        )
+                },
+                label = "voice_transcript_text",
+            ) { content ->
+                Text(
+                    text = content,
+                    color = BuyPilotColors.PrimaryDark,
+                    fontSize = BuyPilotType.Body,
+                    lineHeight = 20.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 )
             }
         }
@@ -7246,7 +7538,7 @@ private fun AttachmentMenu(
 ) {
     Column(
         modifier = modifier
-            .width(164.dp)
+            .width(128.dp)
             .shadow(
                 4.dp,
                 RoundedCornerShape(16.dp),
@@ -7258,8 +7550,8 @@ private fun AttachmentMenu(
             .padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        AttachmentAction(R.drawable.ic_image_24, "商品图识别", enabled = true, onClick = onImageInput)
-        AttachmentAction(R.drawable.ic_add_photo_24, "拍照/截图识别", enabled = true, onClick = onCameraInput)
+        AttachmentAction(R.drawable.ic_image_24, "选图片", enabled = true, onClick = onImageInput)
+        AttachmentAction(R.drawable.ic_add_photo_24, "拍照", enabled = true, onClick = onCameraInput)
     }
 }
 
@@ -7293,12 +7585,121 @@ private fun inlineSpeechRecognitionIntent(): Intent =
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
     }
 
+private fun canLaunchSpeechRecognitionActivity(context: Context): Boolean {
+    val packageManager = context.packageManager
+    return inlineSpeechRecognitionIntent().resolveActivity(packageManager) != null
+}
+
+private fun resolveSpeechRecognitionServiceComponent(context: Context): ComponentName? {
+    val defaultService = Settings.Secure.getString(
+        context.contentResolver,
+        VoiceRecognitionServiceSetting,
+    )
+    val services = context.packageManager.queryIntentServices(
+        Intent(RecognitionService.SERVICE_INTERFACE),
+        PackageManager.MATCH_ALL,
+    )
+    val service = chooseSpeechRecognitionServiceCandidate(
+        services.mapNotNull { it.toSpeechRecognitionServiceCandidate() },
+        defaultServiceComponent = defaultService,
+    ) ?: return null
+    return ComponentName(service.packageName, service.serviceName)
+}
+
+private fun ResolveInfo.toSpeechRecognitionServiceCandidate(): SpeechRecognitionServiceCandidate? {
+    val service = serviceInfo ?: return null
+    return SpeechRecognitionServiceCandidate(
+        packageName = service.packageName,
+        serviceName = service.name,
+        serviceEnabled = service.enabled,
+        applicationEnabled = service.applicationInfo?.enabled ?: true,
+        exported = service.exported,
+        systemApp = service.applicationInfo?.isSystemOrUpdatedSystemApp() == true,
+    )
+}
+
+private fun ApplicationInfo.isSystemOrUpdatedSystemApp(): Boolean =
+    flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+
+internal data class SpeechRecognitionServiceCandidate(
+    val packageName: String,
+    val serviceName: String,
+    val serviceEnabled: Boolean,
+    val applicationEnabled: Boolean,
+    val exported: Boolean,
+    val systemApp: Boolean,
+)
+
+internal fun chooseSpeechRecognitionServiceCandidate(
+    candidates: List<SpeechRecognitionServiceCandidate>,
+    defaultServiceComponent: String? = null,
+): SpeechRecognitionServiceCandidate? = candidates.firstOrNull { candidate ->
+    candidate.isUsableRecognitionService() &&
+        defaultServiceComponent?.let { candidate.matchesFlattenedComponent(it) } == true
+} ?: candidates.firstOrNull { candidate ->
+    candidate.isUsableRecognitionService() && candidate.systemApp
+}
+
+private fun SpeechRecognitionServiceCandidate.isUsableRecognitionService(): Boolean =
+    packageName.isNotBlank() &&
+        serviceName.isNotBlank() &&
+        serviceEnabled &&
+        applicationEnabled &&
+        exported
+
+private fun SpeechRecognitionServiceCandidate.matchesFlattenedComponent(component: String): Boolean {
+    val separator = component.indexOf('/')
+    if (separator <= 0 || separator == component.lastIndex) return false
+    val componentPackage = component.substring(0, separator)
+    val rawClassName = component.substring(separator + 1)
+    if (componentPackage != packageName || rawClassName.isBlank()) return false
+
+    val className = if (rawClassName.startsWith(".")) componentPackage + rawClassName else rawClassName
+    val candidateClassName = if (serviceName.startsWith(".")) packageName + serviceName else serviceName
+    return className == candidateClassName || rawClassName == serviceName
+}
+
+internal enum class SpeechInputMode {
+    InlineRecognizer,
+    SystemActivity,
+    Unavailable,
+}
+
+internal fun resolveSpeechInputMode(
+    hasInlineRecognizer: Boolean,
+    canLaunchRecognitionActivity: Boolean,
+): SpeechInputMode = when {
+    hasInlineRecognizer -> SpeechInputMode.InlineRecognizer
+    canLaunchRecognitionActivity -> SpeechInputMode.SystemActivity
+    else -> SpeechInputMode.Unavailable
+}
+
+private fun extractSpeechText(data: Intent?): String? =
+    data
+        ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+        ?.firstOrNull()
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
 private fun extractSpeechText(results: Bundle?): String? =
     results
         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
         ?.firstOrNull()
         ?.trim()
         ?.takeIf(String::isNotBlank)
+
+private fun speechRecognizerErrorLabel(error: Int): String = when (error) {
+    SpeechRecognizer.ERROR_AUDIO -> "录音失败(ERROR_AUDIO)"
+    SpeechRecognizer.ERROR_CLIENT -> "客户端错误(ERROR_CLIENT)"
+    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "缺少麦克风权限(ERROR_INSUFFICIENT_PERMISSIONS)"
+    SpeechRecognizer.ERROR_NETWORK -> "网络错误(ERROR_NETWORK)"
+    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时(ERROR_NETWORK_TIMEOUT)"
+    SpeechRecognizer.ERROR_NO_MATCH -> "没有识别到语音(ERROR_NO_MATCH)"
+    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "识别服务忙(ERROR_RECOGNIZER_BUSY)"
+    SpeechRecognizer.ERROR_SERVER -> "识别服务错误(ERROR_SERVER)"
+    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "没有检测到说话(ERROR_SPEECH_TIMEOUT)"
+    else -> "未知错误($error)"
+}
 
 private fun seedVoiceWaveformLevels(): List<Float> =
     List(VoiceWaveformBarCount) { index ->

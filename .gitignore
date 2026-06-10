@@ -5,6 +5,9 @@
 *.swo
 .DS_Store
 
+# JavaScript
+node_modules/
+
 # Python
 __pycache__/
 *.py[cod]

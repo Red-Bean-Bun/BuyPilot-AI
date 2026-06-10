@@ -67,8 +67,8 @@ import com.yuyakaido.android.cardstackview.SwipeAnimationSetting
 import com.yuyakaido.android.cardstackview.SwipeableMethod
 import kotlin.math.roundToInt
 
-private const val ProductSwipeDetailEnterMs = 520
-private const val ProductSwipeAnimationMs = 430
+private const val ProductSwipeDetailEnterMs = RouteEnterDurationMs
+private const val ProductSwipeAnimationMs = SwipeAnimationDurationMs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -316,7 +316,7 @@ private fun ProductSwipeModeContent(
     val initialProductId = remember(productIds) {
         currentProductId.takeIf { id -> productIds.any { it == id } }
     }
-    val orderedProducts = remember(productIds, initialProductId) {
+    val orderedProducts = remember(products, initialProductId) {
         val currentIndex = products.indexOfFirst { it.product.productId == initialProductId }.coerceAtLeast(0)
         products.drop(currentIndex) + products.take(currentIndex)
     }

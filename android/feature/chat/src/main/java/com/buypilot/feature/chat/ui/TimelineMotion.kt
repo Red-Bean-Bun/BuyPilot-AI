@@ -22,11 +22,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -39,6 +43,12 @@ import androidx.compose.ui.zIndex
 private const val ProductDeckArrivalMs = 320
 private const val ProductImageSeedVisibleUntilProgress = 0.78f
 private const val ProductArrivalSeedMinVisibleProgress = 0.01f
+private const val ProductArrivalSeedGoneProgress = 0.82f
+
+/** 产品级统一动画时长：页面入场 / 卡片入场 / 卡片划走（150-320ms 区间，对齐产品规范） */
+internal const val RouteEnterDurationMs = 300
+internal const val CardEnterDurationMs = 260
+internal const val SwipeAnimationDurationMs = 300
 
 internal fun lerp(start: Float, stop: Float, fraction: Float): Float =
     start + (stop - start) * fraction
@@ -231,11 +241,22 @@ private fun ProductArrivalSeedBubble(
     progress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
-    val progressValue = progress().coerceIn(0f, 1f)
-    if (!shouldRenderProductArrivalSeedBubble(progressValue)) return
+    // 一次性可见窗口：动画走完后翻转 Boolean 销毁 shimmer transition；
+    // 窗口内进度只在 graphicsLayer/draw 阶段读取，零重组
+    var seedActive by remember { mutableStateOf(true) }
+    if (!seedActive) return
+    LaunchedEffect(Unit) {
+        while (true) {
+            withFrameNanos { }
+            if (progress().coerceIn(0f, 1f) >= ProductArrivalSeedGoneProgress) {
+                seedActive = false
+                break
+            }
+        }
+    }
 
     val pulse = rememberInfiniteTransition(label = "product_seed_pulse")
-    val shimmer by pulse.animateFloat(
+    val shimmer = pulse.animateFloat(
         initialValue = 0.18f,
         targetValue = 0.52f,
         animationSpec = infiniteRepeatable(
@@ -247,9 +268,13 @@ private fun ProductArrivalSeedBubble(
     Box(
         modifier = modifier
             .graphicsLayer {
-                alpha = progressValue
-                scaleX = 0.88f + progressValue * 0.12f
-                scaleY = 0.88f + progressValue * 0.12f
+                val t = progress()
+                val seedT = segmentProgress(t, 0f, 0.12f)
+                val visibility = ((1f - segmentProgress(t, 0.48f, ProductArrivalSeedGoneProgress)) * seedT)
+                    .coerceIn(0f, 1f)
+                alpha = if (visibility > ProductArrivalSeedMinVisibleProgress) visibility else 0f
+                scaleX = 0.88f + visibility * 0.12f
+                scaleY = 0.88f + visibility * 0.12f
             }
             .size(width = 74.dp, height = 48.dp)
             .shadow(
@@ -266,7 +291,9 @@ private fun ProductArrivalSeedBubble(
             modifier = Modifier
                 .size(width = 38.dp, height = 26.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(BuyPilotColors.PrimarySoft.copy(alpha = 0.28f + shimmer * 0.26f)),
+                .drawBehind {
+                    drawRect(BuyPilotColors.PrimarySoft.copy(alpha = 0.28f + shimmer.value * 0.26f))
+                },
         )
     }
 }
@@ -276,11 +303,20 @@ internal fun ProductImageLoadingSeed(
     progress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
-    val progressValue = progress().coerceIn(0f, 1f)
-    if (!shouldRenderProductImageLoadingSeed(progressValue)) return
+    var seedActive by remember { mutableStateOf(true) }
+    if (!seedActive) return
+    LaunchedEffect(Unit) {
+        while (true) {
+            withFrameNanos { }
+            if (!shouldRenderProductImageLoadingSeed(progress().coerceIn(0f, 1f))) {
+                seedActive = false
+                break
+            }
+        }
+    }
 
     val pulse = rememberInfiniteTransition(label = "product_image_seed_pulse")
-    val shimmer by pulse.animateFloat(
+    val shimmer = pulse.animateFloat(
         initialValue = 0.16f,
         targetValue = 0.42f,
         animationSpec = infiniteRepeatable(
@@ -292,18 +328,20 @@ internal fun ProductImageLoadingSeed(
     Box(
         modifier = modifier
             .graphicsLayer {
-                alpha = (1f - progressValue * 0.78f).coerceIn(0f, 1f)
+                alpha = (1f - progress().coerceIn(0f, 1f) * 0.78f).coerceIn(0f, 1f)
             }
             .clip(RoundedCornerShape(12.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        BuyPilotColors.SurfaceCard.copy(alpha = 0.78f),
-                        BuyPilotColors.PrimarySoft.copy(alpha = 0.2f + shimmer * 0.22f),
-                        BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f),
+            .drawBehind {
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(
+                            BuyPilotColors.SurfaceCard.copy(alpha = 0.78f),
+                            BuyPilotColors.PrimarySoft.copy(alpha = 0.2f + shimmer.value * 0.22f),
+                            BuyPilotColors.SurfaceMuted.copy(alpha = 0.72f),
+                        ),
                     ),
-                ),
-            ),
+                )
+            },
     )
 }
 

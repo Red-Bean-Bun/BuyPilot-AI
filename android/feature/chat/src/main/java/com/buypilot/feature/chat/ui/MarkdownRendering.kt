@@ -5,6 +5,7 @@ import android.text.Spanned
 import android.text.method.LinkMovementMethod
 import android.util.TypedValue
 import android.widget.TextView
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,9 +65,11 @@ import org.commonmark.node.ThematicBreak
 import org.commonmark.parser.Parser
 
 private const val MarkdownRenderCacheMaxEntries = 36
+private const val StreamingBlockCacheMaxEntries = 96
 private val MarkdownSoftBlockColor = BuyPilotColors.MarkdownSoftBlock.toArgb()
 private val MarkdownComposeCodeBackground = BuyPilotColors.MarkdownSoftBlock
 private val PlainMarkdownParser: Parser = Parser.builder().build()
+private val TypingPausePunctuation = setOf('，', '。', '、', '；', '：', '！', '？', ',', '.', ';', ':', '!', '?')
 private val MarkdownBlockQuoteMarkerRegex = Regex("""^\s{0,3}>\s?""")
 private val InternalDebugLabelValueRegex = Regex(
     """(?i)\b(?:product_id|evidence_id|source_id|action_id|feedback_type|criteria_patch|cart_id|trace_id|client_trace_id|session_id|turn_id)\s*[:：=]\s*[\w.-]+""",
@@ -93,6 +97,53 @@ private val MarkdownRepeatedHorizontalSpaceRegex = Regex("""[ \t]{2,}""")
 private val MarkdownEmptyPunctuationLineRegex = Regex("""(?m)^\s*[-•、,，;；:：]+\s*$""")
 private val MarkdownExcessBlankLinesRegex = Regex("""\n{3,}""")
 private val MarkdownTrailingSpacesBeforeNewlineRegex = Regex("""[ \t]+\n""")
+private val MarkdownFenceLineRegex = Regex("""^\s*```""")
+private val MarkdownBlankLineRegex = Regex("""^\s*$""")
+private val MarkdownTableLineRegex = Regex("""^\s*\|.*""")
+private val MarkdownListItemLineRegex = Regex("""^\s*(?:[-*+]|\d+\.)\s+""")
+
+internal data class StreamingBlockSplit(
+    val closedBlocks: List<String>,
+    val openBlock: String,
+)
+
+private data class StreamingRawBlock(
+    val content: String,
+    val closedByBlankLine: Boolean,
+)
+
+private class StreamingMarkdownBlockCache {
+    private val nativeBlocks = object : LinkedHashMap<String, AnnotatedString>(
+        StreamingBlockCacheMaxEntries,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AnnotatedString>?): Boolean =
+            size > StreamingBlockCacheMaxEntries
+    }
+    private val plainBlocks = object : LinkedHashMap<String, String>(
+        StreamingBlockCacheMaxEntries,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+            size > StreamingBlockCacheMaxEntries
+    }
+
+    fun renderNativeClosedBlock(block: String): AnnotatedString {
+        nativeBlocks[block]?.let { return it }
+        val rendered = block.withoutInternalDebugTokens().toNativeMarkdownAnnotatedString()
+        nativeBlocks[block] = rendered
+        return rendered
+    }
+
+    fun renderPlainClosedBlock(block: String): String {
+        plainBlocks[block]?.let { return it }
+        val rendered = block.withoutStreamingMarkdownChrome().withoutInternalDebugTokens()
+        plainBlocks[block] = rendered
+        return rendered
+    }
+}
 
 private data class MarkdownTextRenderTag(
     val contentHash: Int,
@@ -200,6 +251,94 @@ internal fun String.withoutMarkdownMarkup(): String {
 
 private fun StringBuilder.endsWithWhitespace(): Boolean =
     isNotEmpty() && last().isWhitespace()
+
+internal fun splitStreamingMarkdownBlocks(visibleContent: String): StreamingBlockSplit {
+    val source = visibleContent.trimEnd(' ', '\t', '\r')
+    if (source.isBlank()) return StreamingBlockSplit(closedBlocks = emptyList(), openBlock = "")
+
+    val rawBlocks = source.toStreamingRawBlocks()
+    val closedBlocks = mutableListOf<String>()
+    val openBlocks = mutableListOf<String>()
+    rawBlocks.forEach { block ->
+        if (openBlocks.isNotEmpty()) {
+            openBlocks += block.content
+        } else if (block.isClosedStreamingMarkdownBlock()) {
+            closedBlocks += block.content
+        } else {
+            openBlocks += block.content
+        }
+    }
+    return StreamingBlockSplit(
+        closedBlocks = closedBlocks,
+        openBlock = openBlocks.joinToString("\n\n").trimEnd(),
+    )
+}
+
+private fun String.toStreamingRawBlocks(): List<StreamingRawBlock> {
+    val blocks = mutableListOf<StreamingRawBlock>()
+    val current = mutableListOf<String>()
+    split('\n').forEach { line ->
+        if (MarkdownBlankLineRegex.matches(line)) {
+            if (current.isNotEmpty()) {
+                blocks += StreamingRawBlock(
+                    content = current.joinToString("\n").trimEnd(),
+                    closedByBlankLine = true,
+                )
+                current.clear()
+            }
+        } else {
+            current += line
+        }
+    }
+    if (current.isNotEmpty()) {
+        blocks += StreamingRawBlock(
+            content = current.joinToString("\n").trimEnd(),
+            closedByBlankLine = false,
+        )
+    }
+    return blocks
+}
+
+private fun StreamingRawBlock.isClosedStreamingMarkdownBlock(): Boolean {
+    if (!closedByBlankLine) return false
+    val lines = content.lineSequence().toList()
+    if (lines.count { MarkdownFenceLineRegex.containsMatchIn(it) } % 2 != 0) return false
+    if (lines.any { MarkdownTableLineRegex.matches(it) } && !closedByBlankLine) return false
+    if (lines.any { MarkdownListItemLineRegex.matches(it) } && !closedByBlankLine) return false
+    return true
+}
+
+internal fun streamingSafeVisibleLength(
+    content: String,
+    visibleLength: Int,
+    done: Boolean = false,
+): Int {
+    val bounded = visibleLength.coerceIn(0, content.length)
+    if (done || bounded <= 0) return bounded
+    val openTableStart = findOpenStreamingTableStart(content.take(bounded)) ?: return bounded
+    return openTableStart.coerceIn(0, bounded)
+}
+
+private fun findOpenStreamingTableStart(prefix: String): Int? {
+    var lineStart = 0
+    var tableStart: Int? = null
+    prefix.split('\n').forEach { line ->
+        val trimmed = line.trim()
+        when {
+            trimmed.startsWith("|") -> {
+                if (tableStart == null) tableStart = lineStart
+            }
+            trimmed.isBlank() -> {
+                tableStart = null
+            }
+            tableStart != null -> {
+                tableStart = null
+            }
+        }
+        lineStart += line.length + 1
+    }
+    return tableStart
+}
 
 internal fun String.needsFinalMarkdownRender(): Boolean {
     val source = trim()
@@ -452,7 +591,7 @@ private fun typingDelayMs(lastVisibleChar: Char?, backlog: Int, done: Boolean): 
     }
 
 private fun Char.isTypingPausePunctuation(): Boolean =
-    this in setOf('，', '。', '、', '；', '：', '！', '？', ',', '.', ';', ':', '!', '?')
+    this in TypingPausePunctuation
 
 @Composable
 internal fun AssistantText(
@@ -515,6 +654,7 @@ internal fun StreamingAssistantText(
         }
     }
     val shouldRenderStatic = alreadyCompleted || (done && !hasSeenLiveStream && !animateInitialCompleted)
+    var rendererUpgradedToNative by remember(nodeKey) { mutableStateOf(false) }
     if (shouldRenderStatic) {
         LaunchedEffect(nodeKey) {
             if (!alreadyCompleted) {
@@ -523,7 +663,13 @@ internal fun StreamingAssistantText(
                 if (done) onRevealComplete?.invoke()
             }
         }
-        if (shouldKeepPlainTextRendererAfterStreaming(content = content, hasSeenLiveStream = hasSeenLiveStream)) {
+        if (
+            shouldKeepPlainTextRendererAfterStreaming(
+                content = content,
+                hasSeenLiveStream = hasSeenLiveStream,
+                streamedWithNative = rendererUpgradedToNative,
+            )
+        ) {
             PlainStreamingTextBlock(content = content, modifier = modifier, style = style)
         } else {
             AssistantText(content = content, modifier = modifier, style = style)
@@ -545,7 +691,12 @@ internal fun StreamingAssistantText(
     val latestOnRevealActiveChange by rememberUpdatedState(onRevealActiveChange)
     val latestOnRevealProgress by rememberUpdatedState(onRevealProgress)
     var completionReported by remember(nodeKey) { mutableStateOf(false) }
-    val visibleLength = maxOf(localVisibleLength, revealState?.visibleLength ?: 0).coerceAtMost(content.length)
+    val rawVisibleLength = maxOf(localVisibleLength, revealState?.visibleLength ?: 0).coerceAtMost(content.length)
+    val visibleLength = streamingSafeVisibleLength(
+        content = content,
+        visibleLength = rawVisibleLength,
+        done = done && rawVisibleLength >= content.length,
+    )
 
     DisposableEffect(nodeKey) {
         onDispose {
@@ -608,17 +759,20 @@ internal fun StreamingAssistantText(
     if (visibleLength <= 0) return
 
     val visibleContent = content.take(visibleLength.coerceAtMost(content.length))
-    val streamUsesNativeMarkdown = remember(content) { shouldUseNativeMarkdownDuringStreaming(content) }
-    if (streamUsesNativeMarkdown) {
-        NativeMarkdownTextBlock(
-            content = visibleContent,
-            modifier = modifier.fillMaxWidth(),
-            style = style,
-        )
-        return
+    val nextRendererUpgraded = resolveStreamingRendererUpgrade(
+        currentUpgraded = rendererUpgradedToNative,
+        visibleContent = visibleContent,
+    )
+    LaunchedEffect(nodeKey, nextRendererUpgraded) {
+        if (nextRendererUpgraded) rendererUpgradedToNative = true
     }
-    PlainStreamingTextBlock(
-        content = visibleContent,
+    val streamUsesNativeMarkdown = rendererUpgradedToNative || nextRendererUpgraded
+    val blockCache = remember(nodeKey) { StreamingMarkdownBlockCache() }
+    val blockSplit = remember(visibleContent) { splitStreamingMarkdownBlocks(visibleContent) }
+    StreamingBlockColumn(
+        split = blockSplit,
+        blockCache = blockCache,
+        preferNativeMarkdown = streamUsesNativeMarkdown,
         modifier = modifier.fillMaxWidth(),
         style = style,
     )
@@ -627,7 +781,13 @@ internal fun StreamingAssistantText(
 internal fun shouldKeepPlainTextRendererAfterStreaming(
     content: String,
     hasSeenLiveStream: Boolean,
-): Boolean = hasSeenLiveStream && !content.needsFinalMarkdownRender()
+    streamedWithNative: Boolean = false,
+): Boolean = hasSeenLiveStream && !streamedWithNative && !content.needsFinalMarkdownRender()
+
+internal fun resolveStreamingRendererUpgrade(
+    currentUpgraded: Boolean,
+    visibleContent: String,
+): Boolean = currentUpgraded || shouldUseNativeMarkdownDuringStreaming(visibleContent)
 
 internal fun shouldUseNativeMarkdownDuringStreaming(content: String): Boolean =
     content.needsFinalMarkdownRender() && !content.requiresAndroidMarkdownRender()
@@ -653,6 +813,98 @@ internal fun StreamingAssistantText(
     modifier: Modifier = Modifier,
 ) {
     StreamingAssistantText(nodeKey = content, content = content, modifier = modifier, done = true)
+}
+
+@Composable
+private fun StreamingBlockColumn(
+    split: StreamingBlockSplit,
+    blockCache: StreamingMarkdownBlockCache,
+    preferNativeMarkdown: Boolean,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    style: TextStyle = TextStyle(
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.LargeBody,
+        lineHeight = 26.sp,
+    ),
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        split.closedBlocks.forEachIndexed { index, block ->
+            key(index) {
+                if (block.requiresAndroidMarkdownRender()) {
+                    MarkdownTextBlock(
+                        content = block,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = style,
+                    )
+                } else if (preferNativeMarkdown || block.needsFinalMarkdownRender()) {
+                    val annotated = remember(block, blockCache) {
+                        blockCache.renderNativeClosedBlock(block)
+                    }
+                    if (annotated.isNotEmpty()) {
+                        Text(
+                            text = annotated,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = style,
+                        )
+                    }
+                } else {
+                    val display = remember(block, blockCache) {
+                        blockCache.renderPlainClosedBlock(block)
+                    }
+                    if (display.isNotBlank()) {
+                        Text(
+                            text = display,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = style,
+                        )
+                    }
+                }
+            }
+        }
+        if (split.openBlock.isNotBlank()) {
+            key("open") {
+                if (preferNativeMarkdown && !split.openBlock.requiresAndroidMarkdownRender()) {
+                    StreamingOpenNativeMarkdownTextBlock(
+                        content = split.openBlock,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = style,
+                    )
+                } else {
+                    PlainStreamingTextBlock(
+                        content = split.openBlock,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = style,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamingOpenNativeMarkdownTextBlock(
+    content: String,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    style: TextStyle = TextStyle(
+        color = BuyPilotColors.TextPrimary,
+        fontSize = BuyPilotType.LargeBody,
+        lineHeight = 26.sp,
+    ),
+) {
+    val displayContent = remember(content) { content.withoutInternalDebugTokens() }
+    if (displayContent.isBlank()) return
+    val annotated = remember(displayContent) {
+        displayContent.toNativeMarkdownAnnotatedString()
+    }
+    if (annotated.isEmpty()) return
+    Text(
+        text = annotated,
+        modifier = modifier,
+        style = style,
+    )
 }
 
 @Preview(name = "Assistant text plain")

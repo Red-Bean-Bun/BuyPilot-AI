@@ -48,7 +48,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
-private const val CriteriaCardEnterMs = 560
+private const val CriteriaCardEnterMs = CardEnterDurationMs
 private val BudgetBasePresets = listOf(50, 100, 150, 200, 300, 500, 800, 1000)
 private val BudgetHighPresets = listOf(1500, 2000, 3000, 5000, 8000, 10000)
 private val DigitalBudgetPresets = listOf(800, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000)
@@ -177,7 +177,9 @@ internal fun ScenarioFilterReceiptCard(
     onEntered: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    val receipt = remember(payload) { payload.scenarioFilterReceipt() }
+    val receipt = remember(payload.criteria.criteriaId, payload.criteria.summary, payload.criteria.constraints) {
+        payload.scenarioFilterReceipt()
+    }
 
     StructuredCardMotion(
         key = motionKey,
