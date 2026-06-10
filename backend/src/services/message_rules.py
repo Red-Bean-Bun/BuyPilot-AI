@@ -732,7 +732,6 @@ def extract_product_type_hint(message: str) -> str | None:
 
 _COMPARE_MARKERS = (
     "对比",
-    "比较",
     "比一下",
     "pk",
     "PK",
@@ -743,9 +742,13 @@ _COMPARE_MARKERS = (
     "哪个更",
     "哪款好",
     "哪款更",
-    "怎么选",
     "选哪个",
     "选哪款",
+)
+_COMPARE_VERB_PATTERN = re.compile(
+    r"(?:比较|比比)(?:一下|下|看看|看|这|那|前|第|\d|一|二|三|两|俩|几|哪个|哪款)"
+    r"|(?:这|那|前)?(?:两|俩|二|几|2)(?:个|款|件|项)?.{0,8}(?:比较|比一下|怎么选)"
+    r"|第[一二三四五\d].{0,8}(?:和|跟|与).{0,8}第[一二三四五\d].{0,8}(?:比较|比|怎么选)?"
 )
 
 # Patterns for extracting multiple ordinal references: "第一个和第二个"
@@ -764,7 +767,7 @@ _CN_ORDINAL_PATTERN = re.compile(r"第([一二三四五])")
 def is_compare_phrase(message: str) -> bool:
     """Deterministic check: does this message look like a compare request?"""
     text = message.strip().lower()
-    return any(marker.lower() in text for marker in _COMPARE_MARKERS)
+    return any(marker.lower() in text for marker in _COMPARE_MARKERS) or _COMPARE_VERB_PATTERN.search(text) is not None
 
 
 def resolve_compare_targets(message: str, previous_product_ids: list[str]) -> list[str]:

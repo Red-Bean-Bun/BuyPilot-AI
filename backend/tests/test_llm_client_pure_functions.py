@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import pytest
 
+from src.services import llm_client as llm_client_module
 from src.services.llm_client import (
     _deterministic_locked_decision,
+    _normalize_image_analysis_payload,
     _require_json_object,
     _sanitize_decision,
     _validate_recommendation_chunks,
@@ -50,6 +52,54 @@ class TestRequireJsonObject:
     def test_nested_json_object(self):
         result = _require_json_object('{"a": {"b": 1}}', "test_task")
         assert result == {"a": {"b": 1}}
+
+
+# ── analyze_image repair / normalization ────────────────────────────────────
+
+
+class TestAnalyzeImageJsonHandling:
+    def test_normalize_image_analysis_payload(self):
+        result = _normalize_image_analysis_payload(
+            {
+                "category_hint": " 数码电子 ",
+                "description": " 一台笔记本电脑 ",
+                "visible_traits": ["笔记本电脑", "代码编辑", "笔记本电脑", 123, "键盘", "触控板", "屏幕", "多余"],
+                "extra": "ignored",
+            }
+        )
+
+        assert result == {
+            "category_hint": "数码电子",
+            "description": "一台笔记本电脑",
+            "visible_traits": ["笔记本电脑", "代码编辑", "键盘", "触控板", "屏幕"],
+        }
+
+    @pytest.mark.asyncio
+    async def test_analyze_image_repairs_malformed_json_once(self, monkeypatch):
+        calls = []
+
+        async def fake_call_chat_task(task, messages, json_object=False):
+            calls.append({"task": task, "messages": messages, "json_object": json_object})
+            if len(calls) == 1:
+                return '{"category_hint":"数码电子","description":"电脑","visible_traits":["笔记本电脑"],'
+            return '{"category_hint":"数码电子","description":"电脑","visible_traits":["笔记本电脑","代码编辑"]}'
+
+        monkeypatch.setattr(llm_client_module, "_call_chat_task", fake_call_chat_task)
+        monkeypatch.setattr(llm_client_module, "image_url_to_provider_url", lambda url: url)
+        monkeypatch.setattr(llm_client_module, "_schedule_parsed_json_update", lambda *args, **kwargs: None)
+
+        result = await llm_client_module.analyze_image("/uploads/test.jpg")
+
+        assert len(calls) == 2
+        assert calls[0]["json_object"] is True
+        assert calls[1]["json_object"] is True
+        assert "malformed_output" in calls[1]["messages"][1]["content"]
+        assert result == {
+            "category_hint": "数码电子",
+            "description": "电脑",
+            "visible_traits": ["笔记本电脑", "代码编辑"],
+            "image_url": "/uploads/test.jpg",
+        }
 
 
 # ── _validate_recommendation_chunks ─────────────────────────────────────────

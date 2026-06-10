@@ -42,6 +42,7 @@ from src.config.domain_terms import (
     is_supported_product_type,
     normalize_category,
 )
+from src.runtime.cart_rules import message_refers_to_previous_product, ordinal_index
 from src.runtime.streaming import RunRetrieval, StageResult, StreamContext, cancel_background_tasks, run_with_heartbeat
 from src.services.audit import record_audit_event
 from src.services.cancellation import clear_chat_turn, register_chat_turn
@@ -319,6 +320,22 @@ async def _resolve_intent(
         if determined is not None:
             synthetic_intent = determined
 
+    # Cart intents without a resolvable product reference need LLM
+    # for target_product_name extraction (e.g. "把理肤泉加入购物车").
+    # The intent classification stays add_to_cart; only the name is extracted.
+    _force_cart_intent = False
+    if (
+        synthetic_intent is not None
+        and synthetic_intent.intent == "add_to_cart"
+        and not synthetic_intent.target_product_id
+    ):
+        has_ordinal = ordinal_index(pipeline_body.message) is not None
+        has_previous = bool(await get_previous_product_ids(ctx.session_id))
+        refers_to_previous = message_refers_to_previous_product(pipeline_body.message)
+        if not has_ordinal and not (has_previous and refers_to_previous):
+            _force_cart_intent = True
+            synthetic_intent = None
+
     # "换一组" / replace-deck: force recommend intent without LLM call
     if synthetic_intent is None and is_replace_deck_phrase(pipeline_body.message):
         prev = await get_previous_criteria(ctx.session_id)
@@ -376,6 +393,14 @@ async def _resolve_intent(
                 yield intent_item
         if intent is None:
             raise RuntimeError("intent stage completed without a result.")
+
+    # Merge: if we cleared a synthetic add_to_cart for LLM name extraction,
+    # force the intent back to add_to_cart and take the LLM's target_product_name.
+    if _force_cart_intent:
+        intent = intent.model_copy(update={
+            "intent": "add_to_cart",
+            "target_product_name": intent.target_product_name,
+        })
 
     # Apply deterministic post-processing to refine intent constraints
     # Skip for replace-deck requests — the synthetic intent already has

@@ -112,6 +112,7 @@ class IntentResult(BaseModel):
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)
     soft_preferences: list[str] = Field(default_factory=list)
     target_product_id: str | None = None
+    target_product_name: str | None = None
     compare_product_ids: list[str | int] = Field(default_factory=list)
 
 

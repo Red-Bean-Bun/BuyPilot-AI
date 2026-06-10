@@ -11,6 +11,7 @@ from src.services.message_rules import (
     extract_product_lookup_hints,
     extract_product_type_hint,
     has_shopping_signal,
+    is_compare_phrase,
 )
 
 
@@ -113,6 +114,21 @@ class TestHasShoppingSignal:
 
     def test_no_signal(self):
         assert has_shopping_signal("今天天气怎么样") is False
+
+
+# ── is_compare_phrase ────────────────────────────────────────────────
+
+class TestIsComparePhrase:
+    def test_explicit_compare_requests(self):
+        assert is_compare_phrase("对比第一个和第二个") is True
+        assert is_compare_phrase("这两款比较一下") is True
+        assert is_compare_phrase("哪个更适合我") is True
+        assert is_compare_phrase("选哪个") is True
+
+    def test_degree_adverb_not_compare(self):
+        assert is_compare_phrase("最近拍照比较多") is False
+        assert is_compare_phrase("我最近出门拍照比较多，想先看看怎么选") is False
+        assert is_compare_phrase("这款比较便宜") is False
 
 
 # ── extract_product_lookup_hints ─────────────────────────────────────

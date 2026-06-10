@@ -596,3 +596,20 @@ async def test_compare_single_product_reclassified_to_recommend(monkeypatch):
         and getattr(e, "required_slots", None) == ["compare_products"]
     ]
     assert compare_clarifications == []
+
+
+async def test_degree_compare_word_does_not_emit_compare_insufficient():
+    """“比较多” is an adverb phrase, not a product comparison request."""
+    events = [
+        event
+        async for event in chat_stream(
+            "s_photo_more_not_compare",
+            ChatStreamRequest(message="最近拍照比较多"),
+        )
+    ]
+
+    assert all(
+        getattr(event, "delta", "") != "对比需要至少两个候选商品，先看看推荐再对比吧。"
+        for event in events
+    )
+    assert "product_card" in [event.event for event in events]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from src.repos.products import list_products
 from src.services.conversation_state import get_previous_product_ids
 from src.types.schemas import IntentResult
 
@@ -27,17 +28,63 @@ QUANTITY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(\d+)\s*(?:件|个|份)"),
 )
 
+# Android client embeds product_id in cart commands: "把商品ID p_beauty_023 加入购物车"
+_EMBEDDED_PRODUCT_ID = re.compile(r"\b(p_[a-z]+_\d+)\b")
+
 
 async def referenced_product_id(session_id: str, intent: IntentResult, message: str) -> str | None:
+    # 1. Explicit product ID (structured data or API field)
     if intent.target_product_id:
         return intent.target_product_id
+    # 2. Embedded product ID in message (Android client protocol)
+    embedded = _EMBEDDED_PRODUCT_ID.search(message)
+    if embedded:
+        return embedded.group(1)
+    # 3. Product name/brand → catalog lookup (LLM-extracted)
+    if intent.target_product_name:
+        resolved = resolve_product_by_name(intent.target_product_name)
+        if resolved:
+            return resolved
+    # 4. Ordinal reference → session history
     product_ids = await get_previous_product_ids(session_id)
-    if not product_ids:
+    if product_ids:
+        index = ordinal_index(message)
+        if index is not None and 0 <= index < len(product_ids):
+            return product_ids[index]
+    # 5. Implicit reference ("这个"/"这款") → last recommended product
+    if message_refers_to_previous_product(message) and product_ids:
+        return product_ids[-1]
+    # 6. Unresolvable → None (handler should clarify, not guess)
+    return None
+
+
+def resolve_product_by_name(name: str) -> str | None:
+    """Match a brand/product name against the catalog. Returns product_id if unique.
+
+    Priority: exact brand match → exact name match → substring match.
+    Full branded names like "理肤泉特护清盈防晒乳" resolve via exact name match,
+    not the loose "brand in query" substring that matches every product of the brand.
+    """
+    query = name.strip().lower()
+    if not query:
         return None
-    index = ordinal_index(message)
-    if index is not None and 0 <= index < len(product_ids):
-        return product_ids[index]
-    return product_ids[0]
+    exact: list[str] = []
+    substring: list[str] = []
+    for product in list_products():
+        brand = (product.brand or "").strip().lower()
+        product_name = (product.name or "").strip().lower()
+        sub_cat = (product.sub_category or "").strip().lower()
+        if query == brand or query == product_name or query == sub_cat:
+            exact.append(product.product_id)
+        elif query in brand or query in product_name or query in sub_cat:
+            substring.append(product.product_id)
+    unique_exact = set(exact)
+    if len(unique_exact) == 1:
+        return exact[0]
+    unique_sub = set(substring)
+    if len(unique_sub) == 1:
+        return substring[0]
+    return None
 
 
 def quantity_from_intent(intent: IntentResult, message: str, *, default: int) -> int:

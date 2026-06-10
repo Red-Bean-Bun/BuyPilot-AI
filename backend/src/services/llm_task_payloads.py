@@ -237,6 +237,35 @@ def image_messages(image_url: str, provider_image_url: str) -> list[dict[str, An
     ]
 
 
+def image_repair_messages(raw_output: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是 JSON 修复器。把用户提供的模型输出修复为一个合法 JSON object。"
+                "只输出 JSON，不要 Markdown，不要解释。"
+                "输出字段只能是 category_hint、description、visible_traits。"
+                "visible_traits 必须是最多 5 个短字符串的数组。"
+                "如果原文信息不足，使用空字符串或空数组。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "malformed_output": raw_output[:6000],
+                    "target_schema": {
+                        "category_hint": "string",
+                        "description": "string",
+                        "visible_traits": ["string"],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
 def decision_messages(
     criteria: CriteriaPayload,
     products: list[ProductPayload],
@@ -453,6 +482,9 @@ def normalize_intent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if target_product_id is None:
         target_product_id = normalized.get("product_id") or normalized.get("target_product")
     normalized["target_product_id"] = _normalize_nullable_string(target_product_id)
+
+    target_product_name = normalized.get("target_product_name")
+    normalized["target_product_name"] = _normalize_nullable_string(target_product_name)
 
     # Extract compare_product_ids from LLM output or extracted_constraints
     compare_ids = normalized.get("compare_product_ids")

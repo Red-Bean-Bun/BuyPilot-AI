@@ -66,15 +66,16 @@ class TestRunMultimodal:
         assert captured_url == "https://example.com/image.jpg"
 
     @pytest.mark.asyncio
-    async def test_vl_exception_propagates(self, monkeypatch):
-        """VL analysis failure propagates (pipeline handles at higher level)."""
+    async def test_vl_exception_returns_none_gracefully(self, monkeypatch):
+        """VL analysis failure degrades; the rest of the pipeline can continue."""
 
         async def fake_analyze_image(url):
             raise RuntimeError("VL API timeout")
 
         monkeypatch.setattr("src.runtime.stages.multimodal.analyze_image", fake_analyze_image)
-        with pytest.raises(RuntimeError, match="VL API timeout"):
-            await run_multimodal("https://example.com/image.jpg")
+        result = await run_multimodal("https://example.com/image.jpg")
+
+        assert result is None
 
 
 # ── run_image_embedding ─────────────────────────────────────────────────────

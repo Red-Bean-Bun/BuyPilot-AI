@@ -31,6 +31,7 @@ from src.services.llm_task_payloads import (
     criteria_from_live_payload as _criteria_from_live_payload,
     criteria_messages,
     decision_messages,
+    image_repair_messages,
     image_messages,
     intent_messages,
     normalize_intent_payload as _normalize_intent_payload,
@@ -269,7 +270,19 @@ async def analyze_image(image_url: str) -> dict[str, Any]:
         image_messages(image_url, provider_image_url),
         json_object=True,
     )
-    parsed = _require_json_object(live, "analyze_image")
+    parsed = _parse_json_object(live)
+    if parsed is None:
+        logger.warning("Live analyze_image returned malformed JSON; attempting one repair. response_preview=%s", live[:500])
+        repaired = await _call_chat_task(
+            "analyze_image",
+            image_repair_messages(live),
+            json_object=True,
+        )
+        parsed = _parse_json_object(repaired)
+    if parsed is None:
+        _schedule_parsed_json_update("analyze_image", None, "response was not a JSON object")
+        raise RuntimeError("Live analyze_image response was not a JSON object.")
+    parsed = _normalize_image_analysis_payload(parsed)
     parsed["image_url"] = image_url
     _schedule_parsed_json_update("analyze_image", parsed, None)
     return parsed
@@ -355,6 +368,34 @@ def _require_json_object(text: str, task: str) -> dict[str, Any]:
     if parsed is None:
         raise RuntimeError(f"Live {task} response was not a JSON object.")
     return parsed
+
+
+def _normalize_image_analysis_payload(parsed: dict[str, Any]) -> dict[str, Any]:
+    traits = parsed.get("visible_traits")
+    if isinstance(traits, str):
+        raw_traits = [traits]
+    elif isinstance(traits, list):
+        raw_traits = traits
+    else:
+        raw_traits = []
+
+    visible_traits: list[str] = []
+    for trait in raw_traits:
+        if not isinstance(trait, str):
+            continue
+        cleaned = trait.strip()
+        if cleaned and cleaned not in visible_traits:
+            visible_traits.append(cleaned[:30])
+        if len(visible_traits) >= 5:
+            break
+
+    category_hint = parsed.get("category_hint")
+    description = parsed.get("description")
+    return {
+        "category_hint": category_hint.strip()[:50] if isinstance(category_hint, str) else "",
+        "description": description.strip()[:200] if isinstance(description, str) else "",
+        "visible_traits": visible_traits,
+    }
 
 
 def _validate_recommendation_chunks(chunks: list[str], products: list[ProductPayload]) -> None:

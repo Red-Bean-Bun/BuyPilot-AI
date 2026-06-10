@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 async def run_multimodal(image_url: str | None) -> dict | None:
     if not image_url:
         return None
-    return await analyze_image(image_url)
+    try:
+        return await analyze_image(image_url)
+    except Exception as exc:
+        logger.info("Image analysis unavailable, degrading to image embedding/text-only: %s", exc)
+        return None
 
 
 async def run_image_embedding(image_url: str | None) -> list[float] | None:

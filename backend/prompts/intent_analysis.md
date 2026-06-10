@@ -36,6 +36,7 @@
   },
   "soft_preferences": ["一句话总结用户想要什么"],
   "target_product_id": null,
+  "target_product_name": null,
   "compare_product_ids": []  // 数组元素可以是：整数索引（如 1, 2）或商品名字符串
 }
 ```
@@ -109,6 +110,7 @@
 5. confidence 必须是 0-1 的数字，不要输出 "high"/"medium"/"low"
 6. soft_preferences 必须是字符串数组；没有偏好时输出 []
 7. target_product_id 没有明确商品 ID 时输出 null
+8. target_product_name: 当用户用品牌名、商品名或关键词引用商品（而非 product_id 或序数词）时，提取为字符串。例如"把理肤泉加入购物车"→ "理肤泉"，"加入第一个"→ null（序数词引用），"加购"→ null（上下文中已有商品）。没有品牌/商品名引用时输出 null
 
 ## Examples
 
@@ -315,6 +317,21 @@ Output:
   "category": "食品生活",
   "extracted_constraints": {},
   "soft_preferences": ["用户想加购零食，有错别字但结合上下文应为加购意图"],
-  "target_product_id": null
+  "target_product_id": null,
+  "target_product_name": null
+}
+```
+
+Input: "把理肤泉加入购物车"
+Output:
+```json
+{
+  "intent": "add_to_cart",
+  "confidence": 0.9,
+  "category": "美妆护肤",
+  "extracted_constraints": {},
+  "soft_preferences": ["用户想加管理肤泉品牌的商品"],
+  "target_product_id": null,
+  "target_product_name": "理肤泉"
 }
 ```
