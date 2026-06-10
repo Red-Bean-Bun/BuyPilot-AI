@@ -130,9 +130,9 @@
 
 | 成员 | 负责模块 |
 |------|---------|
-| ZJL | 后端架构：混合检索（BM25+RRF）、评测框架、部署链路（Cloudflare/Docker/APK）、文档体系 |
-| forever-ivy | Android 客户端：聊天 UI/UX、会话恢复、历史记录、Compose 动画与交互优化 |
-| MilanKing | 后端功能：GroundingGuard 防幻觉、意图快速路由与否定语义、检索优化与缓存、决策评分算法、会话历史 API、测试防御 |
+| ZJL | 后端架构：混合检索（BM25+RRF）、评测框架、决策评分算法、检索缓存、意图后处理、购物策略引擎、部署链路（Cloudflare/Docker/APK）、文档体系 |
+| forever-ivy | Android 客户端：聊天 UI/UX、会话恢复、历史记录、Compose 动画与交互优化、语音输入 UI、对比卡片 |
+| MilanKing | 后端功能：GroundingGuard 防幻觉、意图快速路由、渐进式预算放宽、会话历史 API、Pipeline 稳定性优化、测试防御 |
 
 ---
 
