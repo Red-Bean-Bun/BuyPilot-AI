@@ -91,9 +91,9 @@
 | **端到端验证** | Live RAG smoke 通过（PostgreSQL + 1024 维 embedding + 两轮 chat_stream） | `make smoke` |
 | **默认 pytest** | 426 passed / 220 skipped | `cd backend && uv run pytest -q` |
 | **真机 APK** | 6.6MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.2.0/app-release.apk) |
-| **Demo 视频** | 4 条路径完整演示 | 🎬 [观看 Demo 视频](#)（录制后替换链接） |
+| **Demo 视频** | 4 条路径完整演示 | 🎬 [观看 Demo 视频](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.2.0/BuyPilot-demo.mp4) |
 
-> `make eval` 是 admin 接口，除 `BAILIAN_API_KEY` 外还必须配置 `ADMIN_API_KEY`；Demo 视频链接暂留占位，录制完成后替换。
+> `make eval` 是 admin 接口，除 `BAILIAN_API_KEY` 外还必须配置 `ADMIN_API_KEY`。
 
 <details>
 <summary>Android 客户端补充证据（原生 Compose + 真机截图）</summary>
