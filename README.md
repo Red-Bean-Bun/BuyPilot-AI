@@ -105,7 +105,8 @@
 | 澄清与筛选 | 预算澄清卡、筛选调整底板和 quick actions 承接多轮补充条件 | <img src="doc/ui/android/03-budget-clarification.png" alt="Android budget clarification" width="90" /> <img src="doc/ui/android/04-filter-edit-sheet.png" alt="Android filter edit sheet" width="90" /> |
 | 证据与决策层 | 商品推荐证据页、最终决策依据页展示“为什么推荐”和“不适合情况” | <img src="doc/ui/android/05-recommendation-evidence.png" alt="Android recommendation evidence" width="90" /> <img src="doc/ui/android/06-decision-evidence.png" alt="Android decision evidence" width="90" /> |
 | 多商品对比 | `compare_card` 渲染为结构化对比表，补齐价格、参数、性能、续航等维度 | <img src="doc/ui/android/07-compare-table.png" alt="Android compare table" width="120" /> |
-| 图片输入入口 | 输入区附件菜单提供“选图片”和“拍照”，承接拍照找货 Demo 路径 | <img src="doc/ui/android/10-attachment-menu.png" alt="Android attachment menu" width="120" /> |
+| 图片输入入口 | 输入区附件菜单提供”选图片”和”拍照”，承接拍照找货 Demo 路径 | <img src=”doc/ui/android/10-attachment-menu.png” alt=”Android attachment menu” width=”120” /> |
+| 语音交互闭环 | SpeechRecognizer 转写语音 → 输入框合并 → 同一 Agent 链路；TTS 按句朗读 text_delta/澄清/决策摘要 | <img src=”doc/ui/android/11-voice-input.png” alt=”Android voice input” width=”120” /> |
 | 购物车反馈 | `cart_action` 驱动角标、已加入状态、数量步进和购物车底板 | <img src="doc/ui/android/09-final-recommendation-added.png" alt="Android final recommendation added" width="90" /> <img src="doc/ui/android/08-cart-sheet.png" alt="Android cart sheet" width="90" /> |
 
 完整截图索引见 `doc/ui/android/README.md`。
@@ -118,6 +119,7 @@
 | 混合检索 | BM25 关键词 + 向量语义 + RRF 融合 + Cross-Encoder 精排，品牌查询召回率提升 40%+ |
 | 证据绑定 | 推荐理由可追溯到原始商品描述/FAQ/评价，点击"看证据"查看原文 |
 | 多商品对比 | 自动提取对比维度（价格/品牌/成分/场景），结构化呈现优劣 |
+| ASR+TTS 语音闭环 | Android 原生 SpeechRecognizer 语音输入 + TextToSpeech 流式播报，同一 Agent/RAG 链路 |
 | 对话式交互 | 意图澄清、标准生成、推荐解释、购物车管理全链路闭环 |
 | 工程深度 | 默认 pytest 422 passed、三端协议守卫、确定性否定语义解析、决策评分算法 |
 
@@ -148,6 +150,7 @@
 | SSE 管道 | async generator stage 模式（推荐文案与检索后台并行） |
 | LLM 调用 | task-oriented interface + Profile 配置驱动（YAML）+ PromptStore 运行时加载 |
 | 图片上传 | multipart `/upload/image`，本地 jpg + 上传转 data URL 进入 Qwen-VL 多模态理解 |
+| 语音交互 | Android SpeechRecognizer + TTS，端侧闭环，零云端语音模型依赖 |
 | 数据库 | SQLModel 自动建表，含 cart_items/eval_runs/retrieval_traces/evidence_links 等 |
 
 完整决策记录 → [doc/decisions/](doc/decisions/) · 设计决策 → [design-decisions.md](design-decisions.md)（模型策略以 CLAUDE.md 和 llm_profiles.yaml 为准）
@@ -164,6 +167,7 @@
 | 4 | 意图解析与否定语义 | 确定性规则层（毫秒级）+ LLM 理解层协同，"不要含酒精但含烟酰胺"→规则层识别否定作用域 |
 | 5 | 三端协议守卫 | SSE 10 种 event type，三层自动化守卫（Python import-time / Kotlin build-time / CI），漂移 = 无法启动 |
 | 6 | 品类理解与校验 | 数据驱动同义词系统（30+ 品类，含层级扩展）+ 品类白名单校验，防止推荐不存在的商品 |
+| 7 | ASR+TTS 端侧语音闭环 | Android SpeechRecognizer 语音输入 + TextToSpeech 按句增量朗读，无需额外云端语音模型，降低 Demo 失败风险 |
 
 **代码规模**：后端 Python ~20,500 行 · Android Kotlin ~35,300 行 · Prompt 模板 ~1,200 行 · 测试 ~11,700 行 · 文档 105 篇
 
