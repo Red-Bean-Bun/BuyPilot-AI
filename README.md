@@ -16,7 +16,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Eval_Score-78%25-blue" alt="综合评测 78%" />
   <img src="https://img.shields.io/badge/Eval-20%2F20-green" alt="Eval 20/20" />
-  <img src="https://img.shields.io/badge/Tests-422%20passed-green" alt="Tests 422 passed" />
+  <img src="https://img.shields.io/badge/Tests-641%20passed-green" alt="Tests 641 passed" />
   <img src="https://img.shields.io/badge/意图准确率-90%25-green" alt="意图准确率 90%" />
   <img src="https://img.shields.io/badge/多轮一致性-100%25-green" alt="多轮一致性 100%" />
   <img src="https://img.shields.io/badge/Recall@5-82%25-blue" alt="Recall@5 82%" />
@@ -56,7 +56,7 @@
 | 数字 | 最后验证时间 | 复现命令 | 报告来源 |
 |------|--------------|----------|----------|
 | 评测综合分 **78.4%**（20 条样本 × 15 指标） | 2026-06-08 发布验收 | `make eval`（需 Docker 服务、真实 `BAILIAN_API_KEY`、非空 `ADMIN_API_KEY`） | Chat Stream Observer 截图：`doc/ui/dashboard.png`、`doc/ui/LLM_trace.png`、`doc/ui/trace.png`；样本源：`data/eval/eval_samples.json` |
-| 默认 pytest **422 passed** | 2026-06-10 赛前验收 | `cd backend && uv run pytest -q` | 本地命令输出；完整集成集可用 `RUN_FULL_TESTS=1 uv run pytest -q` 打开 |
+| 默认 pytest **641 passed** | 2026-06-10 赛前验收 | `cd backend && uv run pytest -q` | 本地命令输出；默认跳过 22 个集成测试文件，全量用 `RUN_FULL_TESTS=1 uv run pytest -q` |
 
 </details>
 
@@ -88,8 +88,8 @@
 | 证据类型 | 内容 | 验证方式 |
 |---------|------|----------|
 | **评测报告** | 20 样本 × 15 指标，综合分 78.4% | `make eval` 或查看上方 Dashboard |
-| **端到端验证** | 5 项 smoke checks 全通过 | `make smoke` |
-| **默认 pytest** | 422 passed | `cd backend && uv run pytest -q` |
+| **端到端验证** | 13 场景 demo smoke 全通过 | `make smoke` |
+| **默认 pytest** | 641 passed | `cd backend && uv run pytest -q` |
 | **真机 APK** | 6.6MB，安装即用 | [下载 APK](https://github.com/Red-Bean-Bun/BuyPilot-AI/releases/download/v1.1.0/BuyPilot-v1.1.0-release.apk) |
 | **Demo 视频** | 4 条路径完整演示 | 🎬 [观看 Demo 视频](#)（录制后替换链接） |
 
@@ -116,12 +116,13 @@
 | 能力 | 说明 |
 |------|------|
 | 多模态双通道检索 | 文本 + 图像 embedding 同一向量空间（1024 维），图搜文、文搜图无缝切换 |
-| 混合检索 | BM25 关键词 + 向量语义 + RRF 融合 + Cross-Encoder 精排，品牌查询召回率提升 40%+ |
+| 混合检索 | BM25 关键词 + 向量语义 + RRF 融合 + Cross-Encoder 精排 |
 | 证据绑定 | 推荐理由可追溯到原始商品描述/FAQ/评价，点击"看证据"查看原文 |
 | 多商品对比 | 自动提取对比维度（价格/品牌/成分/场景），结构化呈现优劣 |
+| 流水线并行执行 | LLM 生成购买标准时后台并行跑 DB 召回 + image embedding，降低首字延迟 |
 | ASR+TTS 语音闭环 | Android 原生 SpeechRecognizer 语音输入 + TextToSpeech 流式播报，同一 Agent/RAG 链路 |
 | 对话式交互 | 意图澄清、标准生成、推荐解释、购物车管理全链路闭环 |
-| 工程深度 | 默认 pytest 422 passed、三端协议守卫、确定性否定语义解析、决策评分算法 |
+| 工程深度 | 641 单元测试、三端协议守卫、确定性消息路由、决策评分算法、语境诊断审计、检索缓存 |
 
 ---
 
@@ -131,7 +132,7 @@
 |------|---------|
 | ZJL | 后端架构：混合检索（BM25+RRF）、评测框架、部署链路（Cloudflare/Docker/APK）、文档体系 |
 | forever-ivy | Android 客户端：聊天 UI/UX、会话恢复、历史记录、Compose 动画与交互优化 |
-| MilanKing | 后端功能：GroundingGuard 防幻觉、意图快速路由、检索优化、会话历史 API、测试防御 |
+| MilanKing | 后端功能：GroundingGuard 防幻觉、意图快速路由与否定语义、检索优化与缓存、决策评分算法、会话历史 API、测试防御 |
 
 ---
 
@@ -162,12 +163,14 @@
 | # | 亮点 | 说明 |
 |---|------|------|
 | 1 | 多模态双通道检索 | 文本 1024 维 + 图像 1024 维同一向量空间，100 张商品图片预建视觉索引，响应 < 200ms |
-| 2 | 混合检索 + RRF 融合 | BM25 关键词 + pgvector 语义 + RRF 融合 + qwen3-rerank 精排，品牌查询召回率提升 40%+ |
-| 3 | 证据绑定 + 幻觉防御 | 推荐理由绑定原始知识库（evidence_id + source_type），结构化数据从数据库直查，LLM 无法编造 |
-| 4 | 意图解析与否定语义 | 确定性规则层（毫秒级）+ LLM 理解层协同，"不要含酒精但含烟酰胺"→规则层识别否定作用域 |
-| 5 | 三端协议守卫 | SSE 10 种 event type，三层自动化守卫（Python import-time / Kotlin build-time / CI），漂移 = 无法启动 |
-| 6 | 品类理解与校验 | 数据驱动同义词系统（30+ 品类，含层级扩展）+ 品类白名单校验，防止推荐不存在的商品 |
-| 7 | ASR+TTS 端侧语音闭环 | Android SpeechRecognizer 语音输入 + TextToSpeech 按句增量朗读，无需额外云端语音模型，降低 Demo 失败风险 |
+| 2 | 混合检索 + RRF 融合 | BM25 关键词 + pgvector 语义 + RRF 融合 + qwen3-rerank 精排 |
+| 3 | 证据绑定 + 幻觉防御 | 推荐理由绑定原始知识库（evidence_id + source_type），结构化数据从数据库直查；定价数字 GroundingGuard 后置校验，LLM 无法编造 |
+| 4 | 决策评分算法 | 5 因子加权（retrieval×0.35 + 标准匹配×0.25 + 用户反馈信号×0.25 + 证据×0.10 − 风险×0.05），LLM 只解释不挑选，置信度基于分数差距比计算 |
+| 5 | 意图解析与否定语义 | 多层预 LLM 确定性路由（购物车/预算/品牌/排除/对比/商品查询/商业声明） + LLM 理解层协同，毫秒级快速路径 |
+| 6 | 三端协议守卫 | SSE 10 种 event type，三层自动化守卫（Python import-time / Kotlin build-time / CI），漂移 = 无法启动 |
+| 7 | 品类理解与校验 | 数据驱动同义词系统（30+ 品类，含层级扩展）+ 品类白名单校验，防止推荐不存在的商品 |
+| 8 | ASR+TTS 端侧语音闭环 | Android SpeechRecognizer 语音输入 + TextToSpeech 按句增量朗读，无需额外云端语音模型，降低 Demo 失败风险 |
+| 9 | 场景化购物策略 | 确定性场景分类（送礼/兴趣/旅行），决策障碍检测，旅行跨品类组合推荐，LLM 策略叙事 + 模板 fallback |
 
 **代码规模**：后端 Python ~20,500 行 · Android Kotlin ~35,300 行 · Prompt 模板 ~1,200 行 · 测试 ~11,700 行 · 文档 105 篇
 
@@ -230,7 +233,7 @@ make rebuild
 
 # 3) 验证
 make db-stats     # products:100, chunks:1292, image_embeddings:100
-make smoke        # All 5 smoke checks passed
+make smoke        # All 13 scenarios passed
 ```
 
 详细部署指南 → [Android 编译 SOP](doc/dev/android-build-sop.md)
